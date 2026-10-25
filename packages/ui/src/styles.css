@@ -1105,3 +1105,6 @@ select.btn { font-family: var(--sans); }
    and the colour only reinforces it. */
 .picker-note.warn { color: var(--warn-text); }
 .picker-value { font-family: var(--mono); font-size: var(--fs-xs); color: var(--dim); }
+/* The thinking level shares the header line with the model, so it is narrower: a level is at most
+   a few characters. */
+.picker-select-narrow { max-width: 10ch; }

@@ -495,3 +495,105 @@ test("the picker is not a controlled component that invents the value", () => {
   const source = readFileSync(new URL("../src/components/ModelPicker.tsx", import.meta.url), "utf8");
   assert.ok(!/useState<string/.test(source), "the picker must not hold the selected model in local state");
 });
+
+// --- The thinking-level picker (issue #2) ---------------------------------------------------------
+
+test("the levels offered are the ones Pi reported for THIS model, not a hardcoded list", async () => {
+  const { ThinkingPicker } = await server.ssrLoadModule("/src/components/ThinkingPicker.tsx");
+  const html = renderToString(createElement(ThinkingPicker, {
+    session: session({ model: "m", provider: "p", thinkingLevel: "low" }),
+    levels: ["off", "low", "high"],
+    error: undefined,
+    onRequest() {},
+    onSelect() {},
+  }));
+  // Every reported level is an option, and nothing else is.
+  for (const level of ["off", "low", "high"]) assert.match(html, new RegExp(`value="${level}"`));
+  assert.ok(!/value="medium"/.test(html), "a level Pi did not report must not be offered");
+});
+
+test("an unread level list is not presented as 'no levels'", async () => {
+  const { ThinkingPicker } = await server.ssrLoadModule("/src/components/ThinkingPicker.tsx");
+  const html = renderToString(createElement(ThinkingPicker, {
+    session: session({ model: "m", provider: "p", thinkingLevel: "medium" }),
+    levels: undefined,
+    error: undefined,
+    onRequest() {},
+    onSelect() {},
+  }));
+  assert.match(html, /reading the levels/);
+  // The current level is still shown, because it is known from get_state.
+  assert.match(html, /value="" selected/);
+  assert.match(html, /medium/);
+});
+
+test("the picker shows the session's level, so a level Pi changed is reflected", async () => {
+  // Pi re-applies the thinking level on a model switch, so the displayed value must follow Pi
+  // (LiveSession.thinkingLevel, set from get_state and thinking_level_changed) rather than the last
+  // request this component made.
+  const { ThinkingPicker } = await server.ssrLoadModule("/src/components/ThinkingPicker.tsx");
+  const html = renderToString(createElement(ThinkingPicker, {
+    session: session({ model: "m", provider: "p", thinkingLevel: "high" }),
+    levels: ["off", "low", "high"],
+    error: undefined,
+    onRequest() {},
+    onSelect() {},
+  }));
+  assert.match(html, /value="high" selected/);
+});
+
+test("a level the current model does not support is not left selected", async () => {
+  // The narrowing case: the model changed and 'high' is no longer available. The control must not
+  // show a level that is not in the list — that would offer a value Pi cannot accept.
+  const { ThinkingPicker } = await server.ssrLoadModule("/src/components/ThinkingPicker.tsx");
+  const html = renderToString(createElement(ThinkingPicker, {
+    session: session({ model: "small", provider: "p", thinkingLevel: "high" }),
+    levels: ["off", "low"],
+    error: undefined,
+    onRequest() {},
+    onSelect() {},
+  }));
+  assert.ok(!/value="high" selected/.test(html), "an unsupported level must not remain selected");
+  // It is still DISPLAYED, so the value is not silently lost — as the fallback entry. Asserted as
+  // the selected option's TEXT rather than an exact attribute spelling, since React renders
+  // `selected=""` and the point is which option is chosen, not how the marker is written.
+  assert.match(html, /<option value="" selected[^>]*>high<\/option>/);
+});
+
+test("a failed level read names the reason rather than looking like an empty list", async () => {
+  const { ThinkingPicker } = await server.ssrLoadModule("/src/components/ThinkingPicker.tsx");
+  const html = renderToString(createElement(ThinkingPicker, {
+    session: session({ model: "m", provider: "p", thinkingLevel: "low" }),
+    levels: undefined,
+    error: "session is not running",
+    onRequest() {},
+    onSelect() {},
+  }));
+  assert.match(text(html), /Could not read the levels: session is not running/);
+  assert.match(html, /Retry/);
+});
+
+test("a stopped session's thinking picker is disabled", async () => {
+  const { ThinkingPicker } = await server.ssrLoadModule("/src/components/ThinkingPicker.tsx");
+  const html = renderToString(createElement(ThinkingPicker, {
+    session: session({ state: "stopped", model: "m", provider: "p", thinkingLevel: "low" }),
+    levels: ["off", "low"],
+    error: undefined,
+    onRequest() {},
+    onSelect() {},
+  }));
+  assert.match(html, /disabled/);
+});
+
+test("the level list is keyed on the model AND the level, so a switch invalidates it", async () => {
+  // This is the mechanism behind "a level that no longer exists cannot be selected": the identity
+  // changes when Pi's reported level changes, which happens on a model switch because Pi re-applies
+  // the level. A key of the model alone would miss that.
+  const { thinkingLevelsFor } = await server.ssrLoadModule("/src/components/ThinkingPicker.tsx");
+  const base = session({ model: "a", provider: "p", thinkingLevel: "low" });
+  const differentModel = session({ model: "b", provider: "p", thinkingLevel: "low" });
+  const differentLevel = session({ model: "a", provider: "p", thinkingLevel: "high" });
+  assert.notEqual(thinkingLevelsFor(base), thinkingLevelsFor(differentModel));
+  assert.notEqual(thinkingLevelsFor(base), thinkingLevelsFor(differentLevel));
+  assert.equal(thinkingLevelsFor(base), thinkingLevelsFor(session({ model: "a", provider: "p", thinkingLevel: "low" })));
+});

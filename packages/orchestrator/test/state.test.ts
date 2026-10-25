@@ -185,3 +185,29 @@ test("a clean exit with no stderr still reports the code", () => {
   assert.match(clean, /code=0/);
   assert.ok(!clean.includes("Seatbelt"));
 });
+
+// --- The thinking level follows Pi (issue #2) ----------------------------------------------------
+
+test("a thinking_level_changed record updates the session's level", () => {
+  // The acceptance criterion is that the RAIL updates without a manual refresh. RPC mode forwards
+  // every session event (`rpc-mode.js`: `session.subscribe(...)` with no type filter), so this
+  // record really arrives — and this reducer is what applies it. It was wired from the start and
+  // had no test until the picker made the path load-bearing.
+  const effect = interpretRecord(session({ thinkingLevel: "low" }), {
+    type: "thinking_level_changed",
+    level: "high",
+  });
+  assert.equal(effect.patch?.thinkingLevel, "high");
+});
+
+test("a thinking_level_changed record does not disturb the run state", () => {
+  // Pi re-applies the level on a model switch, mid-run, so this must never look like a state
+  // transition — an `agent_end`-style mistake would mark a working session idle (C8's family).
+  const effect = interpretRecord(session({ state: "streaming" }), {
+    type: "thinking_level_changed",
+    level: "off",
+  });
+  assert.equal(effect.patch?.state, undefined);
+  assert.equal(effect.refreshStats, undefined);
+  assert.equal(effect.dialog, undefined);
+});

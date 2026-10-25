@@ -191,9 +191,9 @@ Stack is fixed: React + Vite UI, WebSocket over loopback, TypeScript orchestrato
 - [x] **The model picker** (issue #1): a `Control` for `set_model` plus the catalogue, grouped by
       provider. The header shows what Pi **reports back**, not an optimistic guess, and a refusal
       appears as an error naming the reason. `ModelPicker.tsx`, tested.
-- [ ] **Thinking-level picker driven by `get_available_thinking_levels`** (issue #2). The
-      `Control` and the supervisor methods now exist alongside the model picker, so this is a UI
-      slice rather than a protocol one.
+- [x] **The thinking-level picker** (issue #2), constrained by the current model: the levels come
+      from `get_available_thinking_levels` for THAT model, and a model switch invalidates the list.
+      `ThinkingPicker.tsx`, tested.
 - [ ] **Steer.** Blocked on the protocol, not the UI: `Control` has no `steer` and the
       supervisor hard-codes `followUp` when streaming. The hint line says so rather than
       showing a control that cannot work.
