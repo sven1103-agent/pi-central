@@ -8,31 +8,51 @@ later phases are not committed until earlier ones pass.
 **Question:** can two sessions in different working directories hold independent Safehouse
 profiles at the same time?
 
-- [ ] Spawn two `safehouse --workdir <X> -- pi --mode rpc --no-session` processes for two
+Harness: [`spikes/phase-0/verify.ts`](../spikes/phase-0/verify.ts). Run it **unsandboxed**;
+it refuses otherwise, because Seatbelt does not nest and every check would be meaningless.
+
+```bash
+node spikes/phase-0/verify.ts --dry-run   # compose + print policy, spawn nothing
+node spikes/phase-0/verify.ts             # run the real probes
+```
+
+- [ ] Spawn two `safehouse --workdir <X> -- pi --mode rpc` processes for two
       distinct directories.
-- [ ] Confirm each process's `--explain` output differs (different workdir grants).
-- [ ] Via RPC `bash` in session A, read a path in B's workdir → **expect denial**.
-- [ ] Via RPC `bash` in session B, read a path in A's workdir → **expect denial**.
-- [ ] Within each session, read/write its own workdir → **expect success**.
+- [ ] Confirm each process's policy differs (different workdir grants).
+- [ ] Via RPC `bash` inside session A, read and write in B's workdir → **expect denial**.
+- [ ] Via RPC `bash` inside session B, read and write in A's workdir → **expect denial**.
+- [ ] Within each session, read and write its own workdir → **expect success**.
+- [ ] Confirm from *outside* the sandbox that no denied write left a file behind.
 - [ ] Confirm `~/.pi` is readable from both (C6) and recorded as a known limit.
 - [ ] Confirm `sandbox-exec` nesting fails from a child (C1) — documents *why* this works.
 
 **Fail condition:** if one session can reach another's workdir, the isolation premise is
 false. Stop and redesign.
 
-**Deliverable:** `spikes/phase-0/` with a script and captured transcripts.
+**Note:** fixtures must not live under `/tmp` or `/var/folders`, which the base profile
+grants globally; a pass there would be a false pass. The harness places them in `$HOME`
+(override with `PHASE0_ROOT`) and refuses to run from inside a sandbox.
 
 ## Phase 1 — Orchestrator core (headless)
 
 **Question:** can we reliably supervise N sessions without a UI?
 
+Informed by [USER-STORIES.md](USER-STORIES.md): starting work and resuming history are the
+critical paths, so they are in scope here rather than deferred.
+
 - [ ] Session registry: `SessionManager.listAll()` merged with live-process state.
+- [ ] **Default workspace** (US-3): an app-owned directory for sessions started without a
+      path, outside `$HOME` proper, `/tmp`, and `~/.pi` (D-5).
 - [ ] Safehouse launcher: deterministic argv, per-session policy, `--env-pass` config.
 - [ ] Process supervisor: spawn, JSONL line reader (LF-only, C7), `id` correlation,
       `agent_settled` gating (C8), process-group teardown.
 - [ ] State machine: `registered → starting → idle ⇄ streaming → stopped/failed`.
 - [ ] Lifecycle commands: `get_state`, `get_session_stats`, `prompt`, `abort`,
       `set_session_name`.
+- [ ] **Resume a historical session** (US-5), validating the recorded cwd *before* spawn
+      and surfacing the missing-directory choice (D-4). Pi exits 1 in RPC mode here.
+- [ ] **Change a session's working directory** (US-2), re-composing policy and re-spawning
+      (D-2) while preserving context (D-3).
 - [ ] Extension UI dialog relay (headless: log or auto-answer by policy).
 - [ ] Test: three sessions in three cwds, prompt each, confirm no cross-talk.
 

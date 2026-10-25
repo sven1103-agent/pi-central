@@ -30,6 +30,23 @@ pi --mode rpc [--no-session | --session <path|id> | --continue | --session-id <i
 
 ## Commands used by Pi Central
 
+### Resuming a session whose working directory is gone
+
+Pi behaves differently by mode. Verified in `dist/main.js:558`: if a session's recorded
+`cwd` no longer exists, **interactive** mode prompts ("continue in current cwd" / cancel)
+while **print, JSON, and RPC** modes print `MissingSessionCwdError` to stderr and
+**`process.exit(1)`**.
+
+Pi Central drives Pi in RPC mode, so it gets the exit, not the prompt. **Validate the
+recorded cwd before spawning** and offer the choice in the UI. This case is common: a
+finished git worktree, an unmounted volume, or a moved checkout all leave a session
+pointing at a directory that no longer exists. See
+[US-5](USER-STORIES.md#us-5--continue-a-past-session).
+
+Relevant helpers, both exported: `switch_session` accepts a `cwdOverride`, and
+`SessionManager.forkFrom(sourcePath, targetCwd, …)` copies history into a session whose
+header carries the new cwd.
+
 ### Lifecycle and identity
 
 | Command | Use |

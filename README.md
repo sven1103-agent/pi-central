@@ -63,13 +63,15 @@ See [docs/STACK.md](docs/STACK.md) for the language and library choices.
 
 ## Status
 
-**Planning.** No implementation yet. This repository currently holds the design,
-constraints, protocol notes, and decision records that the implementation will follow.
+**Planning.** No product implementation yet. This repository holds the design,
+constraints, protocol notes, user stories, and decision records that the implementation
+will follow — plus one throwaway [prototype](prototype/) used to check feasibility.
 
 Start here:
 
 | Document | What it covers |
 |---|---|
+| [docs/USER-STORIES.md](docs/USER-STORIES.md) | What users need, and the constraints those needs create |
 | [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) | The Seatbelt nesting limit and its consequences (C1–C8) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, trust boundaries, lifecycle |
 | [docs/STACK.md](docs/STACK.md) | TypeScript/Node orchestrator, React UI, rendering pipeline |

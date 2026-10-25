@@ -9,3 +9,6 @@ dist/
 # Local scratch: spike output, captured transcripts, policy files.
 spikes/**/out/
 *.sb.generated
+
+# Phase 0 spike fixtures
+.phase0-tmp/
