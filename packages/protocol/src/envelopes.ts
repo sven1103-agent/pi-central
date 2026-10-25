@@ -150,6 +150,15 @@ export type Event =
    * duplicate the conversation or lose the newest turn.
    */
   | { kind: "transcript"; sessionId: string; messages: unknown[] }
+  /**
+   * The conversation could not be read.
+   *
+   * A distinct event rather than an empty `transcript`, because the two mean opposite things: an
+   * empty conversation is a fact about the session, and a failed read is a fact about the attempt.
+   * Collapsing them made the UI show "Loading this session's history…" forever, which is a claim
+   * that something is still in progress when nothing is.
+   */
+  | { kind: "transcriptError"; sessionId: string; message: string }
   | { kind: "history"; history: HistoricalSession[]; total: number }
   | { kind: "error"; message: string; sessionId?: string | undefined };
 

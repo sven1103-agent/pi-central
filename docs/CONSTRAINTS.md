@@ -330,3 +330,18 @@ Pi runs that command when the key is first needed. Two verified properties:
 - Creating a keychain mutates the **user-wide search list** and has been observed to drop the
   login keychain, "which breaks YOUR shell's keychain access". Pi Central must never do this
   implicitly ([ADR-0010 §6](decisions/0010-agent-credential-identity.md)).
+
+## C14 — A cached conversation is stale the moment it is taken
+
+Pi emits a session's history only to the client that asked for it, and never re-emits it. Any copy
+Pi Central keeps is a snapshot of one instant.
+
+**Consequence:** a client that connects later must **fetch** the conversation, not be handed a
+remembered one. Replaying a cache does not merely risk staleness — it *overwrites* whatever the
+client already had. The observed failure: a session started fresh cached its own empty opening
+state, so every reconnect replaced a correct transcript with an empty one, while `messageCount`
+said 11. The UI then claimed to be loading, forever, because a once-only guard prevented recovery.
+
+**Related, same family:** a *failed* read and an *empty* result must be different events. Rendered
+as the same thing, a failure becomes an eternal spinner — a claim that work is in progress when
+none is.

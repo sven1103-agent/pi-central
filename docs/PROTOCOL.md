@@ -130,12 +130,26 @@ Also: a call can exist with **no result at all**. A real session had 1188 calls 
 one interrupted run. Surface it as "no result recorded" rather than omitting it, since "it tried
 this and we never saw the outcome" is exactly what someone opens a trace to find.
 
-### A reconnecting client needs the transcript re-sent
+### A reconnecting client needs the transcript re-FETCHED, never replayed
 
-The `transcript` event fires **once**, when history is fetched. A browser reload creates a new
-client that receives only a `snapshot`, so without re-sending, every running session appears to
-have an empty transcript until a new message arrives. The supervisor therefore retains the loaded
-conversation per session, and the transport replays it to each new connection.
+The `transcript` event fires **once**, when a session starts. A browser reload creates a new client
+that receives only a `snapshot`, so a connecting client must be given the conversation.
+
+**Fetch it. Do not cache it.** A cached conversation is stale the moment it is taken, and this is
+not hypothetical: an earlier version cached the fetch from session start — which for a session
+created moments ago is *empty* — and replayed it on every reconnect. The reconnect therefore
+**replaced** a correct transcript with an empty one, and a once-only guard meant it could never
+recover. The UI showed "Loading this session's history…" indefinitely, because Pi reported
+`messageCount: 11` while the client held nothing.
+
+The cost of being right is one sub-millisecond `get_messages` round trip per live session per
+connection.
+
+### A failed read is not an empty conversation
+
+`transcriptError` is a separate event from `transcript`, because the two mean opposite things: an
+empty conversation is a fact about the session, and a failed read is a fact about the attempt.
+Folded together, the UI asserted that work was in progress when none was.
 
 ### `send` takes the closed `Command` union
 

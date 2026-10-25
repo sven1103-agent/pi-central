@@ -27,6 +27,15 @@ export interface UiState {
   home: string | undefined;
   /** Transcripts keyed by session id, built from that session's records. */
   transcripts: Record<string, Transcript>;
+  /**
+   * Sessions whose conversation could not be read, keyed by session id.
+   *
+   * Tracked separately from an empty transcript because the two mean opposite things: an empty
+   * conversation is a fact about the session, a failed read is a fact about the attempt. Without
+   * this distinction the UI asserted "Loading…" indefinitely — a claim that work is in progress
+   * when none is.
+   */
+  transcriptErrors: Record<string, string>;
   /** The session the user is looking at. Not necessarily the one that is streaming. */
   focusedId: string | undefined;
   connection: "connecting" | "open" | "closed";
@@ -44,6 +53,7 @@ export function initialState(): UiState {
     historyTotal: 0,
     home: undefined,
     transcripts: {},
+    transcriptErrors: {},
     focusedId: undefined,
     connection: "connecting",
     connectionDetail: undefined,
@@ -104,13 +114,21 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
     }
 
     case "transcript": {
-      // Replayed history replaces whatever was there, because it is the authoritative past.
+      // Replaces whatever was there, because it is the authoritative conversation as of now.
       // Appending would duplicate the conversation on every reconnect.
+      const { [event.sessionId]: _cleared, ...errors } = state.transcriptErrors;
       return {
         ...state,
         transcripts: { ...state.transcripts, [event.sessionId]: seedTranscript(event.messages) },
+        transcriptErrors: errors,
       };
     }
+
+    case "transcriptError":
+      return {
+        ...state,
+        transcriptErrors: { ...state.transcriptErrors, [event.sessionId]: event.message },
+      };
 
     case "history":
       return { ...state, history: event.history, historyTotal: event.total, ready: true };

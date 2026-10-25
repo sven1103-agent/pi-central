@@ -47,12 +47,21 @@ export function checkResumable(session: Pick<HistoricalSession, "cwd" | "path">)
   let stats;
   try {
     stats = statSync(session.cwd);
-  } catch {
+  } catch (error) {
+    // The error CODE decides the message, and this was originally a bare `catch` that always
+    // claimed "no longer exists". Observed in practice: an EACCES on an ancestor directory — the
+    // path was present and fine — reported as a missing directory, which sends the reader off to
+    // restore something that is already there. `unreadable` existed as a blocker for exactly this
+    // case and could never be produced by this branch.
+    const code = (error as NodeJS.ErrnoException).code;
+    const unreadable = code === "EACCES" || code === "EPERM";
     return {
       ok: false,
-      reason: "missing-directory",
+      reason: unreadable ? "unreadable" : "missing-directory",
       cwd: session.cwd,
-      message: `The directory this session worked in no longer exists:\n  ${session.cwd}\n\nRestore it, or start a new session in the directory you want to work in. Pi Central does not move a session between directories.`,
+      message: unreadable
+        ? `The directory this session worked in cannot be read (${code}):\n  ${session.cwd}\n\nThis is a permissions problem, not a missing directory. Check that you can enter it: it may be owned by another user, or a parent directory may deny access.`
+        : `The directory this session worked in no longer exists:\n  ${session.cwd}\n\nRestore it, or start a new session in the directory you want to work in. Pi Central does not move a session between directories.`,
     };
   }
 

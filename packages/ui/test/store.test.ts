@@ -345,3 +345,32 @@ test("an unsandboxed session is detectable, so the banner can be shown", () => {
 
   assert.equal(hasUnisolatedSession(initialState()), false, "no sessions is not a warning");
 });
+
+// --- A failed history read must not look like an empty session ---------------------------------
+//
+// Reported: a session showed "Loading this session's history…" indefinitely. An empty conversation
+// and a failed read mean opposite things, and collapsing them made the UI claim that work was in
+// progress when none was.
+
+test("a transcript error is recorded per session", () => {
+  const state = reduce(initialState(), {
+    kind: "transcriptError",
+    sessionId: "s1",
+    message: "session is not running",
+  });
+  assert.equal(state.transcriptErrors["s1"], "session is not running");
+});
+
+test("a successful transcript clears that session's error", () => {
+  let state = reduce(initialState(), { kind: "transcriptError", sessionId: "s1", message: "boom" });
+  state = reduce(state, { kind: "transcript", sessionId: "s1", messages: [{ role: "user", content: "hi" }] });
+  assert.equal(state.transcriptErrors["s1"], undefined, "a later success must not leave a stale error");
+  assert.equal(transcriptFor(state, "s1").messages.length, 1);
+});
+
+test("one session's error does not affect another", () => {
+  let state = reduce(initialState(), { kind: "transcriptError", sessionId: "s1", message: "boom" });
+  state = reduce(state, { kind: "transcript", sessionId: "s2", messages: [] });
+  assert.equal(state.transcriptErrors["s1"], "boom");
+  assert.equal(state.transcriptErrors["s2"], undefined);
+});

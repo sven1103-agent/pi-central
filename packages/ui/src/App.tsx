@@ -225,6 +225,7 @@ export function App() {
               session={focused}
               transcript={transcript}
               home={home}
+              historyError={state.transcriptErrors[focused?.id ?? ""]}
               onAnswer={onAnswer}
               onSend={(message) => {
                 if (focused) send({ kind: "prompt", sessionId: focused.id, message });
@@ -270,6 +271,7 @@ function SessionView({
   session,
   transcript,
   home,
+  historyError,
   onAnswer,
   onSend,
   onClearQueueAndStop,
@@ -279,6 +281,7 @@ function SessionView({
   session: LiveSession | undefined;
   transcript: ReturnType<typeof transcriptFor>;
   home: string | undefined;
+  historyError: string | undefined;
   onAnswer: (dialogId: string, answer: DialogAnswer) => void;
   onSend: (message: string) => void;
   onClearQueueAndStop: () => void;
@@ -361,6 +364,7 @@ function SessionView({
         sessionLabel={displayName(session)}
         expectedCount={session.messageCount}
         showMarkers={showMarkers}
+        historyError={historyError}
         onOpenTool={(toolCallId) => {
           // Opening from a marker un-collapses the trace, or the click would appear to do nothing.
           setTraceCollapsed(false);

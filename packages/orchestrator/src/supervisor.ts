@@ -62,14 +62,6 @@ export interface StartFailure {
 export class Supervisor extends EventEmitter {
   #config: Config;
   #sessions = new Map<string, LiveSession>();
-  /**
-   * The loaded conversation per session, retained so a client that connects LATER still gets it.
-   *
-   * The `transcript` event fires once, when history is fetched. A browser reload creates a new
-   * client, which receives only a snapshot — so without this, every live session appeared to have
-   * an empty transcript after a reload until a new message happened to arrive.
-   */
-  #transcripts = new Map<string, unknown[]>();
   #processes = new Map<string, RpcProcess>();
   #created = 0;
 
@@ -339,7 +331,44 @@ export class Supervisor extends EventEmitter {
   }
 
   /**
-   * Load a session's existing conversation and re-emit it as records.
+   * Fetch a session's conversation from Pi.
+   *
+   * **Authoritative and current, and nothing is cached.** That is the whole design, and it is a
+   * correction: an earlier version fetched once at session start, cached the result, and replayed
+   * the cache to every client that connected later. For a session started fresh that cache held
+   * the empty conversation from its first instant, so a reconnect REPLACED a correct transcript
+   * with an empty one — and a one-shot guard meant it could never recover. The UI then showed
+   * "Loading this session's history…" indefinitely, because Pi reported messages that the client
+   * would never receive.
+   *
+   * A cache of a conversation is stale the moment it is taken. Re-fetching costs one sub-
+   * millisecond round trip per session per connection, which is a price worth paying for being
+   * right.
+   *
+   * Returns a result rather than throwing, because callers must distinguish "the conversation is
+   * empty" from "the conversation could not be read" — the first is fine and the second must not
+   * be presented as an eternal spinner.
+   */
+  async fetchTranscript(
+    id: string,
+  ): Promise<{ ok: true; messages: unknown[] } | { ok: false; message: string }> {
+    const rpc = this.#processes.get(id);
+    if (!rpc) return { ok: false, message: "this session is not running" };
+    try {
+      const data = (await rpc.send({ type: "get_messages" }, 30_000)) as { messages?: unknown[] };
+      return {
+        ok: true,
+        messages: (data?.messages ?? []).filter(
+          (message) => typeof message === "object" && message !== null,
+        ),
+      };
+    } catch (error) {
+      return { ok: false, message: (error as Error).message };
+    }
+  }
+
+  /**
+   * Load a session's conversation once, when it starts or resumes.
    *
    * **This is the fix for a resumed session showing an empty transcript.** Pi loads a resumed
    * session's history into the model's context but does NOT re-emit it as events, so a UI built
@@ -350,30 +379,29 @@ export class Supervisor extends EventEmitter {
    * live stream take the SAME code path in the UI reducer. There is one renderer for one
    * conversation; two is how the past and the present end up looking different.
    *
-   * Runs at most once per session: a second call would append a duplicate copy of the whole
-   * conversation, since the reducer appends every `message_end` it sees.
+   * The once-only guard covers this automatic path to avoid duplicating the conversation on every
+   * state refresh. Clients that connect later call `fetchTranscript` directly instead, so they
+   * always get the CURRENT conversation rather than this session's opening state.
    */
   async #loadTranscript(id: string): Promise<void> {
     const session = this.#sessions.get(id);
-    const rpc = this.#processes.get(id);
-    if (!session || !rpc || session.transcriptLoaded) return;
-    session.transcriptLoaded = true;
-    try {
-      const data = (await rpc.send({ type: "get_messages" }, 30_000)) as { messages?: unknown[] };
-      const messages = (data?.messages ?? []).filter(
-        (message) => typeof message === "object" && message !== null,
-      );
-      this.#transcripts.set(id, messages);
-      this.emit("transcript", id, messages);
-    } catch (error) {
-      // A transcript that failed to load must not fail the session. Statistics are cosmetic;
-      // this is not, so the failure is surfaced as a warning rather than swallowed.
+    if (!session || session.transcriptLoaded) return;
+
+    const result = await this.fetchTranscript(id);
+    if (!result.ok) {
+      // Deliberately NOT marking the load as done: a transient failure (Pi not ready yet) should
+      // be retryable rather than permanently disabling this session's history.
       session.warnings = [
         ...session.warnings,
-        `Could not load this session's earlier messages: ${(error as Error).message}`,
+        `Could not load this session's earlier messages: ${result.message}`,
       ];
+      this.emit("transcriptError", id, result.message);
       this.#patch(id);
+      return;
     }
+
+    session.transcriptLoaded = true;
+    this.emit("transcript", id, result.messages);
   }
 
   async #refreshStats(id: string): Promise<void> {
@@ -428,16 +456,6 @@ export class Supervisor extends EventEmitter {
     this.#patch(id);
   }
 
-  /**
-   * The conversation already loaded for a session, if any.
-   *
-   * Read by the transport when a client connects, so a reload does not present a session with
-   * hundreds of messages as empty.
-   */
-  transcriptOf(id: string): unknown[] | undefined {
-    return this.#transcripts.get(id);
-  }
-
   /** Send a prompt. The command shape is closed; the message is the only free value. */
   async prompt(id: string, message: string): Promise<void> {
     const rpc = this.#processes.get(id);
@@ -473,9 +491,6 @@ export class Supervisor extends EventEmitter {
     this.#patch(id);
     await rpc.stop();
     this.#processes.delete(id);
-    // The transcript is dropped with the process: a stopped session's conversation belongs to the
-    // session FILE, which discovery reads, not to a copy held for a client that may never return.
-    this.#transcripts.delete(id);
   }
 
   async stopAll(): Promise<void> {

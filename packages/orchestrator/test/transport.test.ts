@@ -40,6 +40,19 @@ class FakeSupervisor extends EventEmitter {
     return { ok: true as const, session: live };
   }
 
+  /** Counts fetches so a test can prove the transport RE-FETCHES rather than replaying a cache. */
+  transcriptFetches = 0;
+
+  // Typed like the real method so a test can substitute a failure without a cast.
+  fetchTranscript = async (
+    id: string,
+  ): Promise<{ ok: true; messages: unknown[] } | { ok: false; message: string }> => {
+    this.calls.push({ method: "fetchTranscript", args: [id] });
+    this.transcriptFetches += 1;
+    // Fresh content each time, so a cached replay would be visibly stale.
+    return { ok: true, messages: [{ role: "user", content: `fetch ${this.transcriptFetches}` }] };
+  };
+
   async prompt(id: string, message: string): Promise<void> {
     this.calls.push({ method: "prompt", args: [id, message] });
   }
@@ -378,6 +391,69 @@ test("all clients see a broadcast (fan-out, not first-wins)", async () => {
     assert.equal(eb.kind === "session" && eb.session.id, "s7");
     a.close();
     b.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("a client connecting to a live session receives its CURRENT conversation", async () => {
+  // The reported bug: a reconnect showed a session as loading forever, because the transport
+  // replayed a copy captured at session START (empty, for a fresh session) which then REPLACED
+  // the client's correct transcript. Fetching fresh is the only way to be current.
+  const supervisor = new FakeSupervisor();
+  supervisor.sessions.push(makeSession("s1", "/tmp/a"));
+  const transport = new Transport(supervisor as never, emptyConfig());
+  try {
+    const address = await transport.listen();
+    const first = await TestClient.connect(address.url);
+    const one = await first.next("transcript");
+    assert.equal(one.kind === "transcript" && one.sessionId, "s1");
+    assert.match(JSON.stringify(one), /fetch 1/, "the first client gets the current conversation");
+
+    // A second client — a page reload — must get the conversation NOW, not the first snapshot.
+    const second = await TestClient.connect(address.url);
+    const two = await second.next("transcript");
+    assert.match(JSON.stringify(two), /fetch 2/, "the second client must re-fetch, not replay a cache");
+    assert.equal(supervisor.transcriptFetches, 2);
+    first.close();
+    second.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("a stopped or failed session is not asked for a transcript", async () => {
+  // There is no process to answer, so the fetch would fail and be reported as an error.
+  const supervisor = new FakeSupervisor();
+  supervisor.sessions.push(makeSession("s1", "/tmp/a"), { ...makeSession("s2", "/tmp/b"), state: "stopped" });
+  const transport = new Transport(supervisor as never, emptyConfig());
+  try {
+    const address = await transport.listen();
+    const client = await TestClient.connect(address.url);
+    await client.next("transcript");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const fetched = supervisor.calls.filter((c) => c.method === "fetchTranscript");
+    assert.deepEqual(fetched.map((c) => c.args[0]), ["s1"], "only the running session is fetched");
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("a failed fetch is reported as an error, never as an empty transcript", async () => {
+  // The two mean opposite things. Reported as empty, the UI asserted "Loading…" forever — a claim
+  // that work was in progress when none was.
+  const supervisor = new FakeSupervisor();
+  supervisor.sessions.push(makeSession("s1", "/tmp/a"));
+  supervisor.fetchTranscript = async () => ({ ok: false as const, message: "session is not running" });
+  const transport = new Transport(supervisor as never, emptyConfig());
+  try {
+    const address = await transport.listen();
+    const client = await TestClient.connect(address.url);
+    const event = await client.next("transcriptError");
+    assert.equal(event.kind === "transcriptError" && event.sessionId, "s1");
+    assert.match(event.kind === "transcriptError" ? event.message : "", /not running/);
+    client.close();
   } finally {
     await transport.close();
   }

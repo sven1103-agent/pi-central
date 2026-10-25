@@ -30,6 +30,7 @@ export function TranscriptView({
   loading = false,
   onOpenTool,
   showMarkers = true,
+  historyError,
 }: {
   transcript: TranscriptModel;
   busy: boolean;
@@ -55,6 +56,14 @@ export function TranscriptView({
    * when they want to understand — rather than one of the two being imposed.
    */
   showMarkers?: boolean;
+  /**
+   * Why the conversation could not be read, if it could not be.
+   *
+   * Passed so the pane can stop claiming to be loading. A failed read and an empty conversation
+   * look identical from here, and rendering the failure as "Loading…" tells the reader to wait for
+   * something that is never coming.
+   */
+  historyError?: string | undefined;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -78,7 +87,9 @@ export function TranscriptView({
   });
 
   const isEmpty = transcript.messages.length === 0 && transcript.tools.length === 0;
-  const awaitingHistory = isEmpty && expectedCount > 0;
+  // An error is not "still loading": the attempt is over.
+  const awaitingHistory = isEmpty && expectedCount > 0 && historyError === undefined;
+  const failed = isEmpty && historyError !== undefined;
   const entries = planTranscript(transcript);
 
   return (
@@ -90,11 +101,20 @@ export function TranscriptView({
       aria-label={`Transcript for ${sessionLabel}`}
       aria-busy={busy || undefined}
     >
-      {awaitingHistory ? (
+      {failed ? (
+        <div className="empty" style={{ padding: 0 }}>
+          <h2>Could not load this session's history</h2>
+          <p>{historyError}</p>
+          <p className="dim">
+            {`Pi reports ${expectedCount} message${expectedCount === 1 ? "" : "s"} in this session, `}
+            so they exist — the request for them failed. Reconnect, or reload the page, to try again.
+          </p>
+        </div>
+      ) : awaitingHistory ? (
         <div className="empty" style={{ padding: 0 }}>
           <h2>Loading this session's history…</h2>
           <p>
-            Pi reports {expectedCount} message{expectedCount === 1 ? "" : "s"} in this session.
+            {`Pi reports ${expectedCount} message${expectedCount === 1 ? "" : "s"} in this session. `}
             They are being fetched; nothing is missing.
           </p>
         </div>

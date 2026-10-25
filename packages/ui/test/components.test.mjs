@@ -316,6 +316,27 @@ test("the transcript region declares aria-busy while streaming and is not a live
   assert.ok(!html.includes("aria-live"), "the streaming transcript must not be a live region");
 });
 
+test("a failed history read says so instead of loading forever", () => {
+  // The reported symptom: "i only see that it is loading, but the messages and tool trace never
+  // appears". An error is not a pending state, and rendering it as one tells the reader to wait
+  // for something that is never coming.
+  const html = renderToString(createElement(TranscriptView, {
+    transcript: { messages: [], tools: [] }, busy: false, sessionLabel: "s1",
+    expectedCount: 11, historyError: "session is not running",
+  }));
+  assert.match(html, /Could not load this session&#x27;s history/);
+  assert.match(html, /session is not running/, "the reason must be shown, not hidden");
+  assert.ok(!html.includes("Loading this session"), "a failure must not claim to be loading");
+  assert.match(html, /11 messages/, "it should say what it knows: the messages exist");
+});
+
+test("while a load is genuinely pending it says loading, not an error", () => {
+  const html = renderToString(createElement(TranscriptView, {
+    transcript: { messages: [], tools: [] }, busy: false, sessionLabel: "s1", expectedCount: 11,
+  }));
+  assert.match(html, /Loading this session&#x27;s history/);
+});
+
 test("an empty transcript explains where the session works", () => {
   const html = renderToString(createElement(TranscriptView, {
     transcript: { messages: [], tools: [] },

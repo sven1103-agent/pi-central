@@ -184,13 +184,27 @@ export class Transport {
       home: this.#config.home,
     });
 
-    // Then the conversation for each live session. The `transcript` event fires once when
-    // history is fetched, so a client connecting later — after a browser reload, say — would
-    // otherwise see every running session as empty until a new message arrived.
+    // Then the CURRENT conversation for each live session, FETCHED rather than replayed.
+    //
+    // The `transcript` event fires once when a session starts, so a client that connects later —
+    // after a browser reload, say — receives none of it. An earlier version replayed a copy cached
+    // at session start; for a session started fresh that copy held its opening, empty state, so a
+    // reload REPLACED a correct transcript with an empty one and the session appeared to load
+    // forever. Re-fetching is the only way to be current.
     for (const session of this.#supervisor.list()) {
-      const messages = this.#supervisor.transcriptOf(session.id);
-      if (messages) this.#send(socket, { kind: "transcript", sessionId: session.id, messages });
+      if (session.state === "stopped" || session.state === "failed") continue;
+      void this.#sendTranscript(socket, session.id);
     }
+  }
+
+  /** Fetch one session's conversation for one client, and report failure as a failure. */
+  async #sendTranscript(socket: WebSocket, sessionId: string): Promise<void> {
+    const result = await this.#supervisor.fetchTranscript(sessionId);
+    if (!result.ok) {
+      this.#send(socket, { kind: "transcriptError", sessionId, message: result.message });
+      return;
+    }
+    this.#send(socket, { kind: "transcript", sessionId, messages: result.messages });
   }
 
   async #onMessage(socket: WebSocket, raw: string): Promise<void> {
@@ -310,6 +324,9 @@ export class Transport {
     // Replayed history, kept distinct from the live stream (see the `transcript` event).
     this.#supervisor.on("transcript", (sessionId: string, messages: unknown[]) => {
       this.#broadcast({ kind: "transcript", sessionId, messages });
+    });
+    this.#supervisor.on("transcriptError", (sessionId: string, message: string) => {
+      this.#broadcast({ kind: "transcriptError", sessionId, message });
     });
     this.#supervisor.on("error", (sessionId: string, message: string) => {
       this.#broadcast({ kind: "error", message, sessionId });
