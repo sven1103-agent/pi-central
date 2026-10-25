@@ -92,6 +92,26 @@ variables must be opted in:
 - Provider credentials Pi needs must be passed deliberately, or they will be absent.
 - This is a feature: the orchestrator controls leakage per session.
 
+### C4a — Safehouse's sanitized allowlist is not a security boundary
+
+The allowlist is a convenience default, not a control, and it must not be relied on to keep a
+secret out of a session. Two verified properties (Safehouse `0.12.0`, `bin/safehouse`):
+
+1. **`SSH_AUTH_SOCK` is in the allowlist** (line 7055). A session launched through Safehouse
+   therefore still reaches the host's ssh-agent by default.
+2. **`--env-pass` / `--env=FILE` merge append-only.** The merge helper is
+   `runtime_append_requested_host_env_entries`: they can *add* a variable but can never
+   *remove* one from the sanitized set.
+
+Consequences:
+
+- The **orchestrator** is the sanitization boundary: it builds an explicit environment and
+  passes it to `spawn`. `LaunchSpec.env` is required so that omitting it is a type error
+  rather than a silent inheritance of `process.env`.
+- A leak of `SSH_AUTH_SOCK` cannot be fixed with a Safehouse flag. It needs the spawn
+  environment, and for defence in depth the policy layer too.
+- See [ADR-0010](decisions/0010-agent-credential-identity.md) and C11.
+
 ## C5 — Inbound loopback is allowed; that is not the boundary
 
 Safehouse's `20-network.sb` allows:
@@ -129,6 +149,11 @@ The `60-agents/pi.sb` profile grants:
 - Pi Central must not present cross-project transcript access as isolation it does not
   have. If per-project transcript secrecy is required, that needs a policy change, not a
   UI affordance.
+- **`~/.pi/agent/auth.json` holds the *host user's* provider credentials and is readable by
+  every session.** It must be denied in the appended policy fragment, with the agent's own
+  keys injected per session instead — see
+  [ADR-0010](decisions/0010-agent-credential-identity.md). Until that is implemented, a
+  session can read the user's provider keys.
 
 ## C6a — Ancestor directories are listable by design
 
@@ -209,3 +234,42 @@ A Pi-Central-owned lock would not be taken by Pi, so it cannot prevent a foreign
 the only case that is not already handled in memory. It would add lock lifecycle, stale
 handling, pid reuse, and a new blocking failure mode for no coverage gain. Rejected for the
 same reason as the filesystem sidecar ([ADR-0007](decisions/0007-filesystem-access-model.md)).
+
+## C10 — Safehouse is macOS-only
+
+`safehouse` hard-fails off Darwin. `runtime_preflight` (line ~7066):
+
+```
+"safehouse requires macOS (Darwin) to execute commands under sandbox-exec."
+```
+
+There is **no** Linux backend: no `bubblewrap`, `landlock`, `seccomp`, `nsjail`, or `firejail`
+reference exists in the tool (verified by search), and `sandbox-exec` is the only execution
+path.
+
+### Consequences
+
+- Pi Central's sandboxed mode is **macOS-only**, and that is a property of the sandbox
+  backend, not of any credential choice. "Support Linux" is a backend decision.
+- macOS-only is an accepted constraint, which makes macOS-native mechanisms (e.g. the
+  Keychain) have **zero marginal platform cost**.
+- `safehouse --stdout` still renders a policy on any platform; only *execution* is gated.
+- Direct (unsandboxed) mode exists for feasibility testing and is labelled `NO ISOLATION`.
+
+## C11 — Environment sanitization is the orchestrator's job
+
+Environment variables are **not a filesystem concept**: no SBPL grant or deny constrains them,
+so no policy can keep a variable out of a session. Combined with C4a, this means:
+
+- A variable exported in the user's shell (e.g. `SSH_AUTH_SOCK`, or any `*_TOKEN`) reaches a
+  session if the orchestrator spawns it with an inherited environment.
+- Subagents inherit the parent's environment, so the exposure multiplies: `pi-subagents`
+  builds each subagent's env from `process.env`, stripping only git-routing and
+  extension-binding variables — not secrets.
+
+### Consequences
+
+- Sessions are spawned with an **explicit allowlist**, never `process.env`.
+- A denylist is not an option: the set of secret-shaped names is unbounded and user-defined.
+- This control is independent of, and a prerequisite to, every credential decision in
+  [ADR-0010](decisions/0010-agent-credential-identity.md).

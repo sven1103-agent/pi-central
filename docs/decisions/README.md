@@ -15,6 +15,7 @@ reader can tell whether a decision still holds.
 | [0007](0007-filesystem-access-model.md) | Filesystem access: orchestrator at user UID | Accepted |
 | [0008](0008-no-mid-session-workdir-change.md) | No mid-session working-directory change | Accepted |
 | [0009](0009-direct-session-discovery.md) | Discovery parses session files directly; no Pi agent core at runtime | Accepted |
+| [0010](0010-agent-credential-identity.md) | Agent credential identity: agent-owned secrets, delivered per session | Accepted |
 
 ## Format
 
@@ -31,6 +32,6 @@ record. Do not rewrite history in place.
 
 ## Constraint references
 
-ADRs cite the hard limits in [../CONSTRAINTS.md](../CONSTRAINTS.md) as `C1`–`C8`. Those
+ADRs cite the hard limits in [../CONSTRAINTS.md](../CONSTRAINTS.md) as `C1`–`C11`. Those
 limits were verified against Pi `1.4.0` and Agent Safehouse `0.12.0`; re-verify them when
 either is upgraded, since an ADR's premises can expire.

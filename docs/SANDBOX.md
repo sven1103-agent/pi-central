@@ -37,14 +37,29 @@ Env equivalents: `SAFEHOUSE_WORKDIR`, `SAFEHOUSE_ADD_DIRS`, `SAFEHOUSE_ADD_DIRS_
 ```
 1. workdir             = the session header's cwd (or the cwd for a new session)
 2. workdir config      = <workdir>/.safehouse, loaded only if trusted
-3. bespoke layer       = --append-profile <our policy>   (always applied)
+3. bespoke layer       = --append-profile <our policy>   [NOT YET IMPLEMENTED]
 4. optional features   = --enable=... per session profile
-5. env                 = sanitized allowlist + --env-pass + --env=FILE
+5. env                 = explicit spawn-environment allowlist (C11)
 ```
 
-The bespoke layer (3) is where Pi Central's own policy lives. Because appended profiles
-are emitted **after** generated rules, they can tighten what the generated policy allows —
-this is the intended hook for project- or team-specific restrictions.
+The bespoke layer (3) is where Pi Central's own policy belongs, and is where the credential
+denes in [ADR-0010](decisions/0010-agent-credential-identity.md) will live. Because appended
+profiles are emitted **after** generated rules and SBPL is last-match-wins, they can tighten
+what the generated policy allows — this is the intended hook for project- or team-specific
+restrictions.
+
+> **Status: not implemented.** `composePolicy()` does not pass `--append-profile`, and no
+> fragment file exists. This row previously read "always applied", which was a claim the code
+did not support. Until it is implemented, a session's grant set is exactly Safehouse's
+generated policy for its workdir — including the defaults that grant the host's
+`~/.config/gh`, `~/.gitconfig`, and `~/.pi` (C6).
+
+### Environment is not handled by Safehouse
+
+Step 5 is listed here only because it was once described as Safehouse's job. It is not:
+Safehouse's sanitized allowlist **passes `SSH_AUTH_SOCK`**, and `--env-pass`/`--env=FILE`
+merge append-only, so they can add a variable but never remove one (C4a). The orchestrator
+builds the environment and hands it to `spawn` (C11).
 
 ### Automatic deny-write rules worth knowing
 

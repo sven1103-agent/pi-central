@@ -47,8 +47,11 @@ critical paths, so they are in scope here rather than deferred.
       state. `registry.ts`, `supervisor.ts`
 - [x] **Default workspace** (US-3): an app-owned directory for sessions started without a
       path, outside `$HOME` proper, `/tmp`, and `~/.pi` (D-5). `config.ts`, tested
-- [x] Safehouse launcher: deterministic argv, per-session policy, `--env-pass` config.
-      `policy.ts`, tested; the only argv-assembly site (enforced)
+- [x] Safehouse launcher: deterministic argv, per-session policy. `policy.ts`, tested; the
+      only argv-assembly site (enforced). *Credential delivery is now
+      [ADR-0010](decisions/0010-agent-credential-identity.md), superseding the earlier
+      `--env-pass` plan: env vars cannot carry an SSH key, and `--env-pass` merges
+      append-only so it cannot remove `SSH_AUTH_SOCK` (C4a).*
 - [x] Process supervisor: spawn, JSONL line reader (LF-only, C7), `id` correlation,
       `agent_settled` gating (C8), process-group teardown. `rpc.ts`, `framing.ts`, `state.ts`
 - [x] State machine: `registered → starting → idle ⇄ streaming → stopped/failed`.
@@ -67,6 +70,23 @@ critical paths, so they are in scope here rather than deferred.
 
 **Deliverable:** `packages/orchestrator/` + a CLI smoke command. *Built; the two remaining
 items need an unsandboxed run (C1).*
+
+### Phase 1 follow-ups (open defects, from [ADR-0010](decisions/0010-agent-credential-identity.md))
+
+Found while evaluating credential handling; **not** fixed. These are security and
+correctness defects in shipped Phase 1 code, so they come before Phase 2.
+
+- [ ] Session spawn inherits `process.env`, so `SSH_AUTH_SOCK` and any ambient `*_TOKEN`
+      reach every session, and every subagent it starts (C4a, C11). Fix: an explicit spawn
+      allowlist with `LaunchSpec.env` required, so omission is a type error.
+- [ ] `FORBIDDEN_ENABLE` omits `--enable=ssh` and `--enable=keychain`, both verified to
+      re-open the credential boundary (`--enable=ssh` grows the policy 1,076 → 1,136 lines
+      and grants agent-socket access).
+- [ ] Implement `--append-profile` — the bespoke policy layer [SANDBOX.md](SANDBOX.md)
+      promised but the code does not have. It is where the credential denies belong
+      (`~/.pi/agent/auth.json` per C6, `~/.gitconfig`, `~/.config/gh`, `~/.ssh/agent`).
+- [ ] Agent credential store, ownership modes (`managed`/`external`), explicit re-import,
+      and the drift badge (ADR-0010 §5).
 
 ### Verification status
 

@@ -53,16 +53,29 @@ plus a global search.
 
 ## Q5 — Credentials and `--env-pass`
 
-Safehouse sanitizes the environment (C4). Which variables must reach each session?
+**Resolved** by [ADR-0010](decisions/0010-agent-credential-identity.md).
 
-- Provider keys (`ANTHROPIC_API_KEY`, …) if Pi reads them from env.
-- Anything a project's tooling needs.
+Credentials are no longer an env-pass question, because `--env-pass`/`--env=FILE` cannot be
+the mechanism: Safehouse's sanitized allowlist already passes `SSH_AUTH_SOCK`, and both flags
+merge **append-only**, so they can add a variable but never remove one (C4a).
 
-**Working default:** an explicit per-orchestrator allowlist passed via
-`--env-pass`/`--env=FILE`, never the full host environment.
+The decision:
 
-**Decision needed:** confirm Pi here authenticates via a store (`~/.pi/agent/auth.json`)
-rather than env, which would minimize what must be passed through.
+- Sessions are spawned with an **explicit allowlist** built by the orchestrator, never
+  `process.env`. This is the sanitization boundary (C11).
+- The agent gets its **own** credentials from a per-agent store, delivered by the mechanism
+  that can carry them: env values sourced from that store for provider keys and HTTPS
+  `GH_TOKEN`; `GH_CONFIG_DIR`/`GIT_CONFIG_GLOBAL` for identity routing; a key file for SSH
+  push and signing (env cannot carry a private key).
+- `~/.pi/agent/auth.json` is the **host user's** credentials and must be denied in the
+  appended policy fragment (C6).
+- The achievable property is "the agent has its own credentials and not the user's" — not
+  "the agent cannot exfiltrate a credential it holds", since egress is unrestricted by
+  design (C5).
+
+Remaining open sub-question: whether provider keys are delivered purely by env, or via Pi's
+`auth.json` `"key": "!command"` indirection reading the agent keychain. Both are in scope;
+the choice is per-agent configuration, not a fork in the design.
 
 ## Q6 — Approval policy when nobody is watching
 
@@ -83,7 +96,18 @@ the client does not answer. Pi Central must decide what it wants to happen then:
 Does Pi Central store anything durable (window layout, project list, approval audit log)?
 If so, where — and it must be outside `~/.pi` to avoid entangling with Pi's own config.
 
-**Working default:** `~/.config/pi-central/`, JSON, no secrets.
+**Working default:** `~/.config/pi-central/`, JSON, **no secrets**.
+
+**Amended** by [ADR-0010](decisions/0010-agent-credential-identity.md). The "no secrets" rule
+now has a precise meaning, because credential state exists:
+
+- `~/.config/pi-central/` holds **references and non-secret configuration only** — the agent
+  root path, the ownership mode (`managed`/`external`), the agent's non-secret identity
+  (login, email, `user.name`), and which secret each provider maps to.
+- Secret **values** live in the per-agent store (`<state>/agents/<id>/`, `0700`; keychain or
+  `0600` files), never in `config.json`.
+- This honours Q7's intent: config stays shareable and diffable, and rotating a secret never
+  touches it.
 
 **Decision needed:** confirm the location, and whether an approval audit log is in scope
 for v1 (it interacts with Q6).
