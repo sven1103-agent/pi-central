@@ -182,6 +182,8 @@ Stack is fixed: React + Vite UI, WebSocket over loopback, TypeScript orchestrato
       styled `<pre>` today. Shiki adds ~200 kB plus its own lazy-loading path, so it is worth
       doing deliberately rather than tacked on — and it is the one Phase 2 item that is
       cosmetic rather than behavioural.
+- [x] **The orchestrator serves the built UI**, so no dev server is required and the CSP's
+      `connect-src 'self'` is same-origin by construction (issue #24). `static-ui.ts`, tested.
 - [ ] **Model + thinking-level pickers driven by `get_available_*`.** Deferred: the rail shows
       both read-only. The commands are catalogued in [PROTOCOL.md](PROTOCOL.md) and wired in
       `verify-three.ts`, but no `Control` carries them yet, so a picker would need a protocol
@@ -191,18 +193,20 @@ Stack is fixed: React + Vite UI, WebSocket over loopback, TypeScript orchestrato
       showing a control that cannot work.
 - [ ] Compaction / retry banners.
 
-**Deliverable:** runnable dashboard. ✅ `npm run server` + `npm run ui:dev`.
+**Deliverable:** runnable dashboard. ✅ `npm run ui:build && npm run server`, one process and one
+URL. `npm run ui:dev` remains for hot reload while editing the UI.
 
 ### Verification status (Phase 2)
 
 | Layer | State |
 |---|---|
-| Unit tests | ✅ 267 passing (protocol, orchestrator, UI) |
+| Unit tests | ✅ 372 passing (protocol, orchestrator, UI) |
 | Typechecks | ✅ two configs: Node libs and DOM libs cannot share one |
 | Untrusted-rendering tests | ✅ parse the sanitized DOM: no live handler, no dangerous element, no executable scheme |
 | Component tests | ✅ real components rendered through Vite's SSR transform |
 | UI invariants | ✅ enforced by test: one insertion site, `html:false`, DOMPurify after markdown-it, no `agent_end` switch (C8), no cwd change (ADR-0008) |
 | Production build | ✅ `vite build` |
+| Static-UI serving | ✅ traversal denied (403), CSP sent as a **header**, SPA fallback, missing build names the fix; the served tree is confirmed against the real `packages/ui/dist` |
 | **Visual review in a browser** | ⏳ blocked by C1 from the development sandbox — Chromium cannot bind its profile socket here. Components are verified by rendered markup instead, which is stronger for behaviour and weaker for layout. |
 
 ## Phase 2.5 — File navigation and operations

@@ -35,12 +35,21 @@ import {
 import type { Supervisor } from "./supervisor.ts";
 import { discover } from "./registry.ts";
 import type { Config } from "./config.ts";
+import { createUiRequestHandler, resolveUiDistDir } from "./static-ui.ts";
 
 export interface TransportOptions {
   host?: string;
   port?: number;
   /** Cap concurrent clients. Loopback is reachable by any local process (C5). */
   maxClients?: number;
+  /**
+   * The built UI to serve at `/` (issue #24). Absent → `resolveUiDistDir()`, i.e. the repository's
+   * own `packages/ui/dist`.
+   *
+   * Set to `null` to serve no UI at all, which is what a test that only cares about the socket
+   * wants: otherwise every transport test would depend on whether the UI happened to be built.
+   */
+  uiDir?: string | null;
 }
 
 export interface TransportAddress {
@@ -103,6 +112,7 @@ export class Transport {
       host: options.host ?? "127.0.0.1",
       port: options.port ?? 0,
       maxClients: options.maxClients ?? 8,
+      uiDir: options.uiDir === undefined ? resolveUiDistDir() : options.uiDir,
     };
   }
 
@@ -110,15 +120,32 @@ export class Transport {
     return this.#address;
   }
 
+  /** The UI directory being served, or `null` when the socket is the only surface. */
+  get uiDir(): string | null {
+    return this.#options.uiDir;
+  }
+
   /** Bind and start serving. Resolves with the actual address (port 0 → a real port). */
   async listen(): Promise<TransportAddress> {
     if (this.#server) throw new Error("transport is already listening");
 
-    // No HTTP routes: the UI is served by Vite in development and from disk in production.
-    // A bare server exists only to host the WebSocket upgrade.
-    const server = createServer((_req, res) => {
+    // One listener, two protocols. `/ws` upgrades to the socket; every other path is the built
+    // UI. Serving both from one origin is what makes `connect-src 'self'` in the CSP truthful
+    // rather than aspirational (ADR-0006), and it means the dashboard needs no dev server.
+    //
+    // The UI directory may legitimately not exist (nothing built yet). That is not a startup
+    // failure — the socket is still useful, and a CLI smoke run should not require a UI build —
+    // so the handler reports the missing build per request, naming the fix, and the entry point
+    // prints the same fact once at startup.
+    const uiHandler = this.#options.uiDir === null ? undefined : createUiRequestHandler({ root: this.#options.uiDir });
+
+    const server = createServer((req, res) => {
+      if (uiHandler) {
+        uiHandler(req, res);
+        return;
+      }
       res.writeHead(426, { "content-type": "text/plain" });
-      res.end("Pi Central speaks WebSocket only.\n");
+      res.end("Pi Central speaks WebSocket only, and no UI directory is configured.\n");
     });
 
     const wss = new WebSocketServer({ server, maxPayload: 8 * 1024 * 1024 });

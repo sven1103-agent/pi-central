@@ -13,6 +13,8 @@ decoration.
 | `rpc.ts` | One supervised `pi --mode rpc` process | ADR-0003 |
 | `supervisor.ts` | State machine, `agent_settled` gating, teardown | C8, ARCHITECTURE.md |
 | `resume.ts` | Validate recorded cwd before spawning | US-5, D-4, C2 |
+| `transport.ts` | WebSocket + serve the built UI from one origin | ADR-0006, C5 |
+| `static-ui.ts` | Serve `packages/ui/dist`, with containment and the CSP header | ADR-0006, C5 |
 | `cli.ts` | Smoke command: start, prompt, observe | ROADMAP Phase 1 |
 
 ## Two rules that keep this honest

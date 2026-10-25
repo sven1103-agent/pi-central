@@ -63,19 +63,33 @@ never runs untrusted content, so being outside the sandbox is safe by constructi
 
 ## Quick start
 
-Two processes, and **both must run from a plain terminal** (see the constraint above):
+**One process.** The orchestrator serves the built UI and the WebSocket from the same origin, so
+there is no dev server to start and no port to coordinate. It must run from a plain terminal (see
+the constraint above).
 
 ```bash
 npm install
-
-# terminal 1 — the orchestrator (unsandboxed; spawns sandboxed sessions)
-npm run server
-
-# terminal 2 — the UI
-npm run ui:dev
+npm run ui:build      # once, and after any UI change
+npm run server        # the orchestrator, which also serves the UI
 ```
 
-Then open <http://localhost:5173>.
+Then open <http://127.0.0.1:8787> — the URL the server prints.
+
+Serving the UI from the orchestrator is not only convenience. A Vite dev server watches
+`packages/ui/src`, so an agent editing a component reloads the interface you are using out from
+under you, mid-edit, into a syntax-error overlay. A built UI removes the watcher. It also makes
+the `connect-src 'self'` in the CSP truthful by construction: the socket really is same-origin with
+the document. See [docs/DOGFOODING.md](docs/DOGFOODING.md).
+
+### Working on the UI
+
+For hot reload while editing components, run the dev server instead — it proxies `/ws` to the
+orchestrator and still needs no configuration:
+
+```bash
+npm run server -- --no-ui   # terminal 1 — socket only
+npm run ui:dev              # terminal 2 — Vite, on http://localhost:5173
+```
 
 | Key | Action |
 |---|---|

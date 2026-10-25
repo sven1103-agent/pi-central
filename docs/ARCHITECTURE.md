@@ -83,6 +83,26 @@ Control and events are **separate directions on the same socket** with different
 levels, so the transport must distinguish them structurally (typed envelopes), not by
 convention.
 
+## One origin: the UI is served by the orchestrator
+
+There is a single HTTP listener. `/ws` upgrades to the WebSocket; every other path serves the
+built UI from `packages/ui/dist` ([`static-ui.ts`](../packages/orchestrator/src/static-ui.ts)),
+with an SPA fallback so a reload on a client-side route is not a 404. This is not only
+convenience:
+
+- **`connect-src 'self'` is truthful.** ADR-0006's CSP is only meaningful if the socket really is
+  same-origin with the document. Serving both from one listener achieves that by construction,
+  rather than by a dev-server proxy that happens to be configured correctly.
+- **The CSP is sent as a header**, which applies before the document is parsed, in addition to the
+  `<meta>` tag that ships in `index.html`. A test asserts the two are equal, so they cannot drift.
+- **Editing the UI cannot disturb the running one.** With no Vite watcher, an agent editing a
+  component cannot hot-reload the dashboard you are using
+  ([DOGFOODING.md](DOGFOODING.md)).
+
+Loopback is still not a boundary (C5). The listener serves one directory, refuses any path that
+resolves outside it (a `..` segment is *denied* with a 403, not normalized away), and must not be
+bound beyond `127.0.0.1` — the transport guarantees the binding, not the static handler.
+
 ## Session registry
 
 Two sources, deliberately:
