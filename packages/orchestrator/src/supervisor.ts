@@ -19,13 +19,15 @@
  * no attach protocol, so a session is live iff this process spawned it.
  */
 import { EventEmitter } from "node:events";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import type { HistoricalSession, LiveSession, PiRecord } from "@pi-central/protocol";
 import { composePolicy, describe, type LaunchMode, type SessionSpec } from "./policy.ts";
 import { RpcProcess, type LaunchSpec } from "./rpc.ts";
 import { checkResumable } from "./resume.ts";
 import { isScratch, scratchDirFor, type Config } from "./config.ts";
 import { agentRoutingEnv } from "./env.ts";
+import { KEYCHAIN_FILE } from "./agent-store.ts";
 import { renderPolicyFragment } from "./fragment.ts";
 import { interpretRecord } from "./state.ts";
 
@@ -169,13 +171,24 @@ export class Supervisor extends EventEmitter {
     // removes the host's system git config as an independent route to the login keychain.
     const env = { ...agentRoutingEnv(this.#config.agentRoot), ...(input.env ?? {}) };
 
+    // Provider-key resolution needs keychain access (C13). Only granted when the agent tree
+    // actually has a keychain, so a session that cannot reach a model says so by omission
+    // rather than by a silent, unbounded keychain grant.
+    const keychainPath = join(this.#config.agentRoot, KEYCHAIN_FILE);
+    const hasKeychain = existsSync(keychainPath);
+
     // Only sandboxed sessions get a fragment: direct mode applies no Safehouse policy, so
     // there is nothing to append to.
+    //
+    // The agent root is passed unconditionally (not just when managed): the session is
+    // configured with GH_CONFIG_DIR/GIT_CONFIG_GLOBAL inside it, so it must be able to read
+    // its own credentials whether Pi Central created the tree or adopted an external one.
     const fragment =
       input.mode === "sandboxed"
-        ? renderPolicyFragment(
-            this.#config.agentRootManaged ? { agentRoot: this.#config.agentRoot } : {},
-          )
+        ? renderPolicyFragment({
+            agentRoot: this.#config.agentRoot,
+            ...(hasKeychain ? { keychain: true, keychainPath } : {}),
+          })
         : undefined;
 
     const spec: SessionSpec = {

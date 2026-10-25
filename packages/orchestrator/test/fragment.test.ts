@@ -19,8 +19,95 @@ test("the host's credential paths are denied", () => {
   // Each of these is granted by Safehouse's generated policy, so a deny must override it.
   assert.match(fragment, /\(deny file-read\*\s*\n\s*\(home-prefix "\/\.gitconfig"\)/);
   assert.match(fragment, /\(home-subpath "\/\.config\/gh"\)/);
-  assert.match(fragment, /\(home-literal "\/\.pi\/agent\/auth\.json"\)/);
   assert.match(fragment, /\(home-subpath "\/\.ssh\/agent"\)/);
+});
+
+test("Pi's auth store is NOT denied (C12, ADR-0010 Amendment 1)", () => {
+  // Denying it made every session exit 1: Pi reads it at startup, and a policy deny produces
+  // EPERM where ENOENT would have been tolerated. It also holds `!command` indirections, not
+  // secrets. This test fails if the deny is ever reintroduced.
+  const fragment = renderPolicyFragment({
+    agentRoot: "/state/agents/default",
+    keychain: true,
+    keychainPath: "/a/db",
+  });
+  // Read **rules**, not prose: the comments mention auth.json precisely to record why it is
+  // not denied, so matching the whole text would be a false positive.
+  const rules = fragment
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith(";;"))
+    .join("\n");
+  assert.ok(!rules.includes("auth.json"), "auth.json must not appear in any rule");
+  assert.ok(!/\(deny[^)]*\.pi/.test(rules), "nothing under ~/.pi may be denied without booting Pi");
+});
+
+test("the agent's own tree is granted read-write, so GH_CONFIG_DIR is usable", () => {
+  const fragment = renderPolicyFragment({ agentRoot: "/state/agents/default" });
+  assert.match(fragment, /\(allow file-read\* file-write\*\s*\n\s*\(subpath "\/state\/agents\/default"\)/);
+});
+
+test("ancestor traversal is granted, or the agent cannot reach its own tree", () => {
+  // Same class of failure as the auth.json deny (C12): SBPL resolves a path component by
+  // component, and Safehouse only emits ancestor literals for the *workdir*. A managed agent
+  // root sits at ~/.config/pi-central/agents/<id>, which no base grant covers, so without
+  // these literals a session starts fine and then cannot read the credentials it was given.
+  const fragment = renderPolicyFragment({ agentRoot: "/Users/x/.config/pi-central/agents/default" });
+  for (const literal of [
+    '(literal "/")',
+    '(literal "/Users")',
+    '(literal "/Users/x")',
+    '(literal "/Users/x/.config")',
+    '(literal "/Users/x/.config/pi-central")',
+    '(literal "/Users/x/.config/pi-central/agents")',
+    '(literal "/Users/x/.config/pi-central/agents/default")',
+  ]) {
+    assert.ok(fragment.includes(literal), `missing ancestor literal ${literal}`);
+  }
+});
+
+test("ancestor literals are literal, not subpath: no recursive widening", () => {
+  // `subpath` on an ancestor would grant the whole subtree (e.g. all of ~/.config), which is
+  // exactly the over-grant this fragment exists to avoid. Safehouse uses `literal` for this
+  // reason; this test fails if someone "simplifies" it to a subpath.
+  const fragment = renderPolicyFragment({ agentRoot: "/Users/x/.config/agents/default" });
+  const ancestorBlock = fragment.slice(fragment.indexOf("(allow file-read*"));
+  assert.ok(
+    !ancestorBlock.includes('(subpath "/Users/x/.config")'),
+    "an ancestor must never be granted as a subpath",
+  );
+});
+
+test("the agent root is granted even for an externally owned tree", () => {
+  // Ownership affects who WRITES the tree, not whether the session may read its own
+  // credentials. Omitting this allow would configure the session to use files it cannot read.
+  const fragment = renderPolicyFragment({ agentRoot: "/Users/x/.agent" });
+  assert.match(fragment, /\(subpath "\/Users\/x\/\.agent"\)/);
+});
+
+test("keychain access is off unless asked for, and then bounded (C13)", () => {
+  assert.ok(!renderPolicyFragment({ agentRoot: "/a" }).includes("SecurityServer"));
+
+  const withKeychain = renderPolicyFragment({
+    agentRoot: "/a",
+    keychain: true,
+    keychainPath: "/a/agent.keychain-db",
+  });
+  assert.match(withKeychain, /com\.apple\.SecurityServer/);
+  assert.match(withKeychain, /\(literal "\/a\/agent\.keychain-db"\)/);
+  // The bound: the login and System keychain files are denied, so the grant reaches only the
+  // agent's own keychain (the keychain is all-or-nothing via IPC, so this is what limits it).
+  assert.match(withKeychain, /\(deny file-read\* file-write\*\s*\n\s*\(home-subpath "\/Library\/Keychains"\)/);
+  assert.match(withKeychain, /\(subpath "\/Library\/Keychains"\)/);
+  // The search list must be readable or service-only lookups silently fail.
+  assert.match(withKeychain, /com\.apple\.security\.plist/);
+});
+
+test("keychain access without a path is refused rather than guessed", () => {
+  assert.throws(() => renderPolicyFragment({ keychain: true }), /absolute keychainPath/);
+  assert.throws(
+    () => renderPolicyFragment({ keychain: true, keychainPath: "relative" }),
+    /absolute keychainPath/,
+  );
 });
 
 test("the ssh-agent sockets are denied at the network layer too", () => {
@@ -33,19 +120,16 @@ test("the ssh-agent sockets are denied at the network layer too", () => {
 
 test("the agent's own credentials stay readable — the denies are useless otherwise", () => {
   const fragment = renderPolicyFragment({ agentRoot: "/state/agents/default" });
-  assert.match(fragment, /\(allow file-read\*\s*\n\s*\(subpath "\/state\/agents\/default"\)/);
+  assert.match(fragment, /\(allow file-read\* file-write\*\s*\n\s*\(subpath "\/state\/agents\/default"\)/);
 });
 
 test("no absolute home path is hardcoded: the fragment is portable (ADR-0010)", () => {
-  // This is the property the hardening project lacked: its ~/.agent path was baked in
-  // because the policy was generated with that workdir. Everything here is HOME_DIR-relative.
+  // This is the property the hardening project lacked: its ~/.agent path was baked in because
+  // the policy was generated with that workdir. Host paths here are HOME_DIR-relative, and the
+  // only absolute path is the agent root, which is configuration.
   const fragment = renderPolicyFragment({ agentRoot: "/state/agents/default" });
   const home = homedir();
-  assert.ok(
-    !fragment.split("\n").some((line) => line.trimStart().startsWith(";;") === false && line.includes(home)),
-    `the fragment must not hardcode ${home}`,
-  );
-  // The generated policy defines HOME_DIR before appended rules are emitted.
+  assert.ok(!fragment.includes(home), `the fragment must not hardcode ${home}`);
   assert.match(fragment, /HOME_DIR/);
 });
 
@@ -55,9 +139,11 @@ test("rendering is deterministic, so drift is diffable (the drift badge)", () =>
   assert.equal(a, b);
 });
 
-test("denying Pi's auth store can be turned off, and the default is on", () => {
-  assert.match(renderPolicyFragment(), /\.pi\/agent\/auth\.json/);
-  assert.ok(!renderPolicyFragment({ denyPiAuth: false }).includes("auth.json"));
+test("denying Pi's auth store is not possible at all (the option is gone)", () => {
+  // The `denyPiAuth` escape hatch was removed rather than defaulted off: keeping it would
+  // invite someone to switch it back on and break every session again (C12).
+  const fragment = renderPolicyFragment({ agentRoot: "/a" });
+  assert.ok(!fragment.includes("auth.json"));
 });
 
 test("a relative agent root is refused: it would resolve unpredictably", () => {
@@ -94,10 +180,6 @@ const sandboxExec = "/usr/bin/sandbox-exec";
 const canValidate = process.platform === "darwin" && existsSync(sandboxExec);
 
 test("the fragment composes into valid SBPL (parse check)", { skip: !canValidate }, () => {
-  const file = join(dir, "fragment.sb");
-  writeFileSync(file, renderPolicyFragment({ agentRoot: "/state/agents/default" }));
-
-  // A minimal wrapper that defines HOME_DIR, as Safehouse's generated policy does.
   const composed = join(dir, "composed.sb");
   writeFileSync(
     composed,
@@ -108,7 +190,11 @@ test("the fragment composes into valid SBPL (parse check)", { skip: !canValidate
       '(define (home-literal rel) (literal (string-append HOME_DIR rel)))',
       '(define (home-prefix rel) (prefix (string-append HOME_DIR rel)))',
       "(allow file-read*)",
-      renderPolicyFragment({ agentRoot: "/state/agents/default" }),
+      renderPolicyFragment({
+        agentRoot: "/state/agents/default",
+        keychain: true,
+        keychainPath: "/state/agents/default/agent.keychain-db",
+      }),
     ].join("\n"),
   );
 

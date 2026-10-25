@@ -70,8 +70,11 @@ export interface StoreSnapshot {
   fingerprint: string;
 }
 
+/** The agent keychain's filename within an agent root (the hardening project's convention). */
+export const KEYCHAIN_FILE = "agent.keychain-db";
+
 /** Files whose *contents* are never read, only their presence and metadata. */
-const SECRET_BEARING = new Set(["gh/hosts.yml", "ssh/id_ed25519", "ssh/id_rsa", "agent.keychain-db"]);
+const SECRET_BEARING = new Set(["gh/hosts.yml", "ssh/id_ed25519", "ssh/id_rsa", KEYCHAIN_FILE]);
 
 export interface ReadStoreOptions {
   ownership?: Ownership;
@@ -97,7 +100,7 @@ export function readStore(root: string, options: ReadStoreOptions = {}): StoreSn
     sshSigningKey: existsSync(join(root, "ssh", "allowed_signers")),
     knownHosts: existsSync(join(root, "ssh", "known_hosts")),
     sshCommandWrapper: existsSync(join(root, "ssh", "ssh-github.sh")),
-    keychain: existsSync(join(root, "agent.keychain-db")),
+    keychain: existsSync(join(root, KEYCHAIN_FILE)),
   };
 
   const files = exists ? listFiles(root) : [];

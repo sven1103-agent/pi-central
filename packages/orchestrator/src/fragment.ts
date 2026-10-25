@@ -11,42 +11,160 @@
  * policy deliberately grants things a coding agent commonly needs, and some of those are the
  * host user's credentials:
  *
- *   (allow file-read*        (home-prefix "/.gitconfig"))      ;; F12 route
- *   (allow file-read* file-write* (home-subpath "/.config/gh"))
- *   (allow file-read* file-write* (home-subpath "/.pi"))       ;; C6: provider keys + all transcripts
+ *   (allow file-read*              (home-prefix "/.gitconfig"))   ;; F12 route to the host token
+ *   (allow file-read* file-write*  (home-subpath "/.config/gh"))  ;; the host's gh token
+ *   (allow file-read* file-write*  (home-subpath "/.pi"))         ;; C6: all transcripts
  *
- * A session that can read those is not running as the agent; it is running as the user.
+ * A session that can use those is not running as the agent; it is running as the user.
  *
- * Two rules that keep this file honest:
+ * ## What is denied, and what deliberately is not
  *
- *   1. **Every path is derived from `HOME_DIR`**, which the generated policy defines before
- *      appended rules are emitted. No user's home is baked in, so the fragment works for any
- *      machine (ADR-0010: the hardening's approach hardcoded `~/.agent` because it was
- *      generated with that workdir).
+ * **Identity** credentials are denied — a leak there is the *user's* identity, used as the
+ * agent: the host gitconfig, the host gh config, the user's ssh-agent, the user's private keys.
+ *
+ * **Infrastructure** credentials are not. Provider keys (the LLM the agent runs on) are a
+ * capability the user must grant: there is no "agent's own litellm key", so denying it would
+ * not tighten isolation, only stop the agent thinking. `~/.pi/agent/auth.json` is
+ * **allowed** — it holds `!command` indirections, not secrets, and Pi reads it during startup,
+ * where a deny produces EPERM and Pi exits 1 (C12). Amendment 1 to ADR-0010 has the full
+ * account of that bug.
+ *
+ * ## Two rules that keep this file honest
+ *
+ *   1. **Host paths are derived from `HOME_DIR`**, which the generated policy defines before
+ *      appended rules are emitted, so no user's home is baked in.
  *   2. **Denials are narrow.** `~/.config` and `~/.local/share` are granted only as *literals*
- *      for directory traversal, and tools rely on walking them, so this denies the credential
- *      subpath rather than the root. A blunt deny of `~/.config` would break tool discovery
- *      for no security gain.
+ *      for traversal, and tools rely on walking them; the deny targets the credential subpath,
+ *      not the root.
  */
 
 export interface FragmentOptions {
   /**
-   * When set, allow read access to this agent root (the agent's *own* credentials).
+   * The agent's own credential tree.
    *
-   * This is what makes the denies safe to apply: closing the host's paths is only useful if
-   * the agent can still reach its own. Absolute path; the caller owns validating it lives
-   * outside the host's credential directories.
+   * Required in practice: without it the agent cannot read its own `gitconfig` or `gh` config,
+   * while `GH_CONFIG_DIR`/`GIT_CONFIG_GLOBAL` point straight at them — so the session would be
+   * configured to use credentials it is not permitted to read.
    */
   agentRoot?: string;
   /**
-   * Deny read of Pi's own auth store.
+   * Grant the keychain access Pi needs to resolve provider keys (C13).
    *
-   * On by default. `~/.pi/agent/auth.json` holds the **host user's** provider credentials and
-   * is readable by every session under the base policy (C6). The agent's keys are injected
-   * instead (ADR-0010 §2).
+   * `auth.json` resolves each key with a service-only lookup such as
+   * `!security find-generic-password -ws 'litellm'`, which needs `com.apple.SecurityServer`
+   * to read **any** keychain, and the user-wide search list to find the agent keychain.
+   *
+   * Safe because the grant is bounded: the login and System keychain files are denied, and
+   * Safehouse grants no keychain access at all by default (`keychain integration: not
+   * included`), so this is additive rather than a hole punched in an existing protection.
+   *
+   * Off means a session will start and then be unable to reach a model — correct only for a
+   * deliberately offline session.
    */
-  denyPiAuth?: boolean;
+  keychain?: boolean;
+  /** The agent keychain to grant, when `keychain` is on. */
+  keychainPath?: string;
 }
+
+/**
+ * Ancestor directory literals for a path, mirroring what Safehouse emits for the workdir.
+ *
+ * Why this is necessary: path resolution in SBPL needs read access to **every** component, so
+ * a `(subpath <agentRoot>)` grant alone is not enough. Safehouse grants ancestor literals for
+ * the *workdir* and says why:
+ *
+ *   Agents call readdir() on every ancestor of the working directory during startup. If only
+ *   file-read-metadata is granted, the agent cannot list directory contents.
+ *
+ * Our agent root is not the workdir, so it gets no such grant: the base policy covers `~/.config`
+ * as a literal but not `~/.config/pi-central/agents`. Without these literals a session would
+ * start normally, then be unable to reach the very credentials it is configured with — the same
+ * shape of failure as the `auth.json` deny (C12).
+ *
+ * `literal` rather than `subpath` is deliberate, and matches Safehouse: it grants the directory
+ * entry itself (listing immediate children), not recursive access to what is under it.
+ */
+export function ancestorLiterals(path: string): string[] {
+  if (!path.startsWith("/")) throw new Error(`path must be absolute: ${JSON.stringify(path)}`);
+  const parts = path.split("/").filter((part) => part !== "");
+  const out = ['    (literal "/")'];
+  let current = "";
+  for (const part of parts) {
+    current += `/${part}`;
+    out.push(`    (literal ${JSON.stringify(current)})`);
+  }
+  return out;
+}
+
+/** Paths derived from `HOME_DIR`, so the fragment is portable between machines. */
+const HOST_DENIES: { comment: string[]; rules: string[] }[] = [
+  {
+    comment: [
+      "Host git configuration (closes the credential-helper route)",
+      "The host's global gitconfig may set credential.helper = !gh auth git-credential,",
+      "which resolves a token from the login keychain - a path no file deny on ~/.ssh",
+      "would stop. The agent uses its own GIT_CONFIG_GLOBAL instead (ADR-0010 §3).",
+    ],
+    rules: [
+      "(deny file-read*",
+      '    (home-prefix "/.gitconfig")',
+      '    (home-subpath "/.config/git")',
+      '    (home-literal "/.gitattributes")',
+      ")",
+    ],
+  },
+  {
+    comment: [
+      "Host GitHub CLI config",
+      "On macOS gh keeps its token in the keychain, but ~/.config/gh may still hold config",
+      "for the user's own account, and the write grant in particular was a config-tampering",
+      "surface. The agent uses its own GH_CONFIG_DIR. ~/.config stays traversable so tool",
+      "discovery (mise, gh, git) still works.",
+    ],
+    rules: ["(deny file-read* file-write*", '    (home-subpath "/.config/gh")', ")", "(allow file-read-metadata", '    (home-literal "/.config")', ")"],
+  },
+  {
+    comment: [
+      "The user's ssh-agent",
+      "A session with agent access can sign as the user with any loaded key WITHOUT reading",
+      "a key file, so no file deny covers this. The agent uses its own key with",
+      "IdentitiesOnly=yes and needs no agent (ADR-0010 §4).",
+      "",
+      "Defence in depth: the spawn environment is also sanitized (C11). Both layers are",
+      "applied because either alone would be a single point of failure.",
+    ],
+    rules: [
+      "(deny file-read* file-write* file-read-metadata",
+      '    (home-subpath "/.ssh/agent")',
+      ")",
+      "(deny network-outbound",
+      '    (remote unix-socket (path-regex #"^/private/tmp/com\\.apple\\.launchd\\.[^/]+/Listeners$"))',
+      '    (remote unix-socket (path-regex #"^/tmp/com\\.apple\\.launchd\\.[^/]+/Listeners$"))',
+      '    (remote unix-socket (path-regex #"^/private/var/run/com\\.apple\\.launchd\\.[^/]+/Listeners$"))',
+      '    (remote unix-socket (path-regex #"^/var/run/com\\.apple\\.launchd\\.[^/]+/Listeners$"))',
+      '    (remote unix-socket (path-regex (string-append "^" HOME_DIR "/\\\\.ssh/agent(/.*)?$")))',
+      ")",
+    ],
+  },
+  {
+    comment: [
+      "The user's own SSH private keys",
+      "The base policy grants metadata and config but not key contents; this makes that",
+      "explicit so a future base-policy change cannot quietly widen it.",
+      "",
+      "Note: ~/.ssh/config is NOT denied. The agent's git uses an explicit IdentityFile with",
+      "IdentitiesOnly=yes, but ssh still reads config for host aliases, and denying it breaks",
+      "git-over-SSH for no gain - the file holds no private key.",
+    ],
+    rules: [
+      "(deny file-read*",
+      '    (regex #"^.*/\\.ssh/id_[^/]*$")',
+      '    (regex #"^.*/\\.ssh/.*_rsa$")',
+      '    (regex #"^.*/\\.ssh/.*_ed25519$")',
+      ")",
+    ],
+  },
+];
 
 /**
  * Render the fragment.
@@ -55,12 +173,15 @@ export interface FragmentOptions {
  * diffed to detect drift (ADR-0010 §5, the drift badge).
  */
 export function renderPolicyFragment(options: FragmentOptions = {}): string {
-  const { agentRoot, denyPiAuth = true } = options;
+  const { agentRoot, keychain = false, keychainPath } = options;
   if (agentRoot !== undefined && !agentRoot.startsWith("/")) {
     throw new Error(`agent root must be an absolute path: ${JSON.stringify(agentRoot)}`);
   }
+  if (keychain && (keychainPath === undefined || !keychainPath.startsWith("/"))) {
+    throw new Error("keychain access requires an absolute keychainPath");
+  }
 
-  const lines: string[] = [
+  const out: string[] = [
     ";; ---------------------------------------------------------------------------",
     ";; Pi Central — appended policy fragment (ADR-0010).",
     ";;",
@@ -68,91 +189,79 @@ export function renderPolicyFragment(options: FragmentOptions = {}): string {
     ";; Appended AFTER Safehouse's generated rules: SBPL is last-match-wins, so these",
     ";; denies override the base policy's broader allows.",
     ";;",
-    ";; Purpose: the session runs as the AGENT, not as the user. The base policy grants",
-    ";; the host's gitconfig, gh config, and ~/.pi to any agent, because a coding agent",
-    ";; commonly wants them. Here the agent has its own credentials instead.",
+    ";; Purpose: the session runs as the AGENT, not as the user.",
+    ";;",
+    ";; Identity credentials are closed. Provider credentials are NOT denied, and that is",
+    ";; deliberate: the agent runs on the user's model access, so there is no agent-owned",
+    ";; substitute. Denying it would stop the agent thinking, not tighten isolation.",
+    ";; See ADR-0010 Amendment 1.",
     ";; ---------------------------------------------------------------------------",
-    "",
-    ";; --- Host git configuration (closes the credential-helper route) ---------------",
-    ";; The host's global gitconfig may set credential.helper = !gh auth git-credential,",
-    ";; which resolves a token from the login keychain - a path no file deny on ~/.ssh",
-    ";; would stop. The agent uses its own GIT_CONFIG_GLOBAL instead (ADR-0010 §3).",
-    "(deny file-read*",
-    '    (home-prefix "/.gitconfig")',
-    '    (home-subpath "/.config/git")',
-    '    (home-literal "/.gitattributes")',
-    ")",
-    "",
-    ";; --- Host GitHub CLI config ---------------------------------------------------",
-    ";; On macOS gh keeps its token in the keychain, but on a keychain-less host",
-    ";; ~/.config/gh/hosts.yml is a plaintext token. Either way the agent must use its",
-    ";; own GH_CONFIG_DIR. ~/.config itself stays listable so tool discovery still works.",
-    "(deny file-read*",
-    '    (home-subpath "/.config/gh")',
-    ")",
     "",
   ];
 
-  if (denyPiAuth) {
-    lines.push(
-      ";; --- Pi's own auth store (C6) --------------------------------------------------",
-      ";; ~/.pi/agent/auth.json holds the HOST USER's provider credentials, and the base",
-      ";; policy grants all of ~/.pi read/write to every session. The agent's own keys are",
-      ";; injected per session; this file is not its to read.",
-      "(deny file-read*",
-      '    (home-literal "/.pi/agent/auth.json")',
-      ")",
-      "",
-    );
+  for (const block of HOST_DENIES) {
+    out.push(...block.comment.map((line) => (line === "" ? ";;" : `;; ${line}`)));
+    out.push(...block.rules, "");
   }
 
-  lines.push(
-    ";; --- The user's ssh-agent -----------------------------------------------------",
-    ";; A session with agent access can sign as the user with any loaded key WITHOUT",
-    ";; reading a key file, so no file deny covers this. The agent uses its own key with",
-    ";; IdentitiesOnly=yes and needs no agent (ADR-0010 §4).",
-    ";;",
-    ";; Defence in depth: the spawn environment is also sanitized (C11). Both layers are",
-    ";; applied because either alone would be a single point of failure.",
-    "(deny file-read* file-write* file-read-metadata",
-    '    (home-subpath "/.ssh/agent")',
-    ")",
-    "(deny network-outbound",
-    '    (remote unix-socket (path-regex #"^/private/tmp/com\\.apple\\.launchd\\.[^/]+/Listeners$"))',
-    '    (remote unix-socket (path-regex #"^/tmp/com\\.apple\\.launchd\\.[^/]+/Listeners$"))',
-    '    (remote unix-socket (path-regex #"^/private/var/run/com\\.apple\\.launchd\\.[^/]+/Listeners$"))',
-    '    (remote unix-socket (path-regex #"^/var/run/com\\.apple\\.launchd\\.[^/]+/Listeners$"))',
-    '    (remote unix-socket (path-regex (string-append "^" HOME_DIR "/\\\\.ssh/agent(/.*)?$")))',
-    ")",
-    "",
-    ";; --- The user's own SSH private keys -------------------------------------------",
-    ";; The base policy grants metadata and config but not key contents; this makes that",
-    ";; explicit so a future base-policy change cannot quietly widen it.",
-    ";;",
-    ";; Note: ~/.ssh/config is NOT denied. The agent's git uses an explicit IdentityFile",
-    ";; with IdentitiesOnly=yes, but ssh still reads config for host aliases, and denying",
-    ";; it breaks git-over-SSH for no gain - the file holds no private key.",
-    "(deny file-read*",
-    '    (regex #"^.*/\\.ssh/id_[^/]*$")',
-    '    (regex #"^.*/\\.ssh/.*_rsa$")',
-    '    (regex #"^.*/\\.ssh/.*_ed25519$")',
-    ")",
-    "",
-  );
-
+  // --- The agent's own credentials -------------------------------------------------------
+  // Placed after the host denies: the same `gitconfig`/`gh` names exist under both roots, and
+  // the agent's copy must win. Without this the session is configured (via GH_CONFIG_DIR and
+  // GIT_CONFIG_GLOBAL) to use files it is not permitted to read.
   if (agentRoot !== undefined) {
-    lines.push(
+    out.push(
       ";; --- The agent's OWN credentials -----------------------------------------------",
-      ";; Narrow, explicit, and read-only. This is the point of the whole fragment: the",
-      ";; denies above only help if the agent can still reach what it legitimately owns.",
+      ";; Read-write: gh writes cache/state under GH_CONFIG_DIR, and git may update the",
+      ";; agent's config. This is the point of the fragment - the denies above only help if",
+      ";; the agent can still reach what it legitimately owns.",
+      ";;",
+      ";; Ancestor literals are required, not decorative: SBPL needs read access to every path",
+      ";; component, and Safehouse only emits ancestor grants for the workdir. Without them the",
+      ";; agent cannot traverse into its own tree.",
       "(allow file-read*",
+      ...ancestorLiterals(agentRoot),
+      ")",
+      "(allow file-read* file-write*",
       `    (subpath ${JSON.stringify(agentRoot)})`,
       ")",
       "",
     );
   }
 
-  return lines.join("\n");
+  // --- Provider-key resolution (C13) -----------------------------------------------------
+  if (keychain) {
+    out.push(
+      ";; --- Provider key resolution (C13) ----------------------------------------------",
+      ";; auth.json resolves each provider key with a service-only lookup, e.g.",
+      ";;   !security find-generic-password -ws 'litellm'",
+      ";; That needs SecurityServer to read ANY keychain, and the user-wide search list to",
+      ";; find the agent keychain. Neither is granted by Safehouse by default.",
+      ";;",
+      ";; The grant is bounded by denying the login and System keychain FILES: the keychain is",
+      ";; all-or-nothing via IPC, so least privilege (the agent's own keychain) is the",
+      ";; control, not concealment.",
+      "(allow mach-lookup",
+      '    (global-name "com.apple.SecurityServer")',
+      ")",
+      "(deny file-read* file-write*",
+      '    (home-subpath "/Library/Keychains")',
+      '    (subpath "/Library/Keychains")',
+      ")",
+      "(allow file-read* file-write*",
+      `    (literal ${JSON.stringify(keychainPath)})`,
+      ")",
+      ";; The search list lives in com.apple.security.plist. Without read access, `security`",
+      ";; silently falls back to the built-in [login, System] list, does NOT see the agent",
+      ";; keychain, and every service-only lookup fails with no useful error. The file holds",
+      ";; only the search list - no secret.",
+      "(allow file-read*",
+      '    (home-literal "/Library/Preferences/com.apple.security.plist")',
+      ")",
+      "",
+    );
+  }
+
+  return out.join("\n");
 }
 
 /** Write the fragment into the state root, returning its path. Deterministic content. */
