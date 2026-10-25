@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { LiveSession } from "@pi-central/protocol";
 import { blockingDialogMethods, fireAndForgetUiMethods, interpretRecord } from "../src/state.ts";
+import { describeExitFailure } from "../src/supervisor.ts";
 
 const session = (over: Partial<LiveSession> = {}): LiveSession => ({
   id: "s1",
@@ -159,4 +160,28 @@ test("a non-extension_ui_request record is never a dialog", () => {
   for (const type of ["agent_start", "message_update", "tool_execution_start", "session_info_changed"]) {
     assert.equal(interpretRecord(session(), { type }).dialog, undefined);
   }
+});
+
+// --- C1 diagnosis is attached where the evidence is -------------------------------------------
+
+test("seatbelt refusal produces an actionable diagnosis", () => {
+  // The most likely first-run failure. The raw output ("pi exited (code=71)") reads like a
+  // launcher bug and sends the reader looking in the wrong place, so the cause is named.
+  const seatbelt = describeExitFailure(71, null, "sandbox-exec: sandbox_apply: Operation not permitted");
+  assert.match(seatbelt, /Seatbelt refusing to nest/);
+  assert.match(seatbelt, /plain terminal/);
+  assert.match(seatbelt, /code=71/, "the original evidence must survive");
+});
+
+test("an unrelated failure is NOT blamed on nesting", () => {
+  // A wrong hint is worse than none: it would send someone to the wrong place with confidence.
+  const other = describeExitFailure(1, null, "Error: cannot find module 'pi'");
+  assert.ok(!other.includes("Seatbelt"), "an unrelated failure must not be blamed on nesting");
+  assert.match(other, /cannot find module/);
+});
+
+test("a clean exit with no stderr still reports the code", () => {
+  const clean = describeExitFailure(0, null, "");
+  assert.match(clean, /code=0/);
+  assert.ok(!clean.includes("Seatbelt"));
 });

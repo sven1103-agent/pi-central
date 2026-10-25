@@ -273,7 +273,7 @@ export class Supervisor extends EventEmitter {
     rpc.on("exit", ({ code, signal, stderr }: { code: number | null; signal: string | null; stderr: string }) => {
       if (session.state === "stopped") return;
       session.state = "failed";
-      session.error = `pi exited (code=${code ?? "-"}, signal=${signal ?? "-"})${stderr ? `\n${stderr}` : ""}`;
+      session.error = describeExitFailure(code, signal, stderr);
       session.dialogs = [];
       this.#patch(session.id);
       this.emit("error", session.id, session.error);
@@ -421,6 +421,33 @@ export class Supervisor extends EventEmitter {
     const session = this.#sessions.get(id);
     if (session) this.emit("update", session);
   }
+}
+
+/**
+ * Explain a session's death in a way a reader can act on.
+ *
+ * The MOST LIKELY first-run failure is also the least self-explanatory. Seatbelt does not nest
+ * (C1), so running the orchestrator inside another sandbox makes `sandbox-exec` fail with EPERM
+ * and every session dies the moment it starts. The raw output — `pi exited (code=71)` plus
+ * `sandbox_apply: Operation not permitted` — reads like a launcher bug and sends the reader
+ * looking in the wrong place, so the diagnosis is attach­ed here, where the evidence is.
+ *
+ * Exported so the test exercises this function rather than a paraphrase of it, which is the
+ * same reason `interpretRecord` is pure.
+ */
+export function describeExitFailure(
+  code: number | null,
+  signal: string | null,
+  stderr: string,
+): string {
+  const base = `pi exited (code=${code ?? "-"}, signal=${signal ?? "-"})${stderr ? `\n${stderr}` : ""}`;
+  if (!/sandbox_apply|Operation not permitted/i.test(stderr)) return base;
+  return (
+    `${base}\n\n` +
+    "This looks like Seatbelt refusing to nest (C1). The orchestrator must run from a plain " +
+    "terminal, not inside another sandbox, editor task, or agent harness -- because `safehouse` " +
+    "applies its policy with `sandbox-exec`, and that cannot run inside an existing sandbox."
+  );
 }
 
 /** Only used so a display name is never a bare id. */
