@@ -7,5 +7,19 @@
   "license": "MIT",
   "engines": {
     "node": ">=22.19.0"
+  },
+  "workspaces": [
+    "packages/protocol",
+    "packages/orchestrator"
+  ],
+  "scripts": {
+    "test": "node --test \"packages/*/test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "smoke": "node packages/orchestrator/src/cli.ts"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.4.0",
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
   }
 }
