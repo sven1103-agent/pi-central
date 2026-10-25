@@ -71,22 +71,37 @@ critical paths, so they are in scope here rather than deferred.
 **Deliverable:** `packages/orchestrator/` + a CLI smoke command. *Built; the two remaining
 items need an unsandboxed run (C1).*
 
-### Phase 1 follow-ups (open defects, from [ADR-0010](decisions/0010-agent-credential-identity.md))
+### Phase 1 follow-ups (from [ADR-0010](decisions/0010-agent-credential-identity.md))
 
-Found while evaluating credential handling; **not** fixed. These are security and
-correctness defects in shipped Phase 1 code, so they come before Phase 2.
+- [x] **Session spawn no longer inherits `process.env`.** `env.ts` builds an explicit
+      allowlist; `LaunchSpec.env` is **required**, so omitting it is now a type error rather
+      than a silent leak. Verified: a planted `SSH_AUTH_SOCK` and `HF_TOKEN_STRICT` do not
+      reach the session. `env.test.ts`
+- [x] **`FORBIDDEN_ENABLE` now covers `ssh`, `keychain`, `cloud-credentials`,
+      `cloud-storage`.** Verified by policy diff that `--enable=ssh` appends an SSH
+      integration block and `keychain` grants keychain RW + `SecurityServer` mach-lookups.
+- [x] **`--append-profile` implemented.** `fragment.ts` renders a deterministic,
+      `HOME_DIR`-relative fragment denying the host's `~/.gitconfig`, `~/.config/gh`,
+      `~/.pi/agent/auth.json` (C6), the ssh-agent sockets, and `~/.ssh` private keys.
+      `policy.ts` writes it `0600` and passes `--append-profile`.
+- [x] **Agent credential store** with `managed`/`external` ownership, explicit re-import,
+      and drift detection. `agent-store.ts`. Inspection is metadata-only: a planted token
+      and private key do not appear anywhere in a snapshot or drift report.
 
-- [ ] Session spawn inherits `process.env`, so `SSH_AUTH_SOCK` and any ambient `*_TOKEN`
-      reach every session, and every subagent it starts (C4a, C11). Fix: an explicit spawn
-      allowlist with `LaunchSpec.env` required, so omission is a type error.
-- [ ] `FORBIDDEN_ENABLE` omits `--enable=ssh` and `--enable=keychain`, both verified to
-      re-open the credential boundary (`--enable=ssh` grows the policy 1,076 → 1,136 lines
-      and grants agent-socket access).
-- [ ] Implement `--append-profile` — the bespoke policy layer [SANDBOX.md](SANDBOX.md)
-      promised but the code does not have. It is where the credential denies belong
-      (`~/.pi/agent/auth.json` per C6, `~/.gitconfig`, `~/.config/gh`, `~/.ssh/agent`).
-- [ ] Agent credential store, ownership modes (`managed`/`external`), explicit re-import,
-      and the drift badge (ADR-0010 §5).
+### Verification performed for the above
+
+- Composed policy parses as valid SBPL (`sandbox-exec` reports syntax errors *before*
+  attempting to apply, so a parse check works even where C1 blocks execution). Negative
+  control included — a deliberately broken fragment **does** report a syntax error.
+- Our denies land at lines 1092–1110, **after** the base grants at 949/967: last-match-wins
+  makes them authoritative.
+- Safehouse emits `(deny file-write* (literal "<fragment>"))`, so a session cannot rewrite
+  the rules confining it.
+
+### Still to verify (needs a plain, unsandboxed terminal — C1)
+
+Denials are proven at the *policy* layer, not yet by a live session. The remaining checks are
+experiments 1, 2, 4–9 in [ADR-0010](decisions/0010-agent-credential-identity.md).
 
 ### Verification status
 

@@ -30,20 +30,42 @@ export interface Config {
   safehouse: string;
   /** Pi binary. */
   pi: string;
-  /** Environment variable names to forward into each session (C4, Q5). */
-  envPass: string[];
+  /**
+   * The agent identity's credential root (ADR-0010).
+   *
+   * Holds `gh/` (GH_CONFIG_DIR), `gitconfig` (GIT_CONFIG_GLOBAL), and `ssh/`. Either owned by
+   * Pi Central (`managed`) or by an external tree the user maintains (`external`), in which
+   * case Pi Central reads and verifies but never writes.
+   */
+  agentRoot: string;
+  /**
+   * Where rendered policy fragments are written (ADR-0010 §2).
+   *
+   * Under the state root, so it is outside `~/.pi` (Q7) and outside every session's workdir.
+   */
+  fragmentDir: string;
+  /**
+   * Whether Pi Central owns `agentRoot`. When false, credentials are only ever read, and
+   * re-import is an explicit action (ADR-0010 §5).
+   */
+  agentRootManaged: boolean;
 }
 
 export function defaultConfig(): Config {
   const home = homedir();
+  const stateRoot = process.env.PI_CENTRAL_STATE ?? join(home, ".config", "pi-central");
   return {
     workspaceRoot:
       process.env.PI_CENTRAL_WORKSPACE ?? join(home, ".local", "share", "pi-central", "workspaces"),
-    stateRoot: process.env.PI_CENTRAL_STATE ?? join(home, ".config", "pi-central"),
+    stateRoot,
     sessionsRoot: process.env.PI_SESSIONS_DIR ?? join(home, ".pi", "agent", "sessions"),
     safehouse: process.env.PI_CENTRAL_SAFEHOUSE ?? "safehouse",
     pi: process.env.PI_CENTRAL_PI ?? "pi",
-    envPass: [],
+    // An external tree is adopted by pointing this at it (e.g. the hardening project's
+    // ~/.agent), which is what lets one installation be imported rather than duplicated.
+    agentRoot: process.env.PI_CENTRAL_AGENT_ROOT ?? join(stateRoot, "agents", "default"),
+    fragmentDir: join(stateRoot, "policy"),
+    agentRootManaged: process.env.PI_CENTRAL_AGENT_ROOT === undefined,
   };
 }
 

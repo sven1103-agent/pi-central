@@ -72,9 +72,17 @@ test("wide-read is refused, never enabled", () => {
 test("no source file uses shell interpolation for a spawn (fixed binaries only)", () => {
   for (const file of files) {
     const text = readFileSync(file, "utf8");
-    assert.ok(!text.includes("shell: true"), `${relative(SRC, file)} uses shell: true`);
-    assert.ok(!text.includes("exec("), `${relative(SRC, file)} uses exec(`);
-    assert.ok(!text.includes("execSync("), `${relative(SRC, file)} uses execSync(`);
+    const name = relative(SRC, file);
+    assert.ok(!text.includes("shell: true"), `${name} uses shell: true`);
+
+    // Match the *child_process* calls, not `RegExp.prototype.exec`. A bare substring check
+    // for "exec(" also fires on `/pattern/.exec(line)`, which is a regex match with no shell
+    // and no subprocess, so it would be a false positive that trains people to ignore this
+    // test. Scan the import binding plus call sites instead.
+    assert.ok(
+      !/from "node:child_process"/.test(text) || !/\bexec(File|Sync)?\s*\(/.test(text),
+      `${name} uses a child_process exec call; spawn a fixed binary with spawn() instead`,
+    );
   }
 });
 

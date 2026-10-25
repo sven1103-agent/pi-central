@@ -42,17 +42,23 @@ Env equivalents: `SAFEHOUSE_WORKDIR`, `SAFEHOUSE_ADD_DIRS`, `SAFEHOUSE_ADD_DIRS_
 5. env                 = explicit spawn-environment allowlist (C11)
 ```
 
-The bespoke layer (3) is where Pi Central's own policy belongs, and is where the credential
-denes in [ADR-0010](decisions/0010-agent-credential-identity.md) will live. Because appended
-profiles are emitted **after** generated rules and SBPL is last-match-wins, they can tighten
-what the generated policy allows — this is the intended hook for project- or team-specific
+The bespoke layer (3) is where Pi Central's own policy lives, and is where the credential
+**denies** live ([ADR-0010](decisions/0010-agent-credential-identity.md)). Because appended
+profiles are emitted **after** generated rules and SBPL is last-match-wins, they tighten what
+the generated policy allows — this is the intended hook for project- or team-specific
 restrictions.
 
-> **Status: not implemented.** `composePolicy()` does not pass `--append-profile`, and no
-> fragment file exists. This row previously read "always applied", which was a claim the code
-did not support. Until it is implemented, a session's grant set is exactly Safehouse's
-generated policy for its workdir — including the defaults that grant the host's
-`~/.config/gh`, `~/.gitconfig`, and `~/.pi` (C6).
+> **Status: implemented.** `composePolicy()` renders the fragment with `fragment.ts`, writes
+> it `0600` under the state root, and passes `--append-profile`. This row previously read
+> "always applied", which was a claim the code did not support. Safehouse emits a terminal
+> `deny file-write*` for the fragment path, so a session cannot rewrite the rules that
+> confine it.
+>
+> The fragment is where the credential denies live ([ADR-0010](decisions/0010-agent-credential-identity.md)):
+> the host's `~/.gitconfig`, `~/.config/gh`, `~/.pi/agent/auth.json` (C6), the user's
+> ssh-agent sockets, and `~/.ssh` private keys. Denials are proven at the policy layer and
+> are asserted by `fragment.test.ts`; proving them against a *live* session needs a plain
+> terminal (C1).
 
 ### Environment is not handled by Safehouse
 

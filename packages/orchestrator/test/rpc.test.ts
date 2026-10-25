@@ -15,9 +15,18 @@ import { RpcProcess } from "../src/rpc.ts";
 
 const cwd = process.cwd();
 
+/**
+ * These tests exercise the transport, not the environment boundary (that is env.test.ts).
+ * They still pass an explicit env, because `LaunchSpec.env` is required — deliberately, so
+ * that "inherit process.env" cannot be expressed by accident (C11).
+ */
+function testEnv(): Record<string, string> {
+  return { PATH: "/usr/bin:/bin" };
+}
+
 /** A process that echoes stdin, so a sent command produces no matching `response`. */
 function echoProcess(): RpcProcess {
-  return new RpcProcess({ command: "/bin/cat", args: [], cwd });
+  return new RpcProcess({ command: "/bin/cat", args: [], cwd, env: testEnv() });
 }
 
 test("a command with no response times out near its deadline, rather than hanging", async () => {
@@ -34,7 +43,7 @@ test("a command with no response times out near its deadline, rather than hangin
 });
 
 test("an in-flight command rejects when the process exits, instead of waiting for its timeout", async () => {
-  const rpc = new RpcProcess({ command: "/bin/sh", args: ["-c", "sleep 0.2; exit 7"], cwd });
+  const rpc = new RpcProcess({ command: "/bin/sh", args: ["-c", "sleep 0.2; exit 7"], cwd, env: testEnv() });
   const exitInfo = new Promise<{ code: number | null }>((resolve) => rpc.on("exit", resolve));
   rpc.start();
 
@@ -49,7 +58,7 @@ test("an in-flight command rejects when the process exits, instead of waiting fo
 
 test("stop() resolves only once the process is actually reaped (SIGTERM ignored -> SIGKILL)", async () => {
   // A child that ignores SIGTERM forces the escalation path.
-  const rpc = new RpcProcess({ command: "/bin/sh", args: ["-c", "trap '' TERM; sleep 30"], cwd });
+  const rpc = new RpcProcess({ command: "/bin/sh", args: ["-c", "trap '' TERM; sleep 30"], cwd, env: testEnv() });
   rpc.start();
   await new Promise((resolve) => setTimeout(resolve, 300));
 
@@ -82,7 +91,7 @@ test("send() on a stopped process rejects rather than throwing", async () => {
 });
 
 test("stderr is captured and available as a tail for diagnostics", async () => {
-  const rpc = new RpcProcess({ command: "/bin/sh", args: ["-c", "echo boo >&2; sleep 0.1"], cwd });
+  const rpc = new RpcProcess({ command: "/bin/sh", args: ["-c", "echo boo >&2; sleep 0.1"], cwd, env: testEnv() });
   rpc.start();
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert.match(rpc.stderrTail, /boo/);

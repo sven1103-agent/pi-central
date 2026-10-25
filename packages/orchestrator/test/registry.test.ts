@@ -15,7 +15,9 @@ const config = (over: Partial<Config> = {}): Config => ({
   sessionsRoot: root,
   safehouse: "safehouse",
   pi: "pi",
-  envPass: [],
+  agentRoot: join(root, "agent"),
+  fragmentDir: join(root, "state", "policy"),
+  agentRootManaged: true,
   ...over,
 });
 

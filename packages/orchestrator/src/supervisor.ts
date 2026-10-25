@@ -25,6 +25,8 @@ import { composePolicy, describe, type LaunchMode, type SessionSpec } from "./po
 import { RpcProcess, type LaunchSpec } from "./rpc.ts";
 import { checkResumable } from "./resume.ts";
 import { isScratch, scratchDirFor, type Config } from "./config.ts";
+import { agentRoutingEnv } from "./env.ts";
+import { renderPolicyFragment } from "./fragment.ts";
 import { interpretRecord } from "./state.ts";
 
 export interface StartRequest {
@@ -33,7 +35,11 @@ export interface StartRequest {
   name?: string;
   mode?: LaunchMode;
   enable?: string[];
-  envPass?: string[];
+  /**
+   * Extra environment values for this session — the trusted channel for the agent's own
+   * credentials (ADR-0010). Never sourced from `process.env` by the caller.
+   */
+  env?: Record<string, string>;
 }
 
 export interface SupervisorEvents {
@@ -106,7 +112,7 @@ export class Supervisor extends EventEmitter {
       }
     }
 
-    return this.#spawn({ id, cwd, mode, name: request.name, enable: request.enable, envPass: request.envPass });
+    return this.#spawn({ id, cwd, mode, name: request.name, enable: request.enable, env: request.env });
   }
 
   /**
@@ -116,7 +122,10 @@ export class Supervisor extends EventEmitter {
    * directory rather than prompting (C2). The session's directory is never changed
    * (ADR-0008); an unusable directory is refused, not retargeted.
    */
-  resume(session: HistoricalSession, options: { mode?: LaunchMode; envPass?: string[] } = {}): StartResult | StartFailure {
+  resume(
+    session: HistoricalSession,
+    options: { mode?: LaunchMode; env?: Record<string, string> } = {},
+  ): StartResult | StartFailure {
     const readiness = checkResumable(session);
     if (!readiness.ok) return { ok: false, message: readiness.message };
 
@@ -130,7 +139,7 @@ export class Supervisor extends EventEmitter {
       mode: options.mode ?? "sandboxed",
       // No name: the session already carries its own, and re-applying one would append a
       // redundant session_info entry to a file we did not create.
-      envPass: options.envPass,
+      ...(options.env ? { env: options.env } : {}),
       sessionPath: session.path,
     });
   }
@@ -150,18 +159,36 @@ export class Supervisor extends EventEmitter {
     mode: LaunchMode;
     name?: string | undefined;
     enable?: string[] | undefined;
-    envPass?: string[] | undefined;
+    env?: Record<string, string> | undefined;
     sessionPath?: string | undefined;
   }): StartResult | StartFailure {
     // A resumed session must reopen its file; a new one gets a fresh name.
+    //
+    // The environment carries the agent-scoped routing (ADR-0010 §3): GH_CONFIG_DIR and
+    // GIT_CONFIG_GLOBAL point into the agent's own tree, and GIT_CONFIG_SYSTEM=/dev/null
+    // removes the host's system git config as an independent route to the login keychain.
+    const env = { ...agentRoutingEnv(this.#config.agentRoot), ...(input.env ?? {}) };
+
+    // Only sandboxed sessions get a fragment: direct mode applies no Safehouse policy, so
+    // there is nothing to append to.
+    const fragment =
+      input.mode === "sandboxed"
+        ? renderPolicyFragment(
+            this.#config.agentRootManaged ? { agentRoot: this.#config.agentRoot } : {},
+          )
+        : undefined;
+
     const spec: SessionSpec = {
       id: input.id,
       cwd: input.cwd,
       mode: input.mode,
       safehouse: this.#config.safehouse,
       pi: this.#config.pi,
+      env,
+      ...(fragment !== undefined
+        ? { policyFragment: fragment, fragmentDir: this.#config.fragmentDir }
+        : {}),
       ...(input.enable ? { enable: input.enable } : {}),
-      ...(input.envPass ? { envPass: input.envPass } : {}),
       ...(input.name ? { name: input.name } : {}),
     };
 

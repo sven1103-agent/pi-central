@@ -24,6 +24,15 @@ export interface LaunchSpec {
   command: string;
   args: string[];
   cwd: string;
+  /**
+   * The session's complete environment. **Required, deliberately.**
+   *
+   * Node's `spawn` inherits `process.env` when `env` is omitted, which would hand the session
+   * the orchestrator's ambient secrets — including `SSH_AUTH_SOCK`, which Safehouse's own
+   * sanitized allowlist passes through (C4a). Making this non-optional means a caller that
+   * forgets it fails to compile instead of leaking silently (C11).
+   */
+  env: Record<string, string>;
 }
 
 interface Pending {
@@ -59,6 +68,9 @@ export class RpcProcess extends EventEmitter {
     if (this.#child) throw new Error("session already started");
     const child = spawn(this.launch.command, this.launch.args, {
       cwd: this.launch.cwd,
+      // Replaces the inherited environment outright. There is no merge: an omitted `env`
+      // would mean "inherit everything", which is the failure C11 exists to prevent.
+      env: this.launch.env,
       stdio: ["pipe", "pipe", "pipe"],
       // Own process group, so a wedged session cannot outlive the dashboard.
       detached: true,
