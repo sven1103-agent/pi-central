@@ -129,6 +129,27 @@ The `60-agents/pi.sb` profile grants:
   have. If per-project transcript secrecy is required, that needs a policy change, not a
   UI affordance.
 
+## C6a — Ancestor directories are listable by design
+
+Safehouse grants `file-read*` on **literal ancestors** of the workdir, up to
+`(literal "/")`. From `bin/safehouse`, the rationale is explicit:
+
+> Agents (notably Claude Code) call readdir() on every ancestor of the working directory
+> during startup. If only file-read-metadata (stat) is granted, the agent cannot list
+> directory contents, which causes it to blank PATH and break. Using `literal` (not
+> `subpath`) keeps this safe: it grants read access to the directory entry itself (i.e.
+> listing its immediate children), but does NOT grant recursive read access to files or
+> subdirectories under it.
+
+### Consequences
+
+- A session can **list** the directories above its workdir, including `$HOME`.
+- It cannot **read the contents** of non-ancestor siblings — verified in
+  [Phase 0](../spikes/phase-0/RESULT.md).
+- Do not mistake ancestor listing for a leak, and do not write a test asserting the
+  parent directory is unlistable: it is listable, and that is intentional. The boundary to
+  assert is **sibling contents**, not ancestor names.
+
 ## C7 — JSONL framing is LF-only
 
 Pi's framing rules are strict: split on `LF` and strip an optional preceding `CR`.

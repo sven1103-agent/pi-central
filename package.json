@@ -1,0 +1,11 @@
+{
+  "name": "pi-central",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Central station for Pi sessions: orchestrate multiple sandboxed Pi sessions across working directories.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

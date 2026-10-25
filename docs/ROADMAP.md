@@ -3,10 +3,14 @@
 Phases are gated. Each phase answers a question that could invalidate the next one, so
 later phases are not committed until earlier ones pass.
 
-## Phase 0 — Prove the premise (spike)
+## Phase 0 — Prove the premise (spike) — ✅ PASSED
 
 **Question:** can two sessions in different working directories hold independent Safehouse
 profiles at the same time?
+
+**Answer: yes.** 12/12 checks passed on macOS with Pi 1.4.0 and Safehouse 0.12.0. Each
+session is confined to its own working directory, enforced by the OS, verified through the
+model-facing `bash` tool path. Full evidence: [`spikes/phase-0/RESULT.md`](../spikes/phase-0/RESULT.md).
 
 Harness: [`spikes/phase-0/verify.ts`](../spikes/phase-0/verify.ts). Run it **unsandboxed**;
 it refuses otherwise, because Seatbelt does not nest and every check would be meaningless.
@@ -16,18 +20,17 @@ node spikes/phase-0/verify.ts --dry-run   # compose + print policy, spawn nothin
 node spikes/phase-0/verify.ts             # run the real probes
 ```
 
-- [ ] Spawn two `safehouse --workdir <X> -- pi --mode rpc` processes for two
+- [x] Spawn two `safehouse --workdir <X> -- pi --mode rpc` processes for two
       distinct directories.
-- [ ] Confirm each process's policy differs (different workdir grants).
-- [ ] Via RPC `bash` inside session A, read and write in B's workdir → **expect denial**.
-- [ ] Via RPC `bash` inside session B, read and write in A's workdir → **expect denial**.
-- [ ] Within each session, read and write its own workdir → **expect success**.
-- [ ] Confirm from *outside* the sandbox that no denied write left a file behind.
-- [ ] Confirm `~/.pi` is readable from both (C6) and recorded as a known limit.
-- [ ] Confirm `sandbox-exec` nesting fails from a child (C1) — documents *why* this works.
+- [x] Confirm each process's policy differs (different workdir grants).
+- [x] Via RPC `bash` inside session A, read and write in B's workdir → **denied**.
+- [x] Via RPC `bash` inside session B, read and write in A's workdir → **denied**.
+- [x] Within each session, read and write its own workdir → **succeeded**.
+- [x] Confirm from *outside* the sandbox that no denied write left a file behind.
+- [x] Confirm a non-ancestor sibling's contents are unreadable (the decisive boundary).
+- [x] Confirm `sandbox-exec` nesting fails from a child (C1) — documents *why* this works.
 
-**Fail condition:** if one session can reach another's workdir, the isolation premise is
-false. Stop and redesign.
+**Deliverables:** the harness and `RESULT.md` with captured evidence.
 
 **Note:** fixtures must not live under `/tmp` or `/var/folders`, which the base profile
 grants globally; a pass there would be a false pass. The harness places them in `$HOME`
