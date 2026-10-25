@@ -20,5 +20,8 @@
     "packages/*/test/**/*.ts",
     "packages/*/*.ts",
     "spikes/**/*.ts"
+  ],
+  "exclude": [
+    "packages/ui"
   ]
 }

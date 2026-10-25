@@ -10,12 +10,16 @@
   },
   "workspaces": [
     "packages/protocol",
-    "packages/orchestrator"
+    "packages/orchestrator",
+    "packages/ui"
   ],
   "scripts": {
     "test": "node --test \"packages/*/test/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "smoke": "node packages/orchestrator/src/cli.ts"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json",
+    "smoke": "node packages/orchestrator/src/cli.ts",
+    "server": "node packages/orchestrator/src/server.ts",
+    "ui:dev": "npm run dev --workspace @pi-central/ui",
+    "ui:build": "npm run build --workspace @pi-central/ui"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.4.0",
