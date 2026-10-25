@@ -32,6 +32,6 @@ record. Do not rewrite history in place.
 
 ## Constraint references
 
-ADRs cite the hard limits in [../CONSTRAINTS.md](../CONSTRAINTS.md) as `C1`–`C11`. Those
+ADRs cite the hard limits in [../CONSTRAINTS.md](../CONSTRAINTS.md) as `C1`–`C13`. Those
 limits were verified against Pi `1.4.0` and Agent Safehouse `0.12.0`; re-verify them when
 either is upgraded, since an ADR's premises can expire.

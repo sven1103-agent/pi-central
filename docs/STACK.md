@@ -146,5 +146,5 @@ npm run typecheck  # tsc --noEmit across workspaces
 
 Follow `pi-metrics`' approach: assert the expected Pi RPC command and event names are
 present at startup, and fail loudly rather than misbehaving when Pi's surface changes. Pin
-the Pi version used for type-checking, and re-verify constraints C1–C11 when upgrading Pi or
+the Pi version used for type-checking, and re-verify constraints C1–C13 when upgrading Pi or
 Safehouse, since several ADRs rest on them.

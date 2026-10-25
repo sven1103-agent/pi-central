@@ -81,14 +81,23 @@ items need an unsandboxed run (C1).*
       `cloud-storage`.** Verified by policy diff that `--enable=ssh` appends an SSH
       integration block and `keychain` grants keychain RW + `SecurityServer` mach-lookups.
 - [x] **`--append-profile` implemented.** `fragment.ts` renders a deterministic,
-      `HOME_DIR`-relative fragment denying the host's `~/.gitconfig`, `~/.config/gh`,
-      `~/.pi/agent/auth.json` (C6), the ssh-agent sockets, and `~/.ssh` private keys.
-      `policy.ts` writes it `0600` and passes `--append-profile`.
+      `HOME_DIR`-relative fragment. It denies the host's `~/.gitconfig`, `~/.config/gh`, the
+      ssh-agent sockets, and `~/.ssh` private keys. `policy.ts` writes it `0600` and passes
+      `--append-profile`; Safehouse write-protects the file.
 - [x] **Agent credential store** with `managed`/`external` ownership, explicit re-import,
       and drift detection. `agent-store.ts`. Inspection is metadata-only: a planted token
       and private key do not appear anywhere in a snapshot or drift report.
+- [ ] **Remove the `auth.json` deny and add the keychain grants**
+      ([ADR-0010 Amendment 1](decisions/0010-agent-credential-identity.md#amendment-1--provider-credentials-are-a-capability-not-an-identity)).
+      The deny made **every sandboxed session exit `1`** (C12) and protected nothing (the file
+      holds `!command` indirections, not keys). Provider keys require `SecurityServer` + the
+      agent keychain, with the login/System keychain denied (C13).
 
 ### Verification performed for the above
+
+The first live run of `verify-three.ts` **failed**, and that is the most valuable result so
+far: it found a bug no policy-level check could see (C12). See
+[ADR-0010 Amendment 1](decisions/0010-agent-credential-identity.md#amendment-1--provider-credentials-are-a-capability-not-an-identity).
 
 - Composed policy parses as valid SBPL (`sandbox-exec` reports syntax errors *before*
   attempting to apply, so a parse check works even where C1 blocks execution). Negative

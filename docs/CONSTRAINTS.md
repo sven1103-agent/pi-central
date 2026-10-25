@@ -149,11 +149,12 @@ The `60-agents/pi.sb` profile grants:
 - Pi Central must not present cross-project transcript access as isolation it does not
   have. If per-project transcript secrecy is required, that needs a policy change, not a
   UI affordance.
-- **`~/.pi/agent/auth.json` holds the *host user's* provider credentials and is readable by
-  every session.** It must be denied in the appended policy fragment, with the agent's own
-  keys injected per session instead — see
-  [ADR-0010](decisions/0010-agent-credential-identity.md). Until that is implemented, a
-  session can read the user's provider keys.
+- **`~/.pi/agent/auth.json` must NOT be denied**, despite being readable by every session.
+  It was denied in the first implementation, and it made **every sandboxed session exit `1`**:
+  Pi reads it at startup, and `EPERM` throws where `ENOENT` would have returned `{}` (C12).
+  The file also contains **no secret** — it holds `!command` indirections such as
+  `!security find-generic-password -ws 'litellm'` — so denying it protected nothing. See
+  [ADR-0010 Amendment 1](decisions/0010-agent-credential-identity.md#amendment-1--provider-credentials-are-a-capability-not-an-identity).
 
 ## C6a — Ancestor directories are listable by design
 
@@ -273,3 +274,59 @@ so no policy can keep a variable out of a session. Combined with C4a, this means
 - A denylist is not an option: the set of secret-shaped names is unbounded and user-defined.
 - This control is independent of, and a prerequisite to, every credential decision in
   [ADR-0010](decisions/0010-agent-credential-identity.md).
+
+## C12 — Denying a file Pi opens at startup kills the session
+
+Pi reads part of its configuration **during boot**, not lazily on first use. Verified against
+Pi `1.4.0`: `FileAuthStorageBackend.withLockAsync` reads `<agent-dir>/auth.json` at startup,
+and its error handling distinguishes two cases that a sandbox makes easy to confuse:
+
+| Case | Pi's behavior | Sandbox cause |
+|---|---|---|
+| **ENOENT** — file absent | returns `{}`, boots normally | nothing there |
+| **EPERM** — present, denied | **throws**, process exits `1` | a policy deny |
+
+A Safehouse/SBPL deny produces **EPERM**, never ENOENT. So a deny converts "the agent cannot
+read this" into "**the agent cannot start**".
+
+### Consequences
+
+- **Never add a deny for a file Pi touches during startup without booting Pi to check.** The
+  policy text can be perfectly valid, correctly ordered, and still make every session fail.
+- This is invisible to policy-level verification. It was found only by running
+  `verify-three.ts`, which is why that harness exists.
+- Prefer **relocating** a config file (`PI_CODING_AGENT_DIR`) over denying an existing one:
+  redirection produces no error, so there is nothing to trip over.
+- Symptom to recognize: `pi exited (code=1)` plus a Node stack trace naming `EPERM` on a
+  `~/.pi` path.
+
+## C13 — Provider keys require a reachable keychain; a session can start without one
+
+`auth.json` stores provider credentials as an **indirection**:
+
+```json
+"litellm": { "type": "api_key", "key": "!security find-generic-password -ws 'litellm'" }
+```
+
+Pi runs that command when the key is first needed. Two verified properties:
+
+- A **fresh** Safehouse policy grants neither the keychain nor `com.apple.SecurityServer`
+  (`keychain integration: not included`). `security` needs `SecurityServer` to read **any**
+  keychain, so without it the command fails.
+- The lookup is **service-only** (no keychain path), so it consults the user-wide **search
+  list** in `~/Library/Preferences/com.apple.security.plist`. If that file is unreadable,
+  `security` silently falls back to `[login, System]` and every lookup fails **with no useful
+  error**.
+
+### Consequences
+
+- A session with no reachable keychain **starts, reports `idle`, and then cannot reach a
+  model**. "State is idle" is not evidence that a session works — assert a completed model
+  call (C12 has the same lesson from a different direction).
+- Reaching the keychain requires granting `SecurityServer` plus the agent keychain, **and**
+  denying the login/System keychain files so the grant is bounded. The keychain is
+  all-or-nothing via IPC, so partial path hiding is impossible; least privilege (an agent's
+  *own* keychain) is the control, not concealment.
+- Creating a keychain mutates the **user-wide search list** and has been observed to drop the
+  login keychain, "which breaks YOUR shell's keychain access". Pi Central must never do this
+  implicitly ([ADR-0010 §6](decisions/0010-agent-credential-identity.md)).

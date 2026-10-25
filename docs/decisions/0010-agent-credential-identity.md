@@ -58,16 +58,25 @@ Verified against Safehouse `0.12.0` (`bin/safehouse`):
 Therefore `LaunchSpec.env` is **required**, and spawn never inherits `process.env`.
 Sanitization is independent of every credential decision below.
 
-### 2. Provider keys: keychain, injected by env, never inherited
+### 2. Provider credentials are a capability; identity is what gets isolated
 
-Pi resolves a provider key through `~/.pi/agent/auth.json`, whose `"key"` may be a
-`!command` (per `docs/providers.md`). The agent's keys are stored in the **agent keychain**
-and delivered as environment values from the agent store — never read from the host
-environment, and never `--env-pass`ed from the orchestrator's own env.
+**Amended 2026-10-25 — see [Amendment 1](#amendment-1--provider-credentials-are-a-capability-not-an-identity).**
+The original text of this section said to **deny** `~/.pi/agent/auth.json`. That was wrong twice
+over, and the code implementing it made every sandboxed session exit `1`. Amendment 1 replaces
+this section; read it before relying on anything here.
 
-`~/.pi/agent/auth.json` holds the **host user's** provider credentials and is readable by
-every session under the default policy (C6). Pi Central must deny it in the appended
-fragment and inject the agent's keys instead.
+Provider credentials are split from identity credentials, because they behave oppositely:
+
+| | Identity | Infrastructure |
+|---|---|---|
+| Examples | GitHub account, SSH key, git `user.name`, signing key | the LLM provider key |
+| The agent gets its own? | **Yes** — a leak is otherwise the *user's* identity | **No, and it cannot** — it is the user's subscription and endpoint |
+| Mechanism | key file + agent-scoped config roots (§3, §4) | Pi's own `!command` lookup into an **agent keychain** |
+
+There is no meaningful "the agent's own litellm key". The agent runs on the user's model
+access, so this is a capability that must be granted; what can be limited is the key's *scope*,
+not its existence. Denying it does not tighten isolation — it only stops the agent from
+thinking.
 
 ### 3. GitHub over HTTPS: agent-scoped config root
 
@@ -113,13 +122,24 @@ on the launch path. Re-import is an invoked action, and a persistent **drift bad
 the external tree differs from what was imported — so divergence is seen rather than
 discovered.
 
-### 6. The keychain is per-agent optional
+### 6. The keychain is required for providers, but Pi Central must not create one implicitly
 
-Global search-list mutation is a hazard, not a mechanism: the hardening's own setup script
-records that `create-keychain` has been observed to drop `login.keychain-db` from the user-wide
-list, "which breaks YOUR shell's keychain access". A machine that does not want that must
-still work, so provider keys may be delivered by env from the agent store **without** a
-keychain. The keychain is chosen for encryption at rest, not required for function.
+**Amended 2026-10-25 (Amendment 1).** The original text said the keychain was optional and
+that provider keys could be delivered by env instead. Amendment 1 established that provider
+keys are resolved by Pi's own `!command` out of a keychain, so an **unreachable keychain means
+a session that starts but cannot reach a model**.
+
+What is genuinely optional is **who creates the keychain**:
+
+- **`external`** — adopt a tree whose keychain already holds the keys (`~/.agent`). Nothing is
+  created; the search list must include it. This is the recommended path.
+- **`managed`** — Pi Central creates the keychain and writes the keys.
+
+Global search-list mutation is a hazard, and it is the reason `managed` is **never implicit**:
+the hardening's own setup script records that `create-keychain` has been observed to drop
+`login.keychain-db` from the user-wide list, "which breaks YOUR shell's keychain access". It
+needed a restore trap to survive that. Pi Central must not modify a user-wide setting without
+an explicit, confirmed action.
 
 ## Consequences
 
@@ -194,10 +214,145 @@ recorded in [Phase 0](../../spikes/phase-0/RESULT.md).
 
 ## Follow-up work this decision requires
 
-These are **open defects** recorded here so they are not lost; none is fixed by this ADR.
+Items 1–3 were **fixed** in `90ccca1` (spawn env; the `--enable` denylist; `--append-profile`
+implemented). One of them then caused a bug that only a live run could reveal, recorded as
+[Amendment 1](#amendment-1--provider-credentials-are-a-capability-not-an-identity):
 
-1. `rpc.ts` spawns with inherited `process.env` — `SSH_AUTH_SOCK` reaches every session today.
-2. `FORBIDDEN_ENABLE` omits `--enable=ssh` and `--enable=keychain`, both of which re-open the
-   credential boundary (verified by policy diff).
-3. [SANDBOX.md](../SANDBOX.md) claims an `--append-profile` "bespoke layer … always applied"
-   that is **not implemented anywhere**.
+1. ~~`rpc.ts` spawns with inherited `process.env`.~~ **Fixed:** `LaunchSpec.env` is required and
+   `env.ts` builds an explicit allowlist.
+2. ~~`FORBIDDEN_ENABLE` omits `--enable=ssh`/`keychain`.~~ **Fixed**, plus
+   `cloud-credentials`/`cloud-storage`.
+3. ~~[SANDBOX.md](../SANDBOX.md) claims an unimplemented `--append-profile`.~~ **Fixed:**
+   `fragment.ts` implements it.
+4. **The fragment must stop denying `~/.pi/agent/auth.json`**, and must gain the keychain
+   grants (Amendment 1). Denying it makes every session exit `1`.
+5. **A session must actually reach a model.** "State is idle" only proves Pi started; the
+   first live run proved that a session can look healthy and still be unable to resolve a
+   provider key. Assert a completed model call, not just a state transition.
+
+## Amendment 1 — provider credentials are a capability, not an identity
+
+- **Date:** 2026-10-25
+- **Amends:** §2 (and the `denyPiAuth` fragment rule)
+- **Status:** Accepted
+- **Trigger:** the first live run of `verify-three.ts`
+
+### What the live run showed
+
+Every sandboxed session exited `1`:
+
+```
+EPERM: operation not permitted, open '/Users/sven1103/.pi/agent/auth.json'
+  at FileAuthStorageBackend.withLockAsync
+pi exited (code=1, signal=-)
+```
+
+Pi reads `auth.json` **at startup**, not on first model call. And its error handling
+distinguishes two cases that look identical from the outside:
+
+| Case | Pi's behavior |
+|---|---|
+| **ENOENT** (file absent) | `ReadOnlyAuthStorage.load()` returns `{}` — boots normally |
+| **EPERM** (present, denied) | **throws** `Failed to read auth.json` — process exits `1` |
+
+A policy deny produces **EPERM**, never ENOENT. So the deny converted "no access" into a
+**fatal error**, and the sandbox appeared to work while making the product unusable. Verified
+by booting Pi against a bare agent dir both with and without the file.
+
+### The second error: the file holds no secret
+
+Inspecting the host store showed what `auth.json` actually contains:
+
+```json
+"litellm":    { "type": "api_key", "key": "!security find-generic-password -ws 'litellm'" }
+```
+
+An **indirection**, not a key. `auth.json` records *which* providers exist and *how* to obtain
+each key; `models.json` records *where* each provider lives (`baseUrl`, API shape). Both were
+found to contain **zero** inline secrets. Denying the file therefore protected nothing while
+breaking Pi.
+
+Indirection requires only that Pi can *read* `auth.json`, not that any secret is reachable
+through it: access to the keychain remains independently controlled by the policy.
+
+### The corrected split
+
+**Identity** and **infrastructure** are different, and only the first can meaningfully be
+isolated:
+
+| | Identity credentials | Provider (infrastructure) credentials |
+|---|---|---|
+| Examples | GitHub account, SSH key, git `user.name`, signing key | the LLM provider key |
+| A leak is… | the **user's** identity, used as the agent | the user's model access being consumed |
+| The agent gets its own | **yes** | **no — it cannot** |
+| If denied | correct: the point of this ADR | the agent cannot run at all |
+
+Provider access is a **capability the user must grant**, because an LLM agent cannot think
+without one. The honest control is the key's **scope** (a spend-capped or restricted key), not
+its existence. Presenting "the agent cannot use the model" as isolation would be dishonest.
+
+### Policy changes
+
+| Path | Before | After |
+|---|---|---|
+| `~/.pi/agent/auth.json` | **deny** | **allow** — it is configuration, and Pi needs it to boot |
+| `~/.gitconfig` | deny | deny (unchanged — the F12 credential-helper route) |
+| `~/.config/gh` | deny | deny (unchanged — the user's gh token) |
+| `~/.ssh/agent` + launchd sockets | deny | deny (unchanged — sign as the user) |
+| `~/.ssh/id_*` | deny | deny (unchanged — the user's private keys) |
+| agent keychain | not granted | **allow** (required for provider keys) |
+| `com.apple.SecurityServer` | not granted | **allow** (required to read *any* keychain) |
+| `~/Library/Keychains` (login + System) | not granted | **deny** (explicit, so the agent keychain is the only one) |
+| `~/Library/Preferences/com.apple.security.plist` | not granted | **allow** (holds the search list; no secret) |
+
+### Why the keychain grants are safe
+
+Verified against a freshly generated policy: Safehouse grants **neither** the keychain **nor**
+`SecurityServer` by default (`keychain integration: not included`). So these are additive,
+purposeful grants rather than a hole punched in an existing protection.
+
+The mechanism is the hardening project's STEP-03b, measured there:
+
+1. `security` needs the `SecurityServer` mach-lookup to read **any** keychain — it is
+   all-or-nothing via IPC, so partial path hiding is impossible.
+2. Denying the login and System keychain **files** is what bounds the grant. Measured in the
+   prior art: with `SecurityServer` allowed but the files denied, **0** login/System items are
+   readable.
+3. `auth.json` uses **service-only** lookups (`-ws 'litellm'`, no keychain path), which consult
+   the **search list**. On this machine that list is:
+   `[0] ~/Library/Keychains/login.keychain`, `[1] ~/.agent/agent.keychain-db`. With the login
+   keychain file-denied, the lookup **falls through** to the agent keychain.
+4. Without read access to `com.apple.security.plist`, `security` silently reverts to the
+   built-in `[login, System]` list and **every service-only lookup fails with no useful
+   error** — a trap the prior art documents and this ADR inherits.
+
+Net effect: the provider key stays encrypted at rest, is resolved by Pi's own `!command`, and
+never appears in an environment variable or an argv.
+
+### Consequence: Pi Central must own or adopt a keychain
+
+This is a real dependency, not a detail. A session with no reachable keychain **starts but
+cannot reach a model**, so provisioning is part of making a session usable, not an optional
+extra. Two shapes, per §5:
+
+- **`external`** — adopt `~/.agent` (the hardening tree), where the keychain already holds the
+  provider keys. Nothing to build; requires the search list to include it.
+- **`managed`** — Pi Central creates an agent keychain and stores the keys, which means
+  `security create-keychain` and therefore the search-list write the prior art warns can drop
+  `login.keychain-db` and break the user's own shell access.
+
+`managed` is therefore **not** safe to do implicitly. Creating a keychain mutates a user-wide
+setting, and the prior art needed a restore trap to survive it. Pi Central must not touch the
+global search list without an explicit, confirmed action.
+
+### Verification this amendment requires
+
+- [ ] Boot a session with the corrected fragment and confirm it reaches `idle` (the check that
+      failed).
+- [ ] From inside that session, confirm a model call succeeds — i.e. the `!command` resolved.
+      Without this, "idle" only proves Pi started.
+- [ ] Confirm the login keychain is still unreadable while the agent keychain works (the
+      prior art's `SecurityServer`-without-files measurement).
+- [ ] Confirm denying `~/.pi/agent/auth.json` is **removed** and that no deny on a
+      Pi-required config file remains — a general lesson: **never deny a file Pi opens during
+      startup without booting Pi to check.**
