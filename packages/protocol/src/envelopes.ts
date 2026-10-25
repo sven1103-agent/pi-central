@@ -19,12 +19,18 @@ export type LiveState =
   | "stopped"
   | "failed";
 
-/** A session Pi Central has discovered on disk. Untrusted in content, trusted in shape. */
+/**
+ * A session Pi Central has discovered on disk. Untrusted in content, trusted in shape.
+ *
+ * Optional fields admit `undefined` explicitly. These values come from a JSON record, where
+ * "the key is absent" and "the key is null/undefined" are the same thing for display
+ * purposes; narrowing them would force conditional construction everywhere for no gain.
+ */
 export interface HistoricalSession {
   path: string;
   id: string;
   cwd: string;
-  name?: string;
+  name?: string | undefined;
   created: string;
   modifiedMs: number;
   bytes: number;
@@ -51,17 +57,17 @@ export interface LiveSession {
   /** The exact command line, for display. Never executed verbatim from here. */
   command: string;
   scratch: boolean;
-  model?: string;
-  provider?: string;
-  thinkingLevel?: string;
-  sessionFile?: string;
+  model?: string | undefined;
+  provider?: string | undefined;
+  thinkingLevel?: string | undefined;
+  sessionFile?: string | undefined;
   messageCount: number;
   pending: number;
   contextPercent: number | null;
   tokensTotal: number | null;
   cost: number | null;
   dialogs: PendingDialog[];
-  error?: string;
+  error?: string | undefined;
   warnings: string[];
   startedAt: number;
 }
@@ -69,11 +75,11 @@ export interface LiveSession {
 export interface PendingDialog {
   id: string;
   method: string;
-  title?: string;
-  message?: string;
-  options?: string[];
-  placeholder?: string;
-  prefill?: string;
+  title?: string | undefined;
+  message?: string | undefined;
+  options?: string[] | undefined;
+  placeholder?: string | undefined;
+  prefill?: string | undefined;
   receivedAt: number;
 }
 
@@ -94,7 +100,7 @@ export type Event =
   | { kind: "session"; session: LiveSession }
   | { kind: "record"; sessionId: string; record: PiRecord }
   | { kind: "history"; history: HistoricalSession[] }
-  | { kind: "error"; message: string; sessionId?: string };
+  | { kind: "error"; message: string; sessionId?: string | undefined };
 
 export const PROTOCOL_VERSION = 1 as const;
 
