@@ -11,6 +11,18 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Added
 
+- **Fenced code is syntax-highlighted, lazily** (issue #4). Shiki grammars load one at a time, on
+  first encounter of a language: a transcript that shows no code fetches none of it, and one that
+  shows TypeScript fetches ~11 kB rather than the ~8.2 MB that exists. The name→chunk index had to
+  be made lazy as well — measured at 46 kB of URLs, it would otherwise have put most of the saving
+  back. **The entry chunk grew by 5.04 kB (2.36 kB gzip)**, measured with `npm run ui:build` and
+  recorded in [docs/BUNDLE.md](docs/BUNDLE.md).
+  A grammar emits **tokens**, not markup, which the UI renders as React elements; colours become
+  CSS **classes** rather than inline styles, so the sanitizer's allow-list did not have to admit
+  `style`. That keeps ADR-0006's single `dangerouslySetInnerHTML` site exactly as it was, and the
+  invariant test still finds one. An unknown language, an indented fence, and a fence that is still
+  streaming all fall back to the code as escaped plain text — never to nothing.
+
 - **`steer`, follow-up, and Esc that returns what it cleared** (issue #3). Both capabilities were
   documented as impossible; they were blocked by Pi Central's own vocabulary, not by Pi — RPC mode
   handles `steer`, `follow_up` and `clear_queue` (and `Command` already carried the first two), so
@@ -104,8 +116,7 @@ a live three-session isolation run, and a replay of real session files.
 
 ### Known limitations
 
-- File navigation and syntax highlighting are still absent; `steer`, follow-up and Esc-clears-and-
-  returns are now real.
+- File navigation is still absent; `steer`, follow-up and Esc-clears-and-returns are now real.
 - No syntax highlighting, no compaction or retry banners, no file navigation.
 - macOS only. Safehouse has no Linux backend (C10).
 - No screenshot of the running UI exists in the repository: the author's environment cannot launch

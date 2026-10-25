@@ -73,9 +73,9 @@ This is the increment where the dashboard stops being a *viewer* and becomes a *
 It is ordered after Increment 1 because the controls are only meaningful once the session state
 they act on is trustworthy.
 
-Slices: model and thinking-level pickers driven by `get_available_*` (the model picker is
-done — issue #1); syntax highlighting; compaction and retry banners; `steer`, which needs a
-protocol addition (done — issue #3); screenshot capture for the README.
+Slices: model and thinking-level pickers driven by `get_available_*` (done — issues #1, #2);
+syntax highlighting (done — issue #4); compaction and retry banners; `steer` and `clear_queue`
+(done — issue #3); screenshot capture for the README.
 
 ## Increment 3 — Files alongside the session
 
