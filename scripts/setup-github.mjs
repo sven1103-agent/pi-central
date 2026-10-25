@@ -11,11 +11,16 @@
  * Why a script at all: it keeps the taxonomy reviewable and diffable. Adding a label or an
  * increment becomes a pull request instead of a click somebody has to remember.
  *
+ * Branch protection is applied from `.github/branch-protection.json`, for the same reason: a
+ * setting that only exists in a web UI cannot be reviewed, diffed, or restored after someone
+ * changes it by accident.
+ *
  * Usage:
- *   node scripts/setup-github.mjs            # create labels, milestones, and issues
+ *   node scripts/setup-github.mjs            # labels, milestones, issues, branch protection
  *   node scripts/setup-github.mjs --dry-run  # print what would be created
  */
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 const REPO = "sven1103-agent/pi-central";
 const DRY_RUN = process.argv.includes("--dry-run");
@@ -544,6 +549,46 @@ function existingMilestones() {
   return new Set(raw.split("\n").filter(Boolean));
 }
 
+/**
+ * Apply branch protection from the checked-in config.
+ *
+ * The required check names are validated against the check runs this repository actually
+ * produces. A required context that no workflow emits does not fail loudly — it blocks every
+ * merge, forever, with a message about a check that never runs.
+ */
+function applyProtection() {
+  const config = JSON.parse(readFileSync(new URL("../.github/branch-protection.json", import.meta.url), "utf8"));
+  console.log("\nBranch protection (main)");
+
+  const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const actual = new Set(
+    JSON.parse(
+      execFileSync("gh", ["api", `repos/${REPO}/commits/${head}/check-runs`], { encoding: "utf8" }),
+    ).check_runs.map((run) => run.name),
+  );
+  for (const context of config.required_status_checks.contexts) {
+    if (!actual.has(context)) {
+      console.error(`  REFUSING: required check "${context}" is not produced by this repository.`);
+      console.error(`  Available now: ${[...actual].join(", ")}`);
+      console.error("  Applying this would block every merge permanently.");
+      process.exit(1);
+    }
+  }
+  console.log(`  required checks match real check runs: ${config.required_status_checks.contexts.join(", ")}`);
+
+  if (DRY_RUN) {
+    console.log("  would apply protection");
+    return;
+  }
+  const result = execFileSync(
+    "gh",
+    ["api", "-X", "PUT", `repos/${REPO}/branches/main/protection`, "--input", "-"],
+    { input: JSON.stringify(config), encoding: "utf8" },
+  );
+  const applied = JSON.parse(result);
+  console.log(`  applied: pull requests required=${applied.required_pull_request_reviews !== null}, admins enforced=${applied.enforce_admins.enabled}`);
+}
+
 function main() {
   console.log(DRY_RUN ? "DRY RUN — nothing will be created\n" : `Setting up ${REPO}\n`);
 
@@ -611,6 +656,8 @@ function main() {
   }
 
   console.log(`\n${created} issue(s) created, ${ISSUES.length - created} already present.`);
+
+  applyProtection();
 }
 
 main();

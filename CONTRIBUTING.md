@@ -31,6 +31,27 @@ Read, in this order:
 2. [docs/decisions/](docs/decisions/) — why the architecture looks the way it does.
 3. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — components and trust boundaries.
 
+## Branch protection
+
+`main` is protected, and **the rules apply to administrators too** — so a direct push is refused
+by design, not by accident. Land changes through a pull request:
+
+- A pull request is required; **no approving review is required**, because the repository has one
+  maintainer and nobody can approve their own work. The gate is CI, not a second person.
+- Both checks must pass: **`verify`** (typecheck, tests, documentation references) and
+  **`docs-links`**.
+- The branch must be **up to date with `main`** before merging, so what was tested is what lands.
+- **Linear history**: squash or rebase, no merge commits.
+- Force pushes and branch deletion are refused.
+- Unresolved review comments block the merge.
+
+The settings live in [.github/branch-protection.json](.github/branch-protection.json) and are
+applied by `node scripts/setup-github.mjs`, which refuses to apply a required check name that no
+workflow produces — a required context nothing emits does not fail loudly, it blocks every merge
+forever.
+
+To relax any of this, change the file and re-apply. It is recorded rather than clicked.
+
 ## Rules
 
 - **Do not relax sandboxing.** Never pass `--allow-workdir-config-writes`,
