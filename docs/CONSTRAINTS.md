@@ -72,8 +72,9 @@ reachable. There is no `switch_session` field for a cwd override.
 - Pi Central cannot "attach" to a `pi` you started by hand in a terminal. A session is
   visible to Pi Central only if Pi Central spawned it, or if Pi Central reads its file
   (read-only history, no live control).
-- Session discovery for history comes from `SessionManager.listAll()` (exported) or by
-  walking `~/.pi/agent/sessions/` directly.
+- Session discovery for history uses Pi Central's own parser over
+  `~/.pi/agent/sessions/` (ADR-0009). If `SessionManager.listAll()` is ever used instead,
+  note that it is a **runtime** function: it loads Pi's agent core into the calling process.
 
 ## C4 — Environment is sanitized by default
 

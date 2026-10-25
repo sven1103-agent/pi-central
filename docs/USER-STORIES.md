@@ -142,8 +142,8 @@ and how to search it.
 - Sessions are browsable and searchable by content, not just by name or date.
 - Each entry shows its project/working directory, when it was last touched, its size, and
   its opening request.
-- Sessions from all projects are reachable in one place, since `SessionManager.listAll()`
-  exposes every session on disk.
+- Sessions from all projects are reachable in one place, since discovery reads every
+  project directory under `~/.pi/agent/sessions/` (ADR-0009)
 - A session that Pi Central started can be live; one only on disk is history. The
   distinction is visible at a glance (see C3: Pi has no attach protocol).
 

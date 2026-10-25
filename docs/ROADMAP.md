@@ -43,7 +43,8 @@ grants globally; a pass there would be a false pass. The harness places them in 
 Informed by [USER-STORIES.md](USER-STORIES.md): starting work and resuming history are the
 critical paths, so they are in scope here rather than deferred.
 
-- [ ] Session registry: `SessionManager.listAll()` merged with live-process state.
+- [ ] Session registry: discovered session files (ADR-0009) merged with live-process
+      state.
 - [ ] **Default workspace** (US-3): an app-owned directory for sessions started without a
       path, outside `$HOME` proper, `/tmp`, and `~/.pi` (D-5).
 - [ ] Safehouse launcher: deterministic argv, per-session policy, `--env-pass` config.

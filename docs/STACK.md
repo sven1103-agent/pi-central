@@ -74,7 +74,7 @@ Built from small, separately testable pieces — each maps to a constraint:
 
 | Module | Responsibility | Constraint it honours |
 |---|---|---|
-| `registry` | Merge `SessionManager.listAll()` with live processes | C3 |
+| `registry` | Merge discovered session files with live processes | C3, ADR-0009 |
 | `policy` | Compose Safehouse argv + env for a workdir | C4, ADR-0004 |
 | `supervisor` | Spawn, frame, correlate, reap | C7, C8 |
 | `framing` | LF-only JSONL reader/writer | C7 (never `readline`) |

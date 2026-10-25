@@ -43,7 +43,7 @@ protocol types and correlation patterns are reused instead.
 
 Show **all** sessions across all working directories, or a curated set?
 
-- All: `SessionManager.listAll()` gives everything; the rail could be huge.
+- All: discovery returns everything; the rail could be huge.
 - Curated: a user-defined project list, with a "show all" escape hatch.
 
 **Working default:** curated list of *projects* (directories) with all their sessions,

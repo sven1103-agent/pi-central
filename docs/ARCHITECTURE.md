@@ -14,7 +14,7 @@
 │  ┌────────────────┐  ┌──────────────────┐  ┌──────────────┐  │
 │  │ Session        │  │ Process          │  │ Safehouse    │  │
 │  │ Registry       │  │ Supervisor       │  │ Launcher     │  │
-│  │ listAll()      │  │ RpcClient × N    │  │ policy build │  │
+│  │ discovery      │  │ RpcClient × N    │  │ policy build │  │
 │  └────────────────┘  └──────────────────┘  └──────────────┘  │
 └───────┬───────────────────────┬──────────────────────┬───────┘
         │ spawn                 │ spawn                │ spawn
@@ -53,7 +53,7 @@ history plane.
 
 | State | Meaning | Transitions |
 |---|---|---|
-| `registered` | File known from `listAll()`, no process | → `starting` |
+| `registered` | File known from discovery, no process | → `starting` |
 | `starting` | `safehouse` spawned, awaiting first `get_state` | → `idle` / `failed` |
 | `idle` | Process up, `isStreaming: false`, settled | → `streaming` / `stopped` |
 | `streaming` | Run in progress | → `idle` on `agent_settled` |
@@ -87,10 +87,11 @@ convention.
 
 Two sources, deliberately:
 
-1. **Persisted** — `SessionManager.listAll()` (exported from
-   `@earendil-works/pi-coding-agent`) returns `SessionInfo[]` with `path`, `id`, `cwd`,
-   `name`, `modified`, `messageCount`, `firstMessage`. This is the full history for the
-   switcher.
+1. **Persisted** — Pi Central reads `~/.pi/agent/sessions/<encoded-cwd>/*.jsonl`
+   directly (ADR-0009), yielding `path`, `id`, `cwd`, `name`, `modified`, `messageCount`,
+   `firstMessage`. This is the full history for the switcher. It deliberately does **not**
+   call `SessionManager.listAll()`: that would load Pi's agent core into the unsandboxed,
+   privileged orchestrator (ADR-0002).
 2. **Live** — the supervisor's own map of running `RpcClient`s. This is the only source of
    truth for "is it running", because Pi has no daemon (C3).
 
