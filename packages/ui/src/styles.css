@@ -1071,3 +1071,37 @@ select.btn { font-family: var(--sans); }
 /* A call whose result was never recorded: worth noticing, not worth alarming. */
 .trace-row.unfinished { border-left-color: var(--warn); }
 .trace-row.unfinished .t-status { color: var(--warn-text); }
+
+/* --- The model picker (issue #1) -------------------------------------------------------------
+   A native <select>, so keyboard and screen-reader correctness come for free. Styled towards
+   --panel-3 and the mono face because a model id is a machine value, which is the design's rule:
+   the same treatment the read-only metric strip used for it. */
+.picker {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.picker-label {
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  text-transform: none;
+}
+.picker-select {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text);
+  background: var(--panel-3);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 6px;
+  max-width: 22ch;
+}
+.picker-select:focus-visible { outline: none; box-shadow: var(--focus); border-color: var(--accent); }
+.picker-select:disabled { opacity: 0.55; cursor: not-allowed; }
+.picker-note { font-size: var(--fs-xs); color: var(--dim); flex-basis: 100%; text-align: right; }
+/* --warn-text, not --warn: the design's no-colour-alone rule means the text carries the meaning
+   and the colour only reinforces it. */
+.picker-note.warn { color: var(--warn-text); }
+.picker-value { font-family: var(--mono); font-size: var(--fs-xs); color: var(--dim); }

@@ -188,10 +188,12 @@ Stack is fixed: React + Vite UI, WebSocket over loopback, TypeScript orchestrato
       cosmetic rather than behavioural.
 - [x] **The orchestrator serves the built UI**, so no dev server is required and the CSP's
       `connect-src 'self'` is same-origin by construction (issue #24). `static-ui.ts`, tested.
-- [ ] **Model + thinking-level pickers driven by `get_available_*`.** Deferred: the rail shows
-      both read-only. The commands are catalogued in [PROTOCOL.md](PROTOCOL.md) and wired in
-      `verify-three.ts`, but no `Control` carries them yet, so a picker would need a protocol
-      addition first.
+- [x] **The model picker** (issue #1): a `Control` for `set_model` plus the catalogue, grouped by
+      provider. The header shows what Pi **reports back**, not an optimistic guess, and a refusal
+      appears as an error naming the reason. `ModelPicker.tsx`, tested.
+- [ ] **Thinking-level picker driven by `get_available_thinking_levels`** (issue #2). The
+      `Control` and the supervisor methods now exist alongside the model picker, so this is a UI
+      slice rather than a protocol one.
 - [ ] **Steer.** Blocked on the protocol, not the UI: `Control` has no `steer` and the
       supervisor hard-codes `followUp` when streaming. The hint line says so rather than
       showing a control that cannot work.

@@ -234,7 +234,7 @@ errors. Extension commands (`/foo`) execute immediately even while streaming.
 | Command | Use |
 |---|---|
 | `get_available_models` | model picker |
-| `set_model` / `cycle_model` | switch model |
+| `set_model` / `cycle_model` | switch model. `set_model` requires **both** `provider` and `modelId`, and can fail: an unconfigured provider returns `No API key for <provider>/<model>` |
 | `get_available_thinking_levels` | constrain the level picker per model |
 | `set_thinking_level` / `cycle_thinking_level` | thinking controls |
 | `compact` | manual compaction |

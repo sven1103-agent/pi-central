@@ -9,7 +9,7 @@
  * rather than inferring "streaming" from having seen a delta (C8).
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import type { Control, HistoricalSession, LiveSession } from "@pi-central/protocol";
+import type { Control, HistoricalSession, LiveSession, ModelOption } from "@pi-central/protocol";
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
 import {
   fleetCounts,
@@ -26,6 +26,7 @@ import { ToolTrace } from "./components/ToolTrace.tsx";
 import { Composer } from "./components/Composer.tsx";
 import { DialogDock, type DialogAnswer } from "./components/DialogDock.tsx";
 import { Inspector } from "./components/Inspector.tsx";
+import { ModelPicker } from "./components/ModelPicker.tsx";
 import { HistoryView } from "./components/History.tsx";
 import { displayName, formatContext, formatCost, formatTokens, headerLocation } from "./format.ts";
 import { stateLabel } from "./store.ts";
@@ -226,7 +227,18 @@ export function App() {
               transcript={transcript}
               home={home}
               historyError={state.transcriptErrors[focused?.id ?? ""]}
+              models={focused ? state.models[focused.id] : undefined}
+              modelError={focused ? state.modelErrors[focused.id] : undefined}
               onAnswer={onAnswer}
+              onRequestModels={() => {
+                if (focused) send({ kind: "listModels", sessionId: focused.id });
+              }}
+              onSelectModel={(provider, modelId) => {
+                // Sent, not applied locally: the header must show what Pi reports back, and Pi
+                // validates the choice. An optimistic update would display a change that may
+                // have been refused.
+                if (focused) send({ kind: "setModel", sessionId: focused.id, provider, modelId });
+              }}
               onSend={(message) => {
                 if (focused) send({ kind: "prompt", sessionId: focused.id, message });
               }}
@@ -272,7 +284,11 @@ function SessionView({
   transcript,
   home,
   historyError,
+  models,
+  modelError,
   onAnswer,
+  onRequestModels,
+  onSelectModel,
   onSend,
   onClearQueueAndStop,
   draft,
@@ -282,12 +298,18 @@ function SessionView({
   transcript: ReturnType<typeof transcriptFor>;
   home: string | undefined;
   historyError: string | undefined;
+  models: ModelOption[] | undefined;
+  modelError: string | undefined;
   onAnswer: (dialogId: string, answer: DialogAnswer) => void;
+  onRequestModels: () => void;
+  onSelectModel: (provider: string, modelId: string) => void;
   onSend: (message: string) => void;
   onClearQueueAndStop: () => void;
   draft: string;
   onDraftChange: (draft: string) => void;
 }) {
+  // The model request state lives inside ModelPicker, which is remounted per session by the `key`
+  // on SessionView, so focusing another session starts from a clean "not asked yet".
   if (!session) {
     return (
       <div className="empty">
@@ -326,6 +348,16 @@ function SessionView({
             {headerLocation(session, home)}
           </span>
         </div>
+        {/* The model control lives in the header because that is where the value it changes is
+            shown, and because a model change is a session-level decision like rename or stop
+            rather than a per-message one. */}
+        <ModelPicker
+          session={session}
+          models={models}
+          error={modelError}
+          onRequest={onRequestModels}
+          onSelect={onSelectModel}
+        />
       </div>
 
       <div className="metrics">

@@ -51,6 +51,15 @@ after(async () => {
   await server?.close();
 });
 
+/**
+ * React's SSR output separates adjacent text nodes with `<!-- -->`. Assertions here are about what
+ * the markup SAYS, not its byte layout, so the marker is stripped once rather than escaped into
+ * every pattern.
+ */
+function text(html) {
+  return html.replaceAll("<!-- -->", "");
+}
+
 function tool(over = {}) {
   return {
     toolCallId: "c", toolName: "bash", args: { command: "ls" }, result: "",
@@ -385,4 +394,104 @@ test("the direct-mode banner is rendered, not just styled", () => {
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.match(app, /className="direct-banner"/, "the class must actually be used");
   assert.match(app, /Direct mode: sessions are not sandboxed/, "the copy must be present");
+});
+
+// --- The model picker (issue #1) -----------------------------------------------------------------
+
+test("the picker groups models by provider and marks the current one", async () => {
+  const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  const html = renderToString(createElement(ModelPicker, {
+    session: session({ model: "gpt-5", provider: "openai" }),
+    models: [
+      { provider: "openai", id: "gpt-5", name: "GPT-5", reasoning: true },
+      { provider: "openai", id: "gpt-5-mini", name: "GPT-5 mini" },
+      { provider: "anthropic", id: "claude-x", name: "Claude X" },
+    ],
+    error: undefined,
+    onRequest() {},
+    onSelect() {},
+  }));
+  // One optgroup per provider, and the providers appear as labels.
+  assert.match(html, /<optgroup label="openai">/);
+  assert.match(html, /<optgroup label="anthropic">/);
+  // The current model is the select's value — compared with provider AND id.
+  assert.match(html, /value="openai\/gpt-5" selected/);
+  // A reasoning model is marked, so the thinking-level relationship is visible where the choice is made.
+  assert.match(text(html), /GPT-5 · thinking/);
+});
+
+test("the picker shows the session's real model before the catalogue arrives", async () => {
+  // Absent catalogue means "not asked yet", which must not render as "no models": the current model
+  // is known from get_state and is what the control should display.
+  const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  const html = renderToString(createElement(ModelPicker, {
+    session: session({ model: "gpt-5", provider: "openai" }),
+    models: undefined,
+    error: undefined,
+    onRequest() {},
+    onSelect() {},
+  }));
+  assert.match(html, /openai\/gpt-5/);
+  assert.ok(!/no models available/.test(html), "an unasked catalogue must not claim there are none");
+});
+
+test("a catalogue that failed renders the reason and a Retry, never an empty list", async () => {
+  const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  const html = renderToString(createElement(ModelPicker, {
+    session: session({ model: "gpt-5", provider: "openai" }),
+    models: undefined,
+    error: "session is not running",
+    onRequest() {},
+    onSelect() {},
+  }));
+  assert.match(text(html), /Could not read the model list: session is not running/);
+  assert.match(html, /Retry/);
+  assert.ok(!/no models available/.test(html), "a failed read must not be reported as an empty catalogue");
+});
+
+test("an empty catalogue IS shown as empty, because that is a real answer", async () => {
+  const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  const html = renderToString(createElement(ModelPicker, {
+    session: session({ model: undefined, provider: undefined }),
+    models: [],
+    error: undefined,
+    onRequest() {},
+    onSelect() {},
+  }));
+  assert.match(html, /no models available/);
+});
+
+test("while streaming, the picker says the change applies to the next turn", async () => {
+  // A model change takes effect for the next turn, so a control that looked immediate would claim
+  // something false.
+  const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  const html = renderToString(createElement(ModelPicker, {
+    session: session({ state: "streaming", model: "gpt-5", provider: "openai" }),
+    models: [{ provider: "openai", id: "gpt-5" }],
+    error: undefined,
+    onRequest() {},
+    onSelect() {},
+  }));
+  assert.match(text(html), /Applies to the next turn/);
+});
+
+test("a stopping or failed session's picker is disabled rather than silently inert", async () => {
+  const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  for (const state of ["stopped", "failed", "starting"]) {
+    const html = renderToString(createElement(ModelPicker, {
+      session: session({ state, model: "gpt-5", provider: "openai" }),
+      models: [{ provider: "openai", id: "gpt-5" }],
+      error: undefined,
+      onRequest() {},
+      onSelect() {},
+    }));
+    assert.match(html, /disabled/, `a ${state} session's picker must be disabled`);
+  }
+});
+
+test("the picker is not a controlled component that invents the value", () => {
+  // The shown value must come from the session (Pi's report), so a refused change leaves the
+  // control where it was. Reading the source is the honest check for "no local model state".
+  const source = readFileSync(new URL("../src/components/ModelPicker.tsx", import.meta.url), "utf8");
+  assert.ok(!/useState<string/.test(source), "the picker must not hold the selected model in local state");
 });

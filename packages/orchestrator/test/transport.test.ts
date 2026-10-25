@@ -71,6 +71,33 @@ class FakeSupervisor extends EventEmitter {
   answerDialog(id: string, dialogId: string, answer: unknown): void {
     this.calls.push({ method: "answerDialog", args: [id, dialogId, answer] });
   }
+
+  /** Substitutable so a test can make the change fail, as Pi does for an unconfigured provider. */
+  setModelImpl: (id: string, provider: string, modelId: string) => Promise<void> = async () => undefined;
+
+  async setModel(id: string, provider: string, modelId: string): Promise<void> {
+    this.calls.push({ method: "setModel", args: [id, provider, modelId] });
+    await this.setModelImpl(id, provider, modelId);
+  }
+
+  modelsResult: { ok: true; models: { provider: string; id: string }[] } | { ok: false; message: string } = {
+    ok: true,
+    models: [{ provider: "openai", id: "gpt-5" }],
+  };
+
+  async listModels(id: string) {
+    this.calls.push({ method: "listModels", args: [id] });
+    return this.modelsResult;
+  }
+
+  async setThinkingLevel(id: string, level: string): Promise<void> {
+    this.calls.push({ method: "setThinkingLevel", args: [id, level] });
+  }
+
+  async listThinkingLevels(id: string) {
+    this.calls.push({ method: "listThinkingLevels", args: [id] });
+    return { ok: true as const, levels: ["off", "low", "high"] };
+  }
 }
 
 function makeSession(id: string, cwd: string, name?: string): LiveSession {
@@ -556,4 +583,92 @@ test("closing the transport releases the port and clears state", async () => {
   const again = await transport.listen();
   assert.ok(again.port > 0);
   await transport.close();
+});
+
+// --- Model and thinking controls (issue #1) ------------------------------------------------------
+
+test("a setModel control reaches the supervisor with provider and id", async () => {
+  const supervisor = new FakeSupervisor();
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "setModel", sessionId: "s1", provider: "openai", modelId: "gpt-5" });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.deepEqual(supervisor.calls.at(-1), { method: "setModel", args: ["s1", "openai", "gpt-5"] });
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("a REFUSED model change is broadcast as an error naming the reason", async () => {
+  // Pi refuses a model whose provider is not configured ("No API key for …"). The acceptance
+  // criterion is that this surfaces as an error, never as a silent no-op — a control that appears
+  // to work and does nothing is the failure this project treats as worse than absence.
+  const supervisor = new FakeSupervisor();
+  supervisor.setModelImpl = async () => {
+    throw new Error("No API key for anthropic/claude-x");
+  };
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "setModel", sessionId: "s1", provider: "anthropic", modelId: "claude-x" });
+    const event = await client.next("error");
+    assert.equal(event.kind, "error");
+    assert.match(event.message, /No API key for anthropic\/claude-x/);
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("listModels broadcasts the catalogue, and a failure as modelsError", async () => {
+  const supervisor = new FakeSupervisor();
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+
+    client.send({ kind: "listModels", sessionId: "s1" });
+    const models = await client.next("models");
+    assert.equal(models.kind === "models" && models.sessionId, "s1");
+    assert.deepEqual(models.kind === "models" && models.models, [{ provider: "openai", id: "gpt-5" }]);
+
+    // A failure is a DIFFERENT event, not an empty list: "there are none" and "the read failed"
+    // are opposite claims, and the UI renders them differently.
+    supervisor.modelsResult = { ok: false, message: "session is not running" };
+    client.send({ kind: "listModels", sessionId: "s2" });
+    const failure = await client.next("modelsError");
+    assert.equal(failure.kind === "modelsError" && failure.message, "session is not running");
+    assert.equal(failure.kind === "modelsError" && failure.sessionId, "s2");
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("thinking-level controls are routed, and a failed read is not an empty list", async () => {
+  const supervisor = new FakeSupervisor();
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+
+    client.send({ kind: "listThinkingLevels", sessionId: "s1" });
+    const levels = await client.next("thinkingLevels");
+    assert.deepEqual(levels.kind === "thinkingLevels" && levels.levels, ["off", "low", "high"]);
+
+    client.send({ kind: "setThinkingLevel", sessionId: "s1", level: "high" });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.deepEqual(supervisor.calls.at(-1), { method: "setThinkingLevel", args: ["s1", "high"] });
+    client.close();
+  } finally {
+    await transport.close();
+  }
 });

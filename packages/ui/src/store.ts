@@ -15,7 +15,7 @@
  *    produce an authoritative snapshot; merging would leave a session showing as live after
  *    the orchestrator had stopped it.
  */
-import type { HistoricalSession, LiveSession, PiRecord } from "@pi-central/protocol";
+import type { HistoricalSession, LiveSession, ModelOption, PiRecord } from "@pi-central/protocol";
 import { applyRecord, emptyTranscript, seedTranscript, type Transcript } from "./transcript.ts";
 
 export interface UiState {
@@ -42,6 +42,19 @@ export interface UiState {
   connectionDetail: string | undefined;
   /** Errors worth showing, newest first. */
   errors: string[];
+  /**
+   * Model catalogues, keyed by session id, from `listModels`.
+   *
+   * Request-shaped rather than a field on `LiveSession`, because it is hundreds of entries and it
+   * changes only with the provider configuration. Absent means "not asked yet", which is different
+   * from an empty list, so a picker can say "loading" rather than "no models".
+   */
+  models: Record<string, ModelOption[]>;
+  /** Why a catalogue could not be read. Distinct from an empty catalogue, deliberately. */
+  modelErrors: Record<string, string>;
+  /** Thinking levels per session, from `listThinkingLevels`. Per-model, so re-read on a switch. */
+  thinkingLevels: Record<string, string[]>;
+  thinkingLevelErrors: Record<string, string>;
   /** True once a snapshot has arrived, so the UI can distinguish "empty" from "loading". */
   ready: boolean;
 }
@@ -54,6 +67,10 @@ export function initialState(): UiState {
     home: undefined,
     transcripts: {},
     transcriptErrors: {},
+    models: {},
+    modelErrors: {},
+    thinkingLevels: {},
+    thinkingLevelErrors: {},
     focusedId: undefined,
     connection: "connecting",
     connectionDetail: undefined,
@@ -128,6 +145,31 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
       return {
         ...state,
         transcriptErrors: { ...state.transcriptErrors, [event.sessionId]: event.message },
+      };
+
+    case "models": {
+      // A successful read CLEARS the previous error for this session, so a retry that worked does
+      // not leave a stale failure on screen.
+      const { [event.sessionId]: _cleared, ...modelErrors } = state.modelErrors;
+      return { ...state, models: { ...state.models, [event.sessionId]: event.models }, modelErrors };
+    }
+
+    case "modelsError":
+      return { ...state, modelErrors: { ...state.modelErrors, [event.sessionId]: event.message } };
+
+    case "thinkingLevels": {
+      const { [event.sessionId]: _cleared, ...thinkingLevelErrors } = state.thinkingLevelErrors;
+      return {
+        ...state,
+        thinkingLevels: { ...state.thinkingLevels, [event.sessionId]: event.levels },
+        thinkingLevelErrors,
+      };
+    }
+
+    case "thinkingLevelsError":
+      return {
+        ...state,
+        thinkingLevelErrors: { ...state.thinkingLevelErrors, [event.sessionId]: event.message },
       };
 
     case "history":
@@ -307,4 +349,66 @@ export function affectsTranscript(record: PiRecord): boolean {
     record.type === "tool_execution_update" ||
     record.type === "tool_execution_end"
   );
+}
+
+// --- The model and thinking pickers ------------------------------------------------------------
+
+/**
+ * Models grouped by provider, in the order Pi returned them.
+ *
+ * Grouped rather than flat because a provider's models share a prefix and a flat list of hundreds
+ * is unreadable. The grouping is computed here so the component renders and does not decide.
+ */
+export function modelsByProvider(models: ModelOption[]): { provider: string; models: ModelOption[] }[] {
+  const groups: { provider: string; models: ModelOption[] }[] = [];
+  for (const model of models) {
+    const last = groups.at(-1);
+    if (last && last.provider === model.provider) last.models.push(model);
+    else groups.push({ provider: model.provider, models: [model] });
+  }
+  return groups;
+}
+
+/**
+ * Is this model the one the session is currently on?
+ *
+ * Both parts are compared: the same model id can exist under two providers (a proxy and the
+ * upstream), and marking the wrong one as current would make the picker claim a change that is
+ * not the one in effect.
+ */
+export function isCurrentModel(session: LiveSession, model: ModelOption): boolean {
+  return session.model === model.id && (session.provider === undefined || session.provider === model.provider);
+}
+
+/**
+ * What the model control should say while a run is in progress.
+ *
+ * A change takes effect for the NEXT turn, not the one in flight, so a control that looked
+ * immediate would be claiming something false. Returned as text rather than a boolean so the
+ * wording lives in one place and can be asserted.
+ */
+export function modelChangeTiming(session: LiveSession | undefined): string {
+  if (!session) return "";
+  return session.state === "streaming"
+    ? "Applies to the next turn; this run is already using the current model."
+    : "";
+}
+
+/**
+ * Thinking levels, filtered to the ones the current model actually supports.
+ *
+ * `available` is what Pi reported for THIS model. When it has not been read yet the list is empty,
+ * and an empty list must not be presented as "this model has no levels" — hence the caller checks
+ * `error` and `loaded` separately. Returning only the intersection keeps the constraint in one
+ * place: a level that is offered but unsupported would be a control Pi refuses.
+ */
+export function availableThinkingLevels(
+  state: UiState,
+  sessionId: string,
+): { levels: string[]; loaded: boolean; error?: string } {
+  const error = state.thinkingLevelErrors[sessionId];
+  const levels = state.thinkingLevels[sessionId];
+  if (error !== undefined) return { levels: [], loaded: true, error };
+  if (levels === undefined) return { levels: [], loaded: false };
+  return { levels, loaded: true };
 }

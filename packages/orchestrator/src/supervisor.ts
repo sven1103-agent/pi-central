@@ -21,7 +21,7 @@
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { HistoricalSession, LiveSession, PiRecord } from "@pi-central/protocol";
+import type { HistoricalSession, LiveSession, ModelOption, PiRecord } from "@pi-central/protocol";
 import { composePolicy, describe, type LaunchMode, type SessionSpec } from "./policy.ts";
 import { RpcProcess, type LaunchSpec } from "./rpc.ts";
 import { checkResumable } from "./resume.ts";
@@ -484,6 +484,93 @@ export class Supervisor extends EventEmitter {
     await rpc.send({ type: "set_session_name", name }, 20_000);
     session.name = name;
     this.#patch(id);
+  }
+
+  /**
+   * Ask Pi which models this session can use.
+   *
+   * Returns a result rather than throwing, for the same reason `fetchTranscript` does: the caller
+   * needs "there are none" and "the question failed" to be different events. A list rendered as
+   * empty when the command errored would say the session has no models, which is a different and
+   * false claim (C14's family).
+   */
+  async listModels(
+    id: string,
+  ): Promise<{ ok: true; models: ModelOption[] } | { ok: false; message: string }> {
+    const rpc = this.#processes.get(id);
+    if (!rpc) return { ok: false, message: "this session is not running" };
+    try {
+      const data = (await rpc.send({ type: "get_available_models" }, 30_000)) as {
+        models?: Record<string, unknown>[];
+      };
+      // Narrowed here rather than passed through: the picker renders these, and `model.name` may
+      // be absent, so the shape is normalized once instead of at every render site.
+      const models: ModelOption[] = (data?.models ?? [])
+        .filter((model) => typeof model === "object" && model !== null)
+        .map((model) => ({
+          provider: String(model["provider"] ?? ""),
+          id: String(model["id"] ?? ""),
+          ...(typeof model["name"] === "string" ? { name: model["name"] } : {}),
+          ...(typeof model["reasoning"] === "boolean" ? { reasoning: model["reasoning"] } : {}),
+        }))
+        // A model without a provider or an id cannot be selected by `set_model`, which requires
+        // both, so offering it would be a control that cannot work.
+        .filter((model) => model.provider !== "" && model.id !== "");
+      return { ok: true, models };
+    } catch (error) {
+      return { ok: false, message: (error as Error).message };
+    }
+  }
+
+  /**
+   * Change a session's model, then re-read the state Pi reports.
+   *
+   * **The session's fields are not set optimistically.** Pi validates the choice (an unconfigured
+   * provider fails with `No API key for <provider>/<model>`), persists it to the transcript, and
+   * re-applies the thinking level for the new model. Setting `session.model` from the request
+   * would therefore display a change that may not have happened, and would miss the thinking-level
+   * adjustment — the two ways this can disagree with Pi.
+   *
+   * A refusal is thrown, not swallowed: the caller broadcasts it, so it appears as an error naming
+   * the reason rather than as a control that silently did nothing.
+   */
+  async setModel(id: string, provider: string, modelId: string): Promise<void> {
+    const rpc = this.#processes.get(id);
+    const session = this.#sessions.get(id);
+    if (!rpc || !session) throw new Error(`no such session: ${id}`);
+    await rpc.send({ type: "set_model", provider, modelId }, 30_000);
+    // Re-read rather than assume. `refreshState` also pulls the thinking level the switch applied.
+    await this.#refreshState(id);
+  }
+
+  /** Which thinking levels the CURRENT model supports. Per-model, so it must be re-read on a switch. */
+  async listThinkingLevels(
+    id: string,
+  ): Promise<{ ok: true; levels: string[] } | { ok: false; message: string }> {
+    const rpc = this.#processes.get(id);
+    if (!rpc) return { ok: false, message: "this session is not running" };
+    try {
+      const data = (await rpc.send({ type: "get_available_thinking_levels" }, 30_000)) as {
+        levels?: unknown[];
+      };
+      return { ok: true, levels: (data?.levels ?? []).map((level) => String(level)) };
+    } catch (error) {
+      return { ok: false, message: (error as Error).message };
+    }
+  }
+
+  /**
+   * Change the thinking level, then re-read the state Pi reports.
+   *
+   * The same reasoning as `setModel`: Pi may reject a level the model does not support, so the
+   * value shown must be the one Pi confirms rather than the one that was asked for.
+   */
+  async setThinkingLevel(id: string, level: string): Promise<void> {
+    const rpc = this.#processes.get(id);
+    const session = this.#sessions.get(id);
+    if (!rpc || !session) throw new Error(`no such session: ${id}`);
+    await rpc.send({ type: "set_thinking_level", level }, 20_000);
+    await this.#refreshState(id);
   }
 
   async stop(id: string): Promise<void> {

@@ -11,6 +11,16 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Added
 
+- **The model picker** (issue #1): the model shown in a session header can now be changed from the
+  dashboard. The catalogue comes from `get_available_models`, grouped by provider, with the current
+  model marked; choosing one sends `set_model` and the header then shows what **Pi reports back**
+  rather than an optimistic guess. Pi validates the choice (an unconfigured provider fails with `No
+  API key for <provider>/<model>`) and re-applies the thinking level for the new model, so both are
+  re-read after a change. A refusal surfaces as an error naming the reason — never a silent no-op —
+  and while a run is streaming the control says the change applies to the *next* turn. New `Control`
+  variants (`setModel`, `listModels`, `setThinkingLevel`, `listThinkingLevels`) and matching events;
+  the catalogue is request-shaped rather than part of `LiveSession`, because it is hundreds of
+  entries that change only with the provider configuration.
 - **The agent credential store is checked for usability at session start** (issue #28). A session
   whose agent identity cannot be used says so, naming which capability and — the part that matters —
   whether it is **not provisioned** (a setup step) or **provisioned but unreachable** (a defect in
@@ -79,7 +89,7 @@ a live three-session isolation run, and a replay of real session files.
 
 ### Known limitations
 
-- Model and thinking level are displayed but cannot be changed from the UI.
+- The thinking level is displayed but cannot be changed from the UI yet (the model picker works).
 - `steer` is unavailable: the RPC surface Pi Central uses cannot express it, and the composer says
   so rather than showing a control that cannot work.
 - No syntax highlighting, no compaction or retry banners, no file navigation.
