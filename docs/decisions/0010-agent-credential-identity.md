@@ -141,6 +141,40 @@ the hardening's own setup script records that `create-keychain` has been observe
 needed a restore trap to survive that. Pi Central must not modify a user-wide setting without
 an explicit, confirmed action.
 
+### Root resolution, and why `external` is the default when it exists
+
+`resolveAgentRoot` chooses in this order:
+
+1. `PI_CENTRAL_AGENT_ROOT` — explicit always wins, and implies `external` ownership.
+2. **An existing `~/.agent` tree is adopted.** That is the hardening project's convention, so a
+   machine already set up interactively is **imported rather than duplicated**, and both tools
+   share one credential tree instead of drifting (§5: one writer per file).
+3. A Pi-Central-owned tree under the state root — the fresh-install default.
+
+Adoption requires a **marker** file (`agent.keychain-db`, `gitconfig`, `gh/`, or `ssh/`), not
+mere existence: a stray empty `~/.agent` must not silently become the credential root.
+
+### The keychain grant follows the provider configuration, not the agent tree
+
+The original Amendment-1 draft granted keychain access only when `agentRoot` contained a
+keychain. That is wrong, and produced the very C13 failure it was meant to prevent: the keys
+in `auth.json` are looked up through the user-wide **search list**, so they need not live in
+the agent's own keychain at all. On a machine whose agent root has no keychain, the session
+would start, report idle, and be unable to reach a model.
+
+The grant is now derived from `inspectProviderAuth(providerAgentDir)`: if any provider's key is
+resolved by a command naming `security`, keychain access is granted. A command-based key is
+resolved **lazily**, so Pi cannot report the failure at startup — which is exactly why this has
+to be reasoned about in the policy.
+
+`providerAgentDir` is tracked separately from `agentRoot` because a session inherits the
+default `~/.pi/agent` for provider configuration unless `PI_CODING_AGENT_DIR` is set. The
+policy is derived from where the provider configuration **actually** is rather than from an
+assumption; if Pi Central ever sets `PI_CODING_AGENT_DIR`, this field must follow it.
+
+The grant remains bounded: the login and System keychain files stay denied, so it confers the
+*capability* to reach a keychain without granting the user's items in it.
+
 ## Consequences
 
 **Positive**

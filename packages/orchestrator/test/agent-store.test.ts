@@ -3,7 +3,15 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { detectDrift, isSecretBearing, planImport, readStore } from "../src/agent-store.ts";
+import {
+  KEYCHAIN_FILE,
+  detectDrift,
+  inspectProviderAuth,
+  isSecretBearing,
+  looksLikeAgentTree,
+  planImport,
+  readStore,
+} from "../src/agent-store.ts";
 
 /**
  * The agent credential store (ADR-0010 §5): inspection, ownership, drift.
@@ -13,7 +21,8 @@ import { detectDrift, isSecretBearing, planImport, readStore } from "../src/agen
  * a passing "it works" test would not catch a regression that starts reading tokens.
  */
 
-const dir = mkdtempSync(join(tmpdir(), "pi-central-store-"));
+const dir_base = mkdtempSync(join(tmpdir(), "pi-central-store-"));
+const dir = dir_base;
 process.on("exit", () => rmSync(dir, { recursive: true, force: true }));
 
 const SECRET_TOKEN = "ghp_PLANTED_SECRET_VALUE_0123456789";
@@ -197,4 +206,88 @@ test("stats are readable for a secret file, confirming presence is known without
   const stats = statSync(join(root, "ssh", "id_ed25519"));
   assert.ok(stats.size > 0);
   assert.equal(readStore(root).has.sshKey, true);
+});
+
+// --- Provider configuration inspection (C13, ADR-0010 Amendment 1) -------------------------
+
+test("a command-based provider key is detected as needing keychain access", () => {
+  // The shape that broke: Pi resolves the key lazily, so nothing fails at startup.
+  const dir = join(dir_base, "provider-cmd");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "auth.json"),
+    JSON.stringify({
+      litellm: { type: "api_key", key: "!security find-generic-password -ws 'litellm'" },
+      openrouter: { type: "api_key", key: "!security find-generic-password -ws 'openrouter'" },
+    }),
+  );
+  const auth = inspectProviderAuth(dir);
+  assert.equal(auth.readable, true);
+  assert.deepEqual(auth.providers.sort(), ["litellm", "openrouter"]);
+  assert.deepEqual(auth.commandProviders.sort(), ["litellm", "openrouter"]);
+  assert.equal(auth.needsKeychain, true);
+});
+
+test("an inline key does not imply keychain access", () => {
+  const dir = join(dir_base, "provider-inline");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "auth.json"),
+    JSON.stringify({ anthropic: { type: "api_key", key: "sk-ant-literal-value" } }),
+  );
+  const auth = inspectProviderAuth(dir);
+  assert.equal(auth.readable, true);
+  assert.deepEqual(auth.providers, ["anthropic"]);
+  assert.deepEqual(auth.commandProviders, []);
+  assert.equal(auth.needsKeychain, false);
+});
+
+test("a non-keychain command does not trigger the keychain grant", () => {
+  // A vault CLI or `op` needs no keychain grant, so the check is specific rather than
+  // "any command needs a keychain".
+  const dir = join(dir_base, "provider-vault");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "auth.json"), JSON.stringify({ x: { key: "!vault read secret/x" } }));
+  const auth = inspectProviderAuth(dir);
+  assert.deepEqual(auth.commandProviders, ["x"]);
+  assert.equal(auth.needsKeychain, false);
+});
+
+test("inspection never returns a key, inline or resolved", () => {
+  const dir = join(dir_base, "provider-secret");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "auth.json"),
+    JSON.stringify({ anthropic: { type: "api_key", key: `sk-ant-${SECRET_TOKEN}` } }),
+  );
+  const auth = inspectProviderAuth(dir);
+  assert.ok(!JSON.stringify(auth).includes(SECRET_TOKEN));
+  assert.ok(!JSON.stringify(auth).includes("sk-ant"));
+});
+
+test("a missing or malformed auth.json is reported, not thrown", () => {
+  const missing = inspectProviderAuth(join(dir_base, "nowhere"));
+  assert.equal(missing.readable, false);
+  assert.equal(missing.needsKeychain, false);
+
+  const broken = join(dir_base, "provider-broken");
+  mkdirSync(broken, { recursive: true });
+  writeFileSync(join(broken, "auth.json"), "{ not json");
+  assert.equal(inspectProviderAuth(broken).readable, true); // readable, but unparseable
+  assert.equal(inspectProviderAuth(broken).needsKeychain, false);
+});
+
+test("an agent tree is recognized by its markers, not by mere existence", () => {
+  // Adopting a stray empty directory as the credential root would be a silent misconfiguration.
+  const empty = join(dir_base, "not-a-tree");
+  mkdirSync(empty, { recursive: true });
+  assert.equal(looksLikeAgentTree(empty), false);
+  assert.equal(looksLikeAgentTree(join(dir_base, "definitely-absent")), false);
+
+  assert.equal(looksLikeAgentTree(makeStore("tree-markers")), true);
+
+  const onlyKeychain = join(dir_base, "tree-keychain");
+  mkdirSync(onlyKeychain, { recursive: true });
+  writeFileSync(join(onlyKeychain, KEYCHAIN_FILE), "x");
+  assert.equal(looksLikeAgentTree(onlyKeychain), true);
 });

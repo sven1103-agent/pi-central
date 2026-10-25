@@ -89,9 +89,9 @@ items need an unsandboxed run (C1).*
       and private key do not appear anywhere in a snapshot or drift report.
 - [ ] **Remove the `auth.json` deny and add the keychain grants**
       ([ADR-0010 Amendment 1](decisions/0010-agent-credential-identity.md#amendment-1--provider-credentials-are-a-capability-not-an-identity)).
-      The deny made **every sandboxed session exit `1`** (C12) and protected nothing (the file
-      holds `!command` indirections, not keys). Provider keys require `SecurityServer` + the
-      agent keychain, with the login/System keychain denied (C13).
+      ✅ **Done** in `cd7b069` + the follow-up commit: `auth.json` is allowed, the keychain
+      grant is derived from the provider configuration, and `~/.agent` is auto-adopted when it
+      exists (so the hardening setup is imported, not duplicated).
 
 ### Verification performed for the above
 
@@ -109,8 +109,12 @@ far: it found a bug no policy-level check could see (C12). See
 
 ### Still to verify (needs a plain, unsandboxed terminal — C1)
 
-Denials are proven at the *policy* layer, not yet by a live session. The remaining checks are
-experiments 1, 2, 4–9 in [ADR-0010](decisions/0010-agent-credential-identity.md).
+Denials are proven at the *policy* layer, not yet by a live session. The first live run
+(`2026-10-25`) produced: 3/3 sessions sandboxed and idle, 12/12 cross-directory probes denied,
+and the full credential boundary clean — and found the `auth.json` bug (C12) plus a stale
+assertion in the harness. The remaining checks are experiments 1, 2, 4–9 in
+[ADR-0010](decisions/0010-agent-credential-identity.md), plus a re-run to confirm the keychain
+grant lets a session enumerate providers (`get_available_models`, expected non-zero).
 
 ### Verification status
 

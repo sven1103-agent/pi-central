@@ -27,7 +27,7 @@ import { RpcProcess, type LaunchSpec } from "./rpc.ts";
 import { checkResumable } from "./resume.ts";
 import { isScratch, scratchDirFor, type Config } from "./config.ts";
 import { agentRoutingEnv } from "./env.ts";
-import { KEYCHAIN_FILE } from "./agent-store.ts";
+import { KEYCHAIN_FILE, inspectProviderAuth } from "./agent-store.ts";
 import { renderPolicyFragment } from "./fragment.ts";
 import { interpretRecord } from "./state.ts";
 
@@ -171,11 +171,36 @@ export class Supervisor extends EventEmitter {
     // removes the host's system git config as an independent route to the login keychain.
     const env = { ...agentRoutingEnv(this.#config.agentRoot), ...(input.env ?? {}) };
 
-    // Provider-key resolution needs keychain access (C13). Only granted when the agent tree
-    // actually has a keychain, so a session that cannot reach a model says so by omission
-    // rather than by a silent, unbounded keychain grant.
+    // Provider-key resolution needs keychain access (C13), and the grant is derived from the
+    // provider configuration that is ACTUALLY in force rather than from an assumption.
+    //
+    // `auth.json` resolves each key with a command such as
+    //   !security find-generic-password -ws 'litellm'
+    // which needs `SecurityServer` to read any keychain, and the user-wide search list to find
+    // the agent keychain. A command-based key is resolved lazily, so Pi cannot report the
+    // failure at startup: without this grant the session starts, reports idle, and then cannot
+    // think. That is the exact C13 failure mode.
+    const providerAuth = inspectProviderAuth(this.#config.providerAgentDir);
     const keychainPath = join(this.#config.agentRoot, KEYCHAIN_FILE);
-    const hasKeychain = existsSync(keychainPath);
+    const keychainNeeded = providerAuth.needsKeychain;
+    const keychainPresent = existsSync(keychainPath);
+
+    // The environment carries the agent-scoped routing (ADR-0010 §3): GH_CONFIG_DIR and
+    // GIT_CONFIG_GLOBAL point into the agent's own tree, and GIT_CONFIG_SYSTEM=/dev/null
+    // removes the host's system git config as an independent route to the login keychain.
+    const keychainWarnings: string[] = [];
+    if (keychainNeeded && !keychainPresent) {
+      // Granted anyway: the key is looked up through the user-wide SEARCH LIST, so it need not
+      // live in this agent's own keychain. The common case on macOS is the login keychain,
+      // which the fragment still denies -- so this grants the capability without granting the
+      // user's items.
+      keychainWarnings.push(
+        `provider config at ${providerAuth.path} resolves keys via a command ` +
+          `(${providerAuth.commandProviders.join(", ")}), but no keychain exists at ` +
+          `${keychainPath}. Granting keychain access so the lookup can reach the search list; ` +
+          `if the keys are not in a keychain the session will start and be unable to use a model.`,
+      );
+    }
 
     // Only sandboxed sessions get a fragment: direct mode applies no Safehouse policy, so
     // there is nothing to append to.
@@ -187,7 +212,7 @@ export class Supervisor extends EventEmitter {
       input.mode === "sandboxed"
         ? renderPolicyFragment({
             agentRoot: this.#config.agentRoot,
-            ...(hasKeychain ? { keychain: true, keychainPath } : {}),
+            ...(keychainNeeded ? { keychain: true, keychainPath } : {}),
           })
         : undefined;
 
@@ -227,7 +252,9 @@ export class Supervisor extends EventEmitter {
       tokensTotal: null,
       cost: null,
       dialogs: [],
-      warnings: [...policy.warnings],
+      // Policy warnings plus anything the credential configuration needs to say. A session that
+      // starts and cannot think is the failure this surfaces (C13), so it must not be silent.
+      warnings: [...policy.warnings, ...keychainWarnings],
       startedAt: Date.now(),
       ...(input.sessionPath ? { sessionFile: input.sessionPath } : {}),
     };

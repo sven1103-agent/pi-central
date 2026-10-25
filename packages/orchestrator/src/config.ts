@@ -18,6 +18,7 @@
  */
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
+import { looksLikeAgentTree } from "./agent-store.ts";
 
 export interface Config {
   /** Root under which one directory per scratch session is created. */
@@ -49,11 +50,50 @@ export interface Config {
    * re-import is an explicit action (ADR-0010 §5).
    */
   agentRootManaged: boolean;
+  /**
+   * The agent directory holding Pi's provider configuration (`auth.json`).
+   *
+   * Usually the same as `agentRoot`, but not necessarily: a session inherits the default
+   * `~/.pi/agent` unless `PI_CODING_AGENT_DIR` is set, and Pi's provider `!command`
+   * indirections live there. Kept separate so the policy is derived from where the provider
+   * configuration **actually** is, rather than from an assumption (C13).
+   */
+  providerAgentDir: string;
+}
+
+/**
+ * Choose the agent credential root.
+ *
+ * Precedence, and why:
+ *
+ *   1. `PI_CENTRAL_AGENT_ROOT` — explicit always wins, and implies `external` ownership.
+ *   2. An existing tree at `~/.agent` — **adopted**, so a machine already set up by
+ *      `pi-sandbox-hardening` is imported rather than duplicated. This is the path that makes
+ *      an interactive setup and Pi Central share one credential tree instead of drifting
+ *      (ADR-0010 §5: one writer per file).
+ *   3. A Pi-Central-owned tree under the state root — the fresh-install default.
+ *
+ * `~/.agent` is checked for a *marker* rather than mere existence: a stray empty directory
+ * must not silently become the credential root.
+ */
+export function resolveAgentRoot(
+  stateRoot: string,
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+): { agentRoot: string; managed: boolean } {
+  const explicit = env["PI_CENTRAL_AGENT_ROOT"];
+  if (explicit !== undefined && explicit !== "") return { agentRoot: explicit, managed: false };
+
+  const conventional = join(home, ".agent");
+  if (looksLikeAgentTree(conventional)) return { agentRoot: conventional, managed: false };
+
+  return { agentRoot: join(stateRoot, "agents", "default"), managed: true };
 }
 
 export function defaultConfig(): Config {
   const home = homedir();
   const stateRoot = process.env.PI_CENTRAL_STATE ?? join(home, ".config", "pi-central");
+  const { agentRoot, managed } = resolveAgentRoot(stateRoot);
   return {
     workspaceRoot:
       process.env.PI_CENTRAL_WORKSPACE ?? join(home, ".local", "share", "pi-central", "workspaces"),
@@ -61,11 +101,13 @@ export function defaultConfig(): Config {
     sessionsRoot: process.env.PI_SESSIONS_DIR ?? join(home, ".pi", "agent", "sessions"),
     safehouse: process.env.PI_CENTRAL_SAFEHOUSE ?? "safehouse",
     pi: process.env.PI_CENTRAL_PI ?? "pi",
-    // An external tree is adopted by pointing this at it (e.g. the hardening project's
-    // ~/.agent), which is what lets one installation be imported rather than duplicated.
-    agentRoot: process.env.PI_CENTRAL_AGENT_ROOT ?? join(stateRoot, "agents", "default"),
+    agentRoot,
     fragmentDir: join(stateRoot, "policy"),
-    agentRootManaged: process.env.PI_CENTRAL_AGENT_ROOT === undefined,
+    agentRootManaged: managed,
+    // Where a session actually reads provider configuration. Defaults to Pi's own agent dir,
+    // because Pi Central does not currently pass `PI_CODING_AGENT_DIR`; if that changes, this
+    // must follow, or the policy would grant keychain access for the wrong location.
+    providerAgentDir: process.env.PI_CODING_AGENT_DIR ?? join(home, ".pi", "agent"),
   };
 }
 

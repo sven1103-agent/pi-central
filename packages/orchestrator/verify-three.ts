@@ -20,7 +20,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { defaultConfig } from "./src/config.ts";
 import { Supervisor } from "./src/supervisor.ts";
-import { readStore } from "./src/agent-store.ts";
+import { KEYCHAIN_FILE, inspectProviderAuth, readStore } from "./src/agent-store.ts";
 import type { LiveSession } from "@pi-central/protocol";
 
 const KEEP = process.argv.includes("--keep");
@@ -145,9 +145,9 @@ async function main(): Promise<number> {
   const problems: string[] = [];
   supervisor.on("error", (id, message) => problems.push(`${id}: ${message}`));
 
-  // Report credential provisioning, since it changes what the checks below can prove. An
-  // unprovisioned store is not a failure of isolation, but it does mean the agent has no
-  // identity of its own yet (ADR-0010 §5).
+  // Report credential provisioning, since it changes what the checks below can prove. A missing
+  // keychain is no longer fatal on its own: the grant follows the provider configuration, which
+  // may resolve keys through the user-wide search list (ADR-0010 §6).
   console.log("\n\x1b[1mAgent credential store\x1b[0m");
   const store = readStore(config.agentRoot, {
     ownership: config.agentRootManaged ? "managed" : "external",
@@ -162,6 +162,33 @@ async function main(): Promise<number> {
       "the agent has no credentials of its own yet; the boundary checks below still hold, " +
         "because a missing GH_CONFIG_DIR/GIT_CONFIG_GLOBAL fails closed rather than falling back",
     );
+  }
+
+  // Provider configuration decides whether keychain access is granted at all (C13). Reported
+  // because a session that starts and cannot think is otherwise indistinguishable from a
+  // healthy one.
+  const providerAuth = inspectProviderAuth(config.providerAgentDir);
+  info("provider config", config.providerAgentDir);
+  if (!providerAuth.readable) {
+    info(
+      "no provider config",
+      "no auth.json found: the session will start, but it has no provider credentials to use",
+    );
+  } else {
+    const keychainGranted = providerAuth.needsKeychain;
+    info(
+      "providers",
+      `${providerAuth.providers.join(", ")} ` +
+        `(${providerAuth.commandProviders.length} resolved by command) -> keychain ` +
+        `${keychainGranted ? "GRANTED" : "not needed"}`,
+    );
+    if (keychainGranted && !existsSync(join(config.agentRoot, KEYCHAIN_FILE))) {
+      info(
+        "keychain",
+        `no keychain at ${join(config.agentRoot, KEYCHAIN_FILE)}; the grant relies on the ` +
+          `user-wide search list finding the keys elsewhere`,
+      );
+    }
   }
 
   const started: { c: Case; session: LiveSession }[] = [];

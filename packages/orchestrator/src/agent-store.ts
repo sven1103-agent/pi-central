@@ -73,6 +73,99 @@ export interface StoreSnapshot {
 /** The agent keychain's filename within an agent root (the hardening project's convention). */
 export const KEYCHAIN_FILE = "agent.keychain-db";
 
+/** Pi's provider credential file, inside an agent directory. */
+export const PROVIDER_AUTH_FILE = "auth.json";
+
+/**
+ * Does this directory look like an agent credential tree?
+ *
+ * Used to adopt an existing external tree (the hardening project's `~/.agent`) instead of
+ * creating a second one, so an existing setup is imported rather than duplicated
+ * (ADR-0010 §5). Deliberately requires a marker file, not merely an existing directory: a
+ * stray empty `~/.agent` must not silently become the credential root.
+ */
+export function looksLikeAgentTree(root: string): boolean {
+  if (!existsSync(root)) return false;
+  return (
+    existsSync(join(root, KEYCHAIN_FILE)) ||
+    existsSync(join(root, "gitconfig")) ||
+    existsSync(join(root, "gh")) ||
+    existsSync(join(root, "ssh"))
+  );
+}
+
+/**
+ * What Pi's provider configuration implies about keychain access (C13).
+ *
+ * `auth.json` maps a provider to either a literal key or a **command** that resolves one:
+ *
+ *   "litellm": { "key": "!security find-generic-password -ws 'litellm'" }
+ *
+ * A command-based key is looked up lazily on the first call that needs it, so Pi cannot know
+ * at startup whether it will succeed. That is why the *policy* has to reason about it up
+ * front: without keychain access the session starts, reports idle, and then cannot think.
+ */
+export interface ProviderAuth {
+  /** The file inspected. */
+  path: string;
+  readable: boolean;
+  /** Providers named in the file. Names are configuration, not secrets. */
+  providers: string[];
+  /** Providers whose key is resolved by running a command rather than stored inline. */
+  commandProviders: string[];
+  /** True when some command reaches the macOS keychain and therefore needs a policy grant. */
+  needsKeychain: boolean;
+}
+
+/**
+ * Inspect a provider credential file for its *shape* only.
+ *
+ * Never returns a key. A file may hold literal keys for some users, so the value is examined
+ * only to classify it (literal vs command) and is then discarded. Nothing here logs, returns,
+ * or fingerprints a secret.
+ */
+export function inspectProviderAuth(agentDir: string): ProviderAuth {
+  const path = join(agentDir, PROVIDER_AUTH_FILE);
+  const result: ProviderAuth = {
+    path,
+    readable: false,
+    providers: [],
+    commandProviders: [],
+    needsKeychain: false,
+  };
+
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    // Absent (ENOENT) is normal and Pi tolerates it. A denied read (EPERM) is NOT tolerated:
+    // Pi exits 1 (C12), which is why this file must never be denied.
+    return result;
+  }
+  result.readable = true;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return result;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return result;
+
+  for (const [provider, value] of Object.entries(parsed as Record<string, unknown>)) {
+    result.providers.push(provider);
+    if (typeof value !== "object" || value === null) continue;
+    const key = (value as { key?: unknown }).key;
+    if (typeof key !== "string" || !key.startsWith("!")) continue;
+    result.commandProviders.push(provider);
+    // `security` is the macOS keychain CLI. Other commands (a vault CLI, say) do not need a
+    // keychain grant, so the check is specific rather than "any command".
+    if (/\bsecurity\b/.test(key)) result.needsKeychain = true;
+  }
+
+  return result;
+}
+
 /** Files whose *contents* are never read, only their presence and metadata. */
 const SECRET_BEARING = new Set(["gh/hosts.yml", "ssh/id_ed25519", "ssh/id_rsa", KEYCHAIN_FILE]);
 
