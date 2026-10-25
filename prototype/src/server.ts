@@ -22,7 +22,6 @@ const publicDir = join(here, "..", "public");
 const vendorDir = join(here, "..", "node_modules");
 const PORT = Number(process.env.PORT ?? 4319);
 const HOST = "127.0.0.1"; // ADR-0005: loopback only
-
 const fleet = new Fleet();
 
 /* ------------------------------------------------------------------ *
@@ -100,6 +99,30 @@ const server = createServer((req, res) => {
  * ------------------------------------------------------------------ */
 const wss = new WebSocketServer({ server, path: "/ws" });
 const clients = new Set<WebSocket>();
+
+/**
+ * A failed listen surfaces on the WebSocketServer too, because `ws` attaches to
+ * the HTTP server and re-emits its error. Handling only the HTTP server leaves
+ * an "Unhandled 'error' event" crash, so both are handled here.
+ */
+function onListenError(err: NodeJS.ErrnoException): never {
+  if (err.code === "EADDRINUSE") {
+    console.error(
+      `\n  Port ${PORT} is already in use on ${HOST}.\n\n` +
+        `  Another Pi Central may still be running. Find and stop it with:\n` +
+        `    lsof -nP -iTCP:${PORT} -sTCP:LISTEN\n` +
+        `    kill <PID>          # add -9 if it does not exit\n\n` +
+        `  Or start on a different port:\n` +
+        `    PORT=${PORT + 1} npm start\n`,
+    );
+  } else {
+    console.error(`\n  Failed to start: ${err.message}\n`);
+  }
+  process.exit(1);
+}
+
+server.on("error", onListenError);
+wss.on("error", onListenError);
 
 function broadcast(message: unknown): void {
   const text = JSON.stringify(message);
@@ -228,8 +251,22 @@ server.listen(PORT, HOST, () => {
   console.log(`Pi Central prototype -> http://${HOST}:${PORT}${warn}`);
 });
 
+/** Bounded shutdown: never hang on a wedged session. */
+let shuttingDown = false;
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n${signal} — stopping ${fleet.list().length} session(s)…`);
+  const force = setTimeout(() => {
+    console.error("shutdown timed out; exiting anyway");
+    process.exit(1);
+  }, 6000);
+  force.unref();
+  await fleet.stopAll();
+  clearTimeout(force);
+  process.exit(0);
+}
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.on(signal, () => {
-    void fleet.stopAll().finally(() => process.exit(0));
-  });
+  process.on(signal, () => void shutdown(signal));
 }
