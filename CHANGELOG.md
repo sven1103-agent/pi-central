@@ -11,6 +11,13 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Added
 
+- **The agent credential store is checked for usability at session start** (issue #28). A session
+  whose agent identity cannot be used says so, naming which capability and — the part that matters —
+  whether it is **not provisioned** (a setup step) or **provisioned but unreachable** (a defect in
+  Pi Central). The defect that prompted this produced `failed to read configuration: operation not
+  permitted` on a *host* path, which read as "the sandbox is blocking my config" when the agent's own
+  config had never been pointed at. `capabilities.ts`, `capabilities.test.ts`; the same facts are
+  probed from inside a live session in `verify-three.ts` (C15a).
 - **The orchestrator serves the built UI** (`npm run ui:build && npm run server`), so the dashboard
   needs no dev server. One listener answers `/ws` with an upgrade and every other path with
   `packages/ui/dist`, with an SPA fallback. Two consequences beyond convenience: `connect-src

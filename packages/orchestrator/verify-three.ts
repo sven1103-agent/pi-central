@@ -21,6 +21,8 @@ import { join } from "node:path";
 import { defaultConfig } from "./src/config.ts";
 import { Supervisor } from "./src/supervisor.ts";
 import { KEYCHAIN_FILE, inspectProviderAuth, readStore } from "./src/agent-store.ts";
+import { assessAgentCapabilities } from "./src/capabilities.ts";
+import { renderPolicyFragment } from "./src/fragment.ts";
 import type { LiveSession } from "@pi-central/protocol";
 
 const KEEP = process.argv.includes("--keep");
@@ -121,6 +123,18 @@ function credentialProbeFor(): string {
     // the reported failure happened, so a command that merely reads config is the right probe.
     `if gh auth status >/dev/null 2>&1; then echo GH_AUTH=ok; else echo GH_AUTH=failed; fi`,
 
+    // The capability check from issue #28, probed from INSIDE a live session.
+    //
+    // `capabilities.ts` reasons about the store and the rendered fragment from the orchestrator; it
+    // deliberately claims only what it can see there. These are the two facts it cannot see: that
+    // the agent's gitconfig is genuinely readable THROUGH the sandbox, and that the policy grant
+    // reaches the files the routing variables point at. Before the C15 fix the first would have
+    // failed while every "is the host denied?" check above passed.
+    `if [ -r "$GIT_CONFIG_GLOBAL" ]; then echo GITCONFIG_READABLE=yes; else echo GITCONFIG_READABLE=no; fi`,
+    `if [ -d "$GH_CONFIG_DIR" ] && [ -r "$GH_CONFIG_DIR" ]; then echo GHCONFIG_READABLE=yes; else echo GHCONFIG_READABLE=no; fi`,
+    // A directory the agent root must expose for git to work: the ssh key it pushes with.
+    `if [ -r "$GIT_CONFIG_GLOBAL" ] && git config --get user.name >/dev/null 2>&1; then echo AGENT_GIT_USABLE=yes; else echo AGENT_GIT_USABLE=no; fi`,
+
     // The appended policy fragment's identity denies.
     `if cat "$HOME/.gitconfig" >/dev/null 2>&1; then echo HOST_GITCONFIG=readable; else echo HOST_GITCONFIG=denied; fi`,
     `if ls "$HOME/.config/gh" >/dev/null 2>&1; then echo HOST_GH=readable; else echo HOST_GH=denied; fi`,
@@ -217,6 +231,29 @@ async function main(): Promise<number> {
       );
     }
   }
+
+  // The orchestrator-side capability assessment (issue #28), reported here so the harness and the
+  // dashboard agree about what a session will be able to do. It reasons about the store and the
+  // rendered fragment; the probes below then assert the same facts from INSIDE a real sandbox,
+  // which is the part this cannot see. Reported as `info` rather than `check` deliberately: the
+  // live probes are the assertions, and a non-usable store is a legitimate state for a boundary
+  // test rather than a failure of one.
+  const assessment = assessAgentCapabilities({
+    store,
+    sandboxed: true,
+    fragment: renderPolicyFragment({
+      agentRoot: config.agentRoot,
+      ...(providerAuth.needsKeychain
+        ? { keychain: true, keychainPath: join(config.agentRoot, KEYCHAIN_FILE) }
+        : {}),
+    }),
+    providerAuth,
+    keychainPath: join(config.agentRoot, KEYCHAIN_FILE),
+  });
+  for (const warning of assessment.warnings) {
+    info("capability", warning);
+  }
+  if (assessment.usable) info("capability", "every credential the agent needs is provisioned and reachable");
 
   const started: { c: Case; session: LiveSession }[] = [];
   for (const c of CASES) {
@@ -346,6 +383,28 @@ async function main(): Promise<number> {
         "gh can read its config and reach its keychain token",
         vars.GH_AUTH === "ok",
         `gh auth status: ${vars.GH_AUTH} — needs GH_CONFIG_DIR plus the agent keychain grant`,
+      );
+
+      // The two facts the orchestrator-side assessment (issue #28) cannot observe: that the grant
+      // actually reaches the files the routing variables point at, from inside the sandbox. These
+      // are the positive probes that would have failed while every deny check passed — the C15
+      // failure mode, asserted from the inside rather than inferred from the policy text.
+      check(
+        "the agent gitconfig is readable THROUGH the sandbox",
+        vars.GITCONFIG_READABLE === "yes",
+        `GIT_CONFIG_GLOBAL readability: ${vars.GITCONFIG_READABLE} — a 'no' here while the file ` +
+          `exists on disk is the C15 shape: the deny is fine and the capability is dead`,
+      );
+      check(
+        "the agent gh config directory is readable THROUGH the sandbox",
+        vars.GHCONFIG_READABLE === "yes",
+        `GH_CONFIG_DIR readability: ${vars.GHCONFIG_READABLE}`,
+      );
+      check(
+        "git can actually load the agent's config",
+        vars.AGENT_GIT_USABLE === "yes",
+        `git config --get user.name: ${vars.AGENT_GIT_USABLE} — 'no' means the file is there and ` +
+          `unusable, which is the failure that produced a host path in the error message`,
       );
 
       // --- The keychain split (ADR-0010 Amendment 1) -------------------------------------

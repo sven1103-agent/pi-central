@@ -379,3 +379,29 @@ never in effect. The denies were working perfectly; the capability beside them w
 
 Note that Pi's own `auth.json` deny failed in the identical shape (C12): **a denied read is not the
 same as an absent file**, and startup-time config reads turn a denial into a refusal to run.
+
+### C15a — Delivery is not the same as usability
+
+C15 is about getting a variable *into* the session. It is worth stating the neighbouring failure
+separately, because fixing one does not imply the other: a variable can be delivered, point at a
+real file, and still be useless because the policy denies that file — or because the file is there
+and unreadable by its owner.
+
+Three things must all hold for a credential capability to work, and they fail independently:
+
+| Condition | Where it is checked | Failure looks like |
+|---|---|---|
+| Delivered (C15) | `env.ts` + `--env-pass` | the tool silently uses the host's config, or none |
+| Provisioned | `capabilities.ts` | the file is absent — a setup step |
+| Reachable | `capabilities.ts`, `verify-three.ts` | the file exists and the session still cannot read it |
+
+**Consequence:** "the capability is missing" has two causes with opposite fixes. Reporting them as
+one is what produced the misleading `gh` message above — it named a *host* path, so it read as "the
+sandbox is blocking my config", when the agent's own config had simply never been pointed at. The
+third case is a defect in Pi Central rather than a setup step, and saying so is the difference
+between a user fixing their machine and a user reporting a bug.
+
+**Consequence:** a deny check proves nothing about the capability beside it. Every deny in this
+document can pass while the intended thing is dead — which is why `assessAgentCapabilities` reports
+the positive, and why the same facts are probed from *inside* a live session in `verify-three.ts`
+rather than inferred from the policy text.
