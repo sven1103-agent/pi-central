@@ -9,10 +9,14 @@
  * `interpretRecord` decides; the supervisor applies. Keeping the decision pure means the
  * tests exercise the real code path, not a paraphrase of it.
  */
-import type { LiveSession, PendingDialog, PiRecord } from "@pi-central/protocol";
-
-/** The dialog methods that block the agent until answered (docs/PROTOCOL.md). */
-const BLOCKING_DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"]);
+import {
+  BLOCKING_DIALOG_METHODS,
+  FIRE_AND_FORGET_UI_METHODS,
+  isBlockingDialog,
+  type LiveSession,
+  type PendingDialog,
+  type PiRecord,
+} from "@pi-central/protocol";
 
 /** What the supervisor should change after seeing one record. */
 export interface RecordEffect {
@@ -67,9 +71,11 @@ export function interpretRecord(session: LiveSession, record: PiRecord): RecordE
       return { patch: { thinkingLevel: record.level as string | undefined } };
 
     case "extension_ui_request": {
-      // notify / setStatus / setWidget arrive in a burst at startup and are non-blocking.
-      // Misclassifying one would wedge the session on a prompt no human will ever answer.
-      if (!BLOCKING_DIALOG_METHODS.has(String(record.method))) return {};
+      // Classified by METHOD, and the unknown-method default is "blocking" (see
+      // `isBlockingDialog`): notify/setStatus/setWidget arrive in a burst at startup and must
+      // never be dialogs, while an unrecognized method must never be silently dropped -- an
+      // unanswerable request that Pi is waiting on hangs the session with no visible cause.
+      if (!isBlockingDialog(record)) return {};
       const dialog: PendingDialog = {
         id: String(record.id),
         method: String(record.method),
@@ -88,5 +94,14 @@ export function interpretRecord(session: LiveSession, record: PiRecord): RecordE
   }
 }
 
-/** Exposed so a test can assert the dialog set matches Pi's blocking methods. */
+/**
+ * Exposed so a test can assert the classification matches Pi's documented method families.
+ *
+ * This file previously carried its own copy of the blocking-method list, which is a second
+ * source of truth for a security-relevant decision -- the two would drift. It now uses the
+ * protocol's list, and the default for an unrecognized method is handled there.
+ */
 export const blockingDialogMethods: readonly string[] = [...BLOCKING_DIALOG_METHODS];
+
+/** Exposed so a test can assert the non-dialog set matches Pi's fire-and-forget methods. */
+export const fireAndForgetUiMethods: readonly string[] = [...FIRE_AND_FORGET_UI_METHODS];

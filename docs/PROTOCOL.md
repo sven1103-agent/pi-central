@@ -35,13 +35,36 @@ about nine `extension_ui_request` records — in one observed run: five `notify`
 `setStatus`, one `setWidget`.
 
 None is a dialog. Every one carries an `id` (so a naive "has an id → is a dialog" rule would
-misfire). The blocking methods are exactly `select`, `confirm`, `input`, `editor`
-(`BLOCKING_DIALOG_METHODS` in `packages/protocol/src/pi.ts`).
+misfire).
+
+**Both families are documented and closed for Pi `1.4.0`** — five fire-and-forget
+(`notify`, `setStatus`, `setWidget`, `setTitle`, `set_editor_text`) and four dialogs
+(`select`, `confirm`, `input`, `editor`). Five plus four is exactly the nine observed in the
+startup burst.
 
 **Consequence:** a component that treats an unexpected `extension_ui_request` as blocking
 wedges the session on a prompt no human will ever answer — at startup, before the user has
-done anything. The supervisor classifies by method, and `state.ts` has a test asserting
-`notify`/`setStatus`/`setWidget` change neither state nor dialog list.
+done anything.
+
+### The unknown-method default is "blocking", and that is deliberate
+
+Since both families are enumerable, either could be the allowlist. Pi Central enumerates the
+**non-dialogs** (`FIRE_AND_FORGET_UI_METHODS` in `packages/protocol/src/pi.ts`), and the choice
+decides how an unrecognized method fails:
+
+| Enumerate | Unknown method | Failure mode |
+|---|---|---|
+| Dialogs | ignored | Pi waits forever for a response nobody knows to send. **Silent, permanent, unrecoverable** without restarting the session. |
+| Non-dialogs (**chosen**) | treated as a dialog | The user sees it and can cancel. **Costs a click; cannot cost the session.** |
+
+The recoverable direction wins. This is the same lesson as C12 and C13 in a different place: a
+silent, plausible-looking non-failure is worse than a visible annoyance. Concretely, the UI
+renders a Cancel for any method it does not recognize, so an unfamiliar dialog can always be
+dismissed.
+
+The supervisor classifies by method, and `state.ts` has tests asserting that
+`notify`/`setStatus`/`setWidget` change neither state nor dialog list **and** that an unknown
+method does open one.
 
 ### Responses are usually sub-millisecond, but the timeout path matters
 

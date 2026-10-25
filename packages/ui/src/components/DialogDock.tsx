@@ -13,7 +13,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import type { PendingDialog } from "@pi-central/protocol";
-import { BLOCKING_DIALOG_METHODS } from "@pi-central/protocol";
+import { FIRE_AND_FORGET_UI_METHODS, isKnownDialogMethod } from "@pi-central/protocol";
 
 export type DialogAnswer =
   | { value: string }
@@ -27,11 +27,14 @@ export function DialogDock({
   dialogs: PendingDialog[];
   onAnswer: (dialogId: string, answer: DialogAnswer) => void;
 }) {
-  // Only blocking dialogs are rendered here. A `notify` reaching this component would be a
-  // classification bug upstream, so it is filtered rather than trusted.
-  const blocking = dialogs.filter((dialog) =>
-    (BLOCKING_DIALOG_METHODS as readonly string[]).includes(dialog.method),
-  );
+  // Fire-and-forget requests are filtered out rather than trusted, because a `notify` reaching
+  // this component would be a classification bug upstream.
+  //
+  // Note which family is filtered: the NON-dialogs. The orchestrator's default for an
+  // unrecognized method is "blocking", so anything unfamiliar arrives here as a dialog and is
+  // rendered — with a Cancel, since a request the user cannot dismiss would hang the agent.
+  const fireAndForget = new Set<string>(FIRE_AND_FORGET_UI_METHODS);
+  const blocking = dialogs.filter((dialog) => !fireAndForget.has(dialog.method));
   if (blocking.length === 0) return null;
 
   // One at a time: the agent is blocked on the first anyway, and stacking adds no agency.
@@ -185,7 +188,7 @@ function DialogBody({
 
       {/* A method we do not know how to render: offer a cancel rather than showing a dialog the
           user cannot dismiss, which would block the agent forever. */}
-      {!["confirm", "select", "input", "editor"].includes(dialog.method) && (
+      {!isKnownDialogMethod(dialog.method) && (
         <div className="dialog-actions">
           <button
             type="button"

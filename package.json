@@ -14,7 +14,7 @@
     "packages/ui"
   ],
   "scripts": {
-    "test": "node --test \"packages/*/test/**/*.test.ts\"",
+    "test": "node --test \"packages/*/test/**/*.test.ts\" \"packages/*/test/**/*.test.mjs\"",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json",
     "smoke": "node packages/orchestrator/src/cli.ts",
     "server": "node packages/orchestrator/src/server.ts",

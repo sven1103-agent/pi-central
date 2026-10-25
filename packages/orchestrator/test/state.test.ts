@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { LiveSession } from "@pi-central/protocol";
-import { blockingDialogMethods, interpretRecord } from "../src/state.ts";
+import { blockingDialogMethods, fireAndForgetUiMethods, interpretRecord } from "../src/state.ts";
 
 const session = (over: Partial<LiveSession> = {}): LiveSession => ({
   id: "s1",
@@ -92,4 +92,71 @@ test("queue_update sums steering and follow-up depth", () => {
 
 test("an unknown record type is ignored, not guessed at", () => {
   assert.deepEqual(interpretRecord(session(), { type: "some_future_event" }), {});
+});
+
+// --- Extension UI classification (PROTOCOL.md: nine requests, two families) -------------------
+
+test("all five documented fire-and-forget methods are NOT dialogs", () => {
+  // Pi emits ~9 extension_ui_request records at startup: five notify, three setStatus, one
+  // setWidget. Every one carries an `id`, so "has an id therefore it is a dialog" would wedge
+  // every session on a prompt no human will ever answer, before the user has done anything.
+  for (const method of ["notify", "setStatus", "setWidget", "setTitle", "set_editor_text"]) {
+    assert.equal(
+      interpretRecord(session(), { type: "extension_ui_request", id: "x", method }).dialog,
+      undefined,
+      `${method} must not open a dialog`,
+    );
+  }
+});
+
+test("all four documented dialog methods DO open a dialog", () => {
+  for (const method of ["select", "confirm", "input", "editor"]) {
+    const effect = interpretRecord(session(), { type: "extension_ui_request", id: "x", method });
+    assert.ok(effect.dialog, `${method} must open a dialog`);
+    assert.equal(effect.patch?.state, "awaiting-approval");
+  }
+});
+
+test("an UNKNOWN method is treated as a dialog, because that direction is recoverable", () => {
+  // The classification is an allowlist of the NON-dialogs, not of the dialogs, and the
+  // difference decides how a future Pi fails here:
+  //
+  //   - unknown -> dialog: the user sees it and cancels. Costs a click.
+  //   - unknown -> ignored: Pi waits forever for a response nobody knows to send. Costs the
+  //     session, silently, with no visible cause.
+  //
+  // Same lesson as C12/C13 in another place: a plausible-looking non-failure is worse than a
+  // visible annoyance.
+  const effect = interpretRecord(session(), {
+    type: "extension_ui_request",
+    id: "x",
+    method: "someFutureBlockingMethod",
+    message: "from a newer Pi",
+  });
+  assert.ok(effect.dialog, "an unrecognized method must be surfaced, not swallowed");
+  assert.equal(effect.dialog.method, "someFutureBlockingMethod");
+  assert.equal(effect.patch?.state, "awaiting-approval");
+});
+
+test("the classified families are exactly Pi's documented ones", () => {
+  // Guards against a method being added to one list and not the other, which is how the two
+  // families drift into an in-between state.
+  assert.deepEqual([...blockingDialogMethods].sort(), ["confirm", "editor", "input", "select"]);
+  // Compared as a SET, not a sorted list: the order is Pi's, and asserting a locally computed
+  // sort order tests JavaScript's collation rather than the classification.
+  assert.deepEqual(
+    [...fireAndForgetUiMethods].sort(),
+    ["notify", "setStatus", "setTitle", "setWidget", "set_editor_text"].sort(),
+  );
+  assert.equal(
+    blockingDialogMethods.length + fireAndForgetUiMethods.length,
+    9,
+    "the two families plus the observed startup burst should account for all nine requests",
+  );
+});
+
+test("a non-extension_ui_request record is never a dialog", () => {
+  for (const type of ["agent_start", "message_update", "tool_execution_start", "session_info_changed"]) {
+    assert.equal(interpretRecord(session(), { type }).dialog, undefined);
+  }
 });

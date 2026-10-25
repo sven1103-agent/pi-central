@@ -37,12 +37,55 @@ export type BlockingDialogMethod = (typeof BLOCKING_DIALOG_METHODS)[number];
 const BLOCKING = new Set<string>(BLOCKING_DIALOG_METHODS);
 
 /**
- * Non-dialog extension UI requests (`notify`, `setStatus`, `setWidget`) arrive in a burst at
- * startup and must never be treated as blocking. Misclassifying one would wedge a session
- * on a prompt that no human will ever answer.
+ * Extension UI methods that expect **no response** (docs/rpc-extension-ui.md).
+ *
+ * This list is the load-bearing one, and it is deliberately a list of the *non-dialog* family
+ * rather than of the dialogs. Both families are documented and closed for Pi 1.4.0 — five
+ * fire-and-forget plus four dialogs, which is exactly the nine requests observed in the startup
+ * burst — so either could be enumerated. Which one is enumerated decides how to fail on a
+ * method nobody has seen before:
+ *
+ *   - Enumerate the DIALOGS: an unrecognized method is ignored. If a future Pi adds a blocking
+ *     method, the agent waits forever for a response nobody knows to send. Silent, permanent,
+ *     unrecoverable without restarting the session.
+ *   - Enumerate the NON-DIALOGS (this): an unrecognized method is treated as a dialog. The user
+ *     sees it and can cancel. A spurious dialog costs a click; it cannot cost the session.
+ *
+ * The recoverable direction wins. This is the same lesson as C12/C13 in a different place: a
+ * silent, plausible-looking non-failure is worse than a visible annoyance.
+ */
+export const FIRE_AND_FORGET_UI_METHODS = [
+  "notify",
+  "setStatus",
+  "setWidget",
+  "setTitle",
+  "set_editor_text",
+] as const;
+
+export type FireAndForgetUIMethod = (typeof FIRE_AND_FORGET_UI_METHODS)[number];
+
+const FIRE_AND_FORGET = new Set<string>(FIRE_AND_FORGET_UI_METHODS);
+
+/**
+ * Does this extension UI request need an answer?
+ *
+ * The default for an unknown method is **yes**, because that is the recoverable direction: an
+ * unanswerable request that Pi is waiting on hangs the session with no visible cause, whereas a
+ * request that needed no answer merely shows a dialog the user dismisses.
  */
 export function isBlockingDialog(record: PiRecord): boolean {
-  return record.type === "extension_ui_request" && BLOCKING.has(String(record.method ?? ""));
+  if (record.type !== "extension_ui_request") return false;
+  return !FIRE_AND_FORGET.has(String(record.method ?? ""));
+}
+
+/** Is this a method Pi Central recognizes as expecting no response? */
+export function isFireAndForget(record: PiRecord): boolean {
+  return record.type === "extension_ui_request" && FIRE_AND_FORGET.has(String(record.method ?? ""));
+}
+
+/** Whether the method is one this build knows how to render. */
+export function isKnownDialogMethod(method: string): boolean {
+  return BLOCKING.has(method);
 }
 
 /**
