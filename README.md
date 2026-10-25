@@ -108,7 +108,7 @@ transcripts reconstructed from Pi's delta-only stream; the approval dock (`confi
 searchable by content, with a clear refusal when a session's directory is gone; agent-scoped
 credentials with the host's own credentials denied.
 
-**Not yet:** model and thinking-level pickers are displayed but not editable; `steer` is absent
+**Not yet:** the thinking-level picker is displayed but not yet editable (the model picker is); `steer` is absent
 (the RPC surface Pi Central uses cannot express it, and the composer says so rather than showing a
 control that cannot work); no syntax highlighting; no compaction or retry banners; no file
 navigation. Each of these is an issue rather than a wish — see below.

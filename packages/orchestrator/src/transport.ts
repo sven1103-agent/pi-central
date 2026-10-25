@@ -66,6 +66,10 @@ const KNOWN_CONTROL_KINDS: ReadonlySet<string> = new Set<Control["kind"]>([
   "abort",
   "stop",
   "rename",
+  "setModel",
+  "listModels",
+  "setThinkingLevel",
+  "listThinkingLevels",
   "answerDialog",
   "resume",
 ]);
@@ -316,6 +320,30 @@ export class Transport {
         return;
       case "rename":
         await this.#supervisor.rename(control.sessionId, control.name);
+        return;
+      case "listModels": {
+        const result = await this.#supervisor.listModels(control.sessionId);
+        // "empty" and "failed" are different events: an empty picker would claim the session has
+        // no models when the truth is that the question failed. This is the same distinction
+        // `transcriptError` exists for.
+        if (result.ok) this.#broadcast({ kind: "models", sessionId: control.sessionId, models: result.models });
+        else this.#broadcast({ kind: "modelsError", sessionId: control.sessionId, message: result.message });
+        return;
+      }
+      case "setModel": {
+        // Not caught here: `#dispatch` reports a throw as an error event, which is what a refusal
+        // from Pi must become — a visible reason, never a silent no-op.
+        await this.#supervisor.setModel(control.sessionId, control.provider, control.modelId);
+        return;
+      }
+      case "listThinkingLevels": {
+        const result = await this.#supervisor.listThinkingLevels(control.sessionId);
+        if (result.ok) this.#broadcast({ kind: "thinkingLevels", sessionId: control.sessionId, levels: result.levels });
+        else this.#broadcast({ kind: "thinkingLevelsError", sessionId: control.sessionId, message: result.message });
+        return;
+      }
+      case "setThinkingLevel":
+        await this.#supervisor.setThinkingLevel(control.sessionId, control.level);
         return;
       case "answerDialog":
         this.#supervisor.answerDialog(control.sessionId, control.dialogId, control.answer);

@@ -61,7 +61,8 @@ have been looked at.
 
 Two things were deliberately left open and are the first slices of Increment 2: nothing has been
 captured visually in the repository (the author's environment cannot run a browser — C1), and the
-model/thinking pickers are read-only.
+model/thinking pickers were read-only. The model picker is now real (issue #1); the thinking-level
+picker follows.
 
 ## Increment 2 — Drive a session from the UI
 
@@ -72,9 +73,9 @@ This is the increment where the dashboard stops being a *viewer* and becomes a *
 It is ordered after Increment 1 because the controls are only meaningful once the session state
 they act on is trustworthy.
 
-Slices: model and thinking-level pickers driven by `get_available_*`; syntax highlighting;
-compaction and retry banners; `steer`, which needs a protocol addition first; screenshot capture
-for the README.
+Slices: model and thinking-level pickers driven by `get_available_*` (the model picker is
+done — issue #1); syntax highlighting; compaction and retry banners; `steer`, which needs a
+protocol addition first; screenshot capture for the README.
 
 ## Increment 3 — Files alongside the session
 

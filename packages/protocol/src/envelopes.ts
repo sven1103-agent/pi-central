@@ -99,6 +99,22 @@ export interface PendingDialog {
   receivedAt: number;
 }
 
+/** A model Pi can offer for a session. A subset of Pi's `Model`, chosen for display. */
+export interface ModelOption {
+  provider: string;
+  id: string;
+  /** The human name, when Pi reports one. Falls back to `id` for display. */
+  name?: string | undefined;
+  /**
+   * Whether the model supports extended thinking.
+   *
+   * Displayed rather than acted on here: the authoritative constraint is
+   * `get_available_thinking_levels` for the model (issue #2), because `reasoning: false` does not
+   * by itself say WHICH levels are available.
+   */
+  reasoning?: boolean | undefined;
+}
+
 /** Commands the UI may send. A closed union — the UI cannot name an arbitrary operation. */
 export type Control =
   | { kind: "list" }
@@ -107,6 +123,14 @@ export type Control =
   | { kind: "abort"; sessionId: string }
   | { kind: "stop"; sessionId: string }
   | { kind: "rename"; sessionId: string; name: string }
+  /** Change the model. Carries provider AND id because `set_model` requires both (PROTOCOL.md). */
+  | { kind: "setModel"; sessionId: string; provider: string; modelId: string }
+  /** Ask for the session's available models. Answered with `models` or `modelsError`. */
+  | { kind: "listModels"; sessionId: string }
+  /** Change the thinking level. Only levels `listThinkingLevels` reported should be offered. */
+  | { kind: "setThinkingLevel"; sessionId: string; level: string }
+  /** Ask which thinking levels the CURRENT model supports. */
+  | { kind: "listThinkingLevels"; sessionId: string }
   | { kind: "answerDialog"; sessionId: string; dialogId: string; answer: { value: string } | { confirmed: boolean } | { cancelled: true } }
   | { kind: "resume"; path: string; mode?: "sandboxed" | "direct" };
 
@@ -141,6 +165,27 @@ export type Event =
     }
   | { kind: "session"; session: LiveSession }
   | { kind: "record"; sessionId: string; record: PiRecord }
+  /**
+   * The models Pi can offer for a session, in response to `listModels`.
+   *
+   * A REQUEST-shaped event rather than part of `LiveSession`, and that is a deliberate choice:
+   * the catalogue is hundreds of entries (426 measured across three providers), so folding it
+   * into every session update would resend the whole list on each state refresh. It changes only
+   * when the provider configuration does, so it is fetched on demand.
+   *
+   * `error` is present instead of `models` when Pi could not answer — never an empty list, which
+   * would render as "this session has no models" when the truth is "the question failed".
+   */
+  | { kind: "models"; sessionId: string; models: ModelOption[] }
+  | { kind: "modelsError"; sessionId: string; message: string }
+  /**
+   * The thinking levels the CURRENT model supports, in response to `listThinkingLevels`.
+   *
+   * Per-model rather than global: a model without extended thinking has fewer levels, so a list
+   * fetched for one model can offer a level the next model cannot use.
+   */
+  | { kind: "thinkingLevels"; sessionId: string; levels: string[] }
+  | { kind: "thinkingLevelsError"; sessionId: string; message: string }
   /**
    * A session's EXISTING conversation, fetched when it starts or resumes.
    *

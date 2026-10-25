@@ -374,3 +374,79 @@ test("one session's error does not affect another", () => {
   assert.equal(state.transcriptErrors["s1"], "boom");
   assert.equal(state.transcriptErrors["s2"], undefined);
 });
+
+// --- The model picker's derived state (issue #1) -------------------------------------------------
+
+test("models are grouped by provider, preserving Pi's order", async () => {
+  const { modelsByProvider } = await import("../src/store.ts");
+  const groups = modelsByProvider([
+    { provider: "openai", id: "a" },
+    { provider: "openai", id: "b" },
+    { provider: "anthropic", id: "c" },
+    { provider: "openai", id: "d" },
+  ]);
+  // Consecutive runs, not a global grouping: re-sorting Pi's list would put a model somewhere the
+  // user did not see it come from, and grouping is a display concern, not a reordering.
+  assert.deepEqual(groups.map((g) => [g.provider, g.models.map((m) => m.id)]), [
+    ["openai", ["a", "b"]],
+    ["anthropic", ["c"]],
+    ["openai", ["d"]],
+  ]);
+});
+
+test("the current model is matched on provider AND id", async () => {
+  const { isCurrentModel } = await import("../src/store.ts");
+  const session = live({ model: "gpt-5", provider: "openai" });
+  // The same id can exist under two providers (a proxy and the upstream), so matching on id alone
+  // would mark the wrong entry as current.
+  assert.equal(isCurrentModel(session, { provider: "openai", id: "gpt-5" }), true);
+  assert.equal(isCurrentModel(session, { provider: "proxy", id: "gpt-5" }), false);
+  assert.equal(isCurrentModel(session, { provider: "openai", id: "other" }), false);
+});
+
+test("a model change states its timing only while streaming", async () => {
+  const { modelChangeTiming } = await import("../src/store.ts");
+  assert.equal(modelChangeTiming(live({ state: "idle" })), "");
+  assert.match(modelChangeTiming(live({ state: "streaming" })), /next turn/);
+});
+
+test("an unasked thinking-level list is 'not loaded', not 'no levels'", async () => {
+  const { availableThinkingLevels, initialState } = await import("../src/store.ts");
+  const fresh = availableThinkingLevels(initialState(), "s1");
+  assert.deepEqual(fresh, { levels: [], loaded: false });
+  // The distinction matters: rendering "no levels" for a model that simply has not been asked about
+  // would be a claim about the model rather than about the attempt.
+});
+
+test("a thinking-level error is reported as an error, not as an empty list", async () => {
+  const { availableThinkingLevels, initialState, reduce } = await import("../src/store.ts");
+  const state = reduce(initialState(), { kind: "thinkingLevelsError", sessionId: "s1", message: "boom" });
+  const result = availableThinkingLevels(state, "s1");
+  assert.equal(result.error, "boom");
+  assert.equal(result.loaded, true);
+});
+
+test("a successful model read clears that session's previous error", async () => {
+  const { initialState, reduce } = await import("../src/store.ts");
+  let state = reduce(initialState(), { kind: "modelsError", sessionId: "s1", message: "boom" });
+  assert.equal(state.modelErrors["s1"], "boom");
+  state = reduce(state, { kind: "models", sessionId: "s1", models: [{ provider: "p", id: "m" }] });
+  // A retry that worked must not leave a stale failure on screen.
+  assert.equal(state.modelErrors["s1"], undefined);
+  assert.equal(state.models["s1"]?.length, 1);
+});
+
+test("a snapshot does not clobber a fetched catalogue", async () => {
+  // The catalogue is request-shaped and deliberately not part of `LiveSession`, so an authoritative
+  // snapshot must leave it alone: it is a fact about the provider configuration, not session state.
+  const { initialState, reduce } = await import("../src/store.ts");
+  let state = reduce(initialState(), { kind: "models", sessionId: "s1", models: [{ provider: "p", id: "m" }] });
+  state = reduce(state, {
+    kind: "snapshot",
+    live: [live({ id: "s1" })],
+    history: [],
+    historyTotal: 0,
+    home: "/Users/x",
+  });
+  assert.equal(state.models["s1"]?.length, 1);
+});

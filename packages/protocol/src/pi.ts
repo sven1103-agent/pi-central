@@ -114,6 +114,9 @@ export type Command =
    * `send` take this union found both omissions in the same minute.
    */
   | { type: "get_available_models" }
+  | { type: "set_model"; provider: string; modelId: string }
+  | { type: "get_available_thinking_levels" }
+  | { type: "set_thinking_level"; level: string }
   | { type: "prompt"; message: string; streamingBehavior?: "steer" | "followUp" }
   | { type: "steer"; message: string }
   | { type: "follow_up"; message: string }
