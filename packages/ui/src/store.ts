@@ -15,7 +15,7 @@
  *    produce an authoritative snapshot; merging would leave a session showing as live after
  *    the orchestrator had stopped it.
  */
-import type { Control, HistoricalSession, LiveSession, PiRecord } from "@pi-central/protocol";
+import type { HistoricalSession, LiveSession, PiRecord } from "@pi-central/protocol";
 import { applyRecord, emptyTranscript, type Transcript } from "./transcript.ts";
 
 export interface UiState {
@@ -204,11 +204,6 @@ export function stateLabel(session: LiveSession): string {
 export function contextPercent(session: LiveSession): number | null {
   if (session.contextPercent === null || !Number.isFinite(session.contextPercent)) return null;
   return Math.max(0, Math.min(100, session.contextPercent));
-}
-
-/** Controls the UI may send, with the session id filled in. Keeps components free of wire detail. */
-export function controlFor(sessionId: string, action: "abort" | "stop"): Control {
-  return action === "abort" ? { kind: "abort", sessionId } : { kind: "stop", sessionId };
 }
 
 /** Does this record carry transcript content? Used to skip work for lifecycle-only records. */

@@ -15,3 +15,6 @@ spikes/**/out/
 
 # TypeScript incremental build info (we run .ts directly, but tsc --noEmit still emits this)
 *.tsbuildinfo
+
+# UI build output
+packages/ui/dist/
