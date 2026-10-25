@@ -31,10 +31,18 @@ Read, in this order:
 2. [docs/decisions/](docs/decisions/) — why the architecture looks the way it does.
 3. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — components and trust boundaries.
 
-## Branch protection
+## Branch rules
 
-`main` is protected, and **the rules apply to administrators too** — so a direct push is refused
-by design, not by accident. Land changes through a pull request:
+`main` is protected by a **ruleset**, and **the rules apply to administrators too** — so a direct
+push is refused by design, not by accident:
+
+```
+remote: - Changes must be made through a pull request.
+remote: - 2 of 2 required status checks are expected.
+remote: ! [remote rejected] main -> main (push declined due to repository rule violations)
+```
+
+Land changes through a pull request:
 
 - A pull request is required; **no approving review is required**, because the repository has one
   maintainer and nobody can approve their own work. The gate is CI, not a second person.
@@ -45,12 +53,24 @@ by design, not by accident. Land changes through a pull request:
 - Force pushes and branch deletion are refused.
 - Unresolved review comments block the merge.
 
-The settings live in [.github/branch-protection.json](.github/branch-protection.json) and are
-applied by `node scripts/setup-github.mjs`, which refuses to apply a required check name that no
-workflow produces — a required context nothing emits does not fail loudly, it blocks every merge
-forever.
+The settings live in [.github/ruleset.json](.github/ruleset.json) and are applied by
+`node scripts/setup-github.mjs`. That script refuses two silent failure modes: a required check
+name no workflow produces (which blocks every merge forever without erroring), and an
+`enforcement` of anything other than `active` (which reports as configured while enforcing
+nothing).
 
 To relax any of this, change the file and re-apply. It is recorded rather than clicked.
+
+### Why a ruleset and not a classic branch-protection rule
+
+Both are supported and they layer. The reason this repository uses a ruleset is specific:
+`GET /repos/{owner}/{repo}/rules/branches/{branch}` — the modern way to ask "what protects this
+branch?" — **does not report classic branch protection at all.** A correctly protected branch
+therefore reads as *no rules* to anyone checking there, which is exactly the wrong conclusion to
+hand someone.
+
+Rulesets also support named bypass actors, should an emergency valve ever be wanted; today there
+are none, so the rules bind administrators as well.
 
 ## Rules
 
