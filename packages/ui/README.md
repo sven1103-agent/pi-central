@@ -66,15 +66,12 @@ A session that fails this way also gets the diagnosis attached to its error in t
 | `⌘⇧O` | Open in a directory |
 | `Enter` | Send, or queue while a run is in progress |
 | `Shift+Enter` | Newline |
-| `Esc` | Answer an open dialog → close a popover → stop the run. **Never clears your draft.** |
+| `Esc` | Answer an open dialog → close a popover → **stop the run and return the queue to the box.** Never clears your draft: the queue is merged in below it, not over it. |
+| `Alt+Enter` (mid-run) | Queue a follow-up instead of steering. |
 
 ## Deliberately not here yet
 
-- **Steer.** The protocol cannot express it: `Control` has no `steer`, and the supervisor
-  hard-codes `followUp` while streaming. The composer's hint line says so rather than showing a
-  button that cannot work.
-- **Steer.** See below — unchanged, and still the one place the UI documents a missing capability
-  on purpose.
+- **File navigation.** No way to jump to a file or a line from the transcript.
 - **Syntax highlighting.** Code renders in a styled `<pre>`; Shiki is deferred.
 - **Compaction / retry banners.**
 
