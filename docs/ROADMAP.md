@@ -156,22 +156,52 @@ verification harnesses generally.
 **Question:** can a person operate sessions comfortably from one place?
 
 Stack is fixed: React + Vite UI, WebSocket over loopback, TypeScript orchestrator
-([STACK.md](STACK.md)).
+([STACK.md](STACK.md)). The design is in [packages/ui/DESIGN.md](../packages/ui/DESIGN.md).
 
-- [ ] WebSocket server on `127.0.0.1` with typed control/event envelopes. **Not
-      sandboxed** — and refuse to start if an inherited sandbox is detected.
-- [ ] Session rail: name, cwd, model, thinking level, state, context usage.
-- [ ] Transcript pane: streaming render, tool timeline, compaction/retry banners.
-- [ ] Markdown pipeline: `markdown-it({ html: false })` → DOMPurify → React, with a
-      strict CSP and no `dangerouslySetInnerHTML` outside it ([ADR-0006](decisions/0006-untrusted-markdown-rendering.md)).
-- [ ] Shiki syntax highlighting with lazy grammar loading.
-- [ ] Composer: prompt / steer / follow-up, queue visibility, Esc = `clear_queue`+`abort`.
-- [ ] Approvals: `confirm` / `select` / `input` / `editor` rendered as real dialogs;
-      `notify` / `setStatus` / `setWidget` as non-blocking chrome.
-- [ ] Model + thinking-level pickers driven by `get_available_*`.
-- [ ] Session switching = focus switch between live processes (C2).
+- [x] WebSocket server on `127.0.0.1` with typed control/event envelopes. **Not
+      sandboxed** — and **refuses to start** if an inherited sandbox is detected, before
+      binding a port (`sandbox-guard.ts`).
+- [x] Session rail: name, cwd, model, thinking level, state, context usage, cost — ordered by
+      **attention**, so a session blocked on a dialog is first.
+- [x] Transcript pane: streaming reconstruction from the delta-only wire, tool timeline, and
+      quarantined tool output.
+- [x] Markdown pipeline: `markdown-it({ html: false })` → DOMPurify → React, with a strict CSP
+      and exactly one audited `dangerouslySetInnerHTML` site ([ADR-0006](decisions/0006-untrusted-markdown-rendering.md)).
+- [x] Composer: prompt / follow-up with honest mode labelling, queue visibility, and an Esc
+      precedence ladder that never touches the draft. *Steer deferred* — see below.
+- [x] Approvals: `confirm` / `select` / `input` / `editor` as real dialogs;
+      `notify` / `setStatus` / `setWidget` / `setTitle` / `set_editor_text` as non-blocking.
+- [x] Scratch-first start (`⌘N`, no path), with `Open in a directory…` as a secondary sheet
+      (US-1, US-3).
+- [x] History: content search, project, age, size, `cwdExists` badge, and a refusal with a way
+      forward when the directory is gone (US-4, US-5).
+- [x] Session switching = focus switch between live processes (C2).
+- [ ] **Shiki syntax highlighting with lazy grammar loading.** Deferred: code renders in a
+      styled `<pre>` today. Shiki adds ~200 kB plus its own lazy-loading path, so it is worth
+      doing deliberately rather than tacked on — and it is the one Phase 2 item that is
+      cosmetic rather than behavioural.
+- [ ] **Model + thinking-level pickers driven by `get_available_*`.** Deferred: the rail shows
+      both read-only. The commands are catalogued in [PROTOCOL.md](PROTOCOL.md) and wired in
+      `verify-three.ts`, but no `Control` carries them yet, so a picker would need a protocol
+      addition first.
+- [ ] **Steer.** Blocked on the protocol, not the UI: `Control` has no `steer` and the
+      supervisor hard-codes `followUp` when streaming. The hint line says so rather than
+      showing a control that cannot work.
+- [ ] Compaction / retry banners.
 
-**Deliverable:** runnable dashboard.
+**Deliverable:** runnable dashboard. ✅ `npm run server` + `npm run ui:dev`.
+
+### Verification status (Phase 2)
+
+| Layer | State |
+|---|---|
+| Unit tests | ✅ 267 passing (protocol, orchestrator, UI) |
+| Typechecks | ✅ two configs: Node libs and DOM libs cannot share one |
+| Untrusted-rendering tests | ✅ parse the sanitized DOM: no live handler, no dangerous element, no executable scheme |
+| Component tests | ✅ real components rendered through Vite's SSR transform |
+| UI invariants | ✅ enforced by test: one insertion site, `html:false`, DOMPurify after markdown-it, no `agent_end` switch (C8), no cwd change (ADR-0008) |
+| Production build | ✅ `vite build` |
+| **Visual review in a browser** | ⏳ blocked by C1 from the development sandbox — Chromium cannot bind its profile socket here. Components are verified by rendered markup instead, which is stronger for behaviour and weaker for layout. |
 
 ## Phase 2.5 — File navigation and operations
 
