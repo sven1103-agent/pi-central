@@ -17,10 +17,43 @@
  *    utterances per turn.
  * 2. **`aria-busy` while streaming**, so assistive tech does not read a half-written subtree.
  */
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Transcript as TranscriptModel } from "../transcript.ts";
 import { assistantText, hasProse, planTranscript, toolRunSummary, type ToolExecution, type TranscriptMessage } from "../transcript.ts";
 import { Prose } from "./Prose.tsx";
+
+/**
+ * How close to the bottom still counts as "following the tail".
+ *
+ * A tolerance rather than equality because a fractional `scrollTop` (zoom, a device pixel ratio,
+ * a smooth scroll in flight) puts the arithmetic a pixel or two off the true bottom forever; with
+ * `=== 0` the app would silently stop following at random. 80px is also roughly one line of prose
+ * plus a marker, so nudging the wheel without meaning to scroll does not unpin.
+ */
+export const FOLLOW_THRESHOLD_PX = 80;
+
+/**
+ * Whether a scrolled container is close enough to the end to keep following it.
+ *
+ * Pure and exported so the rule is testable without a layout engine. jsdom reports every
+ * element's `scrollHeight`, `scrollTop` and `clientHeight` as 0, so a test that had to drive the
+ * real event would be asserting on a DOM that cannot scroll — which is how `"at the bottom"`
+ * would pass for the wrong reason. The component and the test therefore share this one function.
+ *
+ * `clientHeight === 0` means the container has not been laid out (or is hidden). That is reported
+ * as pinned: an unmeasured box must not throw a "jump to latest" control onto the screen.
+ */
+export function isAtBottom(
+  metrics: { scrollHeight: number; scrollTop: number; clientHeight: number },
+  threshold = FOLLOW_THRESHOLD_PX,
+): boolean {
+  const { scrollHeight, scrollTop, clientHeight } = metrics;
+  if (!Number.isFinite(scrollHeight) || !Number.isFinite(scrollTop) || !Number.isFinite(clientHeight)) {
+    return true;
+  }
+  if (clientHeight <= 0) return true;
+  return scrollHeight - scrollTop - clientHeight < threshold;
+}
 
 export function TranscriptView({
   transcript,
@@ -68,6 +101,14 @@ export function TranscriptView({
   const endRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
+  /**
+   * The same fact as `pinnedRef`, in state.
+   *
+   * The ref is what the scroll effect reads (it must not re-subscribe on every scroll), but the
+   * CONTROL's presence has to re-render. Using the ref alone would compute the button correctly
+   * and never show it — a control that exists but is never visible.
+   */
+  const [pinned, setPinned] = useState(true);
 
   // Follow the tail only while the reader is already at the bottom. Auto-scrolling someone who
   // has scrolled up to read is the most common failure of a streaming transcript.
@@ -75,16 +116,48 @@ export function TranscriptView({
     const container = containerRef.current;
     if (!container) return;
     const onScroll = () => {
-      const distance = container.scrollHeight - container.scrollTop - container.clientHeight;
-      pinnedRef.current = distance < 80;
+      // One measurement, two consumers, so the control and the follow behaviour cannot disagree
+      // about whether the reader is at the bottom.
+      const atBottom = isAtBottom(container);
+      pinnedRef.current = atBottom;
+      setPinned(atBottom);
     };
     container.addEventListener("scroll", onScroll, { passive: true });
+    // Measured once on mount as well: a restored page or a re-render after resize can already be
+    // scrolled away from the bottom, and the control would otherwise stay hidden until the first
+    // scroll event — which, if the reader never scrolls again, is never.
+    onScroll();
     return () => container.removeEventListener("scroll", onScroll);
   }, []);
 
   useEffect(() => {
     if (pinnedRef.current) endRef.current?.scrollIntoView({ block: "end" });
   });
+
+  /**
+   * Return to the newest content and start following again.
+   *
+   * Re-enabling the follow BEFORE scrolling is the load-bearing order: `scrollIntoView` fires a
+   * scroll event, and if the flag were still false when that event was handled, the handler would
+   * immediately re-pin the reader to "not following" — the button would scroll once and then stop
+   * following, which is the bug it exists to fix. Setting it first means the resulting event
+   * agrees.
+   */
+  const jumpToLatest = useCallback(() => {
+    pinnedRef.current = true;
+    setPinned(true);
+    const end = endRef.current;
+    if (!end) return;
+    // `"end"` rather than `"nearest"`: the target is the bottom, and `"nearest"` would do nothing
+    // when the element is already partly visible.
+    if (typeof end.scrollIntoView === "function") end.scrollIntoView({ block: "end" });
+    // Belt and braces for the case that matters most — a browser where `scrollIntoView` is a
+    // no-op in this container (for example if the pane is a scroll port but the target is not
+    // reached). Assigning the scroll offset directly is what the reader asked for, and it is
+    // cheap.
+    const container = containerRef.current;
+    if (container) container.scrollTop = container.scrollHeight;
+  }, []);
 
   const isEmpty = transcript.messages.length === 0 && transcript.tools.length === 0;
   // An error is not "still loading": the attempt is over.
@@ -93,15 +166,20 @@ export function TranscriptView({
   const entries = planTranscript(transcript);
 
   return (
-    <div
-      className="transcript"
-      ref={containerRef}
-      tabIndex={0}
-      role="region"
-      aria-label={`Transcript for ${sessionLabel}`}
-      aria-busy={busy || undefined}
-    >
-      {failed ? (
+    // The scroller and the control are SIBLINGS rather than parent and child, and that is
+    // deliberate: an absolutely-positioned button inside a scrolling container scrolls away with
+    // the content, which is exactly when it is needed. `.transcript-wrap` is the positioned
+    // ancestor instead, so the button stays put while the conversation moves.
+    <div className="transcript-wrap">
+      <div
+        className="transcript"
+        ref={containerRef}
+        tabIndex={0}
+        role="region"
+        aria-label={`Transcript for ${sessionLabel}`}
+        aria-busy={busy || undefined}
+      >
+        {failed ? (
         <div className="empty" style={{ padding: 0 }}>
           <h2>Could not load this session's history</h2>
           <p>{historyError}</p>
@@ -141,7 +219,30 @@ export function TranscriptView({
           )}
         </>
       )}
-      <div ref={endRef} />
+        <div ref={endRef} />
+      </div>
+      {/*
+        * Appears only while the reader is unpinned from the bottom, which is the only moment it
+        * has a job. A control that is always present is noise; one that appears when it can do
+        * nothing is a lie about the state.
+        *
+        * A real <button>, so it is reachable by Tab and activates on Enter/Space for free, rather
+        * than a <div> with an onClick that would need a key handler added and kept in sync. It is
+        * rendered BEFORE the composer in DOM order but never focused programmatically, so
+        * activating it with the mouse or by tabbing does not move focus out of the composer.
+        */}
+      {!pinned && (
+        <button
+          type="button"
+          className="jump-latest"
+          onClick={jumpToLatest}
+          title="Scroll to the newest message and follow along again"
+        >
+          {/* The arrow is decorative: the label carries the meaning, so the glyph is hidden from
+              assistive tech rather than read out as "downwards arrow". */}
+          <span aria-hidden="true">↓</span> Jump to latest
+        </button>
+      )}
     </div>
   );
 }
