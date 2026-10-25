@@ -11,9 +11,12 @@ Three failures, in the order you would hit them.
 **1. The UI you are using gets replaced by the UI being edited.** `npm run ui:dev` runs Vite's dev
 server, which watches `packages/ui/src` and hot-reloads the browser. An agent editing a component
 therefore reloads the interface out from under you — and mid-edit that means a syntax-error
-overlay instead of a dashboard. The orchestrator has no other way to serve a UI: it answers every
-HTTP request with `426 Upgrade Required` and speaks WebSocket only, so a built UI has to be served
-by something else.
+overlay instead of a dashboard.
+
+This one is now **avoidable**: the orchestrator serves a built UI itself (issue #24), so
+`npm run ui:build && npm run server` gives a dashboard with no watcher at all. The dev server is
+still the right tool for editing the UI deliberately, with `npm run server -- --no-ui` on the other
+side.
 
 **2. A branch switch desynchronises the two halves.** The UI and the orchestrator share
 `@pi-central/protocol`, and Vite resolves it to the protocol source on disk. If the checkout moves
@@ -37,20 +40,20 @@ tree lose each other's changes in ways neither can see.
 cd ~/git/idea-factory
 git clone git@github.com:sven1103-agent/pi-central.git pi-central-dev
 
-# terminal 1 — from the STABLE checkout, the one no agent may touch
-cd pi-central && npm install && npm run server
-
-# terminal 2 — also the stable checkout
-cd pi-central && npm run ui:dev
+# from the STABLE checkout, the one no agent may touch
+cd pi-central && npm install && npm run ui:build && npm run server
 ```
+
+One process, one URL. Add `npm run ui:dev` only when you are deliberately editing the stable
+checkout's UI, and start the server with `--no-ui` in that case so the two do not both claim `/`.
 
 Then `⌘⇧O` and point a session at `~/git/idea-factory/pi-central-dev`.
 
 A session is sandboxed to its working directory, so an agent in `pi-central-dev` **cannot write to
 `pi-central` at all**. Sibling directories are denied — that is the property
 [`verify-three.ts`](../packages/orchestrator/verify-three.ts) checks with twelve cross-directory
-probes, not an assumption. The Vite watcher on the stable checkout never fires, so nothing
-replaces the UI you are using.
+probes, not an assumption. With no dev server running on the stable checkout, nothing replaces the
+UI you are using.
 
 ## Use a clone, not a worktree
 
@@ -98,8 +101,9 @@ one agent identity by design — see [ADR-0010](decisions/0010-agent-credential-
 These are filed rather than worked around, because they are the difference between "possible" and
 "pleasant":
 
-- **Serving a built UI from the orchestrator** would remove the file watcher entirely, so editing
-  the UI could never disturb the running one.
 - **A warning when a session's working directory contains a Pi Central installation** would turn
-  failures 1–3 above into something stated up front, rather than a dashboard that mysteriously
+  failures 2–4 above into something stated up front, rather than a dashboard that mysteriously
   stops working.
+
+Failure 1 above is resolved rather than filed: the orchestrator serves the built UI itself
+(issue #24), so `npm run ui:build && npm run server` gives a dashboard with no file watcher.

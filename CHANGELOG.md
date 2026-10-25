@@ -7,6 +7,28 @@ This project's early history was a research spike plus a hard look at what the s
 several entries below record **defects that shipped and were fixed** rather than only features.
 They are kept because each one is the reason a constraint or an invariant test exists.
 
+## [Unreleased]
+
+### Added
+
+- **The orchestrator serves the built UI** (`npm run ui:build && npm run server`), so the dashboard
+  needs no dev server. One listener answers `/ws` with an upgrade and every other path with
+  `packages/ui/dist`, with an SPA fallback. Two consequences beyond convenience: `connect-src
+  'self'` in the CSP is same-origin *by construction* rather than by a correctly configured proxy,
+  and a Vite file watcher no longer reloads the interface you are using out from under you while
+  an agent edits it ([DOGFOODING.md](docs/DOGFOODING.md), issue #24).
+- The Content-Security-Policy is now sent as an **HTTP header** as well as a `<meta>` tag. A header
+  applies before the document is parsed; the meta tag does not. A test asserts the two are equal,
+  so they cannot drift.
+
+### Security
+
+- The static handler refuses any request target that resolves outside the served root: a `..`
+  segment is denied with a **403** rather than silently normalized, `%2e%2e%2f` is decoded before
+  the check, and containment is verified on the canonical path as a backstop. It serves exactly one
+  directory and cannot become a static file server for the filesystem.
+- Method restriction (`GET`/`HEAD` only) and `X-Content-Type-Options: nosniff` on every response.
+
 ## [0.1.0] — first iteration
 
 The premise is proven and the first three layers work end to end. Verified by 342 automated tests,
@@ -55,3 +77,6 @@ a live three-session isolation run, and a replay of real session files.
   so rather than showing a control that cannot work.
 - No syntax highlighting, no compaction or retry banners, no file navigation.
 - macOS only. Safehouse has no Linux backend (C10).
+- No screenshot of the running UI exists in the repository: the author's environment cannot launch
+  a browser inside the sandbox (C1), so layout is verified by rendered markup, which is stronger
+  for behaviour and weaker for looks (issue #7).

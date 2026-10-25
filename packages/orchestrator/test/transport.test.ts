@@ -9,6 +9,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { WebSocket } from "ws";
 import { PROTOCOL_VERSION, type Event } from "@pi-central/protocol";
 import { parseControl, Transport } from "../src/transport.ts";
@@ -259,7 +262,7 @@ class TestClient {
 
 test("a client receives the protocol version, then a snapshot", async () => {
   const supervisor = new FakeSupervisor();
-  const transport = new Transport(supervisor as never, emptyConfig());
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
   const address = await transport.listen();
   try {
     const client = await TestClient.connect(address.url);
@@ -275,7 +278,7 @@ test("a client receives the protocol version, then a snapshot", async () => {
 
 test("a start command is routed to the supervisor and its session broadcast", async () => {
   const supervisor = new FakeSupervisor();
-  const transport = new Transport(supervisor as never, emptyConfig());
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
   const address = await transport.listen();
   try {
     const client = await TestClient.connect(address.url);
@@ -293,7 +296,7 @@ test("a start command is routed to the supervisor and its session broadcast", as
 
 test("a prompt is routed with its exact message, unmodified", async () => {
   const supervisor = new FakeSupervisor();
-  const transport = new Transport(supervisor as never, emptyConfig());
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
   const address = await transport.listen();
   try {
     const client = await TestClient.connect(address.url);
@@ -312,7 +315,7 @@ test("a prompt is routed with its exact message, unmodified", async () => {
 test("an unknown control kind is rejected with an error, not ignored", async () => {
   // Version skew must be visible. Silence would look like a broken button.
   const supervisor = new FakeSupervisor();
-  const transport = new Transport(supervisor as never, emptyConfig());
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
   const address = await transport.listen();
   try {
     const client = await TestClient.connect(address.url);
@@ -329,7 +332,7 @@ test("an unknown control kind is rejected with an error, not ignored", async () 
 
 test("a resume for an unknown path reports an error rather than spawning", async () => {
   const supervisor = new FakeSupervisor();
-  const transport = new Transport(supervisor as never, emptyConfig());
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
   const address = await transport.listen();
   try {
     const client = await TestClient.connect(address.url);
@@ -347,7 +350,7 @@ test("a resume for an unknown path reports an error rather than spawning", async
 
 test("supervisor updates and records are broadcast to connected clients", async () => {
   const supervisor = new FakeSupervisor();
-  const transport = new Transport(supervisor as never, emptyConfig());
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
   transport.attach();
   const address = await transport.listen();
   try {
@@ -377,7 +380,7 @@ test("supervisor updates and records are broadcast to connected clients", async 
 
 test("all clients see a broadcast (fan-out, not first-wins)", async () => {
   const supervisor = new FakeSupervisor();
-  const transport = new Transport(supervisor as never, emptyConfig());
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
   transport.attach();
   const address = await transport.listen();
   try {
@@ -402,7 +405,7 @@ test("a client connecting to a live session receives its CURRENT conversation", 
   // the client's correct transcript. Fetching fresh is the only way to be current.
   const supervisor = new FakeSupervisor();
   supervisor.sessions.push(makeSession("s1", "/tmp/a"));
-  const transport = new Transport(supervisor as never, emptyConfig());
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
   try {
     const address = await transport.listen();
     const first = await TestClient.connect(address.url);
@@ -426,7 +429,7 @@ test("a stopped or failed session is not asked for a transcript", async () => {
   // There is no process to answer, so the fetch would fail and be reported as an error.
   const supervisor = new FakeSupervisor();
   supervisor.sessions.push(makeSession("s1", "/tmp/a"), { ...makeSession("s2", "/tmp/b"), state: "stopped" });
-  const transport = new Transport(supervisor as never, emptyConfig());
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
   try {
     const address = await transport.listen();
     const client = await TestClient.connect(address.url);
@@ -446,7 +449,7 @@ test("a failed fetch is reported as an error, never as an empty transcript", asy
   const supervisor = new FakeSupervisor();
   supervisor.sessions.push(makeSession("s1", "/tmp/a"));
   supervisor.fetchTranscript = async () => ({ ok: false as const, message: "session is not running" });
-  const transport = new Transport(supervisor as never, emptyConfig());
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
   try {
     const address = await transport.listen();
     const client = await TestClient.connect(address.url);
@@ -461,7 +464,7 @@ test("a failed fetch is reported as an error, never as an empty transcript", asy
 
 test("the client cap closes the extra connection with a reason", async () => {
   const supervisor = new FakeSupervisor();
-  const transport = new Transport(supervisor as never, emptyConfig(), { maxClients: 1 });
+  const transport = new Transport(supervisor as never, emptyConfig(), { maxClients: 1, uiDir: null });
   const address = await transport.listen();
   try {
     const first = await TestClient.connect(address.url);
@@ -484,7 +487,7 @@ test("the client cap closes the extra connection with a reason", async () => {
 
 test("a disconnect does not disturb the remaining clients", async () => {
   const supervisor = new FakeSupervisor();
-  const transport = new Transport(supervisor as never, emptyConfig());
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
   transport.attach();
   const address = await transport.listen();
   try {
@@ -504,9 +507,35 @@ test("a disconnect does not disturb the remaining clients", async () => {
   }
 });
 
+test("with a UI directory, the transport serves the dashboard AND still upgrades /ws", async () => {
+  // The wiring, not the handler: `static-ui.test.ts` covers traversal and the CSP in depth. What
+  // this proves is that one listener answers both protocols from one origin — the property that
+  // makes `connect-src 'self'` truthful (issue #24).
+  const uiDir = mkdtempSync(join(tmpdir(), "pi-central-transport-ui-"));
+  process.on("exit", () => rmSync(uiDir, { recursive: true, force: true }));
+  writeFileSync(join(uiDir, "index.html"), "<!doctype html><div id=\"root\"></div>\n");
+
+  const supervisor = new FakeSupervisor();
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir });
+  const address = await transport.listen();
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/`);
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /id="root"/);
+    assert.ok(response.headers.get("content-security-policy"), "the served document needs the CSP header");
+
+    // Same origin, same port: the socket must still work beside the static handler.
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
 test("the transport binds loopback only", async () => {
   const supervisor = new FakeSupervisor();
-  const transport = new Transport(supervisor as never, emptyConfig());
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
   const address = await transport.listen();
   try {
     assert.equal(address.host, "127.0.0.1");
@@ -519,7 +548,7 @@ test("the transport binds loopback only", async () => {
 
 test("closing the transport releases the port and clears state", async () => {
   const supervisor = new FakeSupervisor();
-  const transport = new Transport(supervisor as never, emptyConfig());
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
   const address = await transport.listen();
   await transport.close();
   assert.equal(transport.address, undefined);

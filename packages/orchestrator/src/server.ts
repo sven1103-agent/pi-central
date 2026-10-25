@@ -13,12 +13,15 @@ import { defaultConfig } from "./config.ts";
 import { Supervisor } from "./supervisor.ts";
 import { Transport } from "./transport.ts";
 import { assertNotSandboxed, SandboxedEnvironmentError } from "./sandbox-guard.ts";
+import { hasBuiltUi, resolveUiDistDir } from "./static-ui.ts";
 
 interface Options {
   port: number;
   mode: "sandboxed" | "direct";
   /** Skip the sandbox probe. Only for a host without `sandbox-exec` at all (C10). */
   allowUnsandboxedHost: boolean;
+  /** The built UI to serve, or `null` to serve the socket only (issue #24). */
+  uiDir: string | null;
 }
 
 /**
@@ -34,7 +37,12 @@ interface Options {
 const DEFAULT_PORT = 8787;
 
 function parseArgs(argv: string[]): Options {
-  const options: Options = { port: DEFAULT_PORT, mode: "sandboxed", allowUnsandboxedHost: false };
+  const options: Options = {
+    port: DEFAULT_PORT,
+    mode: "sandboxed",
+    allowUnsandboxedHost: false,
+    uiDir: resolveUiDistDir(),
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--port") {
@@ -51,6 +59,17 @@ function parseArgs(argv: string[]): Options {
       // Escape hatch for developing the UI on a non-macOS host, where Safehouse cannot run at
       // all (C10). Named explicitly so it can never be enabled by accident.
       options.allowUnsandboxedHost = true;
+    } else if (arg === "--ui-dist") {
+      const value = argv[++i];
+      if (value === undefined || value === "") {
+        console.error("--ui-dist expects a directory containing a built UI");
+        process.exit(2);
+      }
+      options.uiDir = value;
+    } else if (arg === "--no-ui") {
+      // Serve the socket only. Useful when a Vite dev server owns the UI, and when running a
+      // second orchestrator beside one that already serves it.
+      options.uiDir = null;
     }
   }
   return options;
@@ -75,7 +94,7 @@ async function main(): Promise<number> {
 
   const config = defaultConfig();
   const supervisor = new Supervisor(config);
-  const transport = new Transport(supervisor, config, { port: options.port });
+  const transport = new Transport(supervisor, config, { port: options.port, uiDir: options.uiDir });
   transport.attach();
 
   const address = await transport.listen();
@@ -89,19 +108,37 @@ async function main(): Promise<number> {
   console.log(`  agent root: ${config.agentRoot}${config.agentRootManaged ? " (managed)" : " (external)"}`);
   console.log(`  isolation: ${options.mode}`);
   console.log("");
-  // The UI is a separate process, so the connection detail belongs here rather than in a
-  // README the user has to find: if the UI cannot reach this port, nothing else matters.
-  if (options.port !== DEFAULT_PORT) {
-    console.log(
-      `Non-default port. Start the UI with:\n` +
-        `  PI_CENTRAL_WS=${address.url} npm run ui:dev`,
-    );
-    console.log("");
+  // The UI is served from this same origin (issue #24), so the dashboard needs no second process
+  // and no dev server. If it has not been built, say so ONCE here — naming the fix — rather than
+  // letting every request answer with the same message.
+  const httpUrl = address.url.replace(/^ws/, "http");
+  if (options.uiDir === null) {
+    console.log(`UI: not served (--no-ui). Use a dev server, or drop the flag to serve a build.`);
+  } else if (hasBuiltUi(options.uiDir)) {
+    console.log(`Open ${httpUrl} — the UI is served from ${options.uiDir}`);
   } else {
-    console.log(`Start the UI in another terminal:  npm run ui:dev`);
-    console.log("");
+    console.log(
+      `No built UI at ${options.uiDir}\n` +
+        `  Build it with:  npm run ui:build\n` +
+        `  Or serve the socket only with:  --no-ui  (and run npm run ui:dev)`,
+    );
   }
-  console.log("Start a session from the UI. Press Ctrl-C to stop every session and exit.");
+  console.log("");
+  // The connection detail belongs here rather than in a README the user has to find: if the UI
+  // cannot reach this port, nothing else matters. With a served build there is nothing to start —
+  // which is the point of issue #24 — so the advice is only printed when a dev server is actually
+  // the way to get a UI.
+  if (options.uiDir !== null && hasBuiltUi(options.uiDir)) {
+    console.log(`Start a session from the UI at ${httpUrl}. Press Ctrl-C to stop every session and exit.`);
+  } else if (options.port !== DEFAULT_PORT) {
+    console.log(`Non-default port. Start the dev UI with:\n  PI_CENTRAL_WS=${address.url} npm run ui:dev`);
+    console.log("");
+    console.log("Start a session from the UI. Press Ctrl-C to stop every session and exit.");
+  } else {
+    console.log(`Start the dev UI in another terminal:  npm run ui:dev`);
+    console.log("");
+    console.log("Start a session from the UI. Press Ctrl-C to stop every session and exit.");
+  }
 
   // An orderly shutdown must close children too, or sandboxed grandchildren outlive us.
   let shuttingDown = false;

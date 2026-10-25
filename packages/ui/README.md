@@ -5,21 +5,33 @@ Vite, rendering to the design in [DESIGN.md](DESIGN.md).
 
 ## Running it
 
-Two processes. **Both must run from a plain terminal** — see the constraint below.
+One process. The orchestrator serves the built UI and the WebSocket from the same origin.
+**It must run from a plain terminal** — see the constraint below.
 
 ```bash
-# terminal 1 — the orchestrator (unsandboxed, spawns sandboxed sessions)
+npm run ui:build     # once, and after any UI change
 npm run server
-
-# terminal 2 — the UI dev server
-npm run ui:dev
 ```
 
-Then open <http://localhost:5173>.
+Then open <http://127.0.0.1:8787>. The server prints the URL, and says so explicitly when the UI
+has not been built yet rather than serving a blank page.
 
-The orchestrator listens on `127.0.0.1:8787` by default and the dev server proxies `/ws` to it,
-so no configuration is needed. If you change the port, the orchestrator prints the exact
-command to start the UI with.
+### Developing the UI
+
+For hot reload, run the dev server against a socket-only orchestrator. No configuration is needed:
+the dev server proxies `/ws` to `127.0.0.1:8787` by default, and the orchestrator prints the exact
+`PI_CENTRAL_WS=…` command if you changed the port.
+
+```bash
+npm run server -- --no-ui   # terminal 1
+npm run ui:dev              # terminal 2 — Vite, on http://localhost:5173
+```
+
+The built-UI path exists for a specific reason: Vite watches `packages/ui/src`, so an agent editing
+a component reloads the interface you are using out from under you, mid-edit, into a syntax-error
+overlay. Serving a build removes the watcher, which is what makes Pi Central usable to develop Pi
+Central ([DOGFOODING.md](../../docs/DOGFOODING.md)). It also makes the CSP's `connect-src 'self'`
+truthful by construction rather than by a proxy that happens to be configured correctly.
 
 ## Why a plain terminal
 
