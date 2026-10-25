@@ -63,9 +63,8 @@ function refuseIfSandboxed(): void {
       "\n\x1b[33mThis harness must run from a plain terminal.\x1b[0m\n" +
         "It looks sandboxed, and Seatbelt does not nest (C1):\n" +
         `  ${(probe.stderr || probe.stdout || "sandbox-exec refused").trim()}\n\n` +
-        "Run it from a plain shell with:\n" +
-        "  \x1b[1mpackages/orchestrator/verify-three.ts\x1b[0m\n" +
-        "  (from the repo root: \x1b[1mnode packages/orchestrator/verify-three.ts\x1b[0m)\n",
+        "Run it from a plain shell (no sandbox):\n" +
+        "  \x1b[1mnode packages/orchestrator/verify-three.ts\x1b[0m   (from the repo root)\n",
     );
     process.exit(2);
   }
@@ -104,11 +103,16 @@ function credentialProbeFor(): string {
     // The environment boundary (C11). Safehouse alone would pass SSH_AUTH_SOCK through.
     `if [ -z "$SSH_AUTH_SOCK" ]; then echo ENV_SSH=absent; else echo ENV_SSH=present; fi`,
     `if [ -z "$HF_TOKEN_STRICT" ]; then echo ENV_TOKEN=absent; else echo ENV_TOKEN=present; fi`,
-    // The appended policy fragment's denies.
+    // The appended policy fragment's identity denies.
     `if cat "$HOME/.gitconfig" >/dev/null 2>&1; then echo HOST_GITCONFIG=readable; else echo HOST_GITCONFIG=denied; fi`,
     `if ls "$HOME/.config/gh" >/dev/null 2>&1; then echo HOST_GH=readable; else echo HOST_GH=denied; fi`,
-    `if cat "$HOME/.pi/agent/auth.json" >/dev/null 2>&1; then echo HOST_PIAUTH=readable; else echo HOST_PIAUTH=denied; fi`,
     `if ssh-add -l >/dev/null 2>&1; then echo SSHAGENT=reachable; else echo SSHAGENT=unreachable; fi`,
+    // Pi's auth store must be READABLE, not denied: Pi reads it at startup and a deny makes
+    // it exit 1 (C12), and it holds `!command` indirections rather than secrets.
+    // See ADR-0010 Amendment 1.
+    `if cat "$HOME/.pi/agent/auth.json" >/dev/null 2>&1; then echo PIAUTH=readable; else echo PIAUTH=blocked; fi`,
+    // Pi needs to write its agent dir; a read-only view would break it later, not at boot.
+    `if [ -w "$HOME/.pi/agent" ]; then echo PIAGENTDIR=writable; else echo PIAGENTDIR=readonly; fi`,
   ].join("; ");
 }
 
@@ -246,17 +250,59 @@ async function main(): Promise<number> {
       );
       check("the host ssh-agent is unreachable in practice", vars.SSHAGENT === "unreachable", `ssh-add -l: ${vars.SSHAGENT}`);
 
-      // The appended policy fragment (ADR-0010). Each is granted by Safehouse's base policy.
+      // The identity denies (ADR-0010). Each of these is granted by Safehouse's base policy.
       check("the host gitconfig is denied", vars.HOST_GITCONFIG === "denied", `~/.gitconfig: ${vars.HOST_GITCONFIG}`);
       check("the host gh config is denied", vars.HOST_GH === "denied", `~/.config/gh: ${vars.HOST_GH}`);
-      check("Pi's auth store is denied (C6)", vars.HOST_PIAUTH === "denied", `~/.pi/agent/auth.json: ${vars.HOST_PIAUTH}`);
 
-      if (vars.HOST_GITCONFIG === "readable" || vars.HOST_GH === "readable" || vars.HOST_PIAUTH === "readable") {
-        info(
-          "note",
-          "a readable credential path means --append-profile was not applied: check the fragment " +
-            "file exists and that the session ran with mode=sandboxed (not direct)",
+      // Pi's own store is REQUIRED to be readable (C12, ADR-0010 Amendment 1). This assertion
+      // is inverted from the pre-amendment version, which asserted it was denied -- the deny
+      // made every session exit 1, so the old check was measuring the bug as a success.
+      check(
+        "Pi's auth store is readable, not denied (C12)",
+        vars.PIAUTH === "readable",
+        `~/.pi/agent/auth.json: ${vars.PIAUTH} (denying it makes Pi exit 1)`,
+      );
+      check(
+        "Pi's agent dir is writable",
+        vars.PIAGENTDIR === "writable",
+        `~/.pi/agent: ${vars.PIAGENTDIR}`,
+      );
+
+      // --- Can the agent actually reach a model? (C13) -----------------------------------
+      //
+      // This is the check whose absence let a session look healthy while being unable to
+      // think. `get_available_models` returns the models Pi can currently offer: measured 426
+      // across three providers with a populated auth.json, and **0** with an empty agent dir,
+      // so it reflects resolved provider configuration rather than listing known names.
+      //
+      // Its limit, stated plainly: this proves Pi can *enumerate* the provider setup, not that
+      // a key's `!command` succeeded. Keys resolve lazily, on the first call that needs one.
+      //
+      // No real model call is made here on purpose. It would need a live provider and would
+      // make a by-hand harness slow and flaky; ordinary use is the honest proof that a key
+      // resolves. A green run means "configured to reach a provider", and nothing stronger.
+      try {
+        const response = (await credentialRpc.send({ type: "get_available_models" }, 30_000)) as {
+          models?: { provider?: string }[];
+        };
+        const models = response.models ?? [];
+        const providers = [...new Set(models.map((m) => m.provider).filter(Boolean))];
+        check(
+          "the session can enumerate providers, so it can reach a model (C13)",
+          models.length > 0,
+          models.length > 0
+            ? `${models.length} model(s) across: ${providers.join(", ")}`
+            : "0 models: the agent dir or its auth.json is unreachable, so this session cannot think",
         );
+        if (models.length === 0) {
+          info(
+            "cause",
+            "a session with no reachable provider configuration starts and reports idle; check " +
+              "that the agent root resolves and its auth.json is readable (C12, C13)",
+          );
+        }
+      } catch (error) {
+        check("the session can enumerate providers", false, (error as Error).message);
       }
     } catch (error) {
       check("credential probe ran", false, (error as Error).message);
