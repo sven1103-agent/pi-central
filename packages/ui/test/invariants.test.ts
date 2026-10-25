@@ -160,3 +160,39 @@ test("the UI does not offer a Steer control the protocol cannot deliver", () => 
     );
   }
 });
+
+// --- A machine value must be formatted the same way everywhere ---------------------------------
+
+test("the metrics strip formats tokens through the shared helper, not raw", () => {
+  // The screenshot showed the SAME value two ways on one screen: the inspector read `127.2M`
+  // while the metrics strip read `12723914`. That is the exact failure `format.ts` exists to
+  // prevent, and it happened by interpolating the raw field in one place.
+  const app = sources.find(({ file }) => file === "/App.tsx");
+  assert.ok(app, "App.tsx must exist");
+  assert.ok(
+    !/\$\{session\.tokensTotal\}(?!\s*(===|!==|==|!=|\?|\+|>|<|\)))/.test(app.text),
+    "tokensTotal must go through formatTokens(), never interpolated raw",
+  );
+  assert.ok(app.text.includes("formatTokens"), "the metrics strip should use the shared formatter");
+});
+
+test("the rail labels its numbers truthfully, via the derived fleet counts", () => {
+  // "2 running" while both sessions were idle, because the label was applied to
+  // `live.length`. Counts come from `fleetCounts` so the label and number cannot drift.
+  const app = sources.find(({ file }) => file === "/App.tsx")!;
+  assert.ok(app.text.includes("fleetCounts"), "the topbar should use the derived counts");
+  assert.ok(
+    !/\{state\.live\.length\}\s*running/.test(app.text),
+    "the running label must not be applied to the total session count",
+  );
+});
+
+test("the header does not append the path to a line that already contains it", () => {
+  // The screenshot showed the working directory twice. `headerLocation` owns this decision.
+  const app = sources.find(({ file }) => file === "/App.tsx")!;
+  assert.ok(app.text.includes("headerLocation"), "the header should use the shared helper");
+  assert.ok(
+    !/whereLine\([^)]*\)\}\s*·\s*\{shortenPath/.test(app.text),
+    "appending shortenPath() to whereLine() duplicates the path for project sessions",
+  );
+});

@@ -51,6 +51,14 @@ export interface Config {
    */
   agentRootManaged: boolean;
   /**
+   * The user's home directory.
+   *
+   * Carried in the config rather than re-derived per use, and sent to the UI so it can render
+   * `~/git/x` instead of `/Users/x/git/x`. Every path in the rail and the header is abbreviated
+   * with it, which is what makes a list of 20 rows scannable.
+   */
+  home: string;
+  /**
    * The agent directory holding Pi's provider configuration (`auth.json`).
    *
    * Usually the same as `agentRoot`, but not necessarily: a session inherits the default
@@ -104,6 +112,7 @@ export function defaultConfig(): Config {
     agentRoot,
     fragmentDir: join(stateRoot, "policy"),
     agentRootManaged: managed,
+    home,
     // Where a session actually reads provider configuration. Defaults to Pi's own agent dir,
     // because Pi Central does not currently pass `PI_CODING_AGENT_DIR`; if that changes, this
     // must follow, or the policy would grant keychain access for the wrong location.

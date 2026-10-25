@@ -9,7 +9,7 @@
  */
 import { useMemo, useState } from "react";
 import type { LiveSession } from "@pi-central/protocol";
-import { displayName, formatContext, formatCost, formatThinking, whereLine } from "../format.ts";
+import { displayName, formatContext, formatCost, formatModel, formatThinking, whereLine } from "../format.ts";
 import { stateLabel } from "../store.ts";
 
 const GROUPS = [
@@ -27,7 +27,7 @@ export function SessionRail({
   onStartSession,
   onOpenDirectory,
   home,
-  historyCount,
+  historyTotal,
 }: {
   sessions: LiveSession[];
   focusedId: string | undefined;
@@ -35,7 +35,8 @@ export function SessionRail({
   onStartSession: () => void;
   onOpenDirectory: () => void;
   home: string | undefined;
-  historyCount: number;
+  /** Total sessions on disk, which may exceed the number loaded. */
+  historyTotal: number;
 }) {
   const [filter, setFilter] = useState("");
 
@@ -107,9 +108,11 @@ export function SessionRail({
           ))
         )}
 
-        {historyCount > 0 && (
+        {historyTotal > 0 && (
           <p className="rail-empty" style={{ borderTop: "1px solid var(--line)", marginTop: 8 }}>
-            {historyCount} sessions on disk — see the History tab.
+            {/* The true total, not the size of the loaded page. See `historyTotal`. Built as one
+                string so it renders as one text node rather than three that React separates. */}
+            {`${historyTotal} session${historyTotal === 1 ? "" : "s"} on disk — see the History tab.`}
           </p>
         )}
       </div>
@@ -152,7 +155,7 @@ function RailRow({
         </span>
       )}
       <span className="r3">
-        <span>{session.model ?? "model —"}</span>
+        <span>{formatModel(session.model)}</span>
         <span>{formatThinking(session.thinkingLevel)}</span>
         <span>{formatContext(session.contextPercent)}</span>
         <span>{formatCost(session.cost)}</span>

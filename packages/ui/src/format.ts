@@ -67,21 +67,44 @@ export function formatAge(modifiedMs: number, now = Date.now()): string {
 }
 
 /**
+ * Truncate from the middle, keeping the head and tail.
+ *
+ * Middle rather than trailing because both ends carry identity: `deepseek-ai/DeepSeek-V4.1-Flash`
+ * is recognizable as `deepseek-ai/D…4.1-Flash` while `deepseek-ai/DeepS…` is not.
+ */
+export function truncateMiddle(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const keep = max - 1; // one character is spent on the ellipsis
+  const head = Math.ceil(keep * 0.55);
+  const tail = keep - head;
+  return `${text.slice(0, head)}…${text.slice(text.length - tail)}`;
+}
+
+/**
  * Shorten a path from the middle, keeping the head and tail.
  *
- * Middle truncation rather than trailing: `/Users/x/git/idea…ry/pi-central` still tells you
- * which project it is, while `/Users/x/git/idea-factory/pi-ce…` does not.
+ * The same rule as `truncateMiddle`, with `$HOME` abbreviated first because it is noise in
+ * every single row.
  */
 export function shortenPath(path: string, max = 34, home?: string): string {
   let display = path;
-  // `$HOME` is abbreviated because it is noise in every single row.
-  const prefix = home ?? "";
-  if (prefix && display.startsWith(prefix)) display = `~${display.slice(prefix.length)}`;
-  if (display.length <= max) return display;
-  const keep = max - 1;
-  const head = Math.ceil(keep * 0.55);
-  const tail = keep - head;
-  return `${display.slice(0, head)}…${display.slice(display.length - tail)}`;
+  if (home && home.length > 1 && display.startsWith(home)) {
+    display = `~${display.slice(home.length)}`;
+  }
+  return truncateMiddle(display, max);
+}
+
+/**
+ * The model name, shortened to fit on a shared metrics line.
+ *
+ * The rail's third line carries model · thinking · context · cost, so an untruncated model
+ * swallows the row: observed in a real screenshot as
+ * `deepseek-ai/DeepSeek-V4.1-Flash  high  ct…` — the context and cost were cut off entirely,
+ * which is worse than a shortened model name because those are the values you scan for.
+ */
+export function formatModel(model: string | undefined, max = 14): string {
+  if (!model) return "model —";
+  return truncateMiddle(model, max);
 }
 
 /** A session's display name, falling back to something more useful than a bare id. */
@@ -103,6 +126,25 @@ export function displayName(session: LiveSession): string {
 export function whereLine(session: LiveSession, home?: string): string {
   if (session.scratch) return `scratch · ${session.id}`;
   return shortenPath(session.cwd, 34, home);
+}
+
+/**
+ * Where a session works, as the header states it: one location, said once.
+ *
+ * Extracted from the component because the first version appended the path to `whereLine`, and
+ * `whereLine` ALREADY returns the path for a project session — so the header printed
+ * `/Users/…/idea-factory · /Users/…/idea-factory`. A duplicated value is a small bug with a
+ * large cost: it reads as two different facts that happen to agree.
+ *
+ * A scratch session is the one case where two facts genuinely differ, so it gets both: the
+ * `scratch · s7` abstraction AND the real path, because the header is where the actual location
+ * belongs.
+ */
+export function headerLocation(session: LiveSession, home?: string, max = 70): string {
+  if (session.scratch) {
+    return `${whereLine(session, home)} · ${shortenPath(session.cwd, max, home)}`;
+  }
+  return shortenPath(session.cwd, max, home);
 }
 
 /** Clipboard write that never throws into a render. Returns whether it succeeded. */

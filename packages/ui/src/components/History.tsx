@@ -18,10 +18,13 @@ import { CopyButton } from "./CopyButton.tsx";
 
 export function HistoryView({
   history,
+  historyTotal,
   onResume,
   home,
 }: {
   history: HistoricalSession[];
+  /** Total on disk, which may exceed the loaded page. */
+  historyTotal: number;
   onResume: (session: HistoricalSession) => void;
   home: string | undefined;
 }) {
@@ -64,7 +67,12 @@ export function HistoryView({
       ) : (
         <>
           <p className="hint" style={{ marginBottom: 12 }} aria-live="polite">
-            {results.length} of {history.length} sessions
+            {results.length} of {history.length} session{history.length === 1 ? "" : "s"}
+            {/* Say when the loaded set is a page. Presenting 500 of 1115 as a total would be a
+                half-truth, and the honest version is one short clause. */}
+            {historyTotal > history.length && (
+              <> · searching the {history.length} most recent of {historyTotal}</>
+            )}
           </p>
           {results.map((session) => (
             <HistoryRow

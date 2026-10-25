@@ -166,15 +166,23 @@ export class Transport {
 
   async #sendSnapshot(socket: WebSocket): Promise<void> {
     let history: HistoricalSession[] = [];
+    let historyTotal = 0;
     try {
       const discovered = await discover(this.#config);
-      history = discovered.sessions as typeof history;
+      history = discovered.sessions;
+      historyTotal = discovered.total;
     } catch (error) {
       // Discovery reads the real session store, which can be absent or unreadable. A
       // snapshot with no history is still useful; failing the whole connection is not.
       this.#send(socket, { kind: "error", message: `discovery failed: ${(error as Error).message}` });
     }
-    this.#send(socket, { kind: "snapshot", live: this.#supervisor.list(), history });
+    this.#send(socket, {
+      kind: "snapshot",
+      live: this.#supervisor.list(),
+      history,
+      historyTotal,
+      home: this.#config.home,
+    });
   }
 
   async #onMessage(socket: WebSocket, raw: string): Promise<void> {
@@ -210,8 +218,14 @@ export class Transport {
     switch (control.kind) {
       case "list": {
         const discovered = await discover(this.#config);
-        this.#broadcast({ kind: "history", history: discovered.sessions });
-        this.#broadcast({ kind: "snapshot", live: this.#supervisor.list(), history: discovered.sessions });
+        this.#broadcast({ kind: "history", history: discovered.sessions, total: discovered.total });
+        this.#broadcast({
+          kind: "snapshot",
+          live: this.#supervisor.list(),
+          history: discovered.sessions,
+          historyTotal: discovered.total,
+          home: this.#config.home,
+        });
         return;
       }
       case "start": {

@@ -164,6 +164,17 @@ function flattenContent(content: unknown): string {
 
 export interface DiscoveryResult {
   sessions: HistoricalSession[];
+  /**
+   * How many session files exist, BEFORE the `limit` is applied.
+   *
+   * This exists because the UI states a total as a fact, and passing it the length of a
+   * truncated array makes it assert something false. Observed on this machine: 1115 session
+   * files, a limit of 500, and a rail reading "500 sessions on disk" -- a misleading machine
+   * value stated confidently, which is precisely the class of thing `format.ts` has tests
+   * against. A total the caller cannot distinguish from a page size will eventually be shown
+   * as one.
+   */
+  total: number;
   /** Files that looked like sessions but could not be parsed. Surfaced, not hidden. */
   skipped: { path: string; reason: string }[];
 }
@@ -179,7 +190,7 @@ export async function discover(config: Config, limit = 500): Promise<DiscoveryRe
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name);
   } catch {
-    return { sessions, skipped }; // no sessions yet is not an error
+    return { sessions, total: 0, skipped }; // no sessions yet is not an error
   }
 
   for (const projectDir of projectDirs) {
@@ -234,7 +245,9 @@ export async function discover(config: Config, limit = 500): Promise<DiscoveryRe
   }
 
   sessions.sort((a, b) => b.modifiedMs - a.modifiedMs);
-  return { sessions: sessions.slice(0, limit), skipped };
+  // `total` is measured after the sort but before the slice, so it is the true count rather
+  // than the size of the page returned.
+  return { sessions: sessions.slice(0, limit), total: sessions.length, skipped };
 }
 
 function directoryExists(dir: string): boolean {

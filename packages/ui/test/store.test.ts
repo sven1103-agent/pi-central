@@ -10,6 +10,8 @@ import assert from "node:assert/strict";
 import {
   composerMode,
   contextPercent,
+  fleetCounts,
+  historyIsPartial,
   focusedSession,
   initialState,
   needingAttention,
@@ -69,7 +71,7 @@ test("a snapshot replaces live state wholesale", () => {
   state = reduce(state, { kind: "session", session: live({ id: "s1" }) });
   state = reduce(state, { kind: "session", session: live({ id: "s2" }) });
   assert.equal(state.live.length, 2);
-  state = reduce(state, { kind: "snapshot", live: [live({ id: "s2" })], history: [] });
+  state = reduce(state, { kind: "snapshot", live: [live({ id: "s2" })], history: [], historyTotal: 0, home: "/Users/x" });
   assert.deepEqual(state.live.map((s) => s.id), ["s2"]);
   assert.equal(state.ready, true);
 });
@@ -79,14 +81,14 @@ test("a snapshot preserves focus when the focused session still exists", () => {
   state = reduce(state, { kind: "session", session: live({ id: "s1" }) });
   state = reduce(state, { kind: "session", session: live({ id: "s2" }) });
   assert.equal(state.focusedId, "s1");
-  state = reduce(state, { kind: "snapshot", live: [live({ id: "s1" }), live({ id: "s2" })], history: [] });
+  state = reduce(state, { kind: "snapshot", live: [live({ id: "s1" }), live({ id: "s2" })], history: [], historyTotal: 0, home: "/Users/x" });
   assert.equal(state.focusedId, "s1", "a reconnect must not move the user's view");
 });
 
 test("a snapshot refocuses when the focused session is gone", () => {
   let state = initialState();
   state = reduce(state, { kind: "session", session: live({ id: "s1" }) });
-  state = reduce(state, { kind: "snapshot", live: [live({ id: "s2" })], history: [] });
+  state = reduce(state, { kind: "snapshot", live: [live({ id: "s2" })], history: [], historyTotal: 0, home: "/Users/x" });
   assert.equal(state.focusedId, "s2", "focus must not point at a session that no longer exists");
 });
 
@@ -258,4 +260,75 @@ test("history search is case-insensitive and returns nothing when nothing matche
   const history = [historical({ name: "MixedCase" })];
   assert.equal(searchHistory(history, "mixedcase").length, 1);
   assert.equal(searchHistory(history, "absent").length, 0);
+});
+
+// --- Findings from a real screenshot (see img_1.png) -----------------------------------------
+
+test("fleet counts label each number truthfully", () => {
+  // The screenshot showed "2 running" while BOTH sessions were idle, because the label was
+  // applied to `live.length`. A count is only useful if its label is true.
+  const state = {
+    ...initialState(),
+    live: [
+      live({ id: "a", state: "idle" }),
+      live({ id: "b", state: "idle", scratch: true }),
+    ],
+  };
+  const counts = fleetCounts(state);
+  assert.equal(counts.total, 2);
+  assert.equal(counts.running, 0, "idle sessions are not running");
+  assert.equal(counts.idle, 2);
+  assert.equal(counts.scratch, 1);
+  assert.equal(counts.needs, 0);
+});
+
+test("only streaming and starting count as running", () => {
+  const state = {
+    ...initialState(),
+    live: [
+      live({ id: "a", state: "streaming" }),
+      live({ id: "b", state: "starting" }),
+      live({ id: "c", state: "idle" }),
+      live({ id: "d", state: "stopped" }),
+      live({ id: "e", state: "awaiting-approval" }),
+      live({ id: "f", state: "failed" }),
+    ],
+  };
+  const counts = fleetCounts(state);
+  assert.equal(counts.running, 2);
+  assert.equal(counts.needs, 2, "blocked and failed both need a human");
+  assert.equal(counts.total, 6);
+});
+
+test("historyIsPartial distinguishes a page from the whole store", () => {
+  // The rail read "500 sessions on disk" while 1115 existed, because the discovery limit was
+  // presented as a total.
+  const partial = { ...initialState(), history: [historical()], historyTotal: 1115 };
+  assert.equal(historyIsPartial(partial), true);
+
+  const complete = { ...initialState(), history: [historical()], historyTotal: 1 };
+  assert.equal(historyIsPartial(complete), false);
+
+  const empty = initialState();
+  assert.equal(historyIsPartial(empty), false, "0 of 0 is not partial");
+});
+
+test("a snapshot carries HOME and the true history total", () => {
+  // The browser cannot discover either: HOME is the orchestrator's environment, and the total
+  // is known only to discovery.
+  const state = reduce(initialState(), {
+    kind: "snapshot",
+    live: [],
+    history: [historical()],
+    historyTotal: 1115,
+    home: "/Users/tester",
+  });
+  assert.equal(state.home, "/Users/tester");
+  assert.equal(state.historyTotal, 1115);
+  assert.equal(state.history.length, 1);
+});
+
+test("a history event updates the total, not just the page", () => {
+  const state = reduce(initialState(), { kind: "history", history: [historical()], total: 42 });
+  assert.equal(state.historyTotal, 42);
 });

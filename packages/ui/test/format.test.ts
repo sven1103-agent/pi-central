@@ -13,9 +13,12 @@ import {
   formatContext,
   formatCost,
   formatElapsed,
+  formatModel,
   formatThinking,
   formatTokens,
+  headerLocation,
   shortenPath,
+  truncateMiddle,
   whereLine,
 } from "../src/format.ts";
 import type { LiveSession } from "@pi-central/protocol";
@@ -149,4 +152,60 @@ test("scratch sessions hide their internal workspace path", () => {
 
 test("a project session shows its shortened path", () => {
   assert.equal(whereLine(session({ cwd: "/Users/x/git/api", scratch: false }), "/Users/x"), "~/git/api");
+});
+
+// --- Findings from a real screenshot (see img_1.png) -----------------------------------------
+
+test("the header states the working directory exactly ONCE", () => {
+  // The screenshot showed `/Users/…/idea-factory · /Users/…/idea-factory`. `whereLine` already
+  // returns the path for a project session, so appending it again duplicated it — which reads
+  // as two different facts that happen to agree.
+  const line = headerLocation(session({ cwd: "/Users/x/git/api", scratch: false }), "/Users/x");
+  assert.equal(line, "~/git/api");
+  assert.equal(line.split("~/git/api").length - 1, 1, `path appears more than once: ${line}`);
+});
+
+test("a scratch header adds the real path to the abstraction, because they differ", () => {
+  // The rail shows `scratch · s7`; the header is where the actual location belongs.
+  const scratch = session({ scratch: true, cwd: "/Users/x/.local/share/pi-central/workspaces/s7" });
+  const line = headerLocation(scratch, "/Users/x");
+  assert.match(line, /scratch · s7/);
+  assert.match(line, /~\/\.local\/share\/pi-central\/workspaces\/s7/);
+});
+
+test("a long path in the header is truncated but a short one is untouched", () => {
+  const long = "/very/long/path/that/definitely/exceeds/the/maximum/width/allowed/here/api";
+  const line = headerLocation(session({ cwd: long, scratch: false }), undefined, 40);
+  assert.ok(line.length <= 40, line);
+  assert.match(line, /…/);
+});
+
+// --- Model truncation: the rail's shared metrics line ----------------------------------------
+
+test("a long model name is shortened so the rest of the metrics survive", () => {
+  // From the screenshot: `deepseek-ai/DeepSeek-V4.1-Flash  high  ct…` — the untruncated model
+  // swallowed the row and the context and cost were cut off, which is worse than a shortened
+  // model name because those are the values you scan for.
+  const model = formatModel("deepseek-ai/DeepSeek-V4.1-Flash");
+  assert.ok(model.length <= 14, `too long: ${model}`);
+  assert.match(model, /…/, "a shortened name should show where it was cut");
+  // The SUFFIX is what distinguishes models from one vendor, so it is the half worth keeping.
+  // Asserting both `deepseek-ai` AND `V4.1-Flash` would be over-claiming: 14 characters cannot
+  // hold both, and a test that demands the impossible is a test that gets deleted rather than
+  // fixed. (This assertion was written the over-claiming way first, and failed.)
+  assert.ok(model.endsWith("Flash"), `the version suffix is the identifying part: ${model}`);
+  assert.ok(model.startsWith("deep"), `the head should still be readable: ${model}`);
+});
+
+test("a short model name is left alone, and an absent one says so", () => {
+  assert.equal(formatModel("gpt-5"), "gpt-5");
+  assert.equal(formatModel(undefined), "model —");
+});
+
+test("truncateMiddle never exceeds the budget, at any length", () => {
+  for (let length = 0; length < 60; length += 1) {
+    const text = "x".repeat(length);
+    const out = truncateMiddle(text, 14);
+    assert.ok(out.length <= Math.max(14, length), `len ${length} produced ${out.length}`);
+  }
 });

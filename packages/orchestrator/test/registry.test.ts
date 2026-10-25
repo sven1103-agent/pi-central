@@ -19,6 +19,7 @@ const config = (over: Partial<Config> = {}): Config => ({
   fragmentDir: join(root, "state", "policy"),
   agentRootManaged: true,
   providerAgentDir: join(root, "provider-agent"),
+  home: "/Users/tester",
   ...over,
 });
 
@@ -177,4 +178,32 @@ test("sessions are sorted newest first", async () => {
   const { sessions } = await discover(config());
   const sortIds = sessions.filter((s) => s.cwd === "/Users/x/sort").map((s) => s.id);
   assert.deepEqual(sortIds, ["id-new", "id-old"]);
+});
+
+test("discovery reports a true total, not the size of the returned page", async () => {
+  // Observed on the real machine: 1115 session files, a limit of 500, and a rail stating
+  // "500 sessions on disk" as a fact. A caller cannot tell a total from a page size unless the
+  // two are separate values, and they previously were not.
+  // A DEDICATED root, not the shared one: `root` accumulates sessions from other tests, so
+  // counting against it asserted 16 instead of 7. A test that depends on test-ordering is a
+  // test that fails for reasons unrelated to the code.
+  const isolated = mkdtempSync(join(tmpdir(), "pi-central-total-"));
+  try {
+    const projectDir = join(isolated, encodeSessionDir("/Users/x/proj-total"));
+    for (let i = 0; i < 7; i += 1) {
+      writeSession(projectDir, `s${i}.jsonl`, [header(`id-${i}`, "/Users/x/proj-total")]);
+    }
+
+    const page = await discover(config({ sessionsRoot: isolated }), 3);
+    assert.equal(page.sessions.length, 3, "the page must honour the limit");
+    assert.equal(page.total, 7, "the total must be the real count, measured before the slice");
+  } finally {
+    rmSync(isolated, { recursive: true, force: true });
+  }
+});
+
+test("an empty or absent sessions root reports a total of zero", async () => {
+  const empty = await discover(config({ sessionsRoot: join(root, "does-not-exist") }));
+  assert.deepEqual(empty.sessions, []);
+  assert.equal(empty.total, 0, "a missing store is not an error, and not an unknown total");
 });

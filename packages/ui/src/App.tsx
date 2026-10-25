@@ -12,12 +12,11 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import type { Control, HistoricalSession, LiveSession } from "@pi-central/protocol";
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
 import {
+  fleetCounts,
   focusedSession,
   initialState,
-  needingAttention,
   pendingDialogCount,
   reduce,
-  scratchSessions,
   transcriptFor,
 } from "./store.ts";
 import { SessionRail } from "./components/SessionRail.tsx";
@@ -26,7 +25,7 @@ import { Composer } from "./components/Composer.tsx";
 import { DialogDock, type DialogAnswer } from "./components/DialogDock.tsx";
 import { Inspector } from "./components/Inspector.tsx";
 import { HistoryView } from "./components/History.tsx";
-import { displayName, formatContext, formatCost, shortenPath, whereLine } from "./format.ts";
+import { displayName, formatContext, formatCost, formatTokens, headerLocation } from "./format.ts";
 import { stateLabel } from "./store.ts";
 
 type Tab = "sessions" | "history";
@@ -69,8 +68,10 @@ export function App() {
 
   const focused = focusedSession(state);
   const transcript = transcriptFor(state, focused?.id);
-  const needs = needingAttention(state);
-  const scratch = scratchSessions(state);
+  const fleet = fleetCounts(state);
+  // HOME arrives with the first snapshot, so it is undefined until then. Paths render in full
+  // for that instant rather than showing a wrong abbreviation.
+  const home = state.home;
 
   // --- keyboard shortcuts -----------------------------------------------------------------
   useEffect(() => {
@@ -138,13 +139,15 @@ export function App() {
 
         <div className="topbar-right">
           <div className="fleet">
+            {/* Each label matched to its number. The first version labelled the session COUNT
+                as "running", so two idle sessions read "2 running". */}
             <span>
-              {state.live.length} running
+              {fleet.total} session{fleet.total === 1 ? "" : "s"}
             </span>
-            {scratch.length > 0 && <span>{scratch.length} scratch</span>}
-            {needs.length > 0 && (
-              <span className="fleet-needs">{needs.length} need you</span>
-            )}
+            {/* "0 running" is noise, so it only appears when something is actually running. */}
+            {fleet.running > 0 && <span>{fleet.running} running</span>}
+            {fleet.scratch > 0 && <span>{fleet.scratch} scratch</span>}
+            {fleet.needs > 0 && <span className="fleet-needs">{fleet.needs} need you</span>}
           </div>
           <span className={`conn conn-${connectionStatus}`}>
             <span className="conn-dot" aria-hidden="true" />
@@ -179,15 +182,16 @@ export function App() {
           }}
           onStartSession={onStartSession}
           onOpenDirectory={() => setSheetOpen(true)}
-          home={undefined}
-          historyCount={state.history.length}
+          home={home}
+          historyTotal={state.historyTotal}
         />
 
         {tab === "history" ? (
           <main className="column">
             <HistoryView
               history={state.history}
-              home={undefined}
+              historyTotal={state.historyTotal}
+              home={home}
               onResume={(session: HistoricalSession) => {
                 send({ kind: "resume", path: session.path });
                 setTab("sessions");
@@ -199,6 +203,7 @@ export function App() {
             <SessionView
               session={focused}
               transcript={transcript}
+              home={home}
               onAnswer={onAnswer}
               onSend={(message) => {
                 if (focused) send({ kind: "prompt", sessionId: focused.id, message });
@@ -216,7 +221,7 @@ export function App() {
 
         <Inspector
           session={tab === "sessions" ? focused : undefined}
-          home={undefined}
+          home={home}
           onStop={() => focused && setConfirmStop(focused)}
           onRename={(name) => focused && send({ kind: "rename", sessionId: focused.id, name })}
         />
@@ -243,6 +248,7 @@ export function App() {
 function SessionView({
   session,
   transcript,
+  home,
   onAnswer,
   onSend,
   onClearQueueAndStop,
@@ -251,6 +257,7 @@ function SessionView({
 }: {
   session: LiveSession | undefined;
   transcript: ReturnType<typeof transcriptFor>;
+  home: string | undefined;
   onAnswer: (dialogId: string, answer: DialogAnswer) => void;
   onSend: (message: string) => void;
   onClearQueueAndStop: () => void;
@@ -285,7 +292,7 @@ function SessionView({
             <span className={`chip chip-${session.state}`}>{stateLabel(session)}</span>
           </h2>
           <span className="where" title={session.cwd}>
-            {whereLine(session, undefined)} · {shortenPath(session.cwd, 60, undefined)}
+            {headerLocation(session, home)}
           </span>
         </div>
       </div>
@@ -294,7 +301,9 @@ function SessionView({
         <span className={session.contextPercent !== null && session.contextPercent >= 80 ? "warn" : ""}>
           {formatContext(session.contextPercent)}
         </span>
-        <span>{session.tokensTotal === null ? "— tok" : `${session.tokensTotal} tok`}</span>
+        {/* Through the formatter, not raw: the inspector rendered the same value as `127.2M`
+            while this strip rendered `12723914` — one value, two formats, one screen. */}
+        <span>{formatTokens(session.tokensTotal)} tok</span>
         <span>{formatCost(session.cost)}</span>
         <span>{session.messageCount} msgs</span>
         {session.pending > 0 && <span className="warn">+{session.pending} queued</span>}

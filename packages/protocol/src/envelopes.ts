@@ -94,12 +94,38 @@ export type Control =
   | { kind: "answerDialog"; sessionId: string; dialogId: string; answer: { value: string } | { confirmed: boolean } | { cancelled: true } }
   | { kind: "resume"; path: string; mode?: "sandboxed" | "direct" };
 
+/**
+ * A page of history plus the true total it was drawn from.
+ *
+ * Kept as a pair so a caller cannot accidentally present the page size as the total. The two
+ * travel together for the same reason `{ sessions, total }` does in `registry.ts`.
+ */
+export interface HistoryPage {
+  sessions: HistoricalSession[];
+  /** Total session files on disk, which may exceed `sessions.length`. */
+  total: number;
+}
+
 /** Events the UI may receive. `record` is untrusted and must be sanitized before render. */
 export type Event =
-  | { kind: "snapshot"; live: LiveSession[]; history: HistoricalSession[] }
+  | {
+      kind: "snapshot";
+      live: LiveSession[];
+      history: HistoricalSession[];
+      /** True history total, as distinct from the length of `history`. */
+      historyTotal: number;
+      /**
+       * The orchestrator's `$HOME`, for abbreviating paths in the UI.
+       *
+       * The browser cannot discover this: it is a local single-user tool talking to a process
+       * that already knows the answer. Without it every path renders in full, so the rail loses
+       * the `~/…` form that makes rows scannable.
+       */
+      home: string;
+    }
   | { kind: "session"; session: LiveSession }
   | { kind: "record"; sessionId: string; record: PiRecord }
-  | { kind: "history"; history: HistoricalSession[] }
+  | { kind: "history"; history: HistoricalSession[]; total: number }
   | { kind: "error"; message: string; sessionId?: string | undefined };
 
 export const PROTOCOL_VERSION = 1 as const;

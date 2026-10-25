@@ -64,7 +64,7 @@ function session(over = {}) {
 test("the primary action is first and mentions no directory", () => {
   // The governing decision: starting a session must not require choosing a path (US-1).
   const html = renderToString(createElement(SessionRail, {
-    sessions: [], focusedId: undefined, onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyCount: 0,
+    sessions: [], focusedId: undefined, onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
   }));
   assert.match(html, /class="btn-primary"/);
   assert.match(html, /New session/);
@@ -81,7 +81,7 @@ test("sessions needing an answer are grouped first", () => {
       session({ id: "idle", state: "idle" }),
       session({ id: "blocked", state: "awaiting-approval", dialogs: [{ id: "d", method: "confirm", message: "Allow?", receivedAt: 0 }] }),
     ],
-    focusedId: undefined, onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyCount: 0,
+    focusedId: undefined, onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
   }));
   assert.ok(html.indexOf("Needs you") < html.indexOf("Idle"), "the blocked group must come first");
 });
@@ -90,7 +90,7 @@ test("a scratch session shows a label, not its internal workspace path", () => {
   // The workspace path is an implementation detail (US-3).
   const html = renderToString(createElement(SessionRail, {
     sessions: [session({ scratch: true, cwd: "/Users/x/.local/share/pi-central/workspaces/s7" })],
-    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyCount: 0,
+    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
   }));
   assert.match(html, /Scratch session/);
   assert.match(html, /scratch · s7/);
@@ -100,10 +100,44 @@ test("a scratch session shows a label, not its internal workspace path", () => {
   assert.ok(!/>[^<]*workspaces\/s7</.test(html), "the internal path must not be visible text");
 });
 
+test("the rail states the TRUE total on disk, not the number loaded", () => {
+  // Observed: "500 sessions on disk" while 1115 existed, because the page size was presented as
+  // a total. Presenting a page as a total is the kind of confident lie this UI must not tell.
+  const html = renderToString(createElement(SessionRail, {
+    sessions: [session()], focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {},
+    home: "/Users/x", historyTotal: 1115,
+  }));
+  assert.match(html, /1115 sessions on disk/);
+  assert.ok(!html.includes("500 sessions"), "the page size must not be shown as the total");
+});
+
+test("a long model name does not swallow the rail's metrics line", () => {
+  // The screenshot showed `deepseek-ai/DeepSeek-V4.1-Flash  high  ct…` -- context and cost cut
+  // off entirely, which is worse than a shortened model because those are the scanned values.
+  const html = renderToString(createElement(SessionRail, {
+    // contextPercent and cost are set deliberately: the point is that THEY survive the model.
+    sessions: [session({ model: "deepseek-ai/DeepSeek-V4.1-Flash", contextPercent: 62, cost: 0.0142 })],
+    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: "/Users/x", historyTotal: 0,
+  }));
+  assert.ok(!html.includes("deepseek-ai/DeepSeek-V4.1-Flash"), "the raw model name must be shortened");
+  assert.match(html, /…/, "the shortening should be visible");
+  assert.match(html, /ctx 62%/, "the context value must survive");
+  assert.match(html, /\$0\.0142/, "the cost must survive");
+});
+
+test("the rail abbreviates HOME, so rows are scannable", () => {
+  const html = renderToString(createElement(SessionRail, {
+    sessions: [session({ cwd: "/Users/x/git/api-gateway", scratch: false })],
+    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: "/Users/x", historyTotal: 0,
+  }));
+  assert.match(html, /~\/git\/api-gateway/);
+  assert.ok(!html.includes(">/Users/x/git"), "the home prefix should be abbreviated away");
+});
+
 test("the rail states an unknown cost as an em dash, never $0.0000", () => {
   const html = renderToString(createElement(SessionRail, {
     sessions: [session({ cost: null })],
-    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyCount: 0,
+    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
   }));
   assert.ok(html.includes("—"), "expected an em dash for unknown values");
   assert.ok(!html.includes("$0.0000"), "an unknown cost must not read as free");
@@ -112,7 +146,7 @@ test("the rail states an unknown cost as an em dash, never $0.0000", () => {
 test("a dialog's ask replaces the path line, because that is what the row is for", () => {
   const html = renderToString(createElement(SessionRail, {
     sessions: [session({ state: "awaiting-approval", dialogs: [{ id: "d", method: "confirm", message: "Allow running npm test?", receivedAt: 0 }] })],
-    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyCount: 0,
+    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
   }));
   assert.match(html, /Allow running npm test\?/);
 });

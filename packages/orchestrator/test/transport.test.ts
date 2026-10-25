@@ -90,6 +90,7 @@ function emptyConfig(): Config {
     fragmentDir: "/nonexistent/policy",
     agentRootManaged: true,
     providerAgentDir: "/nonexistent/provider",
+    home: "/Users/tester",
   };
 }
 

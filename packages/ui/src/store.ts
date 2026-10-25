@@ -21,6 +21,10 @@ import { applyRecord, emptyTranscript, type Transcript } from "./transcript.ts";
 export interface UiState {
   live: LiveSession[];
   history: HistoricalSession[];
+  /** True history total on disk, which may exceed `history.length`. */
+  historyTotal: number;
+  /** The orchestrator's `$HOME`, for path abbreviation. Absent until the first snapshot. */
+  home: string | undefined;
   /** Transcripts keyed by session id, built from that session's records. */
   transcripts: Record<string, Transcript>;
   /** The session the user is looking at. Not necessarily the one that is streaming. */
@@ -37,6 +41,8 @@ export function initialState(): UiState {
   return {
     live: [],
     history: [],
+    historyTotal: 0,
+    home: undefined,
     transcripts: {},
     focusedId: undefined,
     connection: "connecting",
@@ -63,7 +69,15 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
         ? state.focusedId
         : // Otherwise focus the first session, which is what a user arriving expects.
           event.live[0]?.id;
-      return { ...state, live: event.live, history: event.history, focusedId, ready: true };
+      return {
+        ...state,
+        live: event.live,
+        history: event.history,
+        historyTotal: event.historyTotal,
+        home: event.home,
+        focusedId,
+        ready: true,
+      };
     }
 
     case "session": {
@@ -88,7 +102,7 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
     }
 
     case "history":
-      return { ...state, history: event.history, ready: true };
+      return { ...state, history: event.history, historyTotal: event.total, ready: true };
 
     case "error":
       return {
@@ -99,6 +113,42 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
 }
 
 // --- Selectors, so components do not re-derive -------------------------------------------------
+
+/**
+ * Fleet counts for the topbar, each label matched to the number it shows.
+ *
+ * Derived rather than assembled inline, because the first version labelled
+ * `state.live.length` as "running" — so a screenshot of two IDLE sessions read "2 running".
+ * A count is only useful if its label is true, and every state needed to compute it is right
+ * here rather than in a component.
+ */
+export function fleetCounts(state: UiState): {
+  total: number;
+  running: number;
+  idle: number;
+  needs: number;
+  scratch: number;
+} {
+  const isRunning = (s: LiveSession) => s.state === "streaming" || s.state === "starting";
+  const isBlocked = (s: LiveSession) => s.state === "awaiting-approval" || s.state === "failed";
+  return {
+    total: state.live.length,
+    running: state.live.filter(isRunning).length,
+    idle: state.live.filter((s) => s.state === "idle").length,
+    needs: state.live.filter(isBlocked).length,
+    scratch: state.live.filter((s) => s.scratch).length,
+  };
+}
+
+/**
+ * Is the loaded history a page rather than the whole store?
+ *
+ * The rail and the history pane must say so when it is: "1115 sessions on disk" while only
+ * searching the newest 500 is a half-truth, and the honest version is short enough to state.
+ */
+export function historyIsPartial(state: UiState): boolean {
+  return state.historyTotal > state.history.length;
+}
 
 export function focusedSession(state: UiState): LiveSession | undefined {
   return state.live.find((s) => s.id === state.focusedId);
