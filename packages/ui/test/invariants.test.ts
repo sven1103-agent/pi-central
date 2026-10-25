@@ -117,10 +117,32 @@ test("the UI never treats agent_end as completion", () => {
 test("tool output is not run through the Markdown pipeline", () => {
   // Tool output is data, not prose: a diff containing `*` or `_` would be reinterpreted and the
   // user would see something other than what the command produced.
-  const frame = sources.find(({ file }) => file === "/components/ToolFrame.tsx");
-  assert.ok(frame, "ToolFrame.tsx must exist");
-  assert.ok(!frame.text.includes("renderMarkdown"), "tool output must not be rendered as Markdown");
-  assert.ok(!frame.raw.includes("dangerouslySetInnerHTML"), "tool output must be escaped text");
+  //
+  // The guard follows the responsibility: this used to point at `ToolFrame.tsx`, which the trace
+  // window replaced. A test aimed at a deleted file would have silently stopped protecting
+  // anything, which is worse than no test.
+  const trace = sources.find(({ file }) => file === "/components/ToolTrace.tsx");
+  assert.ok(trace, "ToolTrace.tsx must exist — it is the only place tool output renders");
+  assert.ok(!trace.text.includes("renderMarkdown"), "tool output must not be rendered as Markdown");
+  assert.ok(!trace.raw.includes("dangerouslySetInnerHTML"), "tool output must be escaped text");
+});
+
+test("the transcript does NOT append the whole tool list after the conversation", () => {
+  // The reported bug. Tools are a trace and belong in the trace window; rendering them after
+  // every message put 1138 frames below the conversation and made the agent's output unfindable.
+  const view = sources.find(({ file }) => file === "/components/Transcript.tsx");
+  assert.ok(view, "Transcript.tsx must exist");
+  assert.ok(
+    !/transcript\.tools\.map/.test(view.text),
+    "the transcript must not render every tool; that is the trace window's job",
+  );
+  // It must still show WHERE tools ran, or the prose would look like an uninterrupted monologue.
+  // The marker grouping lives in `planTranscript` (transcript.ts), which is where the "one marker
+  // per stretch of work" rule is tested — so the invariant checks the transcript USES that plan
+  // rather than re-deriving positions itself.
+  assert.ok(view.text.includes("planTranscript"), "the transcript should render a planned sequence");
+  assert.ok(view.text.includes("ToolMarker"), "the transcript should render a compact tool marker");
+  assert.ok(view.text.includes("showMarkers"), "markers must be optional, for pure reading");
 });
 
 // --- No live region on the streaming tail -----------------------------------------------------

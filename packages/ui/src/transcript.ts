@@ -72,6 +72,17 @@ export interface ToolExecution {
   running: boolean;
   durationMs?: number | undefined;
   startedAt: number;
+  /**
+   * How many messages existed when this tool ran, i.e. its position in the conversation.
+   *
+   * Recorded because tools are NOT a separate stream to be appended at the end: they happen
+   * between two messages. Without a position the only way to render them is after everything
+   * else, which buries the conversation under a thousand frames — the actual defect this field
+   * exists to fix.
+   *
+   * A tool requested by the message at `messages[i]` has `afterMessage === i + 1`.
+   */
+  afterMessage: number;
 }
 
 export interface Transcript {
@@ -248,6 +259,8 @@ export function applyRecord(transcript: Transcript, record: Record<string, unkno
           isError: message?.isError === true,
           running: false,
           startedAt: Date.now(),
+          // History arrives in order, so the message count at this point IS the position.
+          afterMessage: next.messages.length,
         });
         return next;
       }
@@ -291,6 +304,7 @@ export function applyRecord(transcript: Transcript, record: Record<string, unkno
         isError: false,
         running: true,
         startedAt: Date.now(),
+        afterMessage: next.messages.length,
       });
       return next;
     }
@@ -332,6 +346,7 @@ export function applyRecord(transcript: Transcript, record: Record<string, unkno
           running: false,
           ...(typeof record.durationMs === "number" ? { durationMs: record.durationMs } : {}),
           startedAt: Date.now(),
+          afterMessage: next.messages.length,
         });
       }
       return next;
@@ -549,4 +564,144 @@ export function assistantText(message: TranscriptMessage): string {
     .filter((block): block is TextBlock => block.kind === "text")
     .map((block) => block.text)
     .join("");
+}
+
+// --- Tool positioning and the trace window ----------------------------------------------------
+//
+// Tools are a TRACE, not conversation. A session on this machine produced 1138 tool calls and
+// over a megabyte of tool output; rendering all of it inline buries the agent's actual prose and
+// imposes real mental load, especially with a fast provider. So:
+//
+//   - the transcript shows prose, plus one compact marker per contiguous run of tools, which
+//     keeps the POSITION without the bulk;
+//   - a small trace window shows the most recent few plus whatever is running now;
+//   - the full list stays available for debugging, traversable on demand.
+
+/** Tools that ran immediately after the message at `messageIndex` (0-based). */
+export function toolsAfter(transcript: Transcript, messageIndex: number): ToolExecution[] {
+  const position = messageIndex + 1;
+  return transcript.tools.filter((tool) => tool.afterMessage === position);
+}
+
+/**
+ * Tools that ran before any message, which happens when a session is resumed mid-tool-call.
+ *
+ * Returned separately rather than dropped: they are real work that produced real output, and a
+ * trace that silently omits the first entries is worse than one that shows them out of context.
+ */
+export function leadingTools(transcript: Transcript): ToolExecution[] {
+  return transcript.tools.filter((tool) => tool.afterMessage === 0);
+}
+
+/** The tool currently running, if any. At most one is expected, but a parallel batch can run. */
+export function activeTools(transcript: Transcript): ToolExecution[] {
+  return transcript.tools.filter((tool) => tool.running);
+}
+
+/**
+ * The tail of the trace: the most recent tools, always including anything still running.
+ *
+ * Includes running tools even if they fall outside `limit`, because the active one is the only
+ * entry that changes and the whole point of the window is to watch it.
+ */
+export function recentTools(tools: ToolExecution[], limit = 5): ToolExecution[] {
+  const total = tools.length;
+  if (total === 0) return [];
+  const tail = tools.slice(Math.max(0, total - limit));
+  const running = tools.filter((tool) => tool.running && !tail.includes(tool));
+  return [...running, ...tail];
+}
+
+/** A one-line summary of a tool's input, for a trace row. Never a full argument dump. */
+export function toolSummary(tool: ToolExecution): string {
+  const args = tool.args;
+  if (args === undefined || args === null) return "";
+  if (typeof args === "string") return args;
+  if (typeof args === "object") {
+    const record = args as Record<string, unknown>;
+    // Prefer the argument that says WHAT the tool acted on, which is what a reader scans for.
+    for (const key of ["command", "path", "file_path", "pattern", "query", "url", "prompt", "name"]) {
+      const value = record[key];
+      if (typeof value === "string" && value.length > 0) {
+        return key === "command" ? value : `${value}`;
+      }
+    }
+    const keys = Object.keys(record);
+    return keys.length > 0 ? keys.join(", ") : "";
+  }
+  return String(args);
+}
+
+/** Counts for the transcript's compact marker. */
+export function toolRunSummary(tools: ToolExecution[]): {
+  count: number;
+  names: string[];
+  failed: number;
+} {
+  const names: string[] = [];
+  for (const tool of tools) {
+    if (!names.includes(tool.toolName)) names.push(tool.toolName);
+  }
+  return {
+    count: tools.length,
+    names,
+    failed: tools.filter((tool) => tool.isError).length,
+  };
+}
+
+/**
+ * Does this message have anything worth reading?
+ *
+ * Many assistant messages are a tool call with no text at all — 212 of them in one real session —
+ * and rendering a heading above nothing is pure noise.
+ */
+export function hasProse(message: TranscriptMessage): boolean {
+  return (
+    message.blocks.some((block) => block.kind === "text" && block.text.trim().length > 0) ||
+    message.blocks.some((block) => block.kind === "thinking" && block.text.trim().length > 0)
+  );
+}
+
+/** One entry in the transcript's render plan. */
+export type TranscriptEntry =
+  | { kind: "turn"; message: TranscriptMessage }
+  | { kind: "tools"; tools: ToolExecution[] };
+
+/**
+ * Plan the transcript as a sequence of prose turns and tool markers.
+ *
+ * **One marker per contiguous stretch of tool work**, not one per message position. This is the
+ * difference that makes the transcript readable: Pi interleaves assistant → tool → assistant
+ * rapidly, so a marker at every position produced 997 markers against 866 turns on a real
+ * session — still tool-dominated, and still the mental load the trace window exists to remove.
+ *
+ * Grouping by stretches of prose-less messages collapses each burst of work into a single line
+ * such as `17 tools · bash read edit`, which preserves the POSITION of the work without spending
+ * the reader's attention on each call.
+ *
+ * Tools requested by message `i` run after it, so a stretch of tools is emitted immediately
+ * before the next turn that has something to read.
+ */
+export function planTranscript(transcript: Transcript): TranscriptEntry[] {
+  const entries: TranscriptEntry[] = [];
+  const leading = leadingTools(transcript);
+  if (leading.length > 0) entries.push({ kind: "tools", tools: leading });
+
+  let pending: ToolExecution[] = [];
+  transcript.messages.forEach((message, index) => {
+    const tools = toolsAfter(transcript, index);
+    if (hasProse(message)) {
+      // Whatever ran before this readable turn is announced first, then the turn itself.
+      if (pending.length > 0) {
+        entries.push({ kind: "tools", tools: pending });
+        pending = [];
+      }
+      entries.push({ kind: "turn", message });
+    }
+    pending.push(...tools);
+  });
+
+  // Work after the last readable turn still happened and still needs a marker.
+  if (pending.length > 0) entries.push({ kind: "tools", tools: pending });
+  return entries;
 }

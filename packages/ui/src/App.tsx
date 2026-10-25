@@ -22,6 +22,7 @@ import {
 } from "./store.ts";
 import { SessionRail } from "./components/SessionRail.tsx";
 import { TranscriptView } from "./components/Transcript.tsx";
+import { ToolTrace } from "./components/ToolTrace.tsx";
 import { Composer } from "./components/Composer.tsx";
 import { DialogDock, type DialogAnswer } from "./components/DialogDock.tsx";
 import { Inspector } from "./components/Inspector.tsx";
@@ -42,6 +43,7 @@ export function App() {
   // Drafts are per session and in memory, so switching focus never loses typing. Never cleared
   // by Esc: that keystroke belongs to the agent.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+
 
   const connectionRef = useRef<Connection | undefined>(undefined);
 
@@ -219,6 +221,7 @@ export function App() {
         ) : (
           <main className="column">
             <SessionView
+              key={focused?.id}
               session={focused}
               transcript={transcript}
               home={home}
@@ -298,6 +301,13 @@ function SessionView({
     );
   }
 
+  // Which tool call is open in the trace window, and whether that window is collapsed. Scoped to
+  // the session view so a selection cannot leak into another session's trace.
+  const [openTool, setOpenTool] = useState<string | undefined>(undefined);
+  const [traceCollapsed, setTraceCollapsed] = useState(false);
+  // Markers on by default: they are how you tell WHERE the agent did something, which the trace
+  // window cannot express. One click hides them for pure reading.
+  const [showMarkers, setShowMarkers] = useState(true);
   const busy = session.state === "streaming";
 
   return (
@@ -350,7 +360,27 @@ function SessionView({
         busy={busy}
         sessionLabel={displayName(session)}
         expectedCount={session.messageCount}
+        showMarkers={showMarkers}
+        onOpenTool={(toolCallId) => {
+          // Opening from a marker un-collapses the trace, or the click would appear to do nothing.
+          setTraceCollapsed(false);
+          setOpenTool(toolCallId);
+        }}
       />
+
+      {/* The trace sits between the conversation and the composer: both live surfaces adjacent,
+          so watching the agent and watching what it is running are one glance apart. */}
+      {openTool !== undefined || transcript.tools.length > 0 ? (
+        <ToolTrace
+          tools={transcript.tools}
+          selectedId={openTool}
+          onSelect={setOpenTool}
+          collapsed={traceCollapsed}
+          onToggleCollapsed={() => setTraceCollapsed((was) => !was)}
+          showMarkers={showMarkers}
+          onToggleMarkers={() => setShowMarkers((was) => !was)}
+        />
+      ) : null}
 
       {pendingDialogCount({ ...initialState(), live: [session] }) > 0 ? null : (
         <Composer

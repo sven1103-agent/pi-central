@@ -12,6 +12,8 @@ import {
   applyRecord,
   assistantText,
   emptyTranscript,
+  hasProse,
+  planTranscript,
   seedTranscript,
   type Transcript,
 } from "../src/transcript.ts";
@@ -492,4 +494,86 @@ test("a partial response keeps its text AND gains the failure note", () => {
   const text = assistantText(t.messages[0]!);
   assert.match(text, /I started to explain/, "the partial answer must not be lost");
   assert.match(text, /connection reset/, "and the failure must be visible");
+});
+
+// --- The transcript plan: prose first, tools as markers (the reported bug) ---------------------
+//
+// Reported from real use: "the tools are all pushed to the end of the conversation history, which
+// makes it impossible to read the actual agent output". Tools happen BETWEEN messages, so they
+// are planned into position rather than appended.
+
+test("tools are interleaved by position, not appended at the end", () => {
+  // Build: user, assistant(text), tool, assistant(text), tool, assistant(text).
+  const t = fold([
+    { type: "message_end", message: { role: "user", content: "do the thing" } },
+    { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "step one" }] } },
+    { type: "tool_execution_start", toolCallId: "c1", toolName: "bash", args: { command: "ls" } },
+    { type: "tool_execution_end", toolCallId: "c1", toolName: "bash", result: "a b c" },
+    { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "step two" }] } },
+    { type: "tool_execution_start", toolCallId: "c2", toolName: "read", args: { path: "/x" } },
+    { type: "tool_execution_end", toolCallId: "c2", toolName: "read", result: "contents" },
+    { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
+  ]);
+
+  const plan = planTranscript(t);
+  const shape = plan.map((e) => (e.kind === "turn" ? `turn:${assistantText(e.message).slice(0, 8)}` : `tools:${e.tools.length}`));
+  assert.deepEqual(shape, [
+    "turn:do the t",
+    "turn:step one",
+    "tools:1",
+    "turn:step two",
+    "tools:1",
+    "turn:done",
+  ], "each tool must sit between the turns it ran between");
+
+  // The final entry is a turn, NOT a pile of tools.
+  assert.equal(plan[plan.length - 1]!.kind, "turn", "tools must not be dumped at the end");
+});
+
+test("a burst of tool work with no prose between collapses into ONE marker", () => {
+  // This is what removes the mental load: Pi interleaves assistant->tool->assistant rapidly, and
+  // one marker per position was still tool-dominated (measured: 997 markers vs 866 turns).
+  const records: Record<string, unknown>[] = [
+    { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "working" }] } },
+  ];
+  for (let i = 0; i < 9; i += 1) {
+    records.push({ type: "tool_execution_start", toolCallId: `c${i}`, toolName: "bash", args: {} });
+    records.push({ type: "tool_execution_end", toolCallId: `c${i}`, toolName: "bash", result: "x" });
+    // An assistant message that is ONLY a tool call: nothing for a reader, so no turn.
+    records.push({ type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", id: `t${i}`, name: "bash", arguments: {} }] } });
+  }
+  records.push({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "finished" }] } });
+
+  const plan = planTranscript(fold(records));
+  const markers = plan.filter((e) => e.kind === "tools");
+  assert.equal(markers.length, 1, `expected one collapsed marker, got ${markers.length}`);
+  assert.equal(markers[0]!.kind === "tools" && markers[0]!.tools.length, 9);
+  assert.deepEqual(plan.map((e) => e.kind), ["turn", "tools", "turn"]);
+});
+
+test("prose-less assistant messages do not produce empty turns", () => {
+  // 212 assistant messages in a real session are a tool call with no text.
+  const t = fold([
+    { type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", id: "c", name: "bash", arguments: {} }] } },
+  ]);
+  assert.equal(hasProse(t.messages[0]!), false);
+  assert.deepEqual(planTranscript(t), [], "a message with nothing to read is not a turn");
+});
+
+test("a tool result with no content still gets a marker", () => {
+  // Otherwise work would be invisible, which is the opposite failure.
+  const plan = planTranscript(fold([
+    { type: "message_end", message: { role: "toolResult", toolCallId: "c1", toolName: "bash", content: [] } },
+  ]));
+  assert.equal(plan.length, 1);
+  assert.equal(plan[0]!.kind, "tools");
+});
+
+test("work before the first message is planned first, not dropped", () => {
+  // A resumed session can open mid-tool-call.
+  const plan = planTranscript(fold([
+    { type: "tool_execution_end", toolCallId: "orphan", toolName: "bash", result: "early" },
+    { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "then this" }] } },
+  ]));
+  assert.deepEqual(plan.map((e) => e.kind), ["tools", "turn"]);
 });

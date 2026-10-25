@@ -1,20 +1,26 @@
 /**
  * The transcript pane.
  *
- * Renders whatever the reducer produced. Two rules from the design that matter for behaviour:
+ * **Prose first.** The conversation is what a reader follows; tools are a trace and belong in
+ * `ToolTrace`. The previous version rendered every tool call AFTER every message, so a real
+ * session put 1138 frames below the conversation and the agent's actual output became
+ * unfindable. That was a bug, not a layout preference: tools happen *between* messages, and
+ * appending them destroys the only ordering that makes them readable.
+ *
+ * So each message is followed by at most ONE compact marker per run of tools, which keeps the
+ * position — "something happened here" — while refusing to spend a screenful on it. Clicking a
+ * marker opens that call in the trace window, which is the bridge from reading to debugging.
+ *
+ * Two accessibility rules, both deliberate:
  *
  * 1. **No live region on the streaming tail.** Announcing per delta would emit hundreds of
- *    utterances per turn and make the app unusable with a screen reader. `aria-busy` on the
- *    region plus one announcement per *settled* turn is the honest trade (DESIGN.md §9).
- * 2. **Tool output is quarantined, prose is not.** Assistant text is rendered as Markdown;
- *    tool results get the hatched frame and are rendered as plain text, because they are data
- *    rather than prose and are not Markdown.
+ *    utterances per turn.
+ * 2. **`aria-busy` while streaming**, so assistive tech does not read a half-written subtree.
  */
 import { useEffect, useRef } from "react";
 import type { Transcript as TranscriptModel } from "../transcript.ts";
-import { assistantText, type TranscriptMessage } from "../transcript.ts";
+import { assistantText, hasProse, planTranscript, toolRunSummary, type ToolExecution, type TranscriptMessage } from "../transcript.ts";
 import { Prose } from "./Prose.tsx";
-import { ToolFrame } from "./ToolFrame.tsx";
 
 export function TranscriptView({
   transcript,
@@ -22,6 +28,8 @@ export function TranscriptView({
   sessionLabel,
   expectedCount = 0,
   loading = false,
+  onOpenTool,
+  showMarkers = true,
 }: {
   transcript: TranscriptModel;
   busy: boolean;
@@ -29,21 +37,30 @@ export function TranscriptView({
   /**
    * How many messages Pi says the session has.
    *
-   * Passed so the empty state cannot CONTRADICT the header. The screenshot that exposed the
-   * missing-history bug showed `634 msgs` in the header and "No messages yet." underneath —
-   * both rendered from real data, and visibly disagreeing. An empty transcript with a non-zero
-   * count is not an empty session; it is history that has not arrived, and saying "no messages"
-   * then is worse than saying nothing.
+   * Passed so the empty state cannot CONTRADICT the header. A screenshot once showed
+   * `634 msgs` in the header and "No messages yet." underneath — both from real data, and
+   * visibly disagreeing. An empty transcript with a non-zero count is history that has not
+   * arrived, not an empty session.
    */
   expectedCount?: number;
   /** True once the session is up and its history has been requested. */
   loading?: boolean;
+  onOpenTool?: (toolCallId: string) => void;
+  /**
+   * Whether to show position markers for tool work.
+   *
+   * A marker preserves WHERE the agent did something, which the trace window alone cannot. But a
+   * real session alternates prose and tools almost one-for-one, so markers are numerous by nature.
+   * Making them optional means a reader can have pure prose when they want to read and position
+   * when they want to understand — rather than one of the two being imposed.
+   */
+  showMarkers?: boolean;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
 
-  // Follow the tail only while the user is already at the bottom. Auto-scrolling someone who
+  // Follow the tail only while the reader is already at the bottom. Auto-scrolling someone who
   // has scrolled up to read is the most common failure of a streaming transcript.
   useEffect(() => {
     const container = containerRef.current;
@@ -61,8 +78,8 @@ export function TranscriptView({
   });
 
   const isEmpty = transcript.messages.length === 0 && transcript.tools.length === 0;
-  // Only claim the session is empty when Pi agrees it is. Otherwise this is history in flight.
   const awaitingHistory = isEmpty && expectedCount > 0;
+  const entries = planTranscript(transcript);
 
   return (
     <div
@@ -91,14 +108,17 @@ export function TranscriptView({
         </div>
       ) : (
         <>
-          {transcript.messages.map((message, index) => (
-            <Turn key={message.id} message={message} index={index} />
-          ))}
-          {/* Tools are rendered after messages in arrival order; the reducer keeps them
-              correlated by toolCallId so interleaved parallel calls stay correct. */}
-          {transcript.tools.map((tool) => (
-            <ToolFrame key={tool.toolCallId} tool={tool} />
-          ))}
+          {/* Planned as prose turns interleaved with ONE marker per stretch of tool work, so a
+              burst of calls collapses to a single line instead of one line per call. */}
+          {entries.map((entry, index) =>
+            entry.kind === "tools" ? (
+              showMarkers ? (
+                <ToolMarker key={`tools-${index}`} tools={entry.tools} onOpenTool={onOpenTool} />
+              ) : null
+            ) : (
+              <Turn key={entry.message.id} message={entry.message} />
+            ),
+          )}
         </>
       )}
       <div ref={endRef} />
@@ -106,10 +126,52 @@ export function TranscriptView({
   );
 }
 
-function Turn({ message, index }: { message: TranscriptMessage; index: number }) {
+/**
+ * One line standing in for a run of tool calls.
+ *
+ * Compact by design: a reader must be able to see that the agent did something here without
+ * reading what it did. The names are enough to orient, and the click is there for when they are
+ * not.
+ */
+function ToolMarker({
+  tools,
+  onOpenTool,
+}: {
+  tools: ToolExecution[];
+  onOpenTool?: ((toolCallId: string) => void) | undefined;
+}) {
+  if (tools.length === 0) return null;
+  const summary = toolRunSummary(tools);
+  const last = tools[tools.length - 1]!;
+  const running = tools.some((tool) => tool.running);
+
+  return (
+    <button
+      type="button"
+      className={`tool-marker${summary.failed > 0 ? " has-error" : ""}${running ? " running" : ""}`}
+      onClick={() => onOpenTool?.(last.toolCallId)}
+      title="Open the tool trace at this point"
+    >
+      <span className="m-glyph" aria-hidden="true">
+        {running ? "●" : summary.failed > 0 ? "✕" : "⌁"}
+      </span>
+      <span className="m-count">
+        {summary.count} tool{summary.count === 1 ? "" : "s"}
+      </span>
+      <span className="m-names mono">{summary.names.join(" · ")}</span>
+      {summary.failed > 0 && <span className="m-failed">{summary.failed} failed</span>}
+      {running && <span className="m-running">running</span>}
+    </button>
+  );
+}
+
+function Turn({ message }: { message: TranscriptMessage }) {
   const label = message.role === "user" ? "You" : message.role === "assistant" ? "Assistant" : message.role;
   const text = assistantText(message);
   const thinking = message.blocks.filter((block) => block.kind === "thinking");
+
+  // Guarded as well as filtered by `planTranscript`: a turn heading above nothing is pure noise.
+  if (!hasProse(message)) return null;
 
   return (
     <article className="turn measure">
@@ -118,11 +180,10 @@ function Turn({ message, index }: { message: TranscriptMessage; index: number })
         {message.streaming && (
           <>
             <span className="live-dot" aria-hidden="true" />
-            {/* The state word, not just the dot: colour and motion are never the only signal. */}
+            {/* The state word, not only the dot: colour and motion are never the sole signal. */}
             <span>responding…</span>
           </>
         )}
-        {!message.streaming && message.complete && index > 0 && <span>· done</span>}
       </div>
 
       {thinking.map((block, i) => (
@@ -135,16 +196,6 @@ function Turn({ message, index }: { message: TranscriptMessage; index: number })
       ))}
 
       {text.length > 0 && <Prose text={text} streaming={message.streaming} />}
-
-      {/* Blocks with no text yet: show that a tool call was issued before its result arrives. */}
-      {message.blocks
-        .filter((block) => block.kind === "toolcall")
-        .map((block, i) => (
-          <div key={i} className="quarantine-head" style={{ cursor: "default" }}>
-            <span className="label">Calling tool</span>
-            <span className="tool-name">{block.kind === "toolcall" ? block.name ?? "unknown" : ""}</span>
-          </div>
-        ))}
     </article>
   );
 }

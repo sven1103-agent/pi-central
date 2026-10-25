@@ -29,7 +29,7 @@ globalThis.document = dom.window.document;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 
 let server;
-let SessionRail, ToolFrame, DialogDock, TranscriptView, HistoryView;
+let SessionRail, ToolTrace, DialogDock, TranscriptView, HistoryView;
 
 before(async () => {
   // `root` must be the UI package, not the process CWD: Vite resolves the `/src/...` specifiers
@@ -41,7 +41,7 @@ before(async () => {
     logLevel: "error",
   });
   ({ SessionRail } = await server.ssrLoadModule("/src/components/SessionRail.tsx"));
-  ({ ToolFrame } = await server.ssrLoadModule("/src/components/ToolFrame.tsx"));
+  ({ ToolTrace } = await server.ssrLoadModule("/src/components/ToolTrace.tsx"));
   ({ DialogDock } = await server.ssrLoadModule("/src/components/DialogDock.tsx"));
   ({ TranscriptView } = await server.ssrLoadModule("/src/components/Transcript.tsx"));
   ({ HistoryView } = await server.ssrLoadModule("/src/components/History.tsx"));
@@ -50,6 +50,13 @@ before(async () => {
 after(async () => {
   await server?.close();
 });
+
+function tool(over = {}) {
+  return {
+    toolCallId: "c", toolName: "bash", args: { command: "ls" }, result: "",
+    isError: false, running: false, durationMs: 12, startedAt: 0, afterMessage: 1, ...over,
+  };
+}
 
 function session(over = {}) {
   return {
@@ -220,24 +227,70 @@ test("only one dialog is shown at a time", () => {
 
 // --- Quarantine: provenance is visible --------------------------------------------------------
 
-test("tool output is labelled and rendered as preformatted text, not prose", () => {
-  const html = renderToString(createElement(ToolFrame, {
-    tool: { toolCallId: "c1", toolName: "bash", args: {}, result: "output *not* markdown", isError: false, running: false, startedAt: 0 },
+test("the trace shows the latest tools and marks the one running now", () => {
+  // The window is BOUNDED on purpose. A real session produced 1138 tool calls; showing them all
+  // during a run is the mental load this panel exists to remove.
+  const tools = Array.from({ length: 12 }, (_, i) => tool({ toolCallId: `c${i}`, toolName: i % 2 ? "read" : "bash" }));
+  tools.push(tool({ toolCallId: "live", toolName: "write", running: true }));
+  const html = renderToString(createElement(ToolTrace, {
+    tools, selectedId: undefined, onSelect() {}, collapsed: false, onToggleCollapsed() {},
   }));
-  assert.match(html, /Tool output/);
-  assert.match(html, /class="quarantine"/);
-  assert.match(html, /<pre/);
-  // The asterisks survive literally: a diff must show what the command produced.
-  assert.ok(!html.includes("<em>"), "tool output must not be interpreted as Markdown");
-  assert.ok(html.includes("*not*"), "tool output must be shown verbatim");
+
+  assert.match(html, /Tool trace/);
+  assert.match(html, /13 calls/);
+  assert.match(html, /write running/);
+  // The panel states its own economy rather than silently hiding the rest.
+  assert.match(html, /latest 5 shown/);
+  // Every call is reachable for debugging: the list is the whole trace, not only the latest 5.
+  // Asserted by ROW COUNT rather than by id, because the id is a React key and never reaches the
+  // markup -- an assertion on it would pass for the wrong reason or fail for none.
+  const rows = html.split('class="trace-row').length - 1;
+  assert.equal(rows, 13, `every call must be traversable, found ${rows} rows for 13 calls`);
+  // `recent` marks the latest five, so "now" is findable without reading the whole list. Counted
+  // by regex because the class list order varies (`trace-row running recent`), which a substring
+  // count would miss.
+  const recent = [...html.matchAll(/class="trace-row[^"]*\brecent\b/g)].length;
+  assert.equal(recent, 5, `expected exactly the latest 5 marked as recent, found ${recent}`);
 });
 
-test("a failed tool is marked as failed, not silently shown as success", () => {
-  const html = renderToString(createElement(ToolFrame, {
-    tool: { toolCallId: "c1", toolName: "bash", args: {}, result: "boom", isError: true, running: false, startedAt: 0 },
+test("the trace renders nothing at all when there are no tool calls", () => {
+  const html = renderToString(createElement(ToolTrace, {
+    tools: [], selectedId: undefined, onSelect() {}, collapsed: false, onToggleCollapsed() {},
+  }));
+  assert.equal(html, "", "an always-present empty panel would be permanent chrome");
+});
+
+test("tool output is quarantined, preformatted, and shown only for the selected call", () => {
+  const tools = [
+    tool({ toolCallId: "c1", toolName: "bash", result: "output *one*" }),
+    tool({ toolCallId: "c2", toolName: "read", result: "output two" }),
+  ];
+  const html = renderToString(createElement(ToolTrace, {
+    tools, selectedId: "c1", onSelect() {}, collapsed: false, onToggleCollapsed() {},
+  }));
+  assert.match(html, /Tool output/);
+  assert.match(html, /output \*one\*/, "the selected call's output is shown verbatim");
+  assert.ok(!html.includes("<em>"), "tool output must not be interpreted as Markdown");
+  // Only the selected call's output is rendered; rendering 1138 of them is the original defect.
+  assert.ok(!/trace-output[^>]*>[^<]*output two/.test(html), "an unselected call's output must not render");
+});
+
+test("a collapsed trace shows a preview instead of the full list", () => {
+  const tools = [tool({ toolCallId: "c1", toolName: "bash" }), tool({ toolCallId: "c2", toolName: "edit" })];
+  const html = renderToString(createElement(ToolTrace, {
+    tools, selectedId: undefined, onSelect() {}, collapsed: true, onToggleCollapsed() {},
+  }));
+  assert.match(html, /aria-expanded="false"/);
+  assert.match(html, /latest: bash · edit/);
+  assert.ok(!html.includes("trace-list"), "a collapsed trace must not render the rows");
+});
+
+test("a failed tool is marked in the trace, not silently shown as done", () => {
+  const html = renderToString(createElement(ToolTrace, {
+    tools: [tool({ toolCallId: "c1", toolName: "bash", isError: true, result: "boom" })],
+    selectedId: undefined, onSelect() {}, collapsed: false, onToggleCollapsed() {},
   }));
   assert.match(html, /failed/);
-  assert.match(html, /error/);
 });
 
 // --- Transcript: the accessibility trade --------------------------------------------------------
