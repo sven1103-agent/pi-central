@@ -103,6 +103,13 @@ invariant explicit; the test asserts the sidecar's nested sessions are not surfa
 - `listAll`'s richer fields (`firstMessage` with parts, `lastActivityTime`) are not free;
   we implement what we need and no more. Fields we do not implement are not shown, rather
   than shown wrongly.
+- **Counts from discovery are a floor.** The head window is 256 KB, so a large session's
+  `messageCount` undercounts — measured at 69 for a session whose file holds 869 message
+  records. This is acceptable only because a live session's count is corrected from
+  `get_state` (`supervisor.ts`), which is authoritative. For a session that is *not* live,
+  the rail shows the floor, and the exact figure is not known until the session is opened.
+  If a future UI needs exact counts in the list, discovery must read each file fully and
+  the timing above must be re-measured.
 
 ## Enforcement
 

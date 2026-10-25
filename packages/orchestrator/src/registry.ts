@@ -55,8 +55,12 @@ export const KNOWN_SESSION_VERSIONS = new Set([3]);
  *
  * Measured on this machine: 833 real sessions in ~900 ms, 0 unparseable. Scanning every
  * file to the end would be correct and several times slower for a field the rail does not
- * need yet. Exact counts and names belong to a full read, which happens when a session is
- * opened, not when the list is drawn.
+ * need yet. The floor can be visibly wrong: for one 2.8 MB session the head window counted
+ * 69 messages of 869 records (429 user+assistant). That is why a live session's count is
+ * corrected from `get_state`, which is authoritative, the moment it is supervised.
+ *
+ * Full counts and names belong to a full read, which happens when a session is opened, not
+ * when the list is drawn.
  */
 const HEAD_BYTES = 256 * 1024;
 

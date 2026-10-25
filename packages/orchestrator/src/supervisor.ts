@@ -8,9 +8,12 @@
  *    would let a session be marked idle while it is still working, and would tear down or
  *    re-prompt a process mid-run.
  *
- * 2. **At most one live process per `(sessionFile, cwd)`** (ADR-0004). Two processes writing
- *    one session file would corrupt it. A second start for a live pair focuses the existing
- *    one instead of spawning.
+ * 2. **At most one live process per `(sessionFile, cwd)`** (ADR-0004) — among the sessions
+ *    THIS instance spawned. Two processes appending to one session file add a branch point
+ *    to its history, and Pi takes no file lock, so a `pi` started by hand in a terminal is
+ *    undetectable (C9). That case is a stated limitation, not a solved problem. A second
+ *    resume for a session this instance already supervises returns the existing one rather
+ *    than spawning.
  *
  * The supervisor is also the only source of truth for "running" (C3): Pi has no daemon and
  * no attach protocol, so a session is live iff this process spawned it.

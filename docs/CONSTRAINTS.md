@@ -173,3 +173,39 @@ automatically.
 
 - Pi Central gates "idle / done" UI state on `agent_settled`.
 - "Turn complete" indicators must not be driven by `agent_end`.
+
+## C9 — Session files are unlocked, append-only, and unwatchable
+
+**Verified by execution** against Pi `1.4.0`.
+
+A session file has three properties that together make concurrent writers possible and
+undetectable in advance:
+
+1. **No lock.** `core/session-manager.js` contains no `flock`, `O_EXCL`, or lockfile use.
+   Writes are a bare `appendFileSync(this.sessionFile, …)` (line 812).
+2. **No held descriptor.** `appendFileSync` opens, writes, and closes per append. A live
+   `pi` writing a session does **not** appear in `lsof` for that file — checked while a
+   session was actively being written.
+3. **Append-only, id-linked.** Entries chain by `parentId`. A second writer appends its own
+   entries; the file stays **parseable** (no corruption observed: 1,288 entries, 0
+   unparseable lines, no duplicate ids) but gains a second child for one parent, i.e. a
+   **branch point** Pi did not intend.
+
+### Consequences
+
+- Nothing can reliably answer "is another process using this session right now?" — not a
+  lock, not `lsof`, not a registry (C3).
+- The one-live-process-per-session rule ([ADR-0004](decisions/0004-session-identity.md))
+  is enforceable **only** among processes Pi Central itself spawns.
+- Resuming a session that a terminal `pi` is actively using risks a branch in its history.
+  This was observed directly: a resume of a live session produced the file's only branch
+  point across 50 sampled sessions.
+- A file's recent mtime is a **hint**, not evidence — it cannot distinguish a live writer
+  from a session that was simply closed a moment ago.
+
+### Why Pi Central does not add its own lock
+
+A Pi-Central-owned lock would not be taken by Pi, so it cannot prevent a foreign writer —
+the only case that is not already handled in memory. It would add lock lifecycle, stale
+handling, pid reuse, and a new blocking failure mode for no coverage gain. Rejected for the
+same reason as the filesystem sidecar ([ADR-0007](decisions/0007-filesystem-access-model.md)).

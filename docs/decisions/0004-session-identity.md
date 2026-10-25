@@ -55,11 +55,39 @@ Consequences for the UI:
 
 ## Enforcement
 
-- Supervisor invariant: one live process per `(sessionPath, cwd)`. Attempting a second
-  spawn for a live pair focuses the existing one instead.
+- **In-process:** the supervisor holds at most one live process per `(sessionPath, cwd)`.
+  A resume for a session this instance already supervises returns the existing session
+  rather than spawning a second (`Supervisor#findLiveByPath`).
 - On resume, verify the directory still exists before spawning; surface a clear error if
   not (rather than letting `assertSessionCwdExists` fail inside Pi).
 - Fork across projects uses `SessionManager.forkFrom`; never hand-edit a header `cwd`.
+
+### What is NOT enforced, and cannot be
+
+The guarantee covers sessions **this orchestrator spawned**. It cannot cover a `pi` started
+by hand in a terminal (the C3 situation), because nothing in the system can detect it:
+
+- Pi takes **no file lock** on a session file (`core/session-manager.js` has no
+  `flock`/`O_EXCL`; `appendFileSync` at line 812 is unconditional), so there is no lock to
+  contend for.
+- Pi holds the file **open only for the instant of each append** — `appendFileSync` opens,
+  writes, and closes. So `lsof` shows nothing even while a live Pi is actively writing it.
+  There is no OS-level signal to read.
+
+Two writers on one append-only file are therefore possible, and undetectable in advance.
+This is a real limitation, not a solved problem: the invariant is enforced among Pi
+Central's own sessions and stated honestly as unenforceable beyond them.
+
+A Pi-Central-owned lock was considered and **rejected**. It would be a protocol with
+ourselves: Pi would not take it, so it cannot prevent the one case that actually matters (a
+foreign writer). It would add lock lifecycle, stale detection, pid-reuse handling, a new
+failure mode (a stale lock blocking a legitimate resume), and a storage location that
+cannot live in `~/.pi` (C6) — all to guard the contrived two-Pi-Central-instances case,
+which `findLiveByPath` does not already cover. Same complexity-to-coverage test that
+rejected the filesystem sidecar in [ADR-0007](0007-filesystem-access-model.md).
+
+See [C9](../CONSTRAINTS.md#c9--session-files-are-unlocked-append-only-and-unwatchable) for
+the underlying constraint.
 
 ## Alternatives considered
 
