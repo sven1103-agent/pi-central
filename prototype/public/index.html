@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pi Central — prototype</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div id="app">
+  <aside id="rail">
+    <header>
+      <h1>Pi Central</h1>
+      <p class="tagline">central station for Pi sessions</p>
+    </header>
+
+    <section class="panel">
+      <h2>Start a session</h2>
+      <label>Working directory
+        <input id="cwd" type="text" placeholder="/path/to/repo" spellcheck="false" />
+      </label>
+      <label>Name <span class="opt">(optional)</span>
+        <input id="name" type="text" placeholder="repo-name" spellcheck="false" />
+      </label>
+      <fieldset class="modes">
+        <legend>Isolation</legend>
+        <label class="radio">
+          <input type="radio" name="mode" value="sandboxed" checked />
+          <span><b>Safehouse</b><small>one sandbox per working directory</small></span>
+        </label>
+        <label class="radio">
+          <input type="radio" name="mode" value="direct" />
+          <span><b>Direct</b><small>no isolation — feasibility only</small></span>
+        </label>
+      </fieldset>
+      <button id="start" class="primary">Start session</button>
+      <div id="notice" class="notice hidden"></div>
+    </section>
+
+    <section class="panel grow">
+      <h2>Sessions <span id="count" class="pill">0</span></h2>
+      <div id="sessions" class="list"></div>
+      <h2 class="mt">Recent on disk <span id="histcount" class="pill">0</span></h2>
+      <div id="historical" class="list hist"></div>
+    </section>
+  </aside>
+
+  <main id="main">
+    <div id="empty" class="empty">
+      <h2>No session selected</h2>
+      <p>Start a session on the left, or pick one from <em>Recent on disk</em>.</p>
+      <p class="dim">On-disk sessions are history only: Pi has no daemon or attach protocol (C3),
+      so a session becomes live only when Pi Central starts it.</p>
+    </div>
+
+    <div id="workspace" class="hidden">
+      <header id="wshead">
+        <div>
+          <h2 id="wsname">—</h2>
+          <div id="wsmeta" class="meta"></div>
+        </div>
+        <button id="abort" class="ghost">Abort</button>
+        <button id="stop" class="ghost danger">Stop</button>
+      </header>
+
+      <div id="isolation" class="isolation"></div>
+      <div id="cmdline" class="cmdline"></div>
+      <div id="error" class="error hidden"></div>
+
+      <div id="approvals"></div>
+
+      <div id="panes">
+        <section id="transcript" class="pane">
+          <h3>Transcript</h3>
+          <div id="messages" class="messages"><p class="dim">No messages yet.</p></div>
+          <div id="composer">
+            <textarea id="input" rows="3" placeholder="Send a prompt…  (Enter to send, Shift+Enter for newline)"></textarea>
+            <button id="send" class="primary">Send</button>
+          </div>
+        </section>
+
+        <section id="files" class="pane">
+          <h3>Files <span class="dim small" id="filepath"></span></h3>
+          <div id="filelist" class="filelist"></div>
+          <pre id="fileview" class="fileview dim">Select a file to view it.</pre>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="/vendor/markdown-it.min.js"></script>
+<script src="/vendor/purify.min.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

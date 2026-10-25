@@ -1,0 +1,16 @@
+{
+  "name": "pi-central-prototype",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Feasibility prototype: orchestrate multiple sandboxed Pi sessions from one dashboard.",
+  "scripts": {
+    "start": "node src/server.ts",
+    "probe": "node src/probe.ts"
+  },
+  "dependencies": {
+    "dompurify": "^3.4.17",
+    "markdown-it": "^15.0.3",
+    "ws": "^8.18.0"
+  }
+}
