@@ -31,6 +31,16 @@ Read, in this order:
 2. [docs/decisions/](docs/decisions/) — why the architecture looks the way it does.
 3. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — components and trust boundaries.
 
+## Using Pi Central while developing it
+
+It works, and it is the fastest way to find this tool's problems — but **not from the checkout you
+are working in**. Three things break otherwise: Vite hot-reloads the interface you are using, a
+branch switch desynchronises UI and orchestrator, and if an agent breaks the orchestrator you lose
+the tool you need to fix it.
+
+Run it from one checkout and let agents work in another. The full reasoning, including why a
+separate clone beats a git worktree, is in [docs/DOGFOODING.md](docs/DOGFOODING.md).
+
 ## Branch rules
 
 `main` is protected by a **ruleset**, and **the rules apply to administrators too** — so a direct
