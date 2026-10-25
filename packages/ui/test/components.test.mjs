@@ -17,6 +17,7 @@
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import { createServer } from "vite";
 import { createElement } from "react";
@@ -288,4 +289,18 @@ test("no history explains where it would come from", () => {
   const html = renderToString(createElement(HistoryView, { history: [], onResume() {}, home: undefined }));
   assert.match(html, /No sessions on disk yet/);
   assert.match(html, /~\/.pi\/agent\/sessions/);
+});
+
+// --- Isolation honesty -------------------------------------------------------------------------
+
+test("the direct-mode banner is rendered, not just styled", () => {
+  // The CSS for `.direct-banner` existed from the start but NOTHING rendered it, so `--direct`
+  // mode was signalled only by a chip inside the inspector. Running unsandboxed is the single
+  // most important fact about a session and deserves top-of-window prominence.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.direct-banner/, "the class should still be defined");
+
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /className="direct-banner"/, "the class must actually be used");
+  assert.match(app, /Direct mode: sessions are not sandboxed/, "the copy must be present");
 });

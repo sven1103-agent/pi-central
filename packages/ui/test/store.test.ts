@@ -11,6 +11,7 @@ import {
   composerMode,
   contextPercent,
   fleetCounts,
+  hasUnisolatedSession,
   historyIsPartial,
   focusedSession,
   initialState,
@@ -331,4 +332,16 @@ test("a snapshot carries HOME and the true history total", () => {
 test("a history event updates the total, not just the page", () => {
   const state = reduce(initialState(), { kind: "history", history: [historical()], total: 42 });
   assert.equal(state.historyTotal, 42);
+});
+
+test("an unsandboxed session is detectable, so the banner can be shown", () => {
+  // The banner is the only global signal that a session has the user's own account access. A
+  // per-session chip in the inspector is the wrong prominence for that fact.
+  const sandboxed = { ...initialState(), live: [live({ mode: "sandboxed" })] };
+  assert.equal(hasUnisolatedSession(sandboxed), false);
+
+  const mixed = { ...initialState(), live: [live({ id: "a", mode: "sandboxed" }), live({ id: "b", mode: "direct" })] };
+  assert.equal(hasUnisolatedSession(mixed), true, "one direct session is enough to warn");
+
+  assert.equal(hasUnisolatedSession(initialState()), false, "no sessions is not a warning");
 });

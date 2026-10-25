@@ -141,6 +141,18 @@ export function fleetCounts(state: UiState): {
 }
 
 /**
+ * Is any live session running WITHOUT isolation?
+ *
+ * `mode` is per-session, so this is derived rather than configured. It exists because running
+ * a session unsandboxed is the single most important fact about it, and the design's rule is
+ * to stay honest about isolation: a per-session chip in the inspector is not enough for
+ * something that grants the agent the user's own account.
+ */
+export function hasUnisolatedSession(state: UiState): boolean {
+  return state.live.some((s) => s.mode === "direct");
+}
+
+/**
  * Is the loaded history a page rather than the whole store?
  *
  * The rail and the history pane must say so when it is: "1115 sessions on disk" while only

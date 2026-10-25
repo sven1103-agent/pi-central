@@ -14,6 +14,7 @@ import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
 import {
   fleetCounts,
   focusedSession,
+  hasUnisolatedSession,
   initialState,
   pendingDialogCount,
   reduce,
@@ -72,6 +73,7 @@ export function App() {
   // HOME arrives with the first snapshot, so it is undefined until then. Paths render in full
   // for that instant rather than showing a wrong abbreviation.
   const home = state.home;
+  const unisolated = hasUnisolatedSession(state);
 
   // --- keyboard shortcuts -----------------------------------------------------------------
   useEffect(() => {
@@ -162,6 +164,22 @@ export function App() {
           </span>
         </div>
       </header>
+
+      {/*
+        Unsandboxed sessions announced at the top of the window, not only in the inspector.
+        The design specified this banner and the CSS for it was written, but nothing rendered it
+        — so `--direct` mode was visible only as a chip in a side panel, which is the wrong
+        prominence for "the agent has your account's access".
+      */}
+      {unisolated && (
+        <div className="direct-banner" role="alert">
+          <strong>Direct mode: sessions are not sandboxed</strong>
+          <span>
+            These sessions run pi with your account's access. Everything else in Pi Central is
+            unaffected; start new sessions with the sandbox to change it.
+          </span>
+        </div>
+      )}
 
       {state.errors.length > 0 && (
         <ErrorStrip
