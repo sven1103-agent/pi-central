@@ -28,6 +28,29 @@ pi --mode rpc [--no-session | --session <path|id> | --continue | --session-id <i
 | stdout | session event | streaming run/message/tool/queue/compaction/retry activity |
 | both | extension UI | dialogs and notifications |
 
+### Startup emits a burst of non-blocking extension UI requests
+
+**Verified by execution** against Pi `1.4.0`. Within the first seconds of a session, Pi emits
+about nine `extension_ui_request` records — in one observed run: five `notify`, three
+`setStatus`, one `setWidget`.
+
+None is a dialog. Every one carries an `id` (so a naive "has an id → is a dialog" rule would
+misfire). The blocking methods are exactly `select`, `confirm`, `input`, `editor`
+(`BLOCKING_DIALOG_METHODS` in `packages/protocol/src/pi.ts`).
+
+**Consequence:** a component that treats an unexpected `extension_ui_request` as blocking
+wedges the session on a prompt no human will ever answer — at startup, before the user has
+done anything. The supervisor classifies by method, and `state.ts` has a test asserting
+`notify`/`setStatus`/`setWidget` change neither state nor dialog list.
+
+### Responses are usually sub-millisecond, but the timeout path matters
+
+`get_state` and `get_session_stats` answered in 0–3 ms in practice. The timeout is therefore
+rarely exercised against Pi and must be tested against a stand-in (see
+`packages/orchestrator/test/rpc.test.ts`, which uses `/bin/cat`). An unknown command is
+rejected by Pi with `success: false` and `error: "Unknown command: …"`, so the supervisor's
+rejection path is real and not merely defensive.
+
 ## Commands used by Pi Central
 
 ### Resuming a session whose working directory is gone
