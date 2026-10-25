@@ -53,9 +53,9 @@ critical paths, so they are in scope here rather than deferred.
 - [ ] Lifecycle commands: `get_state`, `get_session_stats`, `prompt`, `abort`,
       `set_session_name`.
 - [ ] **Resume a historical session** (US-5), validating the recorded cwd *before* spawn
-      and surfacing the missing-directory choice (D-4). Pi exits 1 in RPC mode here.
-- [ ] **Change a session's working directory** (US-2), re-composing policy and re-spawning
-      (D-2) while preserving context (D-3).
+      and surfacing the missing-directory choice (D-4). Pi exits 1 in RPC mode here. The
+      only choices are resume-in-place or cancel: Pi Central does not retarget a session
+      ([ADR-0008](decisions/0008-no-mid-session-workdir-change.md)).
 - [ ] Extension UI dialog relay (headless: log or auto-answer by policy).
 - [ ] Test: three sessions in three cwds, prompt each, confirm no cross-talk.
 

@@ -43,9 +43,15 @@ finished git worktree, an unmounted volume, or a moved checkout all leave a sess
 pointing at a directory that no longer exists. See
 [US-5](USER-STORIES.md#us-5--continue-a-past-session).
 
-Relevant helpers, both exported: `switch_session` accepts a `cwdOverride`, and
-`SessionManager.forkFrom(sourcePath, targetCwd, …)` copies history into a session whose
-header carries the new cwd.
+Because Pi Central does not retarget a session (ADR-0008), the offered choice is **resume
+in the recorded directory** or **cancel** — never "continue in another directory".
+
+Relevant helper: `SessionManager.forkFrom(sourcePath, targetCwd, …)` copies history into
+a session whose header carries the new cwd. It is **not** used to move a running session;
+Pi Central does not change a session's working directory (ADR-0008). Note also that
+`cwdOverride` is **not** available over RPC — it exists only in the interactive TUI
+(`dist/modes/interactive/interactive-mode.js`), and the RPC `switch_session` handler passes
+no options (`dist/modes/rpc/rpc-mode.js`). Do not plan around it.
 
 ### Lifecycle and identity
 

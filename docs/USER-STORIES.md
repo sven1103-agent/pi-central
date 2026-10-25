@@ -33,19 +33,33 @@ keep it.
 - A single primary action starts a session with no path entry.
 - The session is usable immediately: a prompt can be sent on the first interaction.
 - The UI states plainly where the session lives, without requiring the user to choose it.
-- If the user later wants the session to live somewhere specific, that is possible
-  (see US-2), and the session's sandbox is updated accordingly.
+- If the user later wants the session to live somewhere specific, they open a session in
+  that directory (US-2, which would have migrated a running session, is rejected by
+  [ADR-0008](decisions/0008-no-mid-session-workdir-change.md)).
 
 **Constraint.** A session is bound to a working directory at spawn (C2), and its Safehouse
 policy is composed from that directory (ADR-0004). "No directory" therefore cannot mean
 "no policy" — it must mean a **default directory that Pi Central owns**. See US-4.
 
 ### US-2 — Set the working directory in one step
-**Status:** proposed · **Theme:** A · **Priority:** high
+**Status:** rejected · **Theme:** A · **Priority:** withdrawn
 
 > As a user, I want to change where a session works without restarting it or losing its
 > context, so that I can start somewhere convenient and move to the right place once I know
 > what I am doing.
+
+**Rejected by [ADR-0008](decisions/0008-no-mid-session-workdir-change.md).** The
+working directory is the sole input to the sandbox policy, so changing it mid-session is a
+live policy swap — the one operation that lets content already read in the old scope
+influence a differently-privileged new scope. The design note below also rested on a false
+premise: `cwdOverride` is **not** reachable over RPC.
+
+**What replaces it:** starting a session in the right place is cheap
+([US-1](#us-1--start-a-session-without-choosing-a-directory)), so the answer is a new
+session there, not a migrated one. Context does not carry over, and that cost is accepted.
+
+<details>
+<summary>Original story, retained for the record</summary>
 
 **Context.** The prototype can only set the directory at spawn. A user who starts in the
 default directory and then realizes the work belongs in a repository has to abandon the
@@ -65,13 +79,15 @@ session.
 setting change: it is a re-spawn with a new policy. Pi supports the two building blocks:
 
 - **Resume with a new cwd** — `switch_session` accepts a `cwdOverride`; the runtime reopens
-  with the session header's cwd otherwise (C2).
+  with the session header's cwd otherwise (C2). *This is incorrect; see ADR-0008.*
 - **Continue in another directory** — `SessionManager.forkFrom(sourcePath, targetCwd, …)`
   copies the history into a session whose header carries the new cwd. Verified in
   `dist/core/session-manager.js:1374`.
 
 Which one US-2 uses is an open design question, not a user-facing one. The user-facing
 requirement is only: context survives, and isolation follows the new directory.
+
+</details>
 
 ### US-3 — The default directory is owned by the app
 **Status:** proposed · **Theme:** A · **Priority:** high
@@ -146,8 +162,9 @@ be found and resumed later.
 - The resumed session's sandbox is composed for **its own recorded working directory**, not
   the orchestrator's and not the last-used directory.
 - The user can see which directory a session will resume in before confirming.
-- If that directory no longer exists, the UI explains this and offers a choice: continue in
-  another directory (US-2) or cancel. It must not fail with a raw error.
+- If that directory no longer exists, the UI explains this and offers a choice: **cancel**,
+  or resume in the recorded directory once it is restored. It must not fail with a raw
+  error, and it must not silently retarget ([ADR-0008](decisions/0008-no-mid-session-workdir-change.md)).
 
 **Design note — the missing-directory case is a real trap.** Pi's behavior differs by mode,
 verified in `dist/main.js:558`:
@@ -183,8 +200,8 @@ These fell out of the stories and constrain the design.
 | # | Requirement | Bears on |
 |---|---|---|
 | D-1 | Every session has a policy before it spawns; "no directory" resolves to an app-owned default | US-1, US-3, ADR-0004 |
-| D-2 | Changing the working directory re-composes the policy and re-spawns | US-2, C2 |
-| D-3 | Conversation context survives a directory change | US-2 |
+| D-2 | Changing the working directory is **not** supported; a session's directory is fixed at spawn | US-2 (rejected), ADR-0008, C2 |
+| D-3 | ~~Conversation context survives a directory change~~ — obsolete with US-2 rejected | US-2 (rejected) |
 | D-4 | The recorded cwd is validated before every resume | US-5, C2 |
 | D-5 | The default workspace is outside `$HOME` proper, `/tmp`, and `~/.pi` | US-3, C6 |
 | D-6 | Live (spawned by Pi Central) and historical (on disk) sessions are distinguished | US-4, C3 |
@@ -197,8 +214,9 @@ These fell out of the stories and constrain the design.
 2. **Cross-project resume.** Should a session recorded in `/repo-a` be resumable while the
    dashboard is "focused" on `/repo-b`? This follows from C2 (each resume is its own
    process) but has UI consequences.
-3. **Directory change mechanics.** `cwdOverride` on resume, or `forkFrom` into the new
-   directory? The second preserves history but creates a new session file, which changes
-   session identity (ADR-0004).
+3. **Directory change mechanics.** **Resolved and rejected:** Pi Central does not change
+   a session's working directory. `cwdOverride` is not available over RPC, and automatic
+   `forkFrom` is a live policy swap that leaks a session file. See
+   [ADR-0008](decisions/0008-no-mid-session-workdir-change.md).
 4. **Bulk cleanup.** How does a user retire 40 stale sessions? Per-session dismissal (US-6)
    is one answer; is anything more needed?

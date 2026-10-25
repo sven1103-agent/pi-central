@@ -13,6 +13,7 @@ reader can tell whether a decision still holds.
 | [0005](0005-typescript-stack.md) | TypeScript + Node orchestrator, TypeScript + React UI | Accepted |
 | [0006](0006-untrusted-markdown-rendering.md) | Untrusted content rendering in a browser UI | Accepted |
 | [0007](0007-filesystem-access-model.md) | Filesystem access: orchestrator at user UID | Accepted |
+| [0008](0008-no-mid-session-workdir-change.md) | No mid-session working-directory change | Accepted |
 
 ## Format
 
