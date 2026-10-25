@@ -43,24 +43,40 @@ grants globally; a pass there would be a false pass. The harness places them in 
 Informed by [USER-STORIES.md](USER-STORIES.md): starting work and resuming history are the
 critical paths, so they are in scope here rather than deferred.
 
-- [ ] Session registry: discovered session files (ADR-0009) merged with live-process
-      state.
-- [ ] **Default workspace** (US-3): an app-owned directory for sessions started without a
-      path, outside `$HOME` proper, `/tmp`, and `~/.pi` (D-5).
-- [ ] Safehouse launcher: deterministic argv, per-session policy, `--env-pass` config.
-- [ ] Process supervisor: spawn, JSONL line reader (LF-only, C7), `id` correlation,
-      `agent_settled` gating (C8), process-group teardown.
-- [ ] State machine: `registered → starting → idle ⇄ streaming → stopped/failed`.
-- [ ] Lifecycle commands: `get_state`, `get_session_stats`, `prompt`, `abort`,
-      `set_session_name`.
-- [ ] **Resume a historical session** (US-5), validating the recorded cwd *before* spawn
+- [x] Session registry: discovered session files (ADR-0009) merged with live-process
+      state. `registry.ts`, `supervisor.ts`
+- [x] **Default workspace** (US-3): an app-owned directory for sessions started without a
+      path, outside `$HOME` proper, `/tmp`, and `~/.pi` (D-5). `config.ts`, tested
+- [x] Safehouse launcher: deterministic argv, per-session policy, `--env-pass` config.
+      `policy.ts`, tested; the only argv-assembly site (enforced)
+- [x] Process supervisor: spawn, JSONL line reader (LF-only, C7), `id` correlation,
+      `agent_settled` gating (C8), process-group teardown. `rpc.ts`, `framing.ts`, `state.ts`
+- [x] State machine: `registered → starting → idle ⇄ streaming → stopped/failed`.
+      `state.ts` (pure), applied by `supervisor.ts`
+- [x] Lifecycle commands: `get_state`, `get_session_stats`, `prompt`, `abort`,
+      `set_session_name`
+- [x] **Resume a historical session** (US-5), validating the recorded cwd *before* spawn
       and surfacing the missing-directory choice (D-4). Pi exits 1 in RPC mode here. The
       only choices are resume-in-place or cancel: Pi Central does not retarget a session
-      ([ADR-0008](decisions/0008-no-mid-session-workdir-change.md)).
-- [ ] Extension UI dialog relay (headless: log or auto-answer by policy).
-- [ ] Test: three sessions in three cwds, prompt each, confirm no cross-talk.
+      ([ADR-0008](decisions/0008-no-mid-session-workdir-change.md)). `resume.ts`, tested
+- [ ] Extension UI dialog relay (headless: log or auto-answer by policy). *Recorded as
+      `awaiting-approval` and answerable; a headless policy is still open (Q6).*
+- [ ] **Test: three sessions in three cwds, prompt each, confirm no cross-talk.** The
+      isolation is proven for two sessions in [Phase 0](../spikes/phase-0/RESULT.md); the
+      three-session supervisor-level test still needs a plain terminal.
 
-**Deliverable:** `packages/orchestrator/` + a CLI smoke command.
+**Deliverable:** `packages/orchestrator/` + a CLI smoke command. *Built; the two remaining
+items need an unsandboxed run (C1).*
+
+### Verification status
+
+| Layer | State |
+|---|---|
+| Unit tests (`node --test`) | ✅ 65 passing |
+| Typecheck (`tsc --noEmit`) | ✅ clean, tsc 5.9.3 |
+| Architectural invariants | ✅ enforced by test (single argv site, no Pi runtime import, no `--add-dirs`) |
+| Discovery against the real store | ✅ 833 sessions, ~900 ms |
+| Real sandboxed session, 3 cwds | ⏳ needs an unsandboxed terminal (C1) |
 
 ## Phase 2 — Transport and UI shell
 

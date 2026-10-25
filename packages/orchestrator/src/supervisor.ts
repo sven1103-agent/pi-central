@@ -68,6 +68,17 @@ export class Supervisor extends EventEmitter {
   }
 
   /**
+   * The underlying RPC process, for verification and diagnostics.
+   *
+   * Exposed so a test can issue a probe through the *model-facing* `bash` tool inside a
+   * session (verify-three.ts). Normal product code goes through the typed lifecycle methods
+   * above; this is the escape hatch that keeps the harness honest about what it exercises.
+   */
+  rpcProcess(id: string): RpcProcess | undefined {
+    return this.#processes.get(id);
+  }
+
+  /**
    * Start a new session. When `cwd` is omitted this creates and uses the app-owned default
    * workspace for the new session's id (US-1 with US-3), rather than defaulting to `$HOME`
    * or the orchestrator's own directory.
