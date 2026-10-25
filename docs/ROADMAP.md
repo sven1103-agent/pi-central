@@ -79,6 +79,10 @@ items need an unsandboxed run (C1).*
       allowlist; `LaunchSpec.env` is **required**, so omitting it is now a type error rather
       than a silent leak. Verified: a planted `SSH_AUTH_SOCK` and `HF_TOKEN_STRICT` do not
       reach the session. `env.test.ts`
+- [x] **The agent credential store is checked for USABILITY at session start** (issue #28), and a
+      missing capability is surfaced as a session warning. It distinguishes *not provisioned* (a
+      setup step) from *provisioned but unreachable* (a defect in Pi Central), because the original
+      `gh` failure named a host path and read as "the sandbox is blocking my config". See C15a.
 - [x] **`FORBIDDEN_ENABLE` now covers `ssh`, `keychain`, `cloud-credentials`,
       `cloud-storage`.** Verified by policy diff that `--enable=ssh` appends an SSH
       integration block and `keychain` grants keychain RW + `SecurityServer` mach-lookups.

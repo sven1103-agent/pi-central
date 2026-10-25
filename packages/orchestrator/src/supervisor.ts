@@ -27,7 +27,8 @@ import { RpcProcess, type LaunchSpec } from "./rpc.ts";
 import { checkResumable } from "./resume.ts";
 import { isScratch, scratchDirFor, type Config } from "./config.ts";
 import { agentRoutingEnv } from "./env.ts";
-import { KEYCHAIN_FILE, inspectProviderAuth } from "./agent-store.ts";
+import { KEYCHAIN_FILE, inspectProviderAuth, readStore } from "./agent-store.ts";
+import { assessAgentCapabilities } from "./capabilities.ts";
 import { renderPolicyFragment } from "./fragment.ts";
 import { interpretRecord } from "./state.ts";
 
@@ -185,23 +186,6 @@ export class Supervisor extends EventEmitter {
     const keychainNeeded = providerAuth.needsKeychain;
     const keychainPresent = existsSync(keychainPath);
 
-    // The environment carries the agent-scoped routing (ADR-0010 §3): GH_CONFIG_DIR and
-    // GIT_CONFIG_GLOBAL point into the agent's own tree, and GIT_CONFIG_SYSTEM=/dev/null
-    // removes the host's system git config as an independent route to the login keychain.
-    const keychainWarnings: string[] = [];
-    if (keychainNeeded && !keychainPresent) {
-      // Granted anyway: the key is looked up through the user-wide SEARCH LIST, so it need not
-      // live in this agent's own keychain. The common case on macOS is the login keychain,
-      // which the fragment still denies -- so this grants the capability without granting the
-      // user's items.
-      keychainWarnings.push(
-        `provider config at ${providerAuth.path} resolves keys via a command ` +
-          `(${providerAuth.commandProviders.join(", ")}), but no keychain exists at ` +
-          `${keychainPath}. Granting keychain access so the lookup can reach the search list; ` +
-          `if the keys are not in a keychain the session will start and be unable to use a model.`,
-      );
-    }
-
     // Only sandboxed sessions get a fragment: direct mode applies no Safehouse policy, so
     // there is nothing to append to.
     //
@@ -237,6 +221,24 @@ export class Supervisor extends EventEmitter {
       return { ok: false, message: (error as Error).message };
     }
 
+    // Can the session USE the credentials it is configured with? (issue #28)
+    //
+    // Checked here rather than earlier because the honest answer depends on the RENDERED fragment:
+    // the C15 defect was a fragment that did not grant what GH_CONFIG_DIR pointed at, and the
+    // fragment is the artifact that actually gets applied. Assessment never reads a credential --
+    // `readStore` is metadata-only -- and never blocks the session: a session with no identity is
+    // still useful for non-credential work.
+    const store = readStore(this.#config.agentRoot, {
+      ownership: this.#config.agentRootManaged ? "managed" : "external",
+    });
+    const capabilities = assessAgentCapabilities({
+      store,
+      sandboxed: input.mode === "sandboxed",
+      ...(fragment !== undefined ? { fragment } : {}),
+      providerAuth,
+      keychainPath,
+    });
+
     const session: LiveSession = {
       id: input.id,
       name: input.name?.trim() || defaultName(input.cwd, input.id),
@@ -252,9 +254,11 @@ export class Supervisor extends EventEmitter {
       tokensTotal: null,
       cost: null,
       dialogs: [],
-      // Policy warnings plus anything the credential configuration needs to say. A session that
-      // starts and cannot think is the failure this surfaces (C13), so it must not be silent.
-      warnings: [...policy.warnings, ...keychainWarnings],
+      // Policy warnings plus whatever the credential configuration needs to say. A session that
+      // starts and cannot think, or cannot use its own identity, is the failure this surfaces
+      // (C13, C15). Assembled through `assessAgentCapabilities` so an "is it provisioned" and an
+      // "is it reachable" are reported as the different problems they are (issue #28).
+      warnings: [...policy.warnings, ...capabilities.warnings],
       startedAt: Date.now(),
       ...(input.sessionPath ? { sessionFile: input.sessionPath } : {}),
     };
