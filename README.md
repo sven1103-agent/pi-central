@@ -39,11 +39,12 @@ sandbox, and each session must be its own `safehouse` invocation.** See
 ```
 ┌──────────────────────────────┐
 │  Pi Central UI (localhost)   │  session rail · transcript · approvals
+│  React + Vite, TypeScript    │  Markdown + Shiki, sanitized (ADR-0006)
 └──────────────┬───────────────┘
-               │  local WebSocket / HTTP
+               │  WebSocket over loopback (typed envelopes)
 ┌──────────────▼───────────────┐
 │  Orchestrator (unsandboxed)  │  session registry · process supervision
-│  · SessionManager.listAll()  │  · one RpcClient per session
+│  TypeScript on Node          │  · one sandboxed pi process per session
 └──────────────┬───────────────┘
                │  spawn: safehouse --workdir <cwd> -- pi --mode rpc
      ┌─────────┼─────────┐
@@ -58,6 +59,8 @@ Each session gets a correctly composed Safehouse profile for its own workdir. Th
 orchestrator never runs untrusted content, so being outside the sandbox is safe by
 construction.
 
+See [docs/STACK.md](docs/STACK.md) for the language and library choices.
+
 ## Status
 
 **Planning.** No implementation yet. This repository currently holds the design,
@@ -67,8 +70,9 @@ Start here:
 
 | Document | What it covers |
 |---|---|
-| [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) | The Seatbelt nesting limit and its consequences |
+| [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) | The Seatbelt nesting limit and its consequences (C1–C8) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, trust boundaries, lifecycle |
+| [docs/STACK.md](docs/STACK.md) | TypeScript/Node orchestrator, React UI, rendering pipeline |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | The Pi RPC surface Pi Central depends on |
 | [docs/SANDBOX.md](docs/SANDBOX.md) | How safehouse is invoked per session |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Phases from spike to UI |
@@ -84,6 +88,8 @@ Start here:
    and the persisted session tree.
 4. **Additive, not a replacement.** Pi Central supervises `pi`; it does not fork it.
 5. **Local first.** No telemetry, no network egress beyond providers Pi already calls.
+6. **Untrusted content is inert.** Transcripts and file contents are strings to display,
+   never markup to execute — see [ADR-0006](docs/decisions/0006-untrusted-rendering-and-file-nav.md).
 
 ## License
 

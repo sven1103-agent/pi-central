@@ -114,9 +114,25 @@ new session in /path/to/repo
 Resuming an existing session uses the same path: the session header's `cwd` is read
 first, the profile is composed for it, and the process is spawned there.
 
-## Deferred decisions
+## Language and framework
 
-The orchestrator's transport (stdio vs local socket vs HTTP+WS) and whether the UI is a
-TUI, a browser app, or both are open — see [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md). The
-constraint that binds all options: **whichever surface is chosen must not run inside a
-sandbox** (C1).
+TypeScript on Node for the orchestrator (no framework), TypeScript + React + Vite for the
+UI, WebSocket over loopback between them. See [STACK.md](STACK.md) and
+[ADR-0005](decisions/0005-typescript-stack.md).
+
+## Data plane protection
+
+Because the UI renders untrusted Markdown in a browser, and because the orchestrator holds
+control over every session, the render path is a security boundary:
+
+```
+RPC event (untrusted) → markdown-it(html:false) → DOMPurify → React children
+```
+
+and file browsing is routed through the **session's** sandbox, never the orchestrator's
+filesystem. See [ADR-0006](decisions/0006-untrusted-rendering-and-file-nav.md).
+
+## Binding constraint on all of the above
+
+The orchestrator and the UI server **must not run inside a sandbox** (C1). Everything else
+in the stack is negotiable; this is not.

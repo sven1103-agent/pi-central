@@ -18,28 +18,26 @@ The orchestrator must be **outside** any sandbox (C1). Options:
 **Decision needed:** is a persistent background daemon acceptable, given it is
 deliberately *not* sandboxed?
 
+**Note:** the transport question that used to sit alongside this is now resolved —
+WebSocket over loopback, per [ADR-0005](decisions/0005-typescript-stack.md). What remains
+open is only the process lifetime: foreground vs `launchd`.
+
 ## Q2 — What is the UI surface?
 
-| Option | Pros | Cons |
-|---|---|---|
-| Browser app (localhost WS) | best transcript rendering, rich dialogs, easy approvals | web stack; loopback server is a surface |
-| Terminal TUI | matches how Pi is already used | must build a TUI on the RPC stream; weaker for rich approvals |
-| Both (transport shared, two clients) | maximally flexible | double the UI work |
+**Resolved:** browser app. React + Vite, served by the orchestrator, WebSocket over
+loopback. See [ADR-0005](decisions/0005-typescript-stack.md).
 
-**Working default:** browser app, because approval dialogs (`select`/`confirm`/`editor`)
-and long transcripts are the differentiator.
-
-**Decision needed:** confirm browser, TUI, or both.
+This is a reversal of the earlier "working default", which was not yet ratified. Markdown
+rendering, syntax highlighting, and rich approval dialogs are the deciding factors; a
+terminal TUI would render all three poorly. The cost is accepted and mitigated: a browser
+means an HTML surface for untrusted content, which makes sanitization and CSP mandatory
+rather than optional ([ADR-0006](decisions/0006-untrusted-rendering-and-file-nav.md)).
 
 ## Q3 — `RpcClient` vs a custom supervisor
 
-See [SANDBOX.md](SANDBOX.md#integration-with-rpcclient). `RpcClient` spawns Pi itself,
-which conflicts with spawning through `safehouse`.
-
-**Working default:** custom supervisor; reuse `RpcClient`'s protocol types and
-correlation logic only. ADR-0003 records this.
-
-**Decision needed:** confirm, or choose the launcher-shim approach for less code.
+**Resolved:** custom supervisor. See [ADR-0003](decisions/0003-custom-supervisor.md).
+`RpcClient` spawns Pi itself, which conflicts with spawning through `safehouse`; its
+protocol types and correlation patterns are reused instead.
 
 ## Q4 — Session discovery scope
 
@@ -86,6 +84,26 @@ Does Pi Central store anything durable (window layout, project list, approval au
 If so, where — and it must be outside `~/.pi` to avoid entangling with Pi's own config.
 
 **Working default:** `~/.config/pi-central/`, JSON, no secrets.
+
+**Decision needed:** confirm the location, and whether an approval audit log is in scope
+for v1 (it interacts with Q6).
+
+## Q9 — File navigation scope
+
+Is the file tree **per session** (the session's workdir) or **per project** (all workdirs,
+switching between them)?
+
+- Per session: matches the sandbox exactly, since the sidecar holds one policy.
+- Per project: convenient when several sessions share a directory, but must still route
+  every read through that project's sandbox ([ADR-0006](decisions/0006-untrusted-rendering-and-file-nav.md)).
+
+**Working default:** per project, one sidecar per workdir, sessions attached to it.
+Because the policy is per workdir and not per session, sharing a sidecar across sessions
+in the same directory is both safe and cheap.
+
+**Decision needed:** confirm. Also unresolved: read-only browsing, or also editing files
+from the UI? Editing would need a write path and an audit trail, and is currently **out of
+scope** — Pi is the thing that edits files.
 
 ## Q8 — Naming and packaging
 

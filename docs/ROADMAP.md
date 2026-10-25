@@ -42,9 +42,16 @@ false. Stop and redesign.
 
 **Question:** can a person operate sessions comfortably from one place?
 
-- [ ] Local transport (WebSocket over loopback, or stdio for a TUI). **Not sandboxed.**
+Stack is fixed: React + Vite UI, WebSocket over loopback, TypeScript orchestrator
+([STACK.md](STACK.md)).
+
+- [ ] WebSocket server on `127.0.0.1` with typed control/event envelopes. **Not
+      sandboxed** — and refuse to start if an inherited sandbox is detected.
 - [ ] Session rail: name, cwd, model, thinking level, state, context usage.
 - [ ] Transcript pane: streaming render, tool timeline, compaction/retry banners.
+- [ ] Markdown pipeline: `markdown-it({ html: false })` → DOMPurify → React, with a
+      strict CSP and no `dangerouslySetInnerHTML` outside it ([ADR-0006](decisions/0006-untrusted-rendering-and-file-nav.md)).
+- [ ] Shiki syntax highlighting with lazy grammar loading.
 - [ ] Composer: prompt / steer / follow-up, queue visibility, Esc = `clear_queue`+`abort`.
 - [ ] Approvals: `confirm` / `select` / `input` / `editor` rendered as real dialogs;
       `notify` / `setStatus` / `setWidget` as non-blocking chrome.
@@ -52,6 +59,22 @@ false. Stop and redesign.
 - [ ] Session switching = focus switch between live processes (C2).
 
 **Deliverable:** runnable dashboard.
+
+## Phase 2.5 — File navigation
+
+**Question:** can a person browse a session's project without breaking the sandbox?
+
+- [ ] `packages/file-helper`: read-only server spawned under the **same** policy as the
+      session (`composePolicy`, reused — not re-assembled).
+- [ ] One helper per workdir, shared by sessions in that directory.
+- [ ] Lazy directory expansion; size caps; binary detection and refusal.
+- [ ] Symlink-aware containment: canonicalize, then verify inside `cwd`. No string prefix
+      checks.
+- [ ] Prove the browser **cannot** list a path the orchestrator itself can read but the
+      sandbox denies — the strongest evidence reads are sandbox-routed.
+- [ ] Read-only. Editing files from the UI is out of scope; Pi edits files.
+
+**Deliverable:** file tree + viewer, with the containment tests above.
 
 ## Phase 3 — Fleet ergonomics
 
@@ -66,6 +89,10 @@ false. Stop and redesign.
 ## Phase 4 — Hardening
 
 - [ ] Loopback-only binding with an explicit access check (C5: loopback is not a control).
+- [ ] Refuse to start when an inherited sandbox is detected (C1) — easy mistake in this
+      environment, where `pi` is normally launched via `safehouse`.
+- [ ] XSS regression suite: `<img onerror>`, `<script>`, `javascript:` links in transcripts
+      and in browsed Markdown files.
 - [ ] Never pass `--allow-workdir-config-writes` / `--allow-profile-writes`.
 - [ ] Never enable `wide-read`; deny it in config validation.
 - [ ] Verify per-session env: no credential leaks across sessions (C4).
@@ -81,6 +108,8 @@ false. Stop and redesign.
 - Session search across all projects (`SessionInfo.allMessagesText`).
 - Diff review pane fed from `tool_execution_*` for edit/write calls.
 - Multi-machine: agents on a remote host, orchestrator local (needs a remote launcher).
+- Rendered-Markdown preview for browsed `.md` files (through the same sanitized
+  pipeline), distinct from the escaped-source view.
 
 ## Explicitly out of scope
 

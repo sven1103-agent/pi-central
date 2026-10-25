@@ -10,6 +10,8 @@ reader can tell whether a decision still holds.
 | [0002](0002-per-session-sandbox.md) | One sandbox per session; never a multi-workdir orchestrator sandbox | Accepted |
 | [0003](0003-custom-supervisor.md) | Custom process supervisor instead of `RpcClient` | Accepted |
 | [0004](0004-session-identity.md) | A session is identified by (session file, working directory) | Accepted |
+| [0005](0005-typescript-stack.md) | TypeScript + Node orchestrator, TypeScript + React UI | Accepted |
+| [0006](0006-untrusted-rendering-and-file-nav.md) | Sanitized Markdown rendering; sandbox-routed file navigation | Accepted |
 
 ## Format
 
