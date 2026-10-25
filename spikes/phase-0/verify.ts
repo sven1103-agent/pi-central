@@ -132,7 +132,7 @@ function parseProbe(output: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const line of output.split("\n")) {
     const m = line.trim().match(/^([A-Z_]+)=(ok|denied)$/);
-    if (m) out[m[1]] = m[2];
+    if (m?.[1] !== undefined && m[2] !== undefined) out[m[1]] = m[2];
   }
   return out;
 }
