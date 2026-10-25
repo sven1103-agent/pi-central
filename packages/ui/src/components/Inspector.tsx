@@ -75,10 +75,28 @@ export function Inspector({
               </dd>
             </>
           )}
+          {/*
+            Pi's own session id, labelled as such. This previously showed `session.id` —
+            Pi Central's handle `s1` — under the label "Session id", which is a different and
+            false claim: Pi's id is a uuid, and it is the one a person needs in order to find
+            the session file or pass it to `pi --session`.
+          */}
           <dt>Session id</dt>
           <dd>
+            {session.sessionId ? (
+              <>
+                <span>{session.sessionId}</span>
+                <CopyButton text={session.sessionId} label="Session id" />
+              </>
+            ) : (
+              <span title="Pi has not reported its session id yet">—</span>
+            )}
+          </dd>
+          {/* The handle is shown too, but named for what it is: it addresses the process. */}
+          <dt>Handle</dt>
+          <dd>
             <span>{session.id}</span>
-            <CopyButton text={session.id} label="Id" />
+            <CopyButton text={session.id} label="Handle" />
           </dd>
         </dl>
       </section>

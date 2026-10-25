@@ -116,3 +116,39 @@ test("only the framing module splits the RPC stdout stream on newlines (C7)", ()
   }
   assert.deepEqual(offenders, [], `stdout split outside framing.ts:\n${offenders.join("\n")}`);
 });
+
+test("rpc.send takes the closed Command union, not any object with a type", () => {
+  // The union was documented as "closed, on purpose" while `send` accepted
+  // `{ type: string } & Record<string, unknown>`, which made it decorative: a typo compiled and
+  // failed only at runtime. Making it binding immediately found TWO commands the supervisor and
+  // the verifier were calling without the union ever listing them (`get_messages`,
+  // `get_available_models`).
+  const source = readFileSync(new URL("../src/rpc.ts", import.meta.url), "utf8");
+  assert.match(
+    source,
+    /send\(command:\s*Command\b/,
+    "send must take the Command union, or a mistyped command silently no-ops at runtime",
+  );
+  assert.ok(
+    !/send\(command:\s*\{\s*type:\s*string\s*\}/.test(source),
+    "send must not accept an arbitrary { type: string }",
+  );
+});
+
+test("every command the supervisor sends is in the closed union", () => {
+  // A cheap proxy for the type check: if the union loses a member, `send` calls for it become
+  // compile errors — but this also catches a command being sent through `write` instead.
+  const supervisor = readFileSync(new URL("../src/supervisor.ts", import.meta.url), "utf8");
+  const protocol = readFileSync(
+    new URL("../../protocol/src/pi.ts", import.meta.url),
+    "utf8",
+  );
+  const sent = [...supervisor.matchAll(/\.send\(\{\s*type:\s*"([a-z_]+)"/g)].map((m) => m[1]!);
+  assert.ok(sent.length > 0, "expected the supervisor to send commands");
+  for (const command of new Set(sent)) {
+    assert.ok(
+      new RegExp(`type:\\s*"${command}"`).test(protocol),
+      `the supervisor sends "${command}" but the Command union does not list it`,
+    );
+  }
+});

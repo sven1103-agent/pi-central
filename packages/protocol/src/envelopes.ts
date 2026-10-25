@@ -61,6 +61,22 @@ export interface LiveSession {
   provider?: string | undefined;
   thinkingLevel?: string | undefined;
   sessionFile?: string | undefined;
+  /**
+   * Pi's OWN session id, a uuid, from `get_state`.
+   *
+   * Distinct from `id`, and the distinction is not cosmetic: `id` is Pi Central's short handle
+   * (`s1`) that addresses the process, while this identifies the transcript. Showing `s1` under
+   * the label "Session id" states something false — Pi's id is `01a171ff-…` — and the uuid is
+   * what a person needs in order to find the session file or correlate it with `pi --session`.
+   */
+  sessionId?: string | undefined;
+  /**
+   * Whether the existing conversation has been fetched from Pi.
+   *
+   * Guards a single load: the UI reducer APPENDS every message it receives, so loading twice
+   * would duplicate the whole transcript. Exposed so that property is directly testable.
+   */
+  transcriptLoaded?: boolean | undefined;
   messageCount: number;
   pending: number;
   contextPercent: number | null;
@@ -125,6 +141,15 @@ export type Event =
     }
   | { kind: "session"; session: LiveSession }
   | { kind: "record"; sessionId: string; record: PiRecord }
+  /**
+   * A session's EXISTING conversation, fetched when it starts or resumes.
+   *
+   * Separate from `record` on purpose. `record` is the live stream and is appended to; this is
+   * the authoritative past and REPLACES what the client holds. Encoding both in one event would
+   * make "append or replace?" undecidable from the payload, and a reconnect would then either
+   * duplicate the conversation or lose the newest turn.
+   */
+  | { kind: "transcript"; sessionId: string; messages: unknown[] }
   | { kind: "history"; history: HistoricalSession[]; total: number }
   | { kind: "error"; message: string; sessionId?: string | undefined };
 

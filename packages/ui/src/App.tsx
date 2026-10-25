@@ -349,6 +349,7 @@ function SessionView({
         transcript={transcript}
         busy={busy}
         sessionLabel={displayName(session)}
+        expectedCount={session.messageCount}
       />
 
       {pendingDialogCount({ ...initialState(), live: [session] }) > 0 ? null : (

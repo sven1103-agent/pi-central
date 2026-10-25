@@ -89,28 +89,56 @@ export function emptyTranscript(): Transcript {
 /**
  * Flatten a Pi message's `content` into display blocks.
  *
- * Pi's `message_end.message` is a whole message with a `content` array. Its parts map onto
- * the same block kinds as the streaming events, so the authoritative replacement reuses the
- * block model rather than introducing a second one.
+ * Verified against a real 2169-message session file, and the shapes are not what the streaming
+ * events suggest:
+ *
+ *   content blocks found: text 1884, thinking 440, **toolCall** 1121, image 3, plain-string 2
+ *   roles found:          system, user, assistant, **toolResult** (1120)
+ *
+ * Three things this got wrong at first, all now load-bearing:
+ *
+ *   - Pi's content block is `toolCall`, **camelCase**. The original code matched `tool_use` and
+ *     `tool_call`, so all 1121 tool calls in a history would have been dropped silently.
+ *   - A user message's `content` may be a plain **string**, not an array, so those messages
+ *     rendered as empty.
+ *   - Tool results are not content blocks at all: they are separate messages with role
+ *     `toolResult`. They are handled in `applyRecord`, not here.
+ *
+ * `image` blocks are deliberately skipped: the transcript has no image viewer, and inventing
+ * one from a base64 payload is worse than omitting it.
  */
 function blocksFromContent(content: unknown): Block[] {
+  if (typeof content === "string") {
+    return content.length > 0 ? [{ kind: "text", text: content, complete: true }] : [];
+  }
   if (!Array.isArray(content)) return [];
   const blocks: Block[] = [];
   for (const part of content) {
     if (typeof part !== "object" || part === null) continue;
-    const piece = part as { type?: string; text?: string; thinking?: string; id?: string; name?: string; input?: unknown };
+    const piece = part as {
+      type?: string;
+      text?: string;
+      thinking?: string;
+      id?: string;
+      name?: string;
+      arguments?: unknown;
+      input?: unknown;
+    };
     if (piece.type === "text" && typeof piece.text === "string") {
       blocks.push({ kind: "text", text: piece.text, complete: true });
     } else if (piece.type === "thinking" && typeof piece.thinking === "string") {
       blocks.push({ kind: "thinking", text: piece.thinking, complete: true });
-    } else if (piece.type === "tool_use" || piece.type === "tool_call") {
+    } else if (piece.type === "toolCall" || piece.type === "tool_use" || piece.type === "tool_call") {
+      // Pi names the payload `arguments`; the snake_case spellings are accepted so a
+      // provider-shaped payload still renders rather than vanishing.
+      const args = piece.arguments ?? piece.input;
       blocks.push({
         kind: "toolcall",
         contentIndex: blocks.length,
         ...(piece.id !== undefined ? { id: piece.id } : {}),
         ...(piece.name !== undefined ? { name: piece.name } : {}),
         argsText: "",
-        ...(piece.input !== undefined ? { args: piece.input } : {}),
+        ...(args !== undefined ? { args } : {}),
         complete: true,
       });
     }
@@ -184,12 +212,55 @@ export function applyRecord(transcript: Transcript, record: Record<string, unkno
     }
 
     case "message_end": {
-      const message = record.message as { role?: string; content?: unknown } | undefined;
+      const message = record.message as
+        | {
+            role?: string;
+            content?: unknown;
+            toolCallId?: string;
+            toolName?: string;
+            isError?: boolean;
+            command?: string;
+            output?: string;
+            stopReason?: string;
+            errorMessage?: string;
+          }
+        | undefined;
+
+      // History replay arrives through this same path (see `Supervisor#loadTranscript`), so the
+      // roles that only appear in a session file have to be handled here rather than only the
+      // two a live stream produces.
+      const role = message?.role;
+
+      // System messages are the initial prompt and the tool declarations. They are not
+      // conversation, and two of them can be larger than the entire exchange.
+      if (role === "system") return next;
+
+      // Tool results are their own MESSAGE role in Pi, not a content block. They become tool
+      // frames so the UI renders them in the hatched quarantine, which is where output the
+      // model did not author belongs.
+      if (role === "toolResult" || role === "bashExecution") {
+        const toolCallId = message?.toolCallId ?? `history-${next.tools.length}`;
+        next.tools.push({
+          toolCallId,
+          toolName: message?.toolName ?? (role === "bashExecution" ? "bash" : "tool"),
+          args: message?.command !== undefined ? { command: message.command } : undefined,
+          result: stringifyResult(message?.content) || String(message?.output ?? ""),
+          isError: message?.isError === true,
+          running: false,
+          startedAt: Date.now(),
+        });
+        return next;
+      }
+
       const blocks = blocksFromContent(message?.content);
+      // A failed or aborted response is shown even when it produced no content. Without this a
+      // provider error arrives as an empty turn and the reader is told nothing at all.
+      const failure = message ? describeStopReason(message as { stopReason?: string; errorMessage?: string }) : undefined;
+      if (failure) blocks.push({ kind: "text", text: failure, complete: true });
       const last = next.messages[next.messages.length - 1];
       // The authoritative message REPLACES the partial one. Matching by position is correct
       // here because `message_end` refers to the message just streamed.
-      if (last && last.role === "assistant" && !last.complete) {
+      if (last && last.role === "assistant" && !last.complete && role !== "user") {
         next.messages[next.messages.length - 1] = {
           ...last,
           // Only replace blocks when the authoritative message actually has content; a
@@ -201,7 +272,7 @@ export function applyRecord(transcript: Transcript, record: Record<string, unkno
       } else if (message) {
         next.messages.push({
           id: `m${next.messages.length}`,
-          role: (message.role ?? "assistant") as TranscriptMessage["role"],
+          role: normaliseRole(role),
           blocks,
           complete: true,
           streaming: false,
@@ -413,6 +484,63 @@ function stringifyResult(result: unknown): string {
     }
   }
   return String(result);
+}
+
+/**
+ * Describe a message that did not complete.
+ *
+ * Verified against a real session: 10 assistant messages have an EMPTY content array, and all 10
+ * carry `stopReason` of `"error"` (8) or `"aborted"` (2) with an `errorMessage`. Rendering those
+ * as blank turns hides a provider failure completely — the same silent-failure class as C12 and
+ * C13, in the transcript rather than the policy.
+ */
+function describeStopReason(message: { stopReason?: string; errorMessage?: string }): string | undefined {
+  const reason = message.stopReason;
+  if (reason !== "error" && reason !== "aborted") return undefined;
+  const detail = message.errorMessage?.trim();
+  const head = reason === "aborted" ? "This response was interrupted." : "This response did not complete.";
+  return `⚠ ${head}${detail ? ` ${detail}` : ""}`;
+}
+
+/**
+ * Map Pi's message roles onto the four the transcript renders.
+ *
+ * Pi has more roles than the four (system, user, assistant, toolResult, bashExecution, and
+ * coding-agent extras), and an unmapped one would be rendered verbatim as a label — which is how
+ * a transcript ends up captioned "toolResult".
+ */
+function normaliseRole(role: string | undefined): TranscriptMessage["role"] {
+  switch (role) {
+    case "user":
+      return "user";
+    case "system":
+      return "system";
+    case "toolResult":
+    case "bashExecution":
+      return "tool";
+    default:
+      return "assistant";
+  }
+}
+
+/**
+ * Fold a list of historical messages into an empty transcript.
+ *
+ * Used when a session is resumed: Pi loads its history into the model's context but does NOT
+ * re-emit it as events, so without this the UI shows "No messages yet" for a session with
+ * hundreds of them.
+ *
+ * Each message is fed through the SAME `message_end` path a live message takes, rather than a
+ * parallel history renderer. Two renderers for one conversation is how the past and the present
+ * end up looking different.
+ */
+export function seedTranscript(messages: unknown[]): Transcript {
+  let transcript = emptyTranscript();
+  for (const message of messages) {
+    if (typeof message !== "object" || message === null) continue;
+    transcript = applyRecord(transcript, { type: "message_end", message });
+  }
+  return transcript;
 }
 
 /** The full assistant text so far, for copy and export. */

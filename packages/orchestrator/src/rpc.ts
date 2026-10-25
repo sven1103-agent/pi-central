@@ -17,7 +17,7 @@
  */
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
-import type { PiRecord } from "@pi-central/protocol";
+import type { Command, PiRecord } from "@pi-central/protocol";
 import { JsonlDecoder, encodeLine } from "./framing.ts";
 
 export interface LaunchSpec {
@@ -119,7 +119,19 @@ export class RpcProcess extends EventEmitter {
   }
 
   /** Send a command and resolve with its response `data`, or reject on error/timeout. */
-  send(command: { type: string } & Record<string, unknown>, timeoutMs = 60_000): Promise<unknown> {
+  /**
+   * Send a command and await its correlated response.
+   *
+   * Takes the CLOSED `Command` union, not `{ type: string } & Record<string, unknown>`.
+   *
+   * This is not a style preference. The union was documented as "closed, on purpose: the
+   * supervisor must not be able to send an arbitrary object derived from untrusted input", but
+   * `send` accepted any object with a `type` string — so the union was decorative and a typo
+   * (`get_message` for `get_messages`) compiled cleanly and failed only at runtime, as a
+   * `success: false` response the caller might not check. `get_messages` was in fact absent from
+   * the union while being called from the supervisor, which is exactly how that goes unnoticed.
+   */
+  send(command: Command, timeoutMs = 60_000): Promise<unknown> {
     const child = this.#child;
     if (!child || !child.stdin.writable) return Promise.reject(new Error("session is not running"));
 

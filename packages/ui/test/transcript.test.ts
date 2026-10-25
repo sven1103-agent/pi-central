@@ -12,6 +12,7 @@ import {
   applyRecord,
   assistantText,
   emptyTranscript,
+  seedTranscript,
   type Transcript,
 } from "../src/transcript.ts";
 
@@ -309,4 +310,186 @@ test("malformed records do not throw", () => {
 test("a delta with no preceding message_start is ignored rather than crashing", () => {
   const t = fold([update({ type: "text_delta", contentIndex: 0, delta: "orphan" })]);
   assert.equal(t.messages.length, 0);
+});
+
+// --- Findings from a real session file (img_2.png) --------------------------------------------
+//
+// The shapes below are copied from an actual 2169-message session. They are the reason a resumed
+// session rendered an EMPTY transcript, and the reason tool calls and tool results vanished.
+// Three separate mismatches, all silent:
+//
+//   Pi's content block is `toolCall` (camelCase)  -- the code matched `tool_use` / `tool_call`
+//   a user message's content may be a plain STRING -- the code required an array
+//   tool results are their own message ROLE        -- the code only knew text and thinking
+
+test("a toolCall block (Pi's camelCase) becomes a tool block, not nothing", () => {
+  // 1121 of these exist in one real session. Matching only snake_case dropped every one.
+  const t = fold([
+    { type: "message_end", message: { role: "assistant", content: [
+      { type: "toolCall", id: "c1", name: "bash", arguments: { command: "npm test" } },
+    ] } },
+  ]);
+  const block = t.messages[0]!.blocks[0];
+  assert.equal(block?.kind, "toolcall", "a camelCase toolCall must be recognised");
+  assert.equal(block?.kind === "toolcall" && block.name, "bash");
+  assert.deepEqual(block?.kind === "toolcall" && block.args, { command: "npm test" });
+});
+
+test("a toolCall's payload is `arguments`, not `input`", () => {
+  const t = fold([
+    { type: "message_end", message: { role: "assistant", content: [
+      { type: "toolCall", id: "c1", name: "read", arguments: { path: "/x" } },
+    ] } },
+  ]);
+  const block = t.messages[0]!.blocks[0];
+  assert.deepEqual(block?.kind === "toolcall" && block.args, { path: "/x" });
+});
+
+test("a user message whose content is a plain string is not rendered empty", () => {
+  // Two of these exist in the real session, and both rendered as blank turns.
+  const t = fold([{ type: "message_end", message: { role: "user", content: "fix the parser" } }]);
+  assert.equal(t.messages.length, 1);
+  assert.equal(assistantText(t.messages[0]!), "fix the parser");
+  assert.equal(t.messages[0]!.role, "user");
+});
+
+test("a toolResult message becomes a tool frame, not a chat turn", () => {
+  // 1120 of these in one real session. They are output the model did not author, so they belong
+  // in the hatched quarantine rather than captioned "toolResult" as if it were prose.
+  const t = fold([
+    { type: "message_end", message: {
+      role: "toolResult", toolCallId: "c1", toolName: "bash", isError: false,
+      content: [{ type: "text", text: "PASS 14 tests" }],
+    } },
+  ]);
+  assert.equal(t.messages.length, 0, "a tool result is not a chat message");
+  assert.equal(t.tools.length, 1);
+  assert.equal(t.tools[0]!.toolName, "bash");
+  assert.equal(t.tools[0]!.result, "PASS 14 tests");
+  assert.equal(t.tools[0]!.running, false);
+});
+
+test("a failed toolResult is marked as an error", () => {
+  const t = fold([
+    { type: "message_end", message: {
+      role: "toolResult", toolCallId: "c1", toolName: "bash", isError: true,
+      content: [{ type: "text", text: "boom" }],
+    } },
+  ]);
+  assert.equal(t.tools[0]!.isError, true);
+});
+
+test("a bashExecution message becomes a tool frame with its command", () => {
+  // A direct shell command is not an LLM tool result, but it is the same thing to a reader.
+  const t = fold([
+    { type: "message_end", message: { role: "bashExecution", command: "ls -la", output: "total 0", exitCode: 0 } },
+  ]);
+  assert.equal(t.tools.length, 1);
+  assert.equal(t.tools[0]!.toolName, "bash");
+  assert.equal(t.tools[0]!.result, "total 0");
+  assert.deepEqual(t.tools[0]!.args, { command: "ls -la" });
+});
+
+test("system messages are not rendered as conversation", () => {
+  // The initial prompt plus tool declarations; two of them can exceed the whole exchange.
+  const t = fold([
+    { type: "message_end", message: { role: "system", content: "You are a coding agent…" } },
+    { type: "message_end", message: { role: "user", content: "hi" } },
+  ]);
+  assert.equal(t.messages.length, 1);
+  assert.equal(t.messages[0]!.role, "user");
+});
+
+test("image blocks are skipped rather than rendered as garbage", () => {
+  // No image viewer exists, and 3 of these are in the real session.
+  const t = fold([
+    { type: "message_end", message: { role: "user", content: [
+      { type: "text", text: "look at this" },
+      { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
+    ] } },
+  ]);
+  assert.equal(t.messages[0]!.blocks.length, 1);
+  assert.equal(assistantText(t.messages[0]!), "look at this");
+  assert.ok(!JSON.stringify(t).includes("iVBORw0KGgo"), "base64 image data must not leak into the transcript");
+});
+
+test("an unknown role does not become a literal label", () => {
+  const t = fold([{ type: "message_end", message: { role: "someFutureRole", content: "x" } }]);
+  assert.equal(t.messages[0]!.role, "assistant");
+});
+
+// --- Seeding a resumed session's history -------------------------------------------------------
+
+test("seedTranscript renders a full conversation in order", () => {
+  // What a resumed session needs: Pi does not re-emit history as events, so the UI asks for it.
+  const t = seedTranscript([
+    { role: "user", content: "first question" },
+    { role: "assistant", content: [{ type: "text", text: "first answer" }] },
+    { role: "toolResult", toolCallId: "c1", toolName: "bash", content: [{ type: "text", text: "output" }] },
+    { role: "user", content: "second question" },
+  ]);
+  assert.deepEqual(t.messages.map((m) => m.role), ["user", "assistant", "user"]);
+  assert.equal(assistantText(t.messages[0]!), "first question");
+  assert.equal(assistantText(t.messages[1]!), "first answer");
+  assert.equal(assistantText(t.messages[2]!), "second question");
+  assert.equal(t.tools.length, 1, "the tool result landed as a frame, in place");
+});
+
+test("seeded history is marked complete, so nothing looks like it is still streaming", () => {
+  const t = seedTranscript([{ role: "assistant", content: [{ type: "text", text: "done long ago" }] }]);
+  assert.equal(t.messages[0]!.complete, true);
+  assert.equal(t.messages[0]!.streaming, false, "history must not show a spinner");
+});
+
+test("seeding an empty or malformed history yields an empty transcript, not a crash", () => {
+  for (const input of [[], [null], [undefined], ["a string"], [42]]) {
+    assert.doesNotThrow(() => seedTranscript(input as unknown[]), `threw on ${JSON.stringify(input)}`);
+  }
+  assert.equal(seedTranscript([]).messages.length, 0);
+});
+
+test("a failed response with EMPTY content is not rendered as a blank turn", () => {
+  // All 10 empty-content messages in a real session carry stopReason error/aborted plus an
+  // errorMessage, so rendering them blank hid a provider failure completely.
+  const t = fold([
+    { type: "message_end", message: {
+      role: "assistant", content: [], stopReason: "error",
+      errorMessage: "rate limit exceeded",
+    } },
+  ]);
+  const text = assistantText(t.messages[0]!);
+  assert.ok(text.length > 0, "an empty-content failure must still say something");
+  assert.match(text, /did not complete/);
+  assert.match(text, /rate limit exceeded/, "the provider's own message must survive");
+});
+
+test("an aborted response says it was interrupted", () => {
+  const t = fold([
+    { type: "message_end", message: {
+      role: "assistant", content: [], stopReason: "aborted", errorMessage: "user aborted",
+    } },
+  ]);
+  assert.match(assistantText(t.messages[0]!), /interrupted/);
+});
+
+test("a normal completion adds no failure note", () => {
+  const t = fold([
+    { type: "message_end", message: {
+      role: "assistant", content: [{ type: "text", text: "all good" }], stopReason: "stop",
+    } },
+  ]);
+  assert.equal(assistantText(t.messages[0]!), "all good");
+});
+
+test("a partial response keeps its text AND gains the failure note", () => {
+  // The common real case: some text streamed, then the provider failed.
+  const t = fold([
+    { type: "message_end", message: {
+      role: "assistant", content: [{ type: "text", text: "I started to explain" }],
+      stopReason: "error", errorMessage: "connection reset",
+    } },
+  ]);
+  const text = assistantText(t.messages[0]!);
+  assert.match(text, /I started to explain/, "the partial answer must not be lost");
+  assert.match(text, /connection reset/, "and the failure must be visible");
 });

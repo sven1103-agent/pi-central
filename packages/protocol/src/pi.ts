@@ -97,6 +97,23 @@ export function isKnownDialogMethod(method: string): boolean {
 export type Command =
   | { type: "get_state" }
   | { type: "get_session_stats" }
+  /**
+   * The existing conversation.
+   *
+   * Needed because Pi does NOT re-emit a resumed session's history as events: without this
+   * command the UI renders "No messages yet" for a session with hundreds of them. It was
+   * missing from this union while `rpc.send` accepted any object, so the omission could not be
+   * caught by the compiler — see the note on `send`.
+   */
+  | { type: "get_messages" }
+  /**
+   * The models Pi can currently offer.
+   *
+   * Also absent from this union while being called from `verify-three.ts`, which is how the
+   * C13 check (can the session reach a model?) was written without the compiler noticing. Making
+   * `send` take this union found both omissions in the same minute.
+   */
+  | { type: "get_available_models" }
   | { type: "prompt"; message: string; streamingBehavior?: "steer" | "followUp" }
   | { type: "steer"; message: string }
   | { type: "follow_up"; message: string }

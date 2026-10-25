@@ -66,6 +66,55 @@ The supervisor classifies by method, and `state.ts` has tests asserting that
 `notify`/`setStatus`/`setWidget` change neither state nor dialog list **and** that an unknown
 method does open one.
 
+### Resuming a session: Pi does NOT re-emit the history
+
+**Verified against a real session** (2205 message records, `01a171ff-…`). This is the single
+most important behaviour to know when resuming, and it is not obvious from the RPC docs.
+
+Pi loads a resumed session's history into the model's **context**, but does not re-emit those
+messages as session events. A client built only from the event stream therefore shows an
+*empty* transcript for a session with hundreds of messages — which is exactly the case
+[US-5](USER-STORIES.md#us-5--continue-a-past-session) exists to serve.
+
+**A client must explicitly fetch the history:**
+
+| Command | What it returns | Use |
+|---|---|---|
+| `get_messages` | the conversation, as `AgentMessage[]` | the transcript |
+| `get_entries` | the full append-only tree, **including pre-compaction history and abandoned branches** | a complete audit view |
+
+`get_messages` is what Pi Central loads on start and resume. Prefer `get_entries` when
+pre-compaction history matters.
+
+The supervisor re-emits the fetched messages as a `transcript` event, kept separate from `record`
+so the client knows whether to append (live) or replace (history).
+
+### The message shapes a transcript must handle
+
+These are the **actual** shapes found in a real session file, and three of them differ from what
+the streaming events suggest:
+
+| Shape | Count in one session | Note |
+|---|---|---|
+| `{ type: "toolCall" }` | 1121 | **camelCase.** Not `tool_use` or `tool_call` |
+| `{ role: "toolResult" }` | 1120 | a separate **message role**, not a content block |
+| `content: "a plain string"` | 2 | a user message's content need not be an array |
+| `{ type: "image" }` | 3 | base64; skip it rather than render garbage |
+| `content: []` + `stopReason: "error"` | 10 | a provider failure — must not render as a blank turn |
+
+The tool-call payload is named `arguments`, not `input`.
+
+Getting any of these wrong fails **silently**: the transcript is merely shorter than it should
+be, which is indistinguishable from a quiet session.
+
+### `send` takes the closed `Command` union
+
+The `Command` union is binding, not decorative: `rpc.send` accepts it and nothing looser. It was
+previously `{ type: string } & Record<string, unknown>`, so a mistyped command compiled cleanly
+and failed at runtime as a `success: false` response the caller might not check. Making it
+binding immediately revealed **two** commands in active use that the union never listed —
+`get_messages` and `get_available_models`.
+
 ### Responses are usually sub-millisecond, but the timeout path matters
 
 `get_state` and `get_session_stats` answered in 0–3 ms in practice. The timeout is therefore

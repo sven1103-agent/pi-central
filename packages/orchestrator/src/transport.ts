@@ -299,6 +299,10 @@ export class Transport {
     this.#supervisor.on("record", (sessionId: string, record: PiRecord) => {
       this.#broadcast({ kind: "record", sessionId, record });
     });
+    // Replayed history, kept distinct from the live stream (see the `transcript` event).
+    this.#supervisor.on("transcript", (sessionId: string, messages: unknown[]) => {
+      this.#broadcast({ kind: "transcript", sessionId, messages });
+    });
     this.#supervisor.on("error", (sessionId: string, message: string) => {
       this.#broadcast({ kind: "error", message, sessionId });
     });

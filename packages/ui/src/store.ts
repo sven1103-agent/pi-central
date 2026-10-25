@@ -16,7 +16,7 @@
  *    the orchestrator had stopped it.
  */
 import type { HistoricalSession, LiveSession, PiRecord } from "@pi-central/protocol";
-import { applyRecord, emptyTranscript, type Transcript } from "./transcript.ts";
+import { applyRecord, emptyTranscript, seedTranscript, type Transcript } from "./transcript.ts";
 
 export interface UiState {
   live: LiveSession[];
@@ -91,6 +91,8 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
     }
 
     case "record": {
+      // A `message_end` with a timestamped whole message is either live or replayed history;
+      // both fold through `applyRecord`, which is the point of replaying history as records.
       const previous = state.transcripts[event.sessionId] ?? emptyTranscript();
       return {
         ...state,
@@ -98,6 +100,15 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
           ...state.transcripts,
           [event.sessionId]: applyRecord(previous, event.record as Record<string, unknown>),
         },
+      };
+    }
+
+    case "transcript": {
+      // Replayed history replaces whatever was there, because it is the authoritative past.
+      // Appending would duplicate the conversation on every reconnect.
+      return {
+        ...state,
+        transcripts: { ...state.transcripts, [event.sessionId]: seedTranscript(event.messages) },
       };
     }
 

@@ -20,10 +20,24 @@ export function TranscriptView({
   transcript,
   busy,
   sessionLabel,
+  expectedCount = 0,
+  loading = false,
 }: {
   transcript: TranscriptModel;
   busy: boolean;
   sessionLabel: string;
+  /**
+   * How many messages Pi says the session has.
+   *
+   * Passed so the empty state cannot CONTRADICT the header. The screenshot that exposed the
+   * missing-history bug showed `634 msgs` in the header and "No messages yet." underneath —
+   * both rendered from real data, and visibly disagreeing. An empty transcript with a non-zero
+   * count is not an empty session; it is history that has not arrived, and saying "no messages"
+   * then is worse than saying nothing.
+   */
+  expectedCount?: number;
+  /** True once the session is up and its history has been requested. */
+  loading?: boolean;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -47,6 +61,8 @@ export function TranscriptView({
   });
 
   const isEmpty = transcript.messages.length === 0 && transcript.tools.length === 0;
+  // Only claim the session is empty when Pi agrees it is. Otherwise this is history in flight.
+  const awaitingHistory = isEmpty && expectedCount > 0;
 
   return (
     <div
@@ -57,7 +73,15 @@ export function TranscriptView({
       aria-label={`Transcript for ${sessionLabel}`}
       aria-busy={busy || undefined}
     >
-      {isEmpty ? (
+      {awaitingHistory ? (
+        <div className="empty" style={{ padding: 0 }}>
+          <h2>Loading this session's history…</h2>
+          <p>
+            Pi reports {expectedCount} message{expectedCount === 1 ? "" : "s"} in this session.
+            They are being fetched; nothing is missing.
+          </p>
+        </div>
+      ) : isEmpty && !loading ? (
         <div className="empty" style={{ padding: 0 }}>
           <h2>No messages yet.</h2>
           <p>

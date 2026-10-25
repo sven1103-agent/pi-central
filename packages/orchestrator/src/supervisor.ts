@@ -309,6 +309,10 @@ export class Supervisor extends EventEmitter {
       session.provider = model?.provider;
       session.thinkingLevel = state.thinkingLevel as string | undefined;
       if (typeof state.sessionFile === "string") session.sessionFile = state.sessionFile;
+      // Pi's OWN session id, which is a uuid. Distinct from `session.id`, which is Pi Central's
+      // short handle. Both are needed: the handle addresses the process, the uuid identifies the
+      // transcript, and showing one under the other's label is a lie about which is which.
+      if (typeof state.sessionId === "string" && state.sessionId) session.sessionId = state.sessionId;
       if (typeof state.sessionName === "string" && state.sessionName) session.name = state.sessionName;
       session.messageCount = Number(state.messageCount ?? session.messageCount);
       session.pending = Number(state.pendingMessageCount ?? session.pending);
@@ -317,9 +321,48 @@ export class Supervisor extends EventEmitter {
       session.error = undefined;
       this.#patch(id);
       void this.#refreshStats(id);
+      // Load the existing conversation BEFORE anything new arrives.
+      void this.#loadTranscript(id);
     } catch (error) {
       session.state = "failed";
       session.error = `${(error as Error).message}${rpc.stderrTail ? `\n${rpc.stderrTail}` : ""}`;
+      this.#patch(id);
+    }
+  }
+
+  /**
+   * Load a session's existing conversation and re-emit it as records.
+   *
+   * **This is the fix for a resumed session showing an empty transcript.** Pi loads a resumed
+   * session's history into the model's context but does NOT re-emit it as events, so a UI built
+   * only from `record` events shows "No messages yet" for a session with hundreds of messages —
+   * which is precisely the case US-5 exists to serve.
+   *
+   * Re-emitted as `message_end` records rather than through a new event type, so history and a
+   * live stream take the SAME code path in the UI reducer. There is one renderer for one
+   * conversation; two is how the past and the present end up looking different.
+   *
+   * Runs at most once per session: a second call would append a duplicate copy of the whole
+   * conversation, since the reducer appends every `message_end` it sees.
+   */
+  async #loadTranscript(id: string): Promise<void> {
+    const session = this.#sessions.get(id);
+    const rpc = this.#processes.get(id);
+    if (!session || !rpc || session.transcriptLoaded) return;
+    session.transcriptLoaded = true;
+    try {
+      const data = (await rpc.send({ type: "get_messages" }, 30_000)) as { messages?: unknown[] };
+      const messages = (data?.messages ?? []).filter(
+        (message) => typeof message === "object" && message !== null,
+      );
+      this.emit("transcript", id, messages);
+    } catch (error) {
+      // A transcript that failed to load must not fail the session. Statistics are cosmetic;
+      // this is not, so the failure is surfaced as a warning rather than swallowed.
+      session.warnings = [
+        ...session.warnings,
+        `Could not load this session's earlier messages: ${(error as Error).message}`,
+      ];
       this.#patch(id);
     }
   }
