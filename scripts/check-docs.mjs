@@ -8,13 +8,18 @@
  * development and caught real breakage each time (a removed prototype, a renamed ADR, an anchor
  * that no longer existed), so it is a script now rather than a habit.
  *
- * Two checks:
+ * Three checks:
  *
  *   1. **Relative links** resolve to a file that exists, and their `#anchor` — when present —
  *      matches a heading in the target. Anchors are the ones that rot most quietly.
  *   2. **Path references in backticks** that look like repository paths resolve too, allowing
  *      `{a,b}` alternatives and a trailing wildcard. This is what catches a doc still citing
  *      `prototype/public/app.js` months after the directory was deleted.
+ *   3. **Generated output is reported, not failed.** A reference under `packages/ui/dist` names
+ *      build output, which is legitimately absent in a fresh checkout — CI has no `dist` until it
+ *      builds. Demanding it exist made an honest mention of where the UI is served from a
+ *      guaranteed failure, which is how this gap was found (issue #24). The exemptions are listed
+ *      in the output, so a reference that is not checked is visible rather than assumed.
  *
  * Deliberately NOT checked: prose. A sentence mentioning "the spike" is history and is allowed to
  * describe something that no longer exists. Only explicit references are held to account.
@@ -49,6 +54,25 @@ function headings(file) {
   return [...readFileSync(file, "utf8").matchAll(/^#{1,6}\s+(.+)$/gm)].map((m) => slug(m[1]));
 }
 
+/**
+ * Directories that hold BUILD OUTPUT rather than source.
+ *
+ * A reference to something under one of these is a reference to a generated path, and a generated
+ * path is legitimately absent in a fresh checkout — CI has no `packages/ui/dist` until it builds,
+ * so demanding that it exist made every honest mention of "where the UI is served from" a failure
+ * (found by CI on the first run of issue #24, which is the check doing its job on a gap in itself).
+ *
+ * This is deliberately a SUPERSET-free, explicit list, not "anything git-ignored": a broad rule
+ * would silently exempt real typos. The exemptions are counted and printed, so a reference that is
+ * never checked is visible rather than assumed.
+ */
+const GENERATED_DIRS = new Set(["dist", ".vite", "coverage"]);
+
+/** Is this reference to build output rather than to a file in the source tree? */
+function isGenerated(reference) {
+  return reference.split("/").some((segment) => GENERATED_DIRS.has(segment));
+}
+
 /** Expand `{a,b}` alternatives and a trailing `*` into concrete paths to test. */
 function candidates(reference) {
   const brace = /\{([^}]*)\}/.exec(reference);
@@ -73,6 +97,7 @@ function candidates(reference) {
 }
 
 const problems = [];
+const generated = [];
 
 for (const file of walk(ROOT)) {
   const text = readFileSync(file, "utf8");
@@ -109,9 +134,15 @@ for (const file of walk(ROOT)) {
       continue;
     }
     for (const candidate of expanded) {
-      if (!existsSync(join(ROOT, candidate))) {
-        problems.push(`${rel}: path reference does not exist: ${candidate}`);
+      if (existsSync(join(ROOT, candidate))) continue;
+      // A generated path (build output) is expected to be absent in a source checkout. Recorded
+      // and reported rather than failed — and rather than skipped silently, which would be the
+      // same as not checking anything.
+      if (isGenerated(candidate)) {
+        generated.push(`${rel}: ${candidate}`);
+        continue;
       }
+      problems.push(`${rel}: path reference does not exist: ${candidate}`);
     }
   }
 }
@@ -124,3 +155,13 @@ if (problems.length > 0) {
 }
 
 console.log(`check-docs: all references resolve (${walk(ROOT).length} Markdown files checked)`);
+
+// Printed, not hidden. A reference to build output cannot be checked for existence in a source
+// checkout, so the honest thing is to say which ones were not checked rather than to imply that
+// every reference was.
+if (generated.length > 0) {
+  console.log(
+    `  ${generated.length} reference${generated.length === 1 ? "" : "s"} to generated output not checked for existence (absent until built):`,
+  );
+  for (const entry of generated) console.log(`    ${entry}`);
+}
