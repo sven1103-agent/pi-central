@@ -10,7 +10,7 @@
 import { createServer } from "node:http";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { realpathSync } from "node:fs";
-import { join, extname, sep } from "node:path";
+import { join, extname, sep, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -49,7 +49,12 @@ function probeInheritedSandbox(): Promise<boolean> {
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".webmanifest": "application/manifest+json",
 };
 
 async function serveFile(res: import("node:http").ServerResponse, path: string): Promise<void> {
@@ -69,12 +74,23 @@ async function serveFile(res: import("node:http").ServerResponse, path: string):
   }
 }
 
+/**
+ * Reject anything that escapes the given root, after canonicalization.
+ *
+ * The relative path must have leading slashes stripped first: `resolve(root,
+ * "/x")` treats "/x" as absolute and jumps out of the root entirely, which
+ * would make every request look like a traversal.
+ */
+function safeJoin(root: string, relative: string): string | null {
+  const resolved = resolve(root, relative.replace(/^[/\\]+/, ""));
+  if (resolved !== root && !resolved.startsWith(root + sep)) return null;
+  return resolved;
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? "/", `http://${HOST}`);
-  const path = url.pathname;
-
-  if (path === "/" || path === "/index.html") return void serveFile(res, join(publicDir, "index.html"));
-  if (path === "/app.js") return void serveFile(res, join(publicDir, "app.js"));
+  let path = decodeURIComponent(url.pathname);
+  if (path === "/") path = "/index.html";
 
   // Vendored UMD builds, served from node_modules so the page needs no network.
   if (path.startsWith("/vendor/")) {
@@ -85,9 +101,18 @@ const server = createServer((req, res) => {
     };
     const target = map[name];
     if (target) return void serveFile(res, target);
+    res.writeHead(404).end("not found");
+    return;
   }
 
-  res.writeHead(404).end("not found");
+  // Everything else is a static file under public/. Serving the whole directory
+  // rather than hardcoding routes is what keeps the CSS from 404ing.
+  const target = safeJoin(publicDir, path);
+  if (!target) {
+    res.writeHead(403).end("forbidden");
+    return;
+  }
+  void serveFile(res, target);
 });
 
 /* ------------------------------------------------------------------ *

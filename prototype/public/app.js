@@ -480,7 +480,38 @@ function submitPrompt() {
   el.value = "";
 }
 
-/* Prefill with the current working directory so the prototype is one click from useful. */
-$("cwd").value = new URLSearchParams(location.search).get("cwd") || "";
+/* Prefill with the current working directory so the prototype is one click from useful.
+ * `?cwd=` prefills the form; `?autostart=1` starts immediately; `?session=sN`
+ * focuses a running session (handy for screenshots and for reloading without
+ * losing your place). */
+const params = new URLSearchParams(location.search);
+$("cwd").value = params.get("cwd") || "";
+
+let autostarted = false;
+let wanted = params.get("session") || null;
+
+function maybeAutostart() {
+  if (wanted) {
+    const target = sessions.find((s) => s.id === wanted) || sessions[sessions.length - 1];
+    if (target) {
+      activeId = target.id;
+      renderRail();
+      renderWorkspace();
+      void loadFiles("");
+      wanted = null;
+      return;
+    }
+  }
+  if (autostarted || params.get("autostart") !== "1") return;
+  if (!params.get("cwd") || sessions.length > 0) return;
+  autostarted = true;
+  send({
+    action: "start",
+    cwd: params.get("cwd"),
+    name: params.get("name") || "",
+    mode: params.get("mode") === "sandboxed" ? "sandboxed" : "direct",
+  });
+}
 
 connect();
+setInterval(maybeAutostart, 700);
