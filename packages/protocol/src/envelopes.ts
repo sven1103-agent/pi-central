@@ -110,9 +110,19 @@ export interface Hello {
 }
 
 /**
+ * What an `orchestrator→client` envelope may carry.
+ *
+ * `hello` is a member even though it is not an `Event`: it is a preamble rather than state,
+ * but it must travel in the same envelope so a client parses exactly one shape. Sending it
+ * unwrapped made the client's reader handle two shapes, which is how the transport's first
+ * tests failed.
+ */
+export type ServerPayload = Event | Hello;
+
+/**
  * Envelope for anything crossing the socket. `dir` makes the trust direction explicit and
  * machine-checkable rather than implied by message shape.
  */
 export type Envelope =
   | { dir: "client→orchestrator"; protocol: typeof PROTOCOL_VERSION; payload: Control }
-  | { dir: "orchestrator→client"; protocol: typeof PROTOCOL_VERSION; payload: Event };
+  | { dir: "orchestrator→client"; protocol: typeof PROTOCOL_VERSION; payload: ServerPayload };
