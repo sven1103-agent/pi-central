@@ -50,7 +50,7 @@ Stack is fixed: React + Vite UI, WebSocket over loopback, TypeScript orchestrato
 - [ ] Session rail: name, cwd, model, thinking level, state, context usage.
 - [ ] Transcript pane: streaming render, tool timeline, compaction/retry banners.
 - [ ] Markdown pipeline: `markdown-it({ html: false })` → DOMPurify → React, with a
-      strict CSP and no `dangerouslySetInnerHTML` outside it ([ADR-0006](decisions/0006-untrusted-rendering-and-file-nav.md)).
+      strict CSP and no `dangerouslySetInnerHTML` outside it ([ADR-0006](decisions/0006-untrusted-markdown-rendering.md)).
 - [ ] Shiki syntax highlighting with lazy grammar loading.
 - [ ] Composer: prompt / steer / follow-up, queue visibility, Esc = `clear_queue`+`abort`.
 - [ ] Approvals: `confirm` / `select` / `input` / `editor` rendered as real dialogs;
@@ -60,21 +60,24 @@ Stack is fixed: React + Vite UI, WebSocket over loopback, TypeScript orchestrato
 
 **Deliverable:** runnable dashboard.
 
-## Phase 2.5 — File navigation
+## Phase 2.5 — File navigation and operations
 
-**Question:** can a person browse a session's project without breaking the sandbox?
+**Question:** can a person browse and manage a session's project comfortably?
 
-- [ ] `packages/file-helper`: read-only server spawned under the **same** policy as the
-      session (`composePolicy`, reused — not re-assembled).
-- [ ] One helper per workdir, shared by sessions in that directory.
-- [ ] Lazy directory expansion; size caps; binary detection and refusal.
-- [ ] Symlink-aware containment: canonicalize, then verify inside `cwd`. No string prefix
-      checks.
-- [ ] Prove the browser **cannot** list a path the orchestrator itself can read but the
-      sandbox denies — the strongest evidence reads are sandbox-routed.
-- [ ] Read-only. Editing files from the UI is out of scope; Pi edits files.
+File access runs **directly at the user's UID** — no sidecar, no sandbox in this path
+([ADR-0007](decisions/0007-filesystem-access-model.md)).
 
-**Deliverable:** file tree + viewer, with the containment tests above.
+- [ ] List and read under the orchestrator's `fs`, confined to the session's `cwd`.
+- [ ] Lazy directory expansion; hidden-file toggle; size caps; binary detection and refusal.
+- [ ] Containment: canonicalize with `realpath`, then verify inside `cwd`. No string
+      prefix checks; symlinks resolved before the check.
+- [ ] File operations: create file/dir, rename, move, delete — destructive actions behind
+      explicit confirmation, never an implicit recursive delete.
+- [ ] Content editing stays out of scope; Pi mutates file contents from inside its sandbox.
+- [ ] Tests: `..` escape refused, symlink escape refused, binary refused, recursive delete
+      confirmed.
+
+**Deliverable:** file tree + viewer + basic file operations, with the guardrail tests.
 
 ## Phase 3 — Fleet ergonomics
 
@@ -93,6 +96,7 @@ Stack is fixed: React + Vite UI, WebSocket over loopback, TypeScript orchestrato
       environment, where `pi` is normally launched via `safehouse`.
 - [ ] XSS regression suite: `<img onerror>`, `<script>`, `javascript:` links in transcripts
       and in browsed Markdown files.
+- [ ] File-browser guardrail suite: containment, symlink escape, confirmation on delete.
 - [ ] Never pass `--allow-workdir-config-writes` / `--allow-profile-writes`.
 - [ ] Never enable `wide-read`; deny it in config validation.
 - [ ] Verify per-session env: no credential leaks across sessions (C4).

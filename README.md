@@ -89,7 +89,10 @@ Start here:
 4. **Additive, not a replacement.** Pi Central supervises `pi`; it does not fork it.
 5. **Local first.** No telemetry, no network egress beyond providers Pi already calls.
 6. **Untrusted content is inert.** Transcripts and file contents are strings to display,
-   never markup to execute — see [ADR-0006](docs/decisions/0006-untrusted-rendering-and-file-nav.md).
+   never markup to execute — see [ADR-0006](docs/decisions/0006-untrusted-markdown-rendering.md).
+7. **Confine the agents, not the user.** Safehouse constrains model-generated actions in a
+   workdir. The orchestrator is a user-level app acting as the user, on the user's files —
+   see [ADR-0007](docs/decisions/0007-filesystem-access-model.md).
 
 ## License
 

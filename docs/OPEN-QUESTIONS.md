@@ -31,7 +31,7 @@ This is a reversal of the earlier "working default", which was not yet ratified.
 rendering, syntax highlighting, and rich approval dialogs are the deciding factors; a
 terminal TUI would render all three poorly. The cost is accepted and mitigated: a browser
 means an HTML surface for untrusted content, which makes sanitization and CSP mandatory
-rather than optional ([ADR-0006](decisions/0006-untrusted-rendering-and-file-nav.md)).
+rather than optional ([ADR-0006](decisions/0006-untrusted-markdown-rendering.md)).
 
 ## Q3 — `RpcClient` vs a custom supervisor
 
@@ -90,20 +90,14 @@ for v1 (it interacts with Q6).
 
 ## Q9 — File navigation scope
 
-Is the file tree **per session** (the session's workdir) or **per project** (all workdirs,
-switching between them)?
+**Resolved:** per project (one tree per workdir), accessed **directly at the user's UID**,
+with file operations in scope and content editing out of scope. See
+[ADR-0007](decisions/0007-filesystem-access-model.md).
 
-- Per session: matches the sandbox exactly, since the sidecar holds one policy.
-- Per project: convenient when several sessions share a directory, but must still route
-  every read through that project's sandbox ([ADR-0006](decisions/0006-untrusted-rendering-and-file-nav.md)).
-
-**Working default:** per project, one sidecar per workdir, sessions attached to it.
-Because the policy is per workdir and not per session, sharing a sidecar across sessions
-in the same directory is both safe and cheap.
-
-**Decision needed:** confirm. Also unresolved: read-only browsing, or also editing files
-from the UI? Editing would need a write path and an audit trail, and is currently **out of
-scope** — Pi is the thing that edits files.
+An earlier "working default" proposed routing reads through a sandbox sidecar. That was
+over-engineered: Safehouse confines the **agents**, which is the boundary that matters. The
+orchestrator is a user-level app acting for the user, at the user's UID, and is
+deliberately unsandboxed so it can spawn sandboxed sessions at all (C1).
 
 ## Q8 — Naming and packaging
 

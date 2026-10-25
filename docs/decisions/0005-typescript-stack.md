@@ -21,7 +21,7 @@ Requirements that constrain the choice:
 - **JSONL streaming** with LF-only framing (C7) and backpressure on both pipes.
 - **WebSocket** transport to a browser UI.
 - **Markdown + syntax highlighting** in a browser.
-- **File navigation** whose reads must respect the per-session sandbox (see ADR-0006).
+- **File navigation** over a session's working directory, at the user's UID (ADR-0007).
 - One maintainer. Minimize the number of runtimes, toolchains, and packaging stories.
 
 Verified environment: Pi `1.4.0`, `engines.node >= 22.19.0`, ESM (`"type": "module"`),

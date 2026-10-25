@@ -129,8 +129,22 @@ control over every session, the render path is a security boundary:
 RPC event (untrusted) → markdown-it(html:false) → DOMPurify → React children
 ```
 
-and file browsing is routed through the **session's** sandbox, never the orchestrator's
-filesystem. See [ADR-0006](decisions/0006-untrusted-rendering-and-file-nav.md).
+See [ADR-0006](decisions/0006-untrusted-markdown-rendering.md).
+
+## Privilege model
+
+Two different actors, two different privileges — conflating them is a design error:
+
+| Actor | Privilege | Confined by |
+|---|---|---|
+| **Agent** (Pi + tools) | Workdir-scoped | Safehouse / Seatbelt |
+| **Orchestrator + UI** | The user's UID | Nothing — it is the user's own app |
+
+The sandbox exists to constrain **model-generated actions**, not to constrain the person.
+The orchestrator is a user-level application acting for the user on the user's files, and
+is deliberately unsandboxed so it can spawn sandboxed agents (C1). File navigation and
+file operations therefore run directly at the user's UID. See
+[ADR-0007](decisions/0007-filesystem-access-model.md).
 
 ## Binding constraint on all of the above
 
