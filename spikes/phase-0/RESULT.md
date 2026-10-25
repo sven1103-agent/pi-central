@@ -3,7 +3,8 @@
 **Status:** ✅ **PASSED** — 12/12 checks
 **Date:** 2026-06-25
 **Environment:** macOS, Pi `1.4.0`, Agent Safehouse `0.12.0`, `node v26.12.1`
-**Harness:** [`verify.ts`](verify.ts), run from a plain (unsandboxed) terminal
+**Harness:** the Phase 0 spike script (retired at v0.1.0; superseded by
+`packages/orchestrator/verify-three.ts`), run from a plain (unsandboxed) terminal
 
 ## Why this mattered
 
@@ -75,8 +76,7 @@ catastrophe. The harness therefore uses `$HOME` and refuses to run under those p
 ```bash
 # from a plain terminal — NOT inside Safehouse, NOT from inside Pi
 cd pi-central
-node spikes/phase-0/verify.ts --dry-run   # compose and print policy, spawn nothing
-node spikes/phase-0/verify.ts             # the real probes (needs model credentials)
+node packages/orchestrator/verify-three.ts   # the supported harness, a superset of this one
 ```
 
 The harness refuses to run when `sandbox-exec` cannot apply a policy, because every check

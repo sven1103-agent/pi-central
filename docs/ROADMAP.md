@@ -12,12 +12,14 @@ profiles at the same time?
 session is confined to its own working directory, enforced by the OS, verified through the
 model-facing `bash` tool path. Full evidence: [`spikes/phase-0/RESULT.md`](../spikes/phase-0/RESULT.md).
 
-Harness: [`spikes/phase-0/verify.ts`](../spikes/phase-0/verify.ts). Run it **unsandboxed**;
-it refuses otherwise, because Seatbelt does not nest and every check would be meaningless.
+The Phase 0 harness was a spike script that imported the feasibility prototype; it was retired
+with the prototype at v0.1.0. Its checks live on in `packages/orchestrator/verify-three.ts`, which
+runs a strict superset — three sessions instead of two, plus the credential boundary — against the
+real product code path. Run it **unsandboxed**; it refuses otherwise, because Seatbelt does not nest
+and every check would be meaningless.
 
 ```bash
-node spikes/phase-0/verify.ts --dry-run   # compose + print policy, spawn nothing
-node spikes/phase-0/verify.ts             # run the real probes
+node packages/orchestrator/verify-three.ts
 ```
 
 - [x] Spawn two `safehouse --workdir <X> -- pi --mode rpc` processes for two
