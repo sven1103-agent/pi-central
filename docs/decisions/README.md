@@ -1,0 +1,31 @@
+# Architecture Decision Records
+
+Decisions that shape Pi Central, with the constraints that forced them. Each record states
+the context, the decision, its consequences, and the alternatives rejected — so a future
+reader can tell whether a decision still holds.
+
+| ADR | Decision | Status |
+|---|---|---|
+| [0001](0001-out-of-process-orchestration.md) | Orchestrate out-of-process rather than in-process (SDK) | Accepted |
+| [0002](0002-per-session-sandbox.md) | One sandbox per session; never a multi-workdir orchestrator sandbox | Accepted |
+| [0003](0003-custom-supervisor.md) | Custom process supervisor instead of `RpcClient` | Accepted |
+| [0004](0004-session-identity.md) | A session is identified by (session file, working directory) | Accepted |
+
+## Format
+
+Each ADR is a single Markdown file named `NNNN-kebab-title.md` with:
+
+- **Status** — Proposed, Accepted, Superseded, Deprecated.
+- **Context** — the forces at play, with evidence where possible.
+- **Decision** — what was chosen.
+- **Consequences** — positive and negative, stated honestly.
+- **Alternatives considered** — and why each was rejected.
+
+Superseding an ADR means marking the old one `Superseded by ADR-NNNN` and writing a new
+record. Do not rewrite history in place.
+
+## Constraint references
+
+ADRs cite the hard limits in [../CONSTRAINTS.md](../CONSTRAINTS.md) as `C1`–`C8`. Those
+limits were verified against Pi `1.4.0` and Agent Safehouse `0.12.0`; re-verify them when
+either is upgraded, since an ADR's premises can expire.

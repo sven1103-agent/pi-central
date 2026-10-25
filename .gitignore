@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tgz
+.DS_Store
+
+# IDE state (this repo lives inside an opened IntelliJ project)
+.idea/
+
+# Local scratch: spike output, captured transcripts, policy files.
+spikes/**/out/
+*.sb.generated
