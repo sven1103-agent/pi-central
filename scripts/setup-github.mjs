@@ -11,9 +11,8 @@
  * Why a script at all: it keeps the taxonomy reviewable and diffable. Adding a label or an
  * increment becomes a pull request instead of a click somebody has to remember.
  *
- * Branch protection is applied from `.github/branch-protection.json`, for the same reason: a
- * setting that only exists in a web UI cannot be reviewed, diffed, or restored after someone
- * changes it by accident.
+ * Branch rules are applied from `.github/ruleset.json`, for the same reason: a setting that only
+ * exists in a web UI cannot be reviewed, diffed, or restored after someone changes it by accident.
  *
  * Usage:
  *   node scripts/setup-github.mjs            # labels, milestones, issues, branch protection
@@ -550,23 +549,43 @@ function existingMilestones() {
 }
 
 /**
- * Apply branch protection from the checked-in config.
+ * Apply the branch ruleset from the checked-in config.
  *
- * The required check names are validated against the check runs this repository actually
- * produces. A required context that no workflow emits does not fail loudly — it blocks every
- * merge, forever, with a message about a check that never runs.
+ * A **ruleset** rather than a classic branch-protection rule: rulesets support named bypass
+ * actors, layer with one another, and — the reason this repository migrated — are the mechanism
+ * GitHub's own `GET /repos/{owner}/{repo}/rules/branches/{branch}` endpoint reports. Classic
+ * protection does not appear there at all, so a correctly protected branch reads as "no rules"
+ * to anyone checking the modern way. That asymmetry is worth avoiding.
+ *
+ * Two failure modes are guarded, both silent:
+ *
+ *   1. A required check name that no workflow produces. Nothing errors; every merge is blocked
+ *      forever with a message about a check that never runs. Validated against real check runs.
+ *   2. Applying a ruleset in `evaluate` mode, which reports as configured while enforcing
+ *      nothing. `active` is asserted rather than trusted.
+ *
+ * Idempotent: an existing ruleset of the same name is updated in place, so re-running after an
+ * edit does not produce a second, competing ruleset.
  */
-function applyProtection() {
-  const config = JSON.parse(readFileSync(new URL("../.github/branch-protection.json", import.meta.url), "utf8"));
-  console.log("\nBranch protection (main)");
+function applyRuleset() {
+  const config = JSON.parse(readFileSync(new URL("../.github/ruleset.json", import.meta.url), "utf8"));
+  console.log("\nBranch ruleset");
 
+  if (config.enforcement !== "active") {
+    console.error(`  REFUSING: enforcement is "${config.enforcement}", which reports as configured`);
+    console.error("  while enforcing nothing. Only \"active\" actually protects the branch.");
+    process.exit(1);
+  }
+
+  const statusRule = config.rules.find((rule) => rule.type === "required_status_checks");
+  const contexts = statusRule?.parameters?.required_status_checks?.map((check) => check.context) ?? [];
   const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const actual = new Set(
     JSON.parse(
       execFileSync("gh", ["api", `repos/${REPO}/commits/${head}/check-runs`], { encoding: "utf8" }),
     ).check_runs.map((run) => run.name),
   );
-  for (const context of config.required_status_checks.contexts) {
+  for (const context of contexts) {
     if (!actual.has(context)) {
       console.error(`  REFUSING: required check "${context}" is not produced by this repository.`);
       console.error(`  Available now: ${[...actual].join(", ")}`);
@@ -574,19 +593,21 @@ function applyProtection() {
       process.exit(1);
     }
   }
-  console.log(`  required checks match real check runs: ${config.required_status_checks.contexts.join(", ")}`);
+  console.log(`  required checks match real check runs: ${contexts.join(", ")}`);
 
   if (DRY_RUN) {
-    console.log("  would apply protection");
+    console.log(`  would apply ruleset "${config.name}" (${config.rules.length} rules)`);
     return;
   }
-  const result = execFileSync(
-    "gh",
-    ["api", "-X", "PUT", `repos/${REPO}/branches/main/protection`, "--input", "-"],
-    { input: JSON.stringify(config), encoding: "utf8" },
-  );
+
+  const existing = JSON.parse(execFileSync("gh", ["api", `repos/${REPO}/rulesets`], { encoding: "utf8" }))
+    .find((ruleset) => ruleset.name === config.name);
+
+  const result = existing
+    ? execFileSync("gh", ["api", "-X", "PUT", `repos/${REPO}/rulesets/${existing.id}`, "--input", "-"], { input: JSON.stringify(config), encoding: "utf8" })
+    : execFileSync("gh", ["api", "-X", "POST", `repos/${REPO}/rulesets`, "--input", "-"], { input: JSON.stringify(config), encoding: "utf8" });
   const applied = JSON.parse(result);
-  console.log(`  applied: pull requests required=${applied.required_pull_request_reviews !== null}, admins enforced=${applied.enforce_admins.enabled}`);
+  console.log(`  ${existing ? "updated" : "created"} ruleset "${applied.name}" (id ${applied.id}, ${applied.enforcement})`);
 }
 
 function main() {
@@ -657,7 +678,7 @@ function main() {
 
   console.log(`\n${created} issue(s) created, ${ISSUES.length - created} already present.`);
 
-  applyProtection();
+  applyRuleset();
 }
 
 main();
