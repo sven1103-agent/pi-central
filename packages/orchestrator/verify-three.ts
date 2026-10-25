@@ -103,6 +103,24 @@ function credentialProbeFor(): string {
     // The environment boundary (C11). Safehouse alone would pass SSH_AUTH_SOCK through.
     `if [ -z "$SSH_AUTH_SOCK" ]; then echo ENV_SSH=absent; else echo ENV_SSH=present; fi`,
     `if [ -z "$HF_TOKEN_STRICT" ]; then echo ENV_TOKEN=absent; else echo ENV_TOKEN=present; fi`,
+    // --- The CAPABILITY, not just the deny ------------------------------------------------
+    //
+    // The deny checks below were passing while the agent's credentials were unreachable, which is
+    // the failure this project keeps repeating: verifying that something is blocked, and assuming
+    // from it that the intended thing works. These assert the positive.
+    //
+    // Safehouse runs the session under `env -i` plus a list of names of its own, so a variable not
+    // requested by name never arrives. `GH_CONFIG_DIR` was absent from that list, so the agent's
+    // `gh` used the host's config, found it denied, and refused to start.
+    `if [ -n "$GH_CONFIG_DIR" ]; then echo GH_CONFIG_DIR=set; else echo GH_CONFIG_DIR=empty; fi`,
+    `if [ -n "$GIT_CONFIG_GLOBAL" ]; then echo GIT_CONFIG_GLOBAL=set; else echo GIT_CONFIG_GLOBAL=empty; fi`,
+    // The agent's git identity, read through the config we pointed it at. Its own user.email is
+    // what proves GIT_CONFIG_GLOBAL took effect; the host's value would prove it did not.
+    `echo EMAIL=$(git config --get user.email 2>/dev/null || echo NONE)`,
+    // `gh` reads GH_CONFIG_DIR and retrieves its token from the agent keychain. Startup is where
+    // the reported failure happened, so a command that merely reads config is the right probe.
+    `if gh auth status >/dev/null 2>&1; then echo GH_AUTH=ok; else echo GH_AUTH=failed; fi`,
+
     // The appended policy fragment's identity denies.
     `if cat "$HOME/.gitconfig" >/dev/null 2>&1; then echo HOST_GITCONFIG=readable; else echo HOST_GITCONFIG=denied; fi`,
     `if ls "$HOME/.config/gh" >/dev/null 2>&1; then echo HOST_GH=readable; else echo HOST_GH=denied; fi`,
@@ -302,6 +320,32 @@ async function main(): Promise<number> {
         "Pi's agent dir is writable",
         vars.PIAGENTDIR === "writable",
         `~/.pi/agent: ${vars.PIAGENTDIR}`,
+      );
+
+      // --- The positive half: can the agent actually use its identity? --------------------
+      //
+      // Each of these would have failed before the fix, while every deny check above passed.
+      check(
+        "the session is pointed at the agent's own gh config (not the host's)",
+        vars.GH_CONFIG_DIR === "set",
+        `GH_CONFIG_DIR=${vars.GH_CONFIG_DIR} — empty means gh falls back to the host's config, ` +
+          `which our own fragment denies, so gh refuses to start at all`,
+      );
+      check(
+        "the session is pointed at the agent's own git config",
+        vars.GIT_CONFIG_GLOBAL === "set",
+        `GIT_CONFIG_GLOBAL=${vars.GIT_CONFIG_GLOBAL}`,
+      );
+      check(
+        "the agent's git identity is actually in effect",
+        typeof vars.EMAIL === "string" && vars.EMAIL.endsWith("users.noreply.github.com"),
+        `git config --get user.email returned ${JSON.stringify(vars.EMAIL)} — the agent's identity ` +
+          `ends in users.noreply.github.com; anything else means the host's config is winning`,
+      );
+      check(
+        "gh can read its config and reach its keychain token",
+        vars.GH_AUTH === "ok",
+        `gh auth status: ${vars.GH_AUTH} — needs GH_CONFIG_DIR plus the agent keychain grant`,
       );
 
       // --- The keychain split (ADR-0010 Amendment 1) -------------------------------------

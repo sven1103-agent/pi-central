@@ -158,3 +158,83 @@ test("composePolicy is deterministic: same input, identical argv", () => {
 test("describe renders a reviewable command string", () => {
   assert.equal(describe(composePolicy(spec())), `safehouse --workdir ${dir} -- pi --mode rpc`);
 });
+
+// --- Env delivery: Safehouse runs the session under `env -i` ---------------------------------
+//
+// A variable that is not requested BY NAME never reaches the session, however carefully the spawn
+// environment sets it. This was a real defect: `GH_CONFIG_DIR` was absent from Safehouse's
+// defaults, so the agent's `gh` fell back to the host's `~/.config/gh/config.yml`, found it denied
+// by Pi Central's own fragment, and refused to start — and `GIT_CONFIG_GLOBAL` was dropped the same
+// way, so the agent's git identity was never in effect either.
+
+test("the injected agent routing variables are forwarded to the session", () => {
+  const policy = composePolicy({
+    ...base,
+    cwd: dir,
+    env: {
+      GH_CONFIG_DIR: "/Users/x/.agent/gh",
+      GIT_CONFIG_GLOBAL: "/Users/x/.agent/gitconfig",
+      GIT_CONFIG_SYSTEM: "/dev/null",
+    },
+  });
+  const passFlag = policy.launch.args.find((arg) => arg.startsWith("--env-pass="));
+  assert.ok(passFlag, "the session cannot see the agent's credentials without --env-pass");
+
+  const names = passFlag.slice("--env-pass=".length).split(",");
+  for (const name of ["GH_CONFIG_DIR", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"]) {
+    assert.ok(names.includes(name), `${name} must be forwarded, got: ${names.join(",")}`);
+  }
+  // The values must also be in the environment handed to safehouse, or `--env-pass` finds
+  // nothing to pass through (`runtime_append_requested_host_env_entries` skips unset names).
+  assert.equal(policy.launch.env["GH_CONFIG_DIR"], "/Users/x/.agent/gh");
+  assert.equal(policy.launch.env["GIT_CONFIG_GLOBAL"], "/Users/x/.agent/gitconfig");
+});
+
+test("forwarding is DERIVED from what we inject, so a new variable cannot be dropped", () => {
+  // A literal list would drift: add a variable to agentRoutingEnv and the new one is silently
+  // discarded again. The delivery set is the injected set, by construction.
+  const policy = composePolicy({
+    ...base,
+    cwd: dir,
+    env: { SOME_FUTURE_ROUTING_VAR: "/x" },
+  });
+  const passFlag = policy.launch.args.find((arg) => arg.startsWith("--env-pass="))!;
+  assert.ok(passFlag.endsWith("SOME_FUTURE_ROUTING_VAR"), passFlag);
+});
+
+test("Safehouse's own variables are NOT forwarded, so we cannot override its choices", () => {
+  // Safehouse builds its own HOME, PATH, TMPDIR, SHELL, USER and LOGNAME, and forwards its own
+  // terminal/locale list. `--env-pass` upserts, so naming any of those would override a value it
+  // chose deliberately — for no gain, since it already delivers them.
+  const policy = composePolicy({ ...base, cwd: dir, env: { GH_CONFIG_DIR: "/x/gh" } });
+  const names = policy.launch.args
+    .find((arg) => arg.startsWith("--env-pass="))!
+    .slice("--env-pass=".length)
+    .split(",");
+  for (const name of ["HOME", "PATH", "TMPDIR", "SHELL", "USER", "LOGNAME", "TERM", "EDITOR", "LANG"]) {
+    assert.ok(!names.includes(name), `${name} must not be forwarded: Safehouse already owns it`);
+  }
+  // But they still reach the safehouse process, which is what lets it deliver them.
+  assert.ok(policy.launch.env["PATH"], "PATH must be in the spawn environment");
+});
+
+test("no injected environment means no --env-pass flag at all", () => {
+  const policy = composePolicy({ ...base, cwd: dir });
+  assert.ok(
+    !policy.launch.args.some((arg) => arg.startsWith("--env-pass")),
+    "an empty flag would be noise",
+  );
+});
+
+test("direct mode has no --env-pass, because there is no Safehouse to pass it to", () => {
+  const policy = composePolicy({
+    ...base,
+    cwd: dir,
+    mode: "direct",
+    env: { GH_CONFIG_DIR: "/x/gh" },
+  });
+  assert.equal(policy.launch.command, "pi");
+  assert.ok(!policy.launch.args.some((arg) => arg.startsWith("--env-pass")));
+  // Direct mode still gets the values — it inherits the spawn environment directly.
+  assert.equal(policy.launch.env["GH_CONFIG_DIR"], "/x/gh");
+});

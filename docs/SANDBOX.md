@@ -134,6 +134,16 @@ basename still matches, or pass the profile explicitly.
 | elsewhere in `$HOME` | **denied** | verified: `~/Documents` is `EPERM` |
 | `/` | denied unless `wide-read` | |
 
+## Environment delivery (C15)
+
+Safehouse runs the session as `env -i` plus its own list of names, so a variable set only in the
+spawn environment **never arrives**. Agent routing variables (`GH_CONFIG_DIR`,
+`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`) are delivered by deriving `--env-pass` from the
+environment Pi Central injects — see [C15](CONSTRAINTS.md#c15--safehouse-runs-the-session-under-env--i-so-a-variable-must-be-requested-by-name).
+
+The rule when adding a variable: if the session must see it, it must be named in `--env-pass`.
+Setting it is not enough, and the failure is silent.
+
 ## Integration with RpcClient
 
 `RpcClient` spawns `node <cliPath> --mode rpc …` itself. To keep sessions sandboxed, one of:
