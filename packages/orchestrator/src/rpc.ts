@@ -131,8 +131,12 @@ export class RpcProcess extends EventEmitter {
 
   /**
    * Bounded, graceful teardown. Close stdin first (Pi's preferred shutdown), then escalate
-   * to the process group. A session that ignores all three is left to the OS rather than
-   * wedging the dashboard forever.
+   * to the process group.
+   *
+   * Waits at every step, including after SIGKILL, so that when this resolves the process has
+   * actually been reaped. Firing the final signal and returning immediately would leave
+   * `running` true for a process that is already dying, and a caller doing `stopAll()` before
+   * exit could not tell a clean shutdown from a wedged one.
    */
   async stop(graceMs = 1500): Promise<void> {
     if (this.#stopping) return;
@@ -161,6 +165,9 @@ export class RpcProcess extends EventEmitter {
     } catch {
       /* gone */
     }
+    // SIGKILL cannot be blocked or ignored, so the exit is prompt; still, wait for it rather
+    // than assuming. Bounded, so a pathological child cannot wedge the caller forever.
+    await this.#waitForExit(2000);
   }
 
   #waitForExit(ms: number): Promise<boolean> {
