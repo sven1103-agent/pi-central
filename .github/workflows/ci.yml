@@ -36,6 +36,19 @@ jobs:
       - name: Unit and component tests
         run: npm test
 
+      # A skipped guarantee is invisible: the suite reports success either way. Two tests skip on
+      # Linux — the SBPL policy-parse check and its negative control — both needing
+      # `sandbox-exec`, which has no Linux implementation (C10). So CI proves the fragment is
+      # BUILT correctly but never that it PARSES. That is stated here, on every run, rather than
+      # left for someone to discover by reading the suite.
+      - name: State what this run does NOT verify
+        run: |
+          echo "::notice::Not verified on this runner, by design:"
+          echo "  - SBPL policy parses (2 tests skip: needs sandbox-exec, macOS only, C10)"
+          echo "  - Any real sandboxed session: needs macOS + Safehouse + a non-nested terminal (C1)"
+          echo "  - Live Pi RPC round trips against a real session"
+          echo "These are 'verified/manual' on the issues that need them. See docs/INCREMENTS.md." 
+
       - name: Documentation references resolve
         run: npm run check:docs
 

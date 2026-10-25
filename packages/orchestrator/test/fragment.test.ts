@@ -9,6 +9,11 @@ import { fragmentPath, renderPolicyFragment } from "../src/fragment.ts";
 /**
  * The appended policy fragment (ADR-0010). Content assertions run everywhere; the SBPL syntax
  * check needs `sandbox-exec` (macOS-only, C10) and skips when it is absent.
+ *
+ * **What that costs, stated plainly:** on Linux these two tests skip, so a suite run there proves
+ * the fragment is *built* correctly but never that it *parses*. CI says so on every run rather
+ * than reporting a green tick over a gap. The macOS-only path is where a policy syntax error would
+ * actually be caught, and a syntax error is a session that will not start.
  */
 
 const dir = mkdtempSync(join(tmpdir(), "pi-central-fragment-"));
