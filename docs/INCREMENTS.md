@@ -12,6 +12,11 @@ verifiable without waiting for anything else in the increment. Slices are GitHub
 The point of the split is that work can proceed programmatically — pick an issue, do it, and know
 when it is done — without re-deriving scope each time.
 
+The live tracker: <https://github.com/sven1103-agent/pi-central/milestones> — increments are
+milestones and slices are issues. The label taxonomy and the initial backlog are defined in
+`scripts/setup-github.mjs`, which is a bootstrap (it creates what is missing and skips what
+exists) rather than a sync: once an issue is open it belongs to whoever is working on it.
+
 ## What makes a good slice
 
 1. **It has acceptance criteria that can fail.** "Improve the rail" cannot fail; "the rail shows

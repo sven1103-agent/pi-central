@@ -3,11 +3,30 @@
 Pi Central is a local, single-user tool. Contributions should preserve its two invariants:
 **per-session sandboxing** and **an orchestrator that holds no untrusted content**.
 
+## How work is organised
+
+Work is **increments** (GitHub milestones) containing **slices** (issues). The full definition,
+including what makes a slice finished, is in [docs/INCREMENTS.md](docs/INCREMENTS.md).
+
+The short version:
+
+1. Pick an issue. Check its **Governing constraints** section and read those first.
+2. Its acceptance criteria are the contract. If one of them cannot fail, it is not a criterion —
+   fix the issue before writing code.
+3. Land it in one pull request, using the repository's PR template.
+4. `npm run verify` must pass: typecheck, tests, and documentation references.
+5. For a `verified/manual` slice, paste what you looked at. Automated checks passed on every
+   defect this project shipped; looking at the result is not optional.
+
+Labels carry the axes that matter: `kind/*` (slice, bug, decision), `area/*`, `verified/*`, and
+`priority/*`. They are defined in `scripts/setup-github.mjs` so the taxonomy is reviewable rather
+than remembered.
+
 ## Before you change anything
 
 Read, in this order:
 
-1. [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) — the hard limits (C1–C8). Most "obvious"
+1. [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) — the hard limits (C1–C14). Most "obvious"
    designs are ruled out here.
 2. [docs/decisions/](docs/decisions/) — why the architecture looks the way it does.
 3. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — components and trust boundaries.
