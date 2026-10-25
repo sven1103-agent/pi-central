@@ -62,6 +62,14 @@ export interface StartFailure {
 export class Supervisor extends EventEmitter {
   #config: Config;
   #sessions = new Map<string, LiveSession>();
+  /**
+   * The loaded conversation per session, retained so a client that connects LATER still gets it.
+   *
+   * The `transcript` event fires once, when history is fetched. A browser reload creates a new
+   * client, which receives only a snapshot — so without this, every live session appeared to have
+   * an empty transcript after a reload until a new message happened to arrive.
+   */
+  #transcripts = new Map<string, unknown[]>();
   #processes = new Map<string, RpcProcess>();
   #created = 0;
 
@@ -355,6 +363,7 @@ export class Supervisor extends EventEmitter {
       const messages = (data?.messages ?? []).filter(
         (message) => typeof message === "object" && message !== null,
       );
+      this.#transcripts.set(id, messages);
       this.emit("transcript", id, messages);
     } catch (error) {
       // A transcript that failed to load must not fail the session. Statistics are cosmetic;
@@ -419,6 +428,16 @@ export class Supervisor extends EventEmitter {
     this.#patch(id);
   }
 
+  /**
+   * The conversation already loaded for a session, if any.
+   *
+   * Read by the transport when a client connects, so a reload does not present a session with
+   * hundreds of messages as empty.
+   */
+  transcriptOf(id: string): unknown[] | undefined {
+    return this.#transcripts.get(id);
+  }
+
   /** Send a prompt. The command shape is closed; the message is the only free value. */
   async prompt(id: string, message: string): Promise<void> {
     const rpc = this.#processes.get(id);
@@ -454,6 +473,9 @@ export class Supervisor extends EventEmitter {
     this.#patch(id);
     await rpc.stop();
     this.#processes.delete(id);
+    // The transcript is dropped with the process: a stopped session's conversation belongs to the
+    // session FILE, which discovery reads, not to a copy held for a client that may never return.
+    this.#transcripts.delete(id);
   }
 
   async stopAll(): Promise<void> {

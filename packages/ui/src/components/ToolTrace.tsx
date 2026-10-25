@@ -148,6 +148,7 @@ export function ToolTrace({
                 tool.running ? "running" : "",
                 tool.isError ? "failed" : "",
                 tool.toolCallId === selectedId ? "selected" : "",
+                tool.unfinished ? "unfinished" : "",
                 recentIds.has(tool.toolCallId) ? "recent" : "",
               ]
                 .filter(Boolean)
@@ -156,14 +157,20 @@ export function ToolTrace({
               aria-current={tool.toolCallId === selectedId ? "true" : undefined}
             >
               <span className="t-status" aria-hidden="true">
-                {tool.running ? "●" : tool.isError ? "✕" : "·"}
+                {tool.running ? "●" : tool.isError ? "✕" : tool.unfinished ? "?" : "·"}
               </span>
               <span className="t-name mono">{tool.toolName || "tool"}</span>
               <span className="t-summary mono" title={toolSummary(tool)}>
                 {toolSummary(tool)}
               </span>
               <span className="t-time mono">
-                {tool.running ? "running" : tool.durationMs !== undefined ? formatMs(tool.durationMs) : "done"}
+                {tool.running
+                  ? "running"
+                  : tool.unfinished
+                    ? "no result"
+                    : tool.durationMs !== undefined
+                      ? formatMs(tool.durationMs)
+                      : "done"}
               </span>
             </button>
           ))}
@@ -187,7 +194,13 @@ export function ToolTrace({
           {selected.result.length > 0 ? (
             <pre className={`trace-output mono${selected.isError ? " error" : ""}`}>{selected.result}</pre>
           ) : (
-            <pre className="trace-output mono">{selected.running ? "waiting for output…" : "(no output)"}</pre>
+            <pre className="trace-output mono">
+              {selected.running
+                ? "waiting for output…"
+                : selected.unfinished
+                  ? "No result was recorded for this call. The run was interrupted or aborted before it finished."
+                  : "This tool returned no output."}
+            </pre>
           )}
         </div>
       )}

@@ -183,6 +183,14 @@ export class Transport {
       historyTotal,
       home: this.#config.home,
     });
+
+    // Then the conversation for each live session. The `transcript` event fires once when
+    // history is fetched, so a client connecting later — after a browser reload, say — would
+    // otherwise see every running session as empty until a new message arrived.
+    for (const session of this.#supervisor.list()) {
+      const messages = this.#supervisor.transcriptOf(session.id);
+      if (messages) this.#send(socket, { kind: "transcript", sessionId: session.id, messages });
+    }
   }
 
   async #onMessage(socket: WebSocket, raw: string): Promise<void> {

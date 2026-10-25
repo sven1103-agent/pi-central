@@ -107,6 +107,36 @@ The tool-call payload is named `arguments`, not `input`.
 Getting any of these wrong fails **silently**: the transcript is merely shorter than it should
 be, which is indistinguishable from a quiet session.
 
+### One tool call arrives by two routes — deduplicate by `toolCallId`
+
+A single tool call reaches a client **twice**, and both routes are legitimate:
+
+| Route | Carries | Lacks |
+|---|---|---|
+| live `tool_execution_start` / `_update` / `_end` | `args`, `durationMs`, live status | — |
+| persisted `toolResult` **message** | `content`, `isError`, `toolCallId` | **`args`** |
+
+Measured on a real session: the file held one `bash` and one `write` tool result, and the trace
+showed **four** rows — with the two extras sharing a `toolCallId`, which also collides as a React
+key. Two consequences worth designing around:
+
+1. **Merge on `toolCallId`, do not append.** Neither route is complete, and which arrives first
+   depends on whether history was loaded before or after the call ran.
+2. **Recover `args` from the assistant's `toolCall` block**, keyed by the same id. Training a
+   trace row to say only "bash" is the least useful thing a trace row can be, and the arguments
+   are in the same conversation.
+
+Also: a call can exist with **no result at all**. A real session had 1188 calls and 1187 results —
+one interrupted run. Surface it as "no result recorded" rather than omitting it, since "it tried
+this and we never saw the outcome" is exactly what someone opens a trace to find.
+
+### A reconnecting client needs the transcript re-sent
+
+The `transcript` event fires **once**, when history is fetched. A browser reload creates a new
+client that receives only a `snapshot`, so without re-sending, every running session appears to
+have an empty transcript until a new message arrives. The supervisor therefore retains the loaded
+conversation per session, and the transport replays it to each new connection.
+
 ### `send` takes the closed `Command` union
 
 The `Command` union is binding, not decorative: `rpc.send` accepts it and nothing looser. It was

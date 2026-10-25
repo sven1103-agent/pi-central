@@ -1067,3 +1067,7 @@ select.btn { font-family: var(--sans); }
 }
 .tool-marker .m-failed { color: var(--danger-text); }
 .tool-marker .m-running { color: var(--ok-text); }
+
+/* A call whose result was never recorded: worth noticing, not worth alarming. */
+.trace-row.unfinished { border-left-color: var(--warn); }
+.trace-row.unfinished .t-status { color: var(--warn-text); }

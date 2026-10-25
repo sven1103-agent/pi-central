@@ -73,6 +73,14 @@ export interface ToolExecution {
   durationMs?: number | undefined;
   startedAt: number;
   /**
+   * The tool was called but no result was ever recorded.
+   *
+   * Verified on a real session: 1188 tool calls, 1187 tool results — one `bash` call's result was
+   * never persisted, because the run was interrupted. Surfaced rather than omitted, since "the
+   * agent tried this and we never saw the outcome" is exactly what someone opens a trace to find.
+   */
+  unfinished?: boolean | undefined;
+  /**
    * How many messages existed when this tool ran, i.e. its position in the conversation.
    *
    * Recorded because tools are NOT a separate stream to be appended at the end: they happen
@@ -155,6 +163,52 @@ function blocksFromContent(content: unknown): Block[] {
     }
   }
   return blocks;
+}
+
+/**
+ * Insert a tool, or MERGE it into the entry that already has its `toolCallId`.
+ *
+ * One tool call reaches the UI by two routes, and both are real:
+ *
+ *   1. the live `tool_execution_start` / `_update` / `_end` events — carry `args` and a duration;
+ *   2. the persisted `toolResult` message, which the transcript also sees when history is loaded
+ *      — carries the result and `isError`, but NO arguments.
+ *
+ * Pushing both produced two rows for one call. Measured on a real session: the file holds one
+ * `bash` and one `write` tool result, and the trace showed four rows — with the two extras
+ * sharing a `toolCallId`, which also collides as a React key.
+ *
+ * Merging rather than "prefer one source" is deliberate: neither route is complete on its own,
+ * and which arrives first depends on whether history was loaded before or after the call ran.
+ */
+function upsertTool(tools: ToolExecution[], incoming: ToolExecution): ToolExecution[] {
+  const index = tools.findIndex((tool) => tool.toolCallId === incoming.toolCallId);
+  if (index === -1) return [...tools, incoming];
+
+  return tools.map((tool, i) => {
+    if (i !== index) return tool;
+    return {
+      ...tool,
+      // Keep a real tool name over the "tool" placeholder a history entry starts with.
+      toolName: tool.toolName && tool.toolName !== "tool" ? tool.toolName : incoming.toolName,
+      args: tool.args ?? incoming.args,
+      // The richer result wins: a live partial can arrive before the final text.
+      result: incoming.result.length > tool.result.length ? incoming.result : tool.result,
+      isError: tool.isError || incoming.isError,
+      // Completion is inferred from EVIDENCE rather than from which route the entry came by:
+      // a duration, or any result at all, means the call finished. Neither a live `end` nor a
+      // history `toolResult` can exist without one, and a result is only ever persisted once the
+      // tool is done — so a stale "running" cannot be produced by this rule.
+      running: incoming.running
+        ? true
+        : incoming.durationMs !== undefined || incoming.result.length > 0
+          ? false
+          : tool.running,
+      durationMs: tool.durationMs ?? incoming.durationMs,
+      // Position is kept from the first sighting, which is the earlier and more accurate one.
+      afterMessage: tool.afterMessage,
+    };
+  });
 }
 
 /** Get or create the block at `contentIndex`, keeping the array sparse-tolerant. */
@@ -251,9 +305,11 @@ export function applyRecord(transcript: Transcript, record: Record<string, unkno
       // model did not author belongs.
       if (role === "toolResult" || role === "bashExecution") {
         const toolCallId = message?.toolCallId ?? `history-${next.tools.length}`;
-        next.tools.push({
+        next.tools = upsertTool(next.tools, {
           toolCallId,
           toolName: message?.toolName ?? (role === "bashExecution" ? "bash" : "tool"),
+          // A `toolResult` message carries NO arguments; they are recovered from the assistant's
+          // `toolCall` block in `attachHistoricalArgs`.
           args: message?.command !== undefined ? { command: message.command } : undefined,
           result: stringifyResult(message?.content) || String(message?.output ?? ""),
           isError: message?.isError === true,
@@ -296,7 +352,7 @@ export function applyRecord(transcript: Transcript, record: Record<string, unkno
 
     case "tool_execution_start": {
       const toolCallId = String(record.toolCallId ?? "");
-      next.tools.push({
+      next.tools = upsertTool(next.tools, {
         toolCallId,
         toolName: String(record.toolName ?? ""),
         args: record.args,
@@ -337,7 +393,7 @@ export function applyRecord(transcript: Transcript, record: Record<string, unkno
       // An `end` with no matching `start` happens when a session is resumed mid-tool-call.
       // Recording it beats dropping it: the transcript would otherwise omit real work.
       if (!matched) {
-        next.tools.push({
+        next.tools = upsertTool(next.tools, {
           toolCallId,
           toolName: String(record.toolName ?? ""),
           args: record.args,
@@ -555,7 +611,65 @@ export function seedTranscript(messages: unknown[]): Transcript {
     if (typeof message !== "object" || message === null) continue;
     transcript = applyRecord(transcript, { type: "message_end", message });
   }
-  return transcript;
+  return attachHistoricalArgs(transcript);
+}
+
+/**
+ * Fill in a history tool's arguments from the assistant `toolCall` block that requested it.
+ *
+ * A `toolResult` message records `toolCallId`, `toolName`, `content` and `isError` — but **not
+ * the arguments**. So every trace row from history rendered with an empty description, which is
+ * the least useful thing a trace row can be. The arguments are not missing from the session,
+ * only from that record: the assistant's `toolCall` block in the same conversation has them,
+ * keyed by the same id.
+ *
+ * Verified on a real session: `{id: call_c3567…, name: bash, arguments: {command: "ls -la"}}`
+ * pairs with the `toolResult` whose `toolCallId` is `call_c3567…`.
+ */
+function attachHistoricalArgs(transcript: Transcript): Transcript {
+  const calls = new Map<string, { name?: string | undefined; args?: unknown; index: number }>();
+  transcript.messages.forEach((message, index) => {
+    for (const block of message.blocks) {
+      if (block.kind !== "toolcall" || block.id === undefined) continue;
+      calls.set(block.id, { name: block.name, args: block.args, index });
+    }
+  });
+  if (calls.size === 0) return transcript;
+
+  const seen = new Set(transcript.tools.map((tool) => tool.toolCallId));
+
+  const enriched = transcript.tools.map((tool) => {
+    const call = calls.get(tool.toolCallId);
+    if (!call) return tool;
+    return {
+      ...tool,
+      args: tool.args ?? call.args,
+      toolName: tool.toolName === "tool" && call.name ? call.name : tool.toolName,
+    };
+  });
+
+  // Calls the agent made whose result was never recorded — an interrupted or aborted run.
+  // Without this the trace quietly under-reports what the agent attempted.
+  const unrecorded: ToolExecution[] = [];
+  for (const [id, call] of calls) {
+    if (seen.has(id)) continue;
+    unrecorded.push({
+      toolCallId: id,
+      toolName: call.name ?? "tool",
+      args: call.args,
+      result: "",
+      isError: false,
+      running: false,
+      startedAt: Date.now(),
+      afterMessage: call.index + 1,
+      unfinished: true,
+    });
+  }
+
+  return {
+    ...transcript,
+    tools: [...enriched, ...unrecorded].sort((a, b) => a.afterMessage - b.afterMessage),
+  };
 }
 
 /** The full assistant text so far, for copy and export. */

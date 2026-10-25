@@ -577,3 +577,168 @@ test("work before the first message is planned first, not dropped", () => {
   ]));
   assert.deepEqual(plan.map((e) => e.kind), ["tools", "turn"]);
 });
+
+// --- Double-counting: one call reached the UI by two routes (img_3.png) ------------------------
+//
+// Measured on a real session: the file holds ONE `bash` tool result and ONE `write`, but the trace
+// showed FOUR rows. Every call arrives twice — as live `tool_execution_*` events (with arguments
+// and a duration) and as a persisted `toolResult` message (with the result, but no arguments).
+// The two extras also shared a `toolCallId`, which collides as a React key.
+
+const CALL_ID = "call_c3567abe6db9434aa0f960f6";
+
+test("a tool seen live and then in history is ONE row, not two", () => {
+  const t = fold([
+    // Live: start carries args, end carries the duration.
+    { type: "tool_execution_start", toolCallId: CALL_ID, toolName: "bash", args: { command: "ls -la" } },
+    { type: "tool_execution_end", toolCallId: CALL_ID, toolName: "bash", result: "a b c", durationMs: 17 },
+    // History: the same call as a toolResult message. No arguments, no duration.
+    { type: "message_end", message: { role: "toolResult", toolCallId: CALL_ID, toolName: "bash", content: [{ type: "text", text: "a b c" }] } },
+  ]);
+  assert.equal(t.tools.length, 1, `expected one row for one call, got ${t.tools.length}`);
+  assert.equal(t.tools[0]!.result, "a b c");
+  assert.equal(t.tools[0]!.durationMs, 17, "the live duration must survive the merge");
+});
+
+test("a tool seen in history and then live is also ONE row", () => {
+  // The opposite order happens when history is loaded before the call runs, so neither source can
+  // simply be preferred.
+  const t = fold([
+    { type: "message_end", message: { role: "toolResult", toolCallId: CALL_ID, toolName: "bash", content: [{ type: "text", text: "a b c" }] } },
+    { type: "tool_execution_start", toolCallId: CALL_ID, toolName: "bash", args: { command: "ls -la" } },
+    { type: "tool_execution_end", toolCallId: CALL_ID, toolName: "bash", result: "a b c", durationMs: 17 },
+  ]);
+  assert.equal(t.tools.length, 1);
+  assert.deepEqual(t.tools[0]!.args, { command: "ls -la" }, "the live arguments must be merged in");
+});
+
+test("tool ids are unique, because they are React keys", () => {
+  const t = fold([
+    { type: "tool_execution_start", toolCallId: "a", toolName: "bash", args: {} },
+    { type: "tool_execution_end", toolCallId: "a", toolName: "bash", result: "x" },
+    { type: "message_end", message: { role: "toolResult", toolCallId: "a", toolName: "bash", content: [{ type: "text", text: "x" }] } },
+    { type: "tool_execution_start", toolCallId: "b", toolName: "read", args: {} },
+  ]);
+  const ids = t.tools.map((tool) => tool.toolCallId);
+  assert.equal(new Set(ids).size, ids.length, `duplicate tool ids: ${ids.join(", ")}`);
+});
+
+test("a history entry that carries a result marks the tool finished", () => {
+  // Completion is inferred from EVIDENCE (a duration, or any result), not from which route the
+  // entry took. A `toolResult` is only persisted once the tool is done, so this cannot leave a
+  // stale "running" behind — and a session resumed after its tools finished must not show them
+  // as still running.
+  //
+  // (An earlier version of this test asserted the opposite and failed. The failure was useful: it
+  // showed the code and its comment disagreed, and the code was right.)
+  const t = fold([
+    { type: "tool_execution_start", toolCallId: "a", toolName: "bash", args: {} },
+    { type: "message_end", message: { role: "toolResult", toolCallId: "a", toolName: "bash", content: [{ type: "text", text: "old" }] } },
+  ]);
+  assert.equal(t.tools[0]!.running, false, "a result is evidence the call finished");
+});
+
+test("a bare start with no result yet stays running", () => {
+  const t = fold([{ type: "tool_execution_start", toolCallId: "a", toolName: "bash", args: {} }]);
+  assert.equal(t.tools[0]!.running, true);
+});
+
+test("a live end DOES clear the running flag", () => {
+  const t = fold([
+    { type: "tool_execution_start", toolCallId: "a", toolName: "bash", args: {} },
+    { type: "tool_execution_end", toolCallId: "a", toolName: "bash", result: "done", durationMs: 5 },
+  ]);
+  assert.equal(t.tools[0]!.running, false);
+});
+
+test("the richer result wins when a partial arrives before the final text", () => {
+  const t = fold([
+    { type: "tool_execution_start", toolCallId: "a", toolName: "bash", args: {} },
+    { type: "tool_execution_update", toolCallId: "a", partialResult: "part" },
+    { type: "message_end", message: { role: "toolResult", toolCallId: "a", toolName: "bash", content: [{ type: "text", text: "the complete output" }] } },
+  ]);
+  assert.equal(t.tools[0]!.result, "the complete output");
+});
+
+test("history tool arguments are recovered from the assistant's toolCall block", () => {
+  // `toolResult` records do NOT carry arguments, so every historical trace row rendered blank —
+  // the least useful thing a trace row can be. The arguments are in the same conversation.
+  const t = seedTranscript([
+    { role: "assistant", content: [
+      { type: "toolCall", id: CALL_ID, name: "bash", arguments: { command: "ls -la" } },
+    ] },
+    { role: "toolResult", toolCallId: CALL_ID, toolName: "bash", content: [{ type: "text", text: "a b c" }] },
+  ]);
+  assert.deepEqual(t.tools[0]!.args, { command: "ls -la" }, "arguments must be recovered");
+  assert.equal(t.tools.length, 1);
+});
+
+test("a history row with no matching toolCall block still renders, just without arguments", () => {
+  const t = seedTranscript([
+    { role: "toolResult", toolCallId: "orphan", toolName: "bash", content: [{ type: "text", text: "out" }] },
+  ]);
+  assert.equal(t.tools.length, 1);
+  assert.equal(t.tools[0]!.args, undefined);
+  assert.equal(t.tools[0]!.result, "out");
+});
+
+test("a real session's duplicate-free tool count matches its toolCall blocks", () => {
+  // The property that was violated: the number of trace rows should equal the number of DISTINCT
+  // calls, not the number of records that mention them.
+  const t = seedTranscript([
+    { role: "assistant", content: [
+      { type: "toolCall", id: "c1", name: "bash", arguments: { command: "ls -la" } },
+      { type: "toolCall", id: "c2", name: "write", arguments: { path: "random-notes.md" } },
+    ] },
+    { role: "toolResult", toolCallId: "c1", toolName: "bash", content: [{ type: "text", text: "files" }] },
+    { role: "toolResult", toolCallId: "c2", toolName: "write", content: [{ type: "text", text: "wrote" }] },
+  ]);
+  assert.equal(t.tools.length, 2, "two calls must be two rows");
+  assert.deepEqual(t.tools.map((x) => x.toolName).sort(), ["bash", "write"]);
+  assert.deepEqual(t.tools.map((x) => x.args).sort((a, b) => String(a).localeCompare(String(b))), [
+    { command: "ls -la" },
+    { path: "random-notes.md" },
+  ]);
+});
+
+test("a call whose result was never recorded still appears in the trace", () => {
+  // Real session: 1188 tool calls, 1187 tool results. One `bash` call's result was never
+  // persisted because the run was interrupted. Omitting it makes the trace under-report what the
+  // agent attempted — and "it tried this and we never saw the outcome" is exactly what someone
+  // opens a trace to find.
+  const t = seedTranscript([
+    { role: "assistant", content: [
+      { type: "toolCall", id: "c1", name: "bash", arguments: { command: "ls" } },
+      { type: "toolCall", id: "c2", name: "bash", arguments: { command: "never finished" } },
+    ] },
+    { role: "toolResult", toolCallId: "c1", toolName: "bash", content: [{ type: "text", text: "ok" }] },
+  ]);
+  assert.equal(t.tools.length, 2, "the unrecorded call must not vanish");
+  const orphan = t.tools.find((tool) => tool.toolCallId === "c2")!;
+  assert.equal(orphan.unfinished, true);
+  assert.deepEqual(orphan.args, { command: "never finished" }, "its arguments are still known");
+  assert.equal(orphan.running, false, "it is not running now, it simply never reported");
+});
+
+test("every tool call the agent made appears in the trace", () => {
+  // The property that must hold: trace rows == distinct calls, never fewer.
+  const t = seedTranscript([
+    { role: "assistant", content: [
+      { type: "toolCall", id: "a", name: "bash", arguments: {} },
+      { type: "toolCall", id: "b", name: "read", arguments: {} },
+      { type: "toolCall", id: "c", name: "write", arguments: {} },
+    ] },
+    { role: "toolResult", toolCallId: "b", toolName: "read", content: [{ type: "text", text: "x" }] },
+  ]);
+  assert.equal(t.tools.length, 3);
+  assert.equal(t.tools.filter((x) => x.unfinished).length, 2);
+});
+
+test("unrecorded calls are ordered by where they were made, not appended", () => {
+  const t = seedTranscript([
+    { role: "assistant", content: [{ type: "toolCall", id: "late", name: "bash", arguments: {} }] },
+    { role: "user", content: "more" },
+    { role: "assistant", content: [{ type: "toolCall", id: "later", name: "read", arguments: {} }] },
+  ]);
+  assert.deepEqual(t.tools.map((x) => x.afterMessage), [1, 3]);
+});

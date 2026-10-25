@@ -285,6 +285,14 @@ test("a collapsed trace shows a preview instead of the full list", () => {
   assert.ok(!html.includes("trace-list"), "a collapsed trace must not render the rows");
 });
 
+test("a call with no recorded result says so rather than claiming success", () => {
+  const html = renderToString(createElement(ToolTrace, {
+    tools: [tool({ toolCallId: "c1", toolName: "bash", unfinished: true, result: "" })],
+    selectedId: undefined, onSelect() {}, collapsed: false, onToggleCollapsed() {},
+  }));
+  assert.match(html, /no result/, "an interrupted call must not read as done");
+});
+
 test("a failed tool is marked in the trace, not silently shown as done", () => {
   const html = renderToString(createElement(ToolTrace, {
     tools: [tool({ toolCallId: "c1", toolName: "bash", isError: true, result: "boom" })],
