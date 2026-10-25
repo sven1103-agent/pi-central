@@ -130,6 +130,7 @@ file still *looks* authoritative. It has caught real rot more than once.
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | The Pi RPC surface Pi Central depends on |
 | [docs/SANDBOX.md](docs/SANDBOX.md) | How safehouse is invoked per session |
 | [docs/INCREMENTS.md](docs/INCREMENTS.md) | Increments, slices, and how work is sequenced |
+| [docs/DOGFOODING.md](docs/DOGFOODING.md) | Using Pi Central to develop Pi Central, and what breaks if you run it from the checkout you edit |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Phases, verification status, and out-of-scope items |
 | [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) | Unresolved decisions |
 | [docs/decisions/](docs/decisions/) | Architecture decision records |
