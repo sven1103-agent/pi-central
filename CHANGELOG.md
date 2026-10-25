@@ -21,6 +21,11 @@ They are kept because each one is the reason a constraint or an invariant test e
   variants (`setModel`, `listModels`, `setThinkingLevel`, `listThinkingLevels`) and matching events;
   the catalogue is request-shaped rather than part of `LiveSession`, because it is hundreds of
   entries that change only with the provider configuration.
+- **The thinking-level picker** (issue #2), constrained by the current model: the levels come from
+  `get_available_thinking_levels` for *that* model rather than a hardcoded list, and a model switch
+  invalidates the list, so a level the new model does not support cannot be selected. The displayed
+  level follows Pi — re-applied on a model switch, and updated by `thinking_level_changed` without a
+  refresh. `ThinkingPicker.tsx`, tested.
 - **The agent credential store is checked for usability at session start** (issue #28). A session
   whose agent identity cannot be used says so, naming which capability and — the part that matters —
   whether it is **not provisioned** (a setup step) or **provisioned but unreachable** (a defect in
@@ -89,7 +94,6 @@ a live three-session isolation run, and a replay of real session files.
 
 ### Known limitations
 
-- The thinking level is displayed but cannot be changed from the UI yet (the model picker works).
 - `steer` is unavailable: the RPC surface Pi Central uses cannot express it, and the composer says
   so rather than showing a control that cannot work.
 - No syntax highlighting, no compaction or retry banners, no file navigation.

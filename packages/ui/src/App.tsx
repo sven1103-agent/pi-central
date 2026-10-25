@@ -27,6 +27,7 @@ import { Composer } from "./components/Composer.tsx";
 import { DialogDock, type DialogAnswer } from "./components/DialogDock.tsx";
 import { Inspector } from "./components/Inspector.tsx";
 import { ModelPicker } from "./components/ModelPicker.tsx";
+import { ThinkingPicker } from "./components/ThinkingPicker.tsx";
 import { HistoryView } from "./components/History.tsx";
 import { displayName, formatContext, formatCost, formatTokens, headerLocation } from "./format.ts";
 import { stateLabel } from "./store.ts";
@@ -239,6 +240,16 @@ export function App() {
                 // have been refused.
                 if (focused) send({ kind: "setModel", sessionId: focused.id, provider, modelId });
               }}
+              thinking={{
+                levels: focused ? state.thinkingLevels[focused.id] : undefined,
+                error: focused ? state.thinkingLevelErrors[focused.id] : undefined,
+              }}
+              onRequestThinkingLevels={() => {
+                if (focused) send({ kind: "listThinkingLevels", sessionId: focused.id });
+              }}
+              onSelectThinkingLevel={(level) => {
+                if (focused) send({ kind: "setThinkingLevel", sessionId: focused.id, level });
+              }}
               onSend={(message) => {
                 if (focused) send({ kind: "prompt", sessionId: focused.id, message });
               }}
@@ -289,6 +300,9 @@ function SessionView({
   onAnswer,
   onRequestModels,
   onSelectModel,
+  thinking,
+  onRequestThinkingLevels,
+  onSelectThinkingLevel,
   onSend,
   onClearQueueAndStop,
   draft,
@@ -303,6 +317,9 @@ function SessionView({
   onAnswer: (dialogId: string, answer: DialogAnswer) => void;
   onRequestModels: () => void;
   onSelectModel: (provider: string, modelId: string) => void;
+  thinking: { levels: string[] | undefined; error: string | undefined };
+  onRequestThinkingLevels: () => void;
+  onSelectThinkingLevel: (level: string) => void;
   onSend: (message: string) => void;
   onClearQueueAndStop: () => void;
   draft: string;
@@ -357,6 +374,15 @@ function SessionView({
           error={modelError}
           onRequest={onRequestModels}
           onSelect={onSelectModel}
+        />
+        {/* Beside the model, because the two are coupled: the levels are per-model, so a change to
+            one invalidates the other. */}
+        <ThinkingPicker
+          session={session}
+          levels={thinking.levels}
+          error={thinking.error}
+          onRequest={onRequestThinkingLevels}
+          onSelect={onSelectThinkingLevel}
         />
       </div>
 

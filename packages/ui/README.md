@@ -73,9 +73,8 @@ A session that fails this way also gets the diagnosis attached to its error in t
 - **Steer.** The protocol cannot express it: `Control` has no `steer`, and the supervisor
   hard-codes `followUp` while streaming. The composer's hint line says so rather than showing a
   button that cannot work.
-- **Thinking-level picker.** The model picker in the session header works; the thinking level is
-  still shown read-only. `Control` now carries `setThinkingLevel`/`listThinkingLevels`, so this is
-  a UI slice (issue #2) rather than a protocol one.
+- **Steer.** See below — unchanged, and still the one place the UI documents a missing capability
+  on purpose.
 - **Syntax highlighting.** Code renders in a styled `<pre>`; Shiki is deferred.
 - **Compaction / retry banners.**
 
