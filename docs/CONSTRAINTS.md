@@ -345,3 +345,37 @@ said 11. The UI then claimed to be loading, forever, because a once-only guard p
 **Related, same family:** a *failed* read and an *empty* result must be different events. Rendered
 as the same thing, a failure becomes an eternal spinner — a claim that work is in progress when
 none is.
+
+## C15 — Safehouse runs the session under `env -i`, so a variable must be requested BY NAME
+
+Verified in the installed Safehouse 0.12.0 script. The wrapped command is executed as:
+
+```
+sandbox-exec -f "$policy_path" -- /usr/bin/env -i "${runtime_execution_environment[@]}" "$@"
+```
+
+`env -i` **clears the environment**. Safehouse then rebuilds it from an explicit list:
+
+| Source | Names |
+|---|---|
+| Computed | `HOME` (its own `home_dir`), `PATH` (sanitized), `SHELL`, `TMPDIR`, `PWD`, `USER`, `LOGNAME` |
+| Its passthrough defaults | `TERM`, `COLORTERM`, `TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `EDITOR`, `VISUAL`, `TMP`, `TEMP`, `LANG`, `LC_*`, … |
+| `--env-pass=NAMES` | whatever is named, taking the value from **Safehouse's own** environment |
+
+**Consequence, and it is the subtle part:** setting a variable in the spawn environment is *not
+sufficient*. Safehouse discards it unless its name is also requested via `--env-pass`. Pi Central
+therefore derives the flag from the environment it injects, so the delivered set is the injected
+set by construction.
+
+**Consequence of the consequence:** `--env-pass` upserts, so it cannot *remove* a name Safehouse
+already forwards. Removal and delivery are different problems — `env.ts` solves removal (C4a/§C11),
+`--env-pass` solves delivery.
+
+**This has already caused a defect.** `GH_CONFIG_DIR` was absent from Safehouse's list, so the
+agent's `gh` fell back to the host's `~/.config/gh/config.yml`, found it denied by Pi Central's own
+fragment, and refused to start with `failed to read configuration: operation not permitted`. In the
+same way `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` were dropped, so the agent's git identity was
+never in effect. The denies were working perfectly; the capability beside them was dead.
+
+Note that Pi's own `auth.json` deny failed in the identical shape (C12): **a denied read is not the
+same as an absent file**, and startup-time config reads turn a denial into a refusal to run.

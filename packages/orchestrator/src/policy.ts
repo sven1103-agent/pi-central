@@ -15,9 +15,21 @@
  *   2. the appended fragment      — denies for the host's *credential* paths
  *   3. the spawn environment      — what the session can see at all (C11)
  *
- * `--env-pass` is deliberately **not** used. It merges append-only into Safehouse's sanitized
- * allowlist, so it can add a variable but never remove one — including `SSH_AUTH_SOCK`, which
- * is in that allowlist by default (C4a). Environment control therefore happens in `env.ts`.
+ * On `--env-pass`: it **is** used, and the reason is worth recording because an earlier reading of
+ * the same fact caused a defect.
+ *
+ * The fact: Safehouse's environment handling is add-only. `--env-pass` can introduce a name, and
+ * cannot remove one — `SSH_AUTH_SOCK` is on its default list (C4a), so no flag will take it away.
+ * That is why *sanitisation* happens in `env.ts`, and that part was always right.
+ *
+ * What an earlier comment here generalised from it — "so `--env-pass` is deliberately not used" —
+ * was wrong, and cost a working feature. Safehouse runs the session as `env -i` plus its own list
+ * of names, so a variable that is not requested **by name** is discarded no matter how carefully
+ * the spawn environment sets it. Without `--env-pass`, every variable we inject is silently
+ * dropped: the agent's `gh` fell back to the host config (denied, so it refused to start) and its
+ * git identity was never applied.
+ *
+ * Removal and delivery are different problems. `env.ts` solves removal; this flag solves delivery.
  */
 import { accessSync, constants, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -133,6 +145,44 @@ export function composePolicy(spec: SessionSpec): ComposedPolicy {
   // Emitted after generated rules; SBPL last-match-wins makes these denies authoritative.
   if (fragmentFile !== undefined) args.push(`--append-profile=${fragmentFile}`);
 
+  // Handed to `spawn` directly, replacing the inherited environment entirely (C11).
+  const env = buildSessionEnv(spec.env ? { set: spec.env } : {});
+
+  /**
+   * Tell Safehouse to forward the variables we injected.
+   *
+   * **Without this, the values never reach the session.** Safehouse runs the wrapped command as
+   * `env -i` followed by its own list of names (verified in the installed script), so a variable
+   * that is not on that list is discarded — however carefully we set it in the spawn environment.
+   *
+   * The names are DERIVED from the environment we just built rather than written out, because a
+   * literal list drifts: someone adds a variable to `agentRoutingEnv` and the new one is silently
+   * dropped again. Deriving it means the delivery set is exactly the injected set, by
+   * construction.
+   *
+   * Forwarding everything we inject cannot leak anything, because `env.ts` built that object — it
+   * is the trusted channel of ADR-0010 §3, never `process.env` (C11).
+   *
+   * This was a real defect, not a precaution. `GH_CONFIG_DIR` was absent from Safehouse's
+   * defaults, so the agent's `gh` fell back to the host's `~/.config/gh/config.yml`, found it
+   * denied by our own fragment, and refused to start — while `GIT_CONFIG_GLOBAL` and
+   * `GIT_CONFIG_SYSTEM` were dropped in the same way, so the agent's git identity was never in
+   * effect either. The deny was working perfectly; the capability next to it was dead.
+   */
+  // Forward ONLY what we inject, not everything in `env`.
+  //
+  // Safehouse builds its own `HOME`, `PATH`, `TMPDIR`, `SHELL`, `USER`, `LOGNAME` and forwards a
+  // terminal/editor/locale list of its own (verified in the installed script). Naming those here
+  // would override values it chose deliberately — `--env-pass` upserts — for no gain. The names
+  // that matter are the ones Safehouse cannot know about: the agent's routing variables.
+  //
+  // Derived from `spec.env` rather than written out, so adding a variable to `agentRoutingEnv`
+  // cannot silently reintroduce this defect.
+  const injected = Object.keys(spec.env ?? {});
+  if (injected.length > 0) args.push(`--env-pass=${injected.join(",")}`);
+  // The names must exist in the safehouse process's own environment, and they do: `env`, built
+  // from the same values, is handed to `spawn` for exactly that process.
+
   for (const bad of FORBIDDEN_FLAGS) {
     // Not merely absent: asserted absent, so a future caller cannot smuggle one in.
     if (args.includes(bad)) throw new Error(`refusing to pass ${bad}`);
@@ -140,9 +190,6 @@ export function composePolicy(spec: SessionSpec): ComposedPolicy {
 
   args.push("--", spec.pi, "--mode", "rpc");
   if (spec.name) args.push("--name", spec.name);
-
-  // Handed to `spawn` directly, replacing the inherited environment entirely (C11).
-  const env = buildSessionEnv(spec.env ? { set: spec.env } : {});
 
   const result: ComposedPolicy = {
     launch: { command: spec.safehouse, args, cwd: spec.cwd, env },
