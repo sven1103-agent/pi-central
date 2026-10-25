@@ -55,25 +55,25 @@ Measured: **~700 ms for 500 sessions**, no Pi import, streaming reads that cap t
 
 ### A parser trap, found while verifying this
 
-Pi creates a **directory whose name is the session file plus `.jsonl`**, holding subagent
-runs:
+Pi creates a **sidecar directory next to each session file**, whose name is the session
+file name with the `.jsonl` suffix dropped, holding subagent runs:
 
 ```
 --Users-sven1103-git-idea-factory-typescript--/
   2026-09-20T07-20-23-082Z_01a0bdaf-….jsonl          <- the session file
-  2026-09-20T07-20-23-082Z_01a0bdaf-….jsonl/         <- a directory, same name
+  2026-09-20T07-20-23-082Z_01a0bdaf-…/              <- sidecar DIR, no .jsonl suffix
      dcf8639b-8d09-40de-8d2b-a54e6a46fd97/run-0/session.jsonl
+  subagent-artifacts/
 ```
 
-So the obvious `readdirSync(dir).filter(f => f.endsWith(".jsonl"))` matches **both** the
-file and the directory. Consequences:
+The directory name has **no `.jsonl` suffix**, so a `.jsonl` suffix filter already excludes
+it — this is not, on its own, a bug. What matters is **never recursing**: a recursive walk
+from the project directory would descend into the sidecar and surface each subagent
+`run-0/session.jsonl` as if it were a top-level session. Discovery therefore enumerates
+exactly one level and takes only regular files.
 
-- Discovery must test `isFile()` (or tolerate `EISDIR`), not just the suffix.
-- Discovery enumerates **exactly one level** under each project directory. A recursive walk
-  would surface subagent `run-0/session.jsonl` files as if they were top-level sessions.
-
-The prototype already survived this by accident (`readFileSync` on a directory throws
-`EISDIR`, which it caught). Phase 1 makes it explicit and tested.
+`isFile()` is still checked rather than assumed, because it costs one call and makes the
+invariant explicit; the test asserts the sidecar's nested sessions are not surfaced.
 
 ## Rationale
 
