@@ -107,24 +107,49 @@ far: it found a bug no policy-level check could see (C12). See
 - Safehouse emits `(deny file-write* (literal "<fragment>"))`, so a session cannot rewrite
   the rules confining it.
 
-### Still to verify (needs a plain, unsandboxed terminal — C1)
+### Live verification (plain, unsandboxed terminal — C1)
 
-Denials are proven at the *policy* layer, not yet by a live session. The first live run
-(`2026-10-25`) produced: 3/3 sessions sandboxed and idle, 12/12 cross-directory probes denied,
-and the full credential boundary clean — and found the `auth.json` bug (C12) plus a stale
-assertion in the harness. The remaining checks are experiments 1, 2, 4–9 in
-[ADR-0010](decisions/0010-agent-credential-identity.md), plus a re-run to confirm the keychain
-grant lets a session enumerate providers (`get_available_models`, expected non-zero).
+**Run 2026-10-25: 39/39 checks passed**, three sessions across three directories:
+
+- 3/3 sessions booted sandboxed with their own workdir and their own bespoke fragment.
+- 12/12 cross-directory probes denied — each session reads only its own secret, and cannot
+  read, write into, or even list a sibling's directory.
+- The credential boundary: `SSH_AUTH_SOCK` absent (fake value **planted** in the parent, so
+  "absent" is real evidence), an ambient token absent, `ssh-add -l` unreachable, host
+  `.gitconfig` and `~/.config/gh` denied.
+- Independent confirmation from **outside** every sandbox: no canary file appeared anywhere,
+  and each session's own secret is intact.
+- `auth.json` readable (not denied — the bug that made every session exit 1), the agent dir
+  writable, and **426 models enumerated** across the three providers.
+- Stopping one session did not disturb the others.
+
+Fixtures were removed afterwards; no canary was left in the agent tree or the session store.
+
+Two runs were needed, and both failures were informative: the first exposed the `auth.json`
+defect (C12) **and** revealed that an `auth.json` deny protects nothing, since the file holds
+`!command` indirections rather than keys. The second exposed a **stale assertion**: the harness
+still demanded `auth.json` be denied, so a green run was impossible without reintroducing the
+bug — a check that measures the bug as a success. That is worth remembering as a failure mode of
+verification harnesses generally.
+
+### Remaining checks
+
+- A **live** login-keychain denial (the policy denies both login keychain files and the composed
+  SBPL parses with correct ordering, but no session has been asked to try).
+- A real model call, as opposed to provider enumeration (see the note in
+  [ADR-0010](decisions/0010-agent-credential-identity.md#verification-this-amendment-requires)).
+- Experiment 7 (`--enable=ssh` diff) is static only.
 
 ### Verification status
 
 | Layer | State |
 |---|---|
-| Unit tests (`node --test`) | ✅ 65 passing |
+| Unit tests (`node --test`) | ✅ 140 passing |
 | Typecheck (`tsc --noEmit`) | ✅ clean, tsc 5.9.3 |
-| Architectural invariants | ✅ enforced by test (single argv site, no Pi runtime import, no `--add-dirs`) |
+| Architectural invariants | ✅ enforced by test (single argv site, no Pi runtime import, no `--add-dirs`, no write op on the credential store) |
 | Discovery against the real store | ✅ 833 sessions, ~900 ms |
-| Real sandboxed session, 3 cwds | ⏳ needs an unsandboxed terminal (C1) |
+| Real sandboxed sessions, 3 cwds | ✅ live, 39/39 checks |
+| Credential boundary from inside a session | ✅ live, with planted secrets as falsifiers |
 
 ## Phase 2 — Transport and UI shell
 

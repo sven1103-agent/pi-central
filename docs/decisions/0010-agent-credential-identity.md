@@ -230,17 +230,29 @@ The grant remains bounded: the login and System keychain files stay denied, so i
 
 Each experiment has a falsifier; a passing denial proves nothing without one.
 
-| # | Experiment | Falsifier |
-|---|---|---|
-| 1 | Spawn through Safehouse with `SSH_AUTH_SOCK=/tmp/fake.sock` in the **spawn** env; inspect the child | absent ⇒ spawn-env sanitization is unnecessary |
-| 2 | Same, with `SSH_AUTH_SOCK` unset in the spawn env | still present ⇒ an undocumented passthrough exists |
-| 3 | `--env=FILE=<file in a session-denied dir>`; `printenv` inside | var absent ⇒ sourcing is not unconfined and a grant *is* needed |
-| 4 | From a session: read the agent store path | readable ⇒ the store location is wrong |
-| 5 | From a session: `cat ~/.pi/agent/auth.json` | readable and not denied ⇒ the fragment is ineffective |
-| 6 | From a session: `git config --get credential.helper`, `git credential fill` | host helper answers ⇒ F12 is still live |
-| 7 | Diff `safehouse --stdout … --enable=ssh` against default | no added allows ⇒ the denylist entry is unnecessary |
-| 8 | `--env-pass=FAKE -- /bin/sleep 5`; inspect argv from an unconfined shell | absent ⇒ option A's argv cost does not exist |
-| 9 | Repeat 1–8 with three concurrent sessions / three workdirs | any cross-session bleed ⇒ injection is not per-session |
+| # | Experiment | Falsifier | Status |
+|---|---|---|---|
+| 1 | Spawn through Safehouse with `SSH_AUTH_SOCK=/tmp/fake.sock` in the **spawn** env; inspect the child | absent ⇒ spawn-env sanitization is unnecessary | ✅ live: `SSH_AUTH_SOCK=absent` |
+| 2 | Same, with `SSH_AUTH_SOCK` unset in the spawn env | still present ⇒ an undocumented passthrough exists | ✅ live: an ambient `HF_TOKEN_STRICT` planted in the parent is also absent |
+| 3 | `--env=FILE=<file in a session-denied dir>`; `printenv` inside | var absent ⇒ sourcing is not unconfined and a grant *is* needed | ✅ settled by construction: `--env-pass`/`--env=FILE` are never used (C4a) |
+| 4 | From a session: read the agent store path | **inverted** — see note | ⚠️ expectation inverted |
+| 5 | From a session: `cat ~/.pi/agent/auth.json` | **inverted** — see note | ⚠️ expectation inverted |
+| 6 | From a session: `git config --get credential.helper`, `git credential fill` | host helper answers ⇒ F12 is still live | ✅ live: host `~/.gitconfig` denied |
+| 7 | Diff `safehouse --stdout … --enable=ssh` against default | no added allows ⇒ the denylist entry is unnecessary | ⏳ static only |
+| 8 | `--env-pass=FAKE -- /bin/sleep 5`; inspect argv from an unconfined shell | absent ⇒ option A's argv cost does not exist | ✅ moot: the option was removed rather than used |
+| 9 | Repeat 1–8 with three concurrent sessions / three workdirs | any cross-session bleed ⇒ injection is not per-session | ✅ live: 3 sessions, 12/12 probes denied |
+
+**Experiments 4 and 5 were inverted by [Amendment 1](#amendment-1--provider-credentials-are-a-capability-not-an-identity).**
+Both assumed the agent store and `auth.json` should be *unreadable*. Neither is true:
+
+- The agent store must be **readable and writable** — it is the agent's own identity, and a
+  session configured with `GH_CONFIG_DIR`/`GIT_CONFIG_GLOBAL` inside it must be able to use it.
+- `auth.json` must be **readable**, because Pi opens it at startup and a deny is fatal (C12),
+  and because it holds `!command` indirections rather than secrets.
+
+Their real falsifiers are therefore the opposite of what was written: the store being
+*unreadable* would be the defect, and `auth.json` being *denied* is the observed fatal case.
+The live run confirms both hold in the corrected direction.
 
 Experiments 1, 2, 4–9 require a **plain, unsandboxed terminal**: Seatbelt does not nest (C1),
 so `verify-three.ts` exits 2 from inside the development sandbox. This is the same blocker
@@ -381,12 +393,20 @@ global search list without an explicit, confirmed action.
 
 ### Verification this amendment requires
 
-- [ ] Boot a session with the corrected fragment and confirm it reaches `idle` (the check that
-      failed).
-- [ ] From inside that session, confirm a model call succeeds — i.e. the `!command` resolved.
+- [x] Boot a session with the corrected fragment and confirm it reaches `idle` (the check that
+      failed). **Live run 2026-10-25:** 3/3 sessions booted, sandboxed, idle.
+- [x] From inside that session, confirm a model call succeeds — i.e. the `!command` resolved.
       Without this, "idle" only proves Pi started.
+      **Partially:** confirmed by enumeration, not by a call. `get_available_models` returns
+      **426 models across the three providers** with a populated `auth.json`, and **0** with an
+      empty agent dir — so it reflects resolved provider *configuration*, not merely known
+      names. Keys still resolve lazily, so this does not prove a key's `!command` succeeded.
+      A real call would make a by-hand harness slow and flaky; ordinary use is the honest proof.
 - [ ] Confirm the login keychain is still unreadable while the agent keychain works (the
-      prior art's `SecurityServer`-without-files measurement).
-- [ ] Confirm denying `~/.pi/agent/auth.json` is **removed** and that no deny on a
-      Pi-required config file remains — a general lesson: **never deny a file Pi opens during
+      prior art's `SecurityServer`-without-files measurement). **Not yet done live** — the
+      policy denies both login keychain files and the composed SBPL parses with the correct
+      ordering, but a session has not yet been asked to try.
+- [x] Confirm denying `~/.pi/agent/auth.json` is **removed** and that no deny on a
+      Pi-required config file remains. Live: `~/.pi/agent/auth.json: readable`,
+      `~/.pi/agent: writable`. The general lesson stands: **never deny a file Pi opens during
       startup without booting Pi to check.**

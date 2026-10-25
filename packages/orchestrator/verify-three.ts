@@ -113,6 +113,15 @@ function credentialProbeFor(): string {
     `if cat "$HOME/.pi/agent/auth.json" >/dev/null 2>&1; then echo PIAUTH=readable; else echo PIAUTH=blocked; fi`,
     // Pi needs to write its agent dir; a read-only view would break it later, not at boot.
     `if [ -w "$HOME/.pi/agent" ]; then echo PIAGENTDIR=writable; else echo PIAGENTDIR=readonly; fi`,
+    // The keychain split (ADR-0010 Amendment 1): `SecurityServer` is reachable so provider keys
+    // can be resolved, but the login keychain FILES stay denied -- the grant confers the
+    // capability without conferring the user's items. The first probe reads a BYTE rather than
+    // testing existence, because the deny may be on the read while `stat` still succeeds.
+    `if head -c 1 "$HOME/Library/Keychains/login.keychain-db" >/dev/null 2>&1; then echo LOGIN_KEYCHAIN=readable; else echo LOGIN_KEYCHAIN=denied; fi`,
+    // Probes an item name that cannot exist: exit 44 (not found) if the keychain is reachable,
+    // exit 1 if the lookup itself is denied. Both are non-zero, which is why this is reported
+    // separately and the enumeration check carries the positive evidence.
+    `if security find-generic-password -ws 'pi-central-definitely-absent' >/dev/null 2>&1; then echo KEYCHAIN_LOOKUP=answered; else echo KEYCHAIN_LOOKUP=denied_or_absent; fi`,
   ].join("; ");
 }
 
@@ -293,6 +302,32 @@ async function main(): Promise<number> {
         "Pi's agent dir is writable",
         vars.PIAGENTDIR === "writable",
         `~/.pi/agent: ${vars.PIAGENTDIR}`,
+      );
+
+      // --- The keychain split (ADR-0010 Amendment 1) -------------------------------------
+      //
+      // Both halves are asserted, because either alone is a false pass:
+      //
+      //   - if provider lookups cannot run at all, no key resolves and the session cannot
+      //     think (the C13 failure, which is silent);
+      //   - if the login keychain is readable, the grant leaked the user's entire keychain.
+      //
+      // Note what this pair does NOT prove: an unreachable-keychain `security` call and a
+      // genuinely absent item both exit non-zero, so the exit code cannot separate them. The
+      // positive evidence that the keychain is usable is the enumeration check below; that
+      // division of labour is deliberate rather than an oversight.
+      check(
+        "the login keychain stays unreadable while provider lookups are permitted",
+        vars.LOGIN_KEYCHAIN === "denied",
+        `login.keychain-db: ${vars.LOGIN_KEYCHAIN}` +
+          (vars.LOGIN_KEYCHAIN === "readable"
+            ? " -- the keychain grant leaked the user's keychain"
+            : ""),
+      );
+      check(
+        "a keychain lookup is not blocked outright",
+        vars.KEYCHAIN_LOOKUP === "denied_or_absent",
+        `security find-generic-password: ${vars.KEYCHAIN_LOOKUP}`,
       );
 
       // --- Can the agent actually reach a model? (C13) -----------------------------------
