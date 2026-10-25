@@ -702,3 +702,26 @@ test("a stopped run says the run stopped rather than claiming text was discarded
   const source = readFileSync(new URL("../src/components/Composer.tsx", import.meta.url), "utf8");
   assert.ok(!/was discarded/.test(source), "the discard claim must be gone now the queue is returned");
 });
+
+// --- Jump to latest in the SSR markup (issue #6) -------------------------------------------------
+
+test("the jump control is absent from the initial render, because a fresh pane is pinned", () => {
+  // The rule is that it appears only while the view is unpinned. At rest the pane starts pinned,
+  // so the initial markup has no control — and there is a behaviour test (transcript-scroll) for
+  // the interactive half, which `renderToString` cannot reach.
+  const html = renderToString(createElement(TranscriptView, {
+    transcript: { messages: [], tools: [] }, busy: false, sessionLabel: "s7",
+  }));
+  assert.ok(!/jump-latest/.test(html), "a pinned pane must not offer a jump control");
+});
+
+test("the transcript scroller and the jump control are siblings, so the control cannot scroll away", () => {
+  // An absolutely-positioned button inside the scrolling container moves with the content, which
+  // is precisely when it is needed. Asserted structurally because it is a layout invariant that a
+  // later refactor could break invisibly.
+  const html = renderToString(createElement(TranscriptView, {
+    transcript: { messages: [], tools: [] }, busy: false, sessionLabel: "s7",
+  }));
+  assert.match(html, /class="transcript-wrap"/);
+  assert.match(html, /class="transcript"/);
+});
