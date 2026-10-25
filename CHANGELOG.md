@@ -11,6 +11,16 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Added
 
+- **`steer`, follow-up, and Esc that returns what it cleared** (issue #3). Both capabilities were
+  documented as impossible; they were blocked by Pi Central's own vocabulary, not by Pi — RPC mode
+  handles `steer`, `follow_up` and `clear_queue` (and `Command` already carried the first two), so
+  only a `Control` variant was missing. The composer's mode strip appears **only** while a run is in
+  progress, where the choice is real, and says which of the two will happen; the queued texts are
+  listed read-only (there is no per-item removal to offer, so a `×` would be a fake control); and
+  Esc clears the queue, stops the run and returns the cleared text to the box. The cleared text is
+  merged **below** the draft and only once. The interim "Steer is not available in this build" hint
+  is gone.
+
 - **The model picker** (issue #1): the model shown in a session header can now be changed from the
   dashboard. The catalogue comes from `get_available_models`, grouped by provider, with the current
   model marked; choosing one sends `set_model` and the header then shows what **Pi reports back**
@@ -94,8 +104,8 @@ a live three-session isolation run, and a replay of real session files.
 
 ### Known limitations
 
-- `steer` is unavailable: the RPC surface Pi Central uses cannot express it, and the composer says
-  so rather than showing a control that cannot work.
+- File navigation and syntax highlighting are still absent; `steer`, follow-up and Esc-clears-and-
+  returns are now real.
 - No syntax highlighting, no compaction or retry banners, no file navigation.
 - macOS only. Safehouse has no Linux backend (C10).
 - No screenshot of the running UI exists in the repository: the author's environment cannot launch

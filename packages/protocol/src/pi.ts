@@ -120,6 +120,14 @@ export type Command =
   | { type: "prompt"; message: string; streamingBehavior?: "steer" | "followUp" }
   | { type: "steer"; message: string }
   | { type: "follow_up"; message: string }
+  /**
+   * Empty the queue and return what was in it.
+   *
+   * Pi's `clear_queue` is handled as `session.clearQueue()` and answered with
+   * `{ steering, followUp }` (rpc-mode.js), which is what makes Esc able to give the text back
+   * instead of discarding it (issue #3).
+   */
+  | { type: "clear_queue" }
   | { type: "abort" }
   | { type: "set_session_name"; name: string }
   | { type: "bash"; command: string; excludeFromContext?: boolean };

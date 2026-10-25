@@ -194,7 +194,12 @@ Stack is fixed: React + Vite UI, WebSocket over loopback, TypeScript orchestrato
 - [x] **The thinking-level picker** (issue #2), constrained by the current model: the levels come
       from `get_available_thinking_levels` for THAT model, and a model switch invalidates the list.
       `ThinkingPicker.tsx`, tested.
-- [ ] **Steer.** Blocked on the protocol, not the UI: `Control` has no `steer` and the
+- [x] **Steer and `clear_queue`** (issue #3). The blocker was Pi Central's own vocabulary rather
+      than Pi's: RPC mode handles both commands, so a `Control` and a supervisor method were all
+      that was missing. The removal of a stale claim about Pi is recorded here. (Historical note,
+      with the original reasoning kept below because getting it wrong is the instructive part.)
+
+- [ ] ~~**Steer.** Blocked on the protocol, not the UI: `Control` has no `steer` and the
       supervisor hard-codes `followUp` when streaming. The hint line says so rather than
       showing a control that cannot work.
 - [ ] Compaction / retry banners.

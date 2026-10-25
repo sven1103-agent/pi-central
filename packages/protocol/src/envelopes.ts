@@ -119,7 +119,18 @@ export interface ModelOption {
 export type Control =
   | { kind: "list" }
   | { kind: "start"; cwd?: string; name?: string; mode?: "sandboxed" | "direct" }
-  | { kind: "prompt"; sessionId: string; message: string }
+  | { kind: "prompt"; sessionId: string; message: string; behavior?: "steer" | "followUp" }
+  /**
+   * Empty Pi's message queue, optionally stopping the run.
+   *
+   * `andStop` is a flag rather than two controls because the two are always one gesture: Esc
+   * stops the run *and* returns the queue to the composer. Splitting them would let a caller
+   * abort while silently discarding what the user typed, which is the bug this exists to fix.
+   *
+   * The cleared texts come back in a `queue` event, so "what was removed" is reported rather
+   * than guessed — the composer restores exactly that text, not a reconstruction of it.
+   */
+  | { kind: "clearQueue"; sessionId: string; andStop: boolean }
   | { kind: "abort"; sessionId: string }
   | { kind: "stop"; sessionId: string }
   | { kind: "rename"; sessionId: string; name: string }
@@ -205,6 +216,30 @@ export type Event =
    */
   | { kind: "transcriptError"; sessionId: string; message: string }
   | { kind: "history"; history: HistoricalSession[]; total: number }
+  /**
+   * The session's CURRENT message queue, in full.
+   *
+   * A whole-list event rather than a delta, for the same reason `transcript` replaces rather than
+   * appends: Pi already reports the entire queue on every `queue_update`, so a delta encoding
+   * would mean reconstructing state the source hands over complete. It is also what makes
+   * `clearQueue` reportable — the emptied queue arrives as `{ steering: [], followUp: [] }`
+   * *and* the cleared texts are read from the same structure, so "nothing is queued" and "this is
+   * what was queued" cannot disagree.
+   *
+   * `LiveSession.pending` remains the count (it is what the rail shows); this is the texts. The
+   * two can legitimately differ after a reconnect, which is why the composer falls back to the
+   * count rather than inventing text it never received.
+   */
+  | { kind: "queue"; sessionId: string; steering: string[]; followUp: string[] }
+  /**
+   * What `clearQueue` removed, so the composer can give it back (issue #3).
+   *
+   * Deliberately NOT the `queue` event with the cleared contents: Pi empties its queue as part of
+   * clearing it, so the emptied `queue` arrives first and these texts would overwrite it — the
+   * queue would then appear to still hold the messages just removed. The cleared texts belong to
+   * the composer's draft, which is a different place, so they are a different event.
+   */
+  | { kind: "queueCleared"; sessionId: string; steering: string[]; followUp: string[] }
   | { kind: "error"; message: string; sessionId?: string | undefined };
 
 export const PROTOCOL_VERSION = 1 as const;

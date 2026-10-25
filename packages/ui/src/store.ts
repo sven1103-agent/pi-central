@@ -55,6 +55,22 @@ export interface UiState {
   /** Thinking levels per session, from `listThinkingLevels`. Per-model, so re-read on a switch. */
   thinkingLevels: Record<string, string[]>;
   thinkingLevelErrors: Record<string, string>;
+  /**
+   * The queued messages' TEXTS, keyed by session id, from `queue_update` records.
+   *
+   * The count lives in `LiveSession.pending`; this is the content. The two can disagree after a
+   * reconnect (a snapshot has the count but no texts, because texts are records and records are
+   * not replayed), so `queuedMessages` below never fabricates text to make them match.
+   */
+  queues: Record<string, { steering: string[]; followUp: string[] }>;
+  /**
+   * Text that `clearQueue` took out of the queue, waiting to be restored to the composer.
+   *
+   * Held in the store rather than passed through a callback because it arrives as an EVENT: Esc
+   * is a keystroke in one component and the texts come back from Pi, so the round trip has to be
+   * modelled as state that lands, not as a return value.
+   */
+  restoredQueue: Record<string, string[]>;
   /** True once a snapshot has arrived, so the UI can distinguish "empty" from "loading". */
   ready: boolean;
 }
@@ -71,6 +87,8 @@ export function initialState(): UiState {
     modelErrors: {},
     thinkingLevels: {},
     thinkingLevelErrors: {},
+    queues: {},
+    restoredQueue: {},
     focusedId: undefined,
     connection: "connecting",
     connectionDetail: undefined,
@@ -82,7 +100,28 @@ export function initialState(): UiState {
 /** How many errors to retain. Enough to diagnose, few enough not to bury the UI. */
 const MAX_ERRORS = 20;
 
-export function reduce(state: UiState, event: Parameters<typeof applyEvent>[1]): UiState {
+/**
+ * An action the reducer handles that did NOT come from the orchestrator.
+ *
+ * A separate union rather than a widened `Event`, because the two have different sources and
+ * therefore different trust: `Event` comes off the socket and is untrusted, while this is
+ * produced by the client's own components. Merging them would put a locally-invented event on
+ * the same footing as a message from Pi, which is the kind of blurring C8 exists to prevent. It
+ * is also why this is not a socket round trip: "the composer has now taken the restored text"
+ * is something only the composer knows.
+ */
+export type LocalAction = { kind: "queueRestored"; sessionId: string };
+
+export function reduce(
+  state: UiState,
+  event: import("@pi-central/protocol").Event | LocalAction,
+): UiState {
+  // Narrowed on the key that distinguishes them. A protocol event's `kind` is never
+  // `queueRestored`, so this cannot misroute a server message into local handling.
+  if (event.kind === "queueRestored") {
+    const { [event.sessionId]: _taken, ...restoredQueue } = state.restoredQueue;
+    return { ...state, restoredQueue };
+  }
   return applyEvent(state, event);
 }
 
@@ -171,6 +210,29 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
         ...state,
         thinkingLevelErrors: { ...state.thinkingLevelErrors, [event.sessionId]: event.message },
       };
+
+    case "queue":
+      // A whole-list replacement, for the same reason `transcript` replaces: Pi sends the entire
+      // queue on every `queue_update`, so appending would duplicate it.
+      return {
+        ...state,
+        queues: {
+          ...state.queues,
+          [event.sessionId]: { steering: event.steering, followUp: event.followUp },
+        },
+      };
+
+    case "queueCleared": {
+      // Cleared AND handed back in one transition, so the composer cannot observe the texts as
+      // "still queued" and "not yet restored" at the same time. The `queue` event that emptied
+      // the list arrives separately and is what makes the strip disappear.
+      const restored = [...event.steering, ...event.followUp];
+      return {
+        ...state,
+        queues: { ...state.queues, [event.sessionId]: { steering: [], followUp: [] } },
+        restoredQueue: { ...state.restoredQueue, [event.sessionId]: restored },
+      };
+    }
 
     case "history":
       return { ...state, history: event.history, historyTotal: event.total, ready: true };
@@ -278,6 +340,10 @@ export function composerMode(session: LiveSession | undefined): {
     case "idle":
       return { mode: "prompt" };
     case "streaming":
+      // Both steer and follow-up are available; "steer" is the DEFAULT, which is what Pi's own
+      // interactive mode uses for a plain Enter mid-run (`interactive-mode.js`: `prompt(text, {
+      // streamingBehavior: "steer" })`). Alt+Enter there is the follow-up. Matching the surface
+      // the user already knows is worth more than inventing a different default.
       return { mode: "steer" };
     case "awaiting-approval":
       return { mode: "unavailable", reason: "Waiting for your answer to a dialog below." };
@@ -288,6 +354,32 @@ export function composerMode(session: LiveSession | undefined): {
     case "registered":
       return { mode: "unavailable", reason: "Not yet started." };
   }
+}
+
+/**
+ * The queue's contents, and whether those contents are actually known.
+ *
+ * `LiveSession.pending` is a COUNT and the texts arrive as `queue_update` records, so the two
+ * have genuinely different lifetimes: a reconnect replaces the session from a snapshot (count
+ * present) without replaying records (texts absent). The design rule is that the count is the
+ * header and the texts are the rows, and that a missing text is *said* rather than invented —
+ * "1 message queued before this page loaded" — because a fabricated row would claim to know what
+ * the user typed. `textsKnown` is that distinction, exposed so the component does not re-derive
+ * it from array lengths.
+ */
+export function queuedMessages(
+  state: UiState,
+  session: LiveSession | undefined,
+): { steering: string[]; followUp: string[]; total: number; textsKnown: boolean } {
+  if (!session) return { steering: [], followUp: [], total: 0, textsKnown: true };
+  const queue = state.queues[session.id];
+  const steering = queue?.steering ?? [];
+  const followUp = queue?.followUp ?? [];
+  // Known when a record has been seen AND it accounts for the count the snapshot reported. A
+  // record that is short of the count means some messages predate this page, which is exactly
+  // the case the design calls out.
+  const textsKnown = queue !== undefined && steering.length + followUp.length >= session.pending;
+  return { steering, followUp, total: session.pending, textsKnown };
 }
 
 /**

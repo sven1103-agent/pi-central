@@ -63,6 +63,7 @@ const KNOWN_CONTROL_KINDS: ReadonlySet<string> = new Set<Control["kind"]>([
   "list",
   "start",
   "prompt",
+  "clearQueue",
   "abort",
   "stop",
   "rename",
@@ -310,8 +311,18 @@ export class Transport {
         return;
       }
       case "prompt":
-        await this.#supervisor.prompt(control.sessionId, control.message);
+        // `behavior` is forwarded only when the client chose one; the supervisor decides what a
+        // missing choice means (see `Supervisor#prompt`).
+        await this.#supervisor.prompt(
+          control.sessionId,
+          control.message,
+          ...(control.behavior ? [control.behavior] : []),
+        );
         return;
+      case "clearQueue": {
+        await this.#supervisor.clearQueue(control.sessionId, control.andStop);
+        return;
+      }
       case "abort":
         await this.#supervisor.abort(control.sessionId);
         return;
@@ -383,6 +394,17 @@ export class Transport {
     this.#supervisor.on("transcriptError", (sessionId: string, message: string) => {
       this.#broadcast({ kind: "transcriptError", sessionId, message });
     });
+    // The queue's TEXTS (issue #3). `LiveSession.pending` carries the count on every update;
+    // this carries what is IN the queue, which is what the composer shows and what the user is
+    // told will happen.
+    this.#supervisor.on("queue", (sessionId: string, steering: string[], followUp: string[]) => {
+      this.#broadcast({ kind: "queue", sessionId, steering, followUp });
+    });    this.#supervisor.on(
+      "queueCleared",
+      (sessionId: string, steering: string[], followUp: string[]) => {
+        this.#broadcast({ kind: "queueCleared", sessionId, steering, followUp });
+      },
+    );
     this.#supervisor.on("error", (sessionId: string, message: string) => {
       this.#broadcast({ kind: "error", message, sessionId });
     });

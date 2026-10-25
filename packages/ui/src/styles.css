@@ -1108,3 +1108,23 @@ select.btn { font-family: var(--sans); }
 /* The thinking level shares the header line with the model, so it is narrower: a level is at most
    a few characters. */
 .picker-select-narrow { max-width: 10ch; }
+
+/* --- The composer's mode strip (issue #3) ------------------------------------------------------- */
+
+/* Only rendered while a run is in progress, where the choice between steering and following up is
+   real. Two buttons rather than a <select>: there are exactly two options and both labels fit, so
+   a dropdown would hide one of them behind a click. */
+.mode-strip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 0; }
+.mode-choice { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.mode-option { background: transparent; border: 0; color: inherit; font: inherit; padding: 3px 10px; cursor: pointer; }
+.mode-option + .mode-option { border-left: 1px solid var(--line); }
+.mode-option-on { background: var(--accent); color: var(--accent-ink); }
+.mode-consequence { opacity: 0.85; }
+
+/* The queue's contents. Read-only on purpose: there is no per-item removal in the vocabulary,
+   so a `×` would be a control that cannot work. */
+.queue-strip { padding: 4px 0; }
+.queue-head { opacity: 0.85; }
+.queue-rows { list-style: none; margin: 2px 0 0; padding: 0; }
+.queue-rows li { opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.queue-unknown { opacity: 0.7; font-style: italic; }

@@ -17,6 +17,7 @@ import {
   initialState,
   needingAttention,
   pendingDialogCount,
+  queuedMessages,
   reduce,
   scratchSessions,
   searchHistory,
@@ -449,4 +450,73 @@ test("a snapshot does not clobber a fetched catalogue", async () => {
     home: "/Users/x",
   });
   assert.equal(state.models["s1"]?.length, 1);
+});
+
+// --- Steer, follow-up and queue restoration (issue #3) -------------------------------------------
+
+test("the composer defaults to steer while streaming, matching Pi's own Enter binding", () => {
+  // Pi's interactive mode sends a plain Enter mid-run as a steer and Alt+Enter as a follow-up
+  // (`interactive-mode.js`). Defaulting to the same one means the familiar gesture does the
+  // familiar thing; the strip states the consequence either way, so this is not a hidden default.
+  assert.equal(composerMode(live({ state: "streaming" })).mode, "steer");
+});
+
+test("a queue_update replaces the whole queue rather than appending to it", () => {
+  // Pi sends the entire queue every time, so appending would grow it without bound and show
+  // duplicates of every message.
+  let state = reduce(initialState(), { kind: "queue", sessionId: "s1", steering: ["one"], followUp: [] });
+  state = reduce(state, { kind: "queue", sessionId: "s1", steering: ["two"], followUp: ["later"] });
+  assert.deepEqual(state.queues["s1"], { steering: ["two"], followUp: ["later"] });
+});
+
+test("an emptied queue_update clears the strip's rows", () => {
+  let state = reduce(initialState(), { kind: "queue", sessionId: "s1", steering: ["one"], followUp: [] });
+  state = reduce(state, { kind: "queue", sessionId: "s1", steering: [], followUp: [] });
+  const queued = queuedMessages(state, live({ pending: 0 }));
+  assert.deepEqual(queued.steering, []);
+  assert.equal(queued.textsKnown, true);
+});
+
+test("queueCleared empties the queue AND hands the texts to the composer in one transition", () => {
+  // Both in one reduce call so the composer can never observe the texts as "still queued" and
+  // "not yet restored" at the same time.
+  let state = reduce(initialState(), { kind: "queue", sessionId: "s1", steering: ["a"], followUp: ["b"] });
+  state = reduce(state, { kind: "queueCleared", sessionId: "s1", steering: ["a"], followUp: ["b"] });
+  assert.deepEqual(queuedMessages(state, live({ pending: 0 })).steering, []);
+  assert.deepEqual(state.restoredQueue["s1"], ["a", "b"]);
+});
+
+test("the cleared text is taken back exactly once", () => {
+  // `onRestored` clears the field so the merge effect cannot run twice on the same texts, which
+  // would duplicate everything the user had queued.
+  let state = reduce(initialState(), { kind: "queueCleared", sessionId: "s1", steering: ["a"], followUp: [] });
+  assert.deepEqual(state.restoredQueue["s1"], ["a"]);
+  state = reduce(state, { kind: "queueRestored", sessionId: "s1" });
+  assert.deepEqual(state.restoredQueue["s1"], undefined);
+});
+
+test("a queue count with no texts is reported as unknown rather than invented", () => {
+  // After a reconnect a snapshot carries `pending` but records are not replayed, so the texts are
+  // genuinely absent. Fabricating a row would claim to know what the user typed.
+  const state = { ...initialState(), live: [live({ pending: 2 })] };
+  const queued = queuedMessages(state, state.live[0]);
+  assert.equal(queued.total, 2);
+  assert.equal(queued.textsKnown, false);
+  assert.deepEqual(queued.steering, []);
+});
+
+test("a queue whose texts account for the count is known", () => {
+  let state = { ...initialState(), live: [live({ pending: 2 })] };
+  state = reduce(state, { kind: "queue", sessionId: "s1", steering: ["a"], followUp: ["b"] });
+  assert.equal(queuedMessages(state, state.live[0]).textsKnown, true);
+});
+
+test("a local queueRestored action cannot be mistaken for a protocol event", () => {
+  // The two unions are separate because their sources differ in trust: an Event arrives over the
+  // socket, this is produced by a component. `reduce` narrows on the kind, and no protocol event
+  // is named `queueRestored`, so a server message can never be routed into local handling.
+  const before = initialState();
+  const after = reduce(before, { kind: "queueRestored", sessionId: "nothing-was-restored" });
+  assert.deepEqual(after.restoredQueue, {});
+  assert.equal(after.live, before.live);
 });

@@ -29,7 +29,7 @@ globalThis.document = dom.window.document;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 
 let server;
-let SessionRail, ToolTrace, DialogDock, TranscriptView, HistoryView;
+let SessionRail, ToolTrace, DialogDock, TranscriptView, HistoryView, Composer, initialState;
 
 before(async () => {
   // `root` must be the UI package, not the process CWD: Vite resolves the `/src/...` specifiers
@@ -45,6 +45,10 @@ before(async () => {
   ({ DialogDock } = await server.ssrLoadModule("/src/components/DialogDock.tsx"));
   ({ TranscriptView } = await server.ssrLoadModule("/src/components/Transcript.tsx"));
   ({ HistoryView } = await server.ssrLoadModule("/src/components/History.tsx"));
+  // Loaded here rather than inside a test body: a test that assigned these made every later test
+  // depend on it having run, which breaks the moment `--test-name-pattern` selects a subset.
+  ({ Composer } = await server.ssrLoadModule("/src/components/Composer.tsx"));
+  ({ initialState } = await server.ssrLoadModule("/src/store.ts"));
 });
 
 after(async () => {
@@ -52,12 +56,19 @@ after(async () => {
 });
 
 /**
- * React's SSR output separates adjacent text nodes with `<!-- -->`. Assertions here are about what
- * the markup SAYS, not its byte layout, so the marker is stripped once rather than escaped into
- * every pattern.
+ * React's SSR output separates adjacent text nodes with `<!-- -->`, and escapes characters such as
+ * the apostrophe. Assertions here are about what the markup SAYS, not its byte layout, so both are
+ * normalised once rather than escaped into every pattern — which is how an assertion on
+ * "the current turn's tools" first failed against `turn&#x27;s`.
  */
 function text(html) {
-  return html.replaceAll("<!-- -->", "");
+  return html
+    .replaceAll("<!-- -->", "")
+    .replaceAll("&#x27;", "'")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&amp;", "&")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">");
 }
 
 function tool(over = {}) {
@@ -596,4 +607,98 @@ test("the level list is keyed on the model AND the level, so a switch invalidate
   assert.notEqual(thinkingLevelsFor(base), thinkingLevelsFor(differentModel));
   assert.notEqual(thinkingLevelsFor(base), thinkingLevelsFor(differentLevel));
   assert.equal(thinkingLevelsFor(base), thinkingLevelsFor(session({ model: "a", provider: "p", thinkingLevel: "low" })));
+});
+
+// --- The composer's mode strip and Esc (issue #3) ------------------------------------------------
+
+test("the mode strip appears ONLY while a run is in progress", async () => {
+  const init = initialState;
+
+  const streaming = renderToString(createElement(Composer, {
+    session: session({ state: "streaming" }), state: init(),
+    unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
+    onRestored() {}, draft: "", onDraftChange() {},
+  }));
+  assert.match(streaming, /mode-strip/);
+
+  // Idle: only one thing can happen, so a selector would be a lie about complexity.
+  const idle = renderToString(createElement(Composer, {
+    session: session({ state: "idle" }), state: init(),
+    unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
+    onRestored() {}, draft: "", onDraftChange() {},
+  }));
+  assert.ok(!/mode-strip/.test(idle), "an idle composer must not offer a queue choice");
+});
+
+test("the strip offers BOTH modes and states which one is selected", async () => {
+  const html = renderToString(createElement(Composer, {
+    session: session({ state: "streaming" }), state: initialState(),
+    unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
+    onRestored() {}, draft: "", onDraftChange() {},
+  }));
+  assert.match(html, /Steer/);
+  assert.match(html, /Follow-up/);
+  // Steer is the default, matching Pi's own Enter binding, and it is stated as selected.
+  assert.match(text(html), /aria-checked="true"[^>]*>Steer/);
+  // The consequence of the SELECTED mode, which is what the issue asks the strip to convey.
+  assert.match(text(html), /Delivered after the current turn's tools finish/);
+});
+
+test("the interim 'steer is not available' copy is gone", async () => {
+  // The whole point of the slice: the capability is real now, so the hedge must not survive.
+  const html = renderToString(createElement(Composer, {
+    session: session({ state: "streaming" }), state: initialState(),
+    unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
+    onRestored() {}, draft: "", onDraftChange() {},
+  }));
+  assert.ok(!/not available/i.test(html), "the interim capability hint must be removed");
+  assert.match(text(html), /Esc<\/kbd> stops the run and returns the queue to this box/);
+});
+
+test("the button label names the action the selected mode will take", async () => {
+  const steer = renderToString(createElement(Composer, {
+    session: session({ state: "streaming" }), state: initialState(),
+    unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
+    onRestored() {}, draft: "hello", onDraftChange() {},
+  }));
+  assert.match(steer, /Send steer/);
+
+  const idle = renderToString(createElement(Composer, {
+    session: session({ state: "idle" }), state: initialState(),
+    unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
+    onRestored() {}, draft: "hello", onDraftChange() {},
+  }));
+  assert.match(idle, />Send</);
+});
+
+test("the queued texts are listed, and a read-only row has no removal control", async () => {
+  // Rows are read-only because Pi Central has no per-item removal, so a `×` would be a fake
+  // control — the one real action is Esc, which the hint names.
+  const state = { ...initialState(), queues: { s7: { steering: ["do this instead"], followUp: ["and then"] } } };
+  const html = renderToString(createElement(Composer, {
+    session: session({ state: "streaming", pending: 2 }), state,
+    unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
+    onRestored() {}, draft: "", onDraftChange() {},
+  }));
+  assert.match(text(html), /2 queued/);
+  assert.match(text(html), /do this instead/);
+  assert.match(text(html), /and then/);
+  assert.ok(!/×|Remove|remove/.test(html), "no per-item removal control may be offered");
+});
+
+test("a queue count with no texts says so instead of inventing rows", async () => {
+  // After a reconnect the count is known and the texts are not, because records are not replayed.
+  const html = renderToString(createElement(Composer, {
+    session: session({ state: "streaming", pending: 1 }), state: initialState(),
+    unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
+    onRestored() {}, draft: "", onDraftChange() {},
+  }));
+  assert.match(text(html), /1 message queued before this page loaded/);
+});
+
+test("a stopped run says the run stopped rather than claiming text was discarded", async () => {
+  // The old copy said the queue "was discarded", which is no longer true: it is returned. The
+  // notice must not outlive the transition it describes, so it is transient by construction.
+  const source = readFileSync(new URL("../src/components/Composer.tsx", import.meta.url), "utf8");
+  assert.ok(!/was discarded/.test(source), "the discard claim must be gone now the queue is returned");
 });

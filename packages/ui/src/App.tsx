@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import type { Control, HistoricalSession, LiveSession, ModelOption } from "@pi-central/protocol";
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
 import {
+  composerMode,
   fleetCounts,
   focusedSession,
   hasUnisolatedSession,
@@ -23,14 +24,14 @@ import {
 import { SessionRail } from "./components/SessionRail.tsx";
 import { TranscriptView } from "./components/Transcript.tsx";
 import { ToolTrace } from "./components/ToolTrace.tsx";
-import { Composer } from "./components/Composer.tsx";
+import { Composer, type QueueBehavior } from "./components/Composer.tsx";
 import { DialogDock, type DialogAnswer } from "./components/DialogDock.tsx";
 import { Inspector } from "./components/Inspector.tsx";
 import { ModelPicker } from "./components/ModelPicker.tsx";
 import { ThinkingPicker } from "./components/ThinkingPicker.tsx";
 import { HistoryView } from "./components/History.tsx";
 import { displayName, formatContext, formatCost, formatTokens, headerLocation } from "./format.ts";
-import { stateLabel } from "./store.ts";
+import { stateLabel, type UiState } from "./store.ts";
 
 type Tab = "sessions" | "history";
 
@@ -250,11 +251,31 @@ export function App() {
               onSelectThinkingLevel={(level) => {
                 if (focused) send({ kind: "setThinkingLevel", sessionId: focused.id, level });
               }}
-              onSend={(message) => {
-                if (focused) send({ kind: "prompt", sessionId: focused.id, message });
+              onSend={(message, behavior) => {
+                if (!focused) return;
+                // Only a streaming prompt carries a behavior; the store's `composerMode` is what
+                // decides that, and the App forwards the choice rather than re-deciding it.
+                send(
+                  focused.state === "streaming"
+                    ? { kind: "prompt", sessionId: focused.id, message, behavior }
+                    : { kind: "prompt", sessionId: focused.id, message },
+                );
               }}
               onClearQueueAndStop={() => {
-                if (focused) send({ kind: "abort", sessionId: focused.id });
+                // One control, because it is one gesture: Pi clears and returns the queued texts,
+                // and the abort stops the run. Sending these as separate controls would let a
+                // caller abort while discarding what the user typed (issue #3).
+                if (focused) send({ kind: "clearQueue", sessionId: focused.id, andStop: true });
+              }}
+              state={state}
+              restored={focused ? state.restoredQueue[focused.id] ?? [] : []}
+              onRestored={() => {
+                if (focused) {
+                  // Cleared once merged, so the effect that merges it cannot run twice on the
+                  // same texts. The reducer is the owner of this field, so clearing goes through
+                  // an event-like dispatch rather than a second state container.
+                  dispatch({ kind: "queueRestored", sessionId: focused.id });
+                }
               }}
               draft={focused ? drafts[focused.id] ?? "" : ""}
               onDraftChange={(draft) => {
@@ -305,6 +326,9 @@ function SessionView({
   onSelectThinkingLevel,
   onSend,
   onClearQueueAndStop,
+  restored,
+  onRestored,
+  state,
   draft,
   onDraftChange,
 }: {
@@ -320,8 +344,11 @@ function SessionView({
   thinking: { levels: string[] | undefined; error: string | undefined };
   onRequestThinkingLevels: () => void;
   onSelectThinkingLevel: (level: string) => void;
-  onSend: (message: string) => void;
+  onSend: (message: string, behavior: QueueBehavior) => void;
   onClearQueueAndStop: () => void;
+  restored: string[];
+  onRestored: () => void;
+  state: UiState;
   draft: string;
   onDraftChange: (draft: string) => void;
 }) {
@@ -447,8 +474,12 @@ function SessionView({
       {pendingDialogCount({ ...initialState(), live: [session] }) > 0 ? null : (
         <Composer
           session={session}
+          state={state}
+          unavailableReason={composerMode(session).reason}
           onSend={onSend}
           onClearQueueAndStop={onClearQueueAndStop}
+          restored={restored}
+          onRestored={onRestored}
           draft={draft}
           onDraftChange={onDraftChange}
         />

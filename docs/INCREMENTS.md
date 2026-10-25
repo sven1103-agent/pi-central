@@ -75,7 +75,7 @@ they act on is trustworthy.
 
 Slices: model and thinking-level pickers driven by `get_available_*` (the model picker is
 done — issue #1); syntax highlighting; compaction and retry banners; `steer`, which needs a
-protocol addition first; screenshot capture for the README.
+protocol addition (done — issue #3); screenshot capture for the README.
 
 ## Increment 3 — Files alongside the session
 
