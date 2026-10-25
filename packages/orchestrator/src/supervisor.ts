@@ -21,7 +21,7 @@
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { HistoricalSession, LiveSession, ModelOption, PiRecord } from "@pi-central/protocol";
+import type { Command, HistoricalSession, LiveSession, ModelOption, PiRecord } from "@pi-central/protocol";
 import { composePolicy, describe, type LaunchMode, type SessionSpec } from "./policy.ts";
 import { RpcProcess, type LaunchSpec } from "./rpc.ts";
 import { checkResumable } from "./resume.ts";
@@ -437,6 +437,17 @@ export class Supervisor extends EventEmitter {
     if (effect.refreshStats) void this.#refreshStats(id);
 
     this.emit("record", id, record);
+    // The queued TEXTS come from the record, not from `LiveSession.pending` (which is only a
+    // count). Pi sends the whole queue on every `queue_update`, so this is a full replacement
+    // rather than a reconstruction — see the `queue` event's comment.
+    if (record.type === "queue_update") {
+      this.emit(
+        "queue",
+        id,
+        asTextArray(record.steering),
+        asTextArray(record.followUp),
+      );
+    }
     this.#patch(id);
   }
 
@@ -460,16 +471,54 @@ export class Supervisor extends EventEmitter {
     this.#patch(id);
   }
 
-  /** Send a prompt. The command shape is closed; the message is the only free value. */
-  async prompt(id: string, message: string): Promise<void> {
+  /**
+   * Send a prompt. The command shape is closed; the message is the only free value.
+   *
+   * `behavior` decides what a message means mid-run, and it is the caller's choice rather than
+   * this method's: Pi REJECTS a streaming `prompt` with no `streamingBehavior` (`"Agent is
+   * already processing. Specify streamingBehavior ('steer' or 'followUp')"`), so defaulting it
+   * silently would decide for the user something the composer is there to ask (issue #3). When
+   * idle there is nothing to steer into, so the flag is dropped rather than sent.
+   */
+  async prompt(id: string, message: string, behavior?: "steer" | "followUp"): Promise<void> {
     const rpc = this.#processes.get(id);
     const session = this.#sessions.get(id);
     if (!rpc || !session) throw new Error(`no such session: ${id}`);
     if (session.state === "streaming") {
-      await rpc.send({ type: "prompt", message, streamingBehavior: "followUp" }, 60_000);
+      await rpc.send({ type: "prompt", message, streamingBehavior: behavior ?? "followUp" }, 60_000);
     } else {
       await rpc.send({ type: "prompt", message }, 60_000);
     }
+  }
+
+  /**
+   * Empty Pi's queue, and optionally stop the run, in that order.
+   *
+   * **The order is the whole point.** Pi's `clear_queue` returns the queued texts, so clearing
+   * first is what makes them recoverable: abort-then-clear would let the run settle and, in the
+   * window before the queue was emptied, Pi could begin delivering a queued message as a real
+   * turn. Clearing first removes the queue before anything else can act on it, and the returned
+   * texts are broadcast so the composer restores exactly what was removed instead of guessing.
+   *
+   * `abort` is sent directly rather than via `this.abort` so the pair cannot be reordered by a
+   * later refactor.
+   *
+   * Returns the cleared texts, so a caller that wants them does not have to wait for the event.
+   */
+  async clearQueue(id: string, andStop: boolean): Promise<{ steering: string[]; followUp: string[] }> {
+    const rpc = this.#processes.get(id);
+    if (!rpc) throw new Error(`no such session: ${id}`);
+    const result = await clearQueueVia((command, timeout) => rpc.send(command, timeout), andStop);
+    // A SEPARATE event from `queue`, and deliberately so. Pi emits an emptied `queue_update`
+    // during `clearQueue` (agent-session.js: `_emitQueueUpdate()`), which already tells the
+    // client the queue is now empty. Reporting these texts as the queue would therefore
+    // overwrite that empty list with the very messages that were just removed — the queue would
+    // appear to still hold them. These texts belong to the composer, not to the queue.
+    //
+    // Emitted even when both lists are empty, so "nothing was queued" is reported rather than
+    // left ambiguous with "the clear failed".
+    this.emit("queueCleared", id, result.steering, result.followUp);
+    return result;
   }
 
   async abort(id: string): Promise<void> {
@@ -625,4 +674,52 @@ export function describeExitFailure(
 function defaultName(cwd: string, id: string): string {
   const base = cwd.split("/").filter(Boolean).pop();
   return base && base.length > 0 ? base : id;
+}
+
+/**
+ * A record's list field as strings.
+ *
+ * Records are untrusted, so the elements are coerced rather than asserted: a `queue_update` whose
+ * `steering` held objects would otherwise reach the composer as `[object Object]` or, worse, be
+ * rendered as markup. Nothing is filtered out, because dropping a queued message would make the
+ * count and the list disagree in a way the user cannot see.
+ */
+function asTextArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => String(item)) : [];
+}
+
+/** The `send` surface `clearQueueVia` needs, so the ordering can be tested without a live Pi. */
+export type RpcSend = (command: Command, timeoutMs: number) => Promise<unknown>;
+
+/**
+ * Empty Pi's queue, and optionally abort, in the order that makes the texts recoverable.
+ *
+ * **The order is the whole point, and it is why this is a separate exported function rather than
+ * three lines inside `Supervisor#clearQueue`.** Two things go wrong if the abort is sent first:
+ *
+ *   - Pi's `clear_queue` returns what it removed, so aborting first lets the run settle in the
+ *     window before the clear, and Pi may begin delivering one of the queued messages as a real
+ *     turn — the user asked for the opposite.
+ *   - Any later refactor that reorders the pair would be invisible. Extracted, the order is an
+ *     assertion in a test (C13's lesson: a thing that must happen in one order should be
+ *     testable in that order).
+ *
+ * The returned texts are normalised from untrusted record data, so a caller can render them
+ * without a second narrowing step.
+ */
+export async function clearQueueVia(
+  send: RpcSend,
+  andStop: boolean,
+): Promise<{ steering: string[]; followUp: string[] }> {
+  const cleared = (await send({ type: "clear_queue" }, 20_000)) as {
+    steering?: unknown;
+    followUp?: unknown;
+  };
+  const result = {
+    steering: asTextArray(cleared?.steering),
+    followUp: asTextArray(cleared?.followUp),
+  };
+  // Only now, once nothing is left to be delivered.
+  if (andStop) await send({ type: "abort" }, 30_000);
+  return result;
 }

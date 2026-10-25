@@ -56,11 +56,16 @@ class FakeSupervisor extends EventEmitter {
     return { ok: true, messages: [{ role: "user", content: `fetch ${this.transcriptFetches}` }] };
   };
 
-  async prompt(id: string, message: string): Promise<void> {
-    this.calls.push({ method: "prompt", args: [id, message] });
+  async prompt(id: string, message: string, behavior?: "steer" | "followUp"): Promise<void> {
+    this.calls.push({ method: "prompt", args: behavior ? [id, message, behavior] : [id, message] });
   }
   async abort(id: string): Promise<void> {
     this.calls.push({ method: "abort", args: [id] });
+  }
+  /** Records `andStop`, so a test can prove the pair is sent as one gesture rather than two. */
+  async clearQueue(id: string, andStop: boolean) {
+    this.calls.push({ method: "clearQueue", args: [id, andStop] });
+    return { steering: ["steer me"], followUp: [] };
   }
   async stop(id: string): Promise<void> {
     this.calls.push({ method: "stop", args: [id] });
@@ -667,6 +672,122 @@ test("thinking-level controls are routed, and a failed read is not an empty list
     client.send({ kind: "setThinkingLevel", sessionId: "s1", level: "high" });
     await new Promise((resolve) => setTimeout(resolve, 100));
     assert.deepEqual(supervisor.calls.at(-1), { method: "setThinkingLevel", args: ["s1", "high"] });
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+// --- Steer, follow-up and clearQueue (issue #3) --------------------------------------------------
+
+test("a prompt's streamingBehavior reaches the supervisor, so the choice is not decided here", async () => {
+  // The composer asks; the transport must not substitute its own answer. Before this, the
+  // supervisor hard-coded "followUp", so a steer could not be expressed at all.
+  const supervisor = new FakeSupervisor();
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+
+    client.send({ kind: "prompt", sessionId: "s1", message: "stop and do this instead", behavior: "steer" });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.deepEqual(supervisor.calls.at(-1), {
+      method: "prompt",
+      args: ["s1", "stop and do this instead", "steer"],
+    });
+
+    client.send({ kind: "prompt", sessionId: "s1", message: "and then this", behavior: "followUp" });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.deepEqual(supervisor.calls.at(-1), {
+      method: "prompt",
+      args: ["s1", "and then this", "followUp"],
+    });
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("a prompt with no behavior is sent WITHOUT one, so an idle prompt is not given a queue mode", async () => {
+  // Two args, not three: the supervisor decides what a missing choice means. Passing an
+  // explicit "followUp" from here would be the transport answering the question the composer
+  // exists to ask.
+  const supervisor = new FakeSupervisor();
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "prompt", sessionId: "s1", message: "hello" });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.deepEqual(supervisor.calls.at(-1), { method: "prompt", args: ["s1", "hello"] });
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("clearQueue reaches the supervisor with andStop, so one gesture stays one control", async () => {
+  const supervisor = new FakeSupervisor();
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "clearQueue", sessionId: "s1", andStop: true });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.deepEqual(supervisor.calls.at(-1), { method: "clearQueue", args: ["s1", true] });
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("the queue's texts and the cleared texts are DIFFERENT events", async () => {
+  // Falsified the hard way while building this: reporting the cleared texts as the queue made
+  // the composer's strip keep showing messages that had just been removed, because Pi empties
+  // the queue as part of clearing it. `queue` is what is in the queue; `queueCleared` is what
+  // was taken out and belongs in the draft.
+  const supervisor = new FakeSupervisor();
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  // `attach()` registers the supervisor listeners; without it the emit below goes nowhere, which
+  // is what made these two tests hang rather than fail.
+  transport.attach();
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+
+    supervisor.emit("queue", "s1", ["still queued"], []);
+    const queue = await client.next("queue");
+    assert.equal(queue.kind === "queue" && queue.sessionId, "s1");
+    assert.deepEqual(queue.kind === "queue" && queue.steering, ["still queued"]);
+
+    supervisor.emit("queueCleared", "s1", ["give this back"], []);
+    const cleared = await client.next("queueCleared");
+    assert.equal(cleared.kind === "queueCleared" && cleared.sessionId, "s1");
+    assert.deepEqual(cleared.kind === "queueCleared" && cleared.steering, ["give this back"]);
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("an emptied queue is broadcast as empty, not omitted", async () => {
+  // The strip disappears because it sees zero, which requires the empty list to actually arrive.
+  // Dropping the event when empty would leave a cleared queue looking like a broken one.
+  const supervisor = new FakeSupervisor();
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  transport.attach();
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    supervisor.emit("queue", "s1", [], []);
+    const event = await client.next("queue");
+    assert.deepEqual(event.kind === "queue" && event.steering, []);
+    assert.deepEqual(event.kind === "queue" && event.followUp, []);
     client.close();
   } finally {
     await transport.close();

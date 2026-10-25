@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { LiveSession } from "@pi-central/protocol";
 import { blockingDialogMethods, fireAndForgetUiMethods, interpretRecord } from "../src/state.ts";
-import { describeExitFailure } from "../src/supervisor.ts";
+import { clearQueueVia, describeExitFailure } from "../src/supervisor.ts";
 
 const session = (over: Partial<LiveSession> = {}): LiveSession => ({
   id: "s1",
@@ -210,4 +210,52 @@ test("a thinking_level_changed record does not disturb the run state", () => {
   assert.equal(effect.patch?.state, undefined);
   assert.equal(effect.refreshStats, undefined);
   assert.equal(effect.dialog, undefined);
+});
+
+// --- clearQueue: the order is the behaviour (issue #3) -------------------------------------------
+
+test("clearQueue empties the queue BEFORE aborting, so the cleared text is still recoverable", () => {
+  // Reversing these is the bug this function exists to prevent: abort first lets the run settle
+  // while messages are still queued, and Pi may deliver one as a real turn in that window. The
+  // order is asserted rather than described, so a refactor that swaps them fails here.
+  const order: string[] = [];
+  const send = async (command: { type: string }) => {
+    order.push(command.type);
+    return command.type === "clear_queue" ? { steering: ["keep me"], followUp: [] } : {};
+  };
+  return clearQueueVia(send as never, true).then((result) => {
+    assert.deepEqual(order, ["clear_queue", "abort"]);
+    assert.deepEqual(result.steering, ["keep me"]);
+  });
+});
+
+test("clearQueue without andStop clears but does NOT abort", () => {
+  // Clearing is useful on its own (a queue that should be emptied while the run continues), so
+  // the abort must be conditional rather than always sent.
+  const order: string[] = [];
+  const send = async (command: { type: string }) => {
+    order.push(command.type);
+    return {};
+  };
+  return clearQueueVia(send as never, false).then(() => {
+    assert.deepEqual(order, ["clear_queue"]);
+  });
+});
+
+test("clearQueue returns the steering AND follow-up texts, and coerces untrusted entries", () => {
+  // Pi returns both queues. A record's contents are untrusted, so a non-string entry is coerced
+  // rather than passed through to a renderer.
+  const send = async () => ({ steering: ["a", 2], followUp: ["b"] });
+  return clearQueueVia(send as never, false).then((result) => {
+    assert.deepEqual(result.steering, ["a", "2"]);
+    assert.deepEqual(result.followUp, ["b"]);
+  });
+});
+
+test("a clear_queue answer with no lists is empty, not a crash or a fabricated entry", () => {
+  const send = async () => undefined;
+  return clearQueueVia(send as never, false).then((result) => {
+    assert.deepEqual(result.steering, []);
+    assert.deepEqual(result.followUp, []);
+  });
 });
