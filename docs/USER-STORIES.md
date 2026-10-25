@@ -4,7 +4,8 @@ What users need from Pi Central, and why. Stories are grouped by theme; each car
 acceptance criteria and, where the architecture constrains the answer, a pointer to the
 relevant constraint or ADR.
 
-The stories came from using the [prototype](../prototype/). They are deliberately written
+The stories came from using a throwaway feasibility spike, since removed — its findings are what
+these stories record, and the spike itself is kept only in git history. They are deliberately written
 from the user's side, before deciding how to build them.
 
 **Status:** `proposed` → `accepted` → `built` → `verified`. Nothing here is built yet.

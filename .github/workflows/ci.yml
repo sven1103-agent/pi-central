@@ -1,0 +1,53 @@
+# CI for Pi Central.
+#
+# What this can and cannot check is dictated by the product itself, and the split is deliberate.
+#
+# CHECKED HERE: the unit and component suites, both TypeScript projects, the documentation
+# references, and the UI production build. These are the guarantees that must not regress on any
+# commit.
+#
+# NOT CHECKED HERE, AND NOT HIDDEN: anything that spawns a real sandboxed session needs macOS,
+# Safehouse, and a plain (non-nested) terminal — Seatbelt does not nest (C1), and a GitHub runner
+# has no Safehouse at all (C10). Those checks are `verified/manual` on the issues that need them.
+# A CI badge that implied full coverage would be a lie, so this workflow says what it covers.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck (orchestrator + UI)
+        run: npm run typecheck
+
+      - name: Unit and component tests
+        run: npm test
+
+      - name: Documentation references resolve
+        run: npm run check:docs
+
+      - name: UI production build
+        run: npm run ui:build
+
+  # Kept separate so a documentation-only failure is visibly a documentation-only failure.
+  docs-links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm run check:docs

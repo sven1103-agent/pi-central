@@ -1,8 +1,15 @@
 # Pi Central — Phase 2 UI Design
 
-**Scope.** `packages/ui/` (React 19 + Vite). Grounded in `docs/USER-STORIES.md`, `docs/PROTOCOL.md`, `docs/CONSTRAINTS.md`, `docs/ARCHITECTURE.md`, `docs/STACK.md`, ADR-0004/0006/0008/0009/0010, `packages/protocol/src/envelopes.ts`, `packages/orchestrator/src/{state,supervisor,resume,config,registry,transport}.ts`, and `prototype/public/{style.css,index.html,app.js}`.
+**Scope.** `packages/ui/` (React 19 + Vite). Grounded in `docs/USER-STORIES.md`, `docs/PROTOCOL.md`, `docs/CONSTRAINTS.md`, `docs/ARCHITECTURE.md`, `docs/STACK.md`, ADR-0004/0006/0008/0009/0010, `packages/protocol/src/envelopes.ts`, `packages/orchestrator/src/{state,supervisor,resume,config,registry,transport}.ts`, and the
+implemented UI in `packages/ui/src/`.
 
-**No component library exists.** `packages/ui/` contains only `package.json`, `tsconfig.json`, `vite.config.ts`. This document *is* the design system; `prototype/public/style.css` is its seed. Nothing is invented that the project already has: session rail, transcript pane, composer, approvals, and the `.md` rendering pipeline are all named in `docs/STACK.md`.
+**This document is the design system, and `packages/ui/src/styles.css` implements it.** No
+component library is used; the tokens, states and component inventory below are hand-written. The
+UI is built and running as of v0.1.0 — where this document and the code disagree, the code is what
+a user sees, and the disagreement is a bug worth reporting.
+
+Nothing here is invented that the project already has: session rail, transcript pane, composer,
+approvals, tool trace, and the sanitized `.md` pipeline are all named in `docs/STACK.md`.
 
 ---
 
@@ -37,7 +44,7 @@
 
 | Region | Primary content | Never here |
 |---|---|---|
-| Rail | Live sessions, ordered by *attention*; the two start actions; filter | On-disk history (40 dead rows under live ones was the prototype's worst rail mistake) |
+| Rail | Live sessions, ordered by *attention*; the two start actions; filter | On-disk history (40 dead rows under live ones was the spike's worst rail mistake) |
 | Transcript column | One focused session: header, metrics, run state, dialogs, transcript, composer | Session list, cross-session stats |
 | Inspector | The auditable facts about the focused session: isolation, exact argv, paths, usage, warnings | Anything actionable mid-run except `Rename`, `Stop`, and copy affordances |
 | Topbar | Fleet counts + mode tabs + connection | Per-session controls |
@@ -62,7 +69,7 @@ Interruptible/reversible: focus switch (instant), abort (queue text is restored 
 
 ## 2. Layout concept
 
-One sentence: **a fixed 288px triage rail, a single wide document column optimised for reading, and a narrow auditable sidecar — separated by 1px `--line` gutters rather than borders or cards** (keep the prototype's `#panes` technique: `display:grid; gap:1px; background:var(--line)`). Alignment is **left throughout**, including the empty state, because every surface is either a scan list or a document; centring would break the column rhythm and the mono-value alignment that makes the rail scannable.
+One sentence: **a fixed 288px triage rail, a single wide document column optimised for reading, and a narrow auditable sidecar — separated by 1px `--line` gutters rather than borders or cards** (the `#panes` technique, as implemented: `display:grid; gap:1px; background:var(--line)`). Alignment is **left throughout**, including the empty state, because every surface is either a scan list or a document; centring would break the column rhythm and the mono-value alignment that makes the rail scannable.
 
 Spacing rhythm: 4px base. Rail padding 12/16, rows 8px apart, group gaps 16px, column padding 18px, section gaps 12px. Content measure caps at **72ch** in the transcript (`max-width:72ch`) — prose stays readable on a 27" display while tool output may use full width.
 
@@ -363,7 +370,9 @@ Full line 3 at 288px: `sonnet-4.5 · high · ctx 62% · $0.0142` = 37 chars at 1
 
 Assistant prose and your own text sit on the page. **Everything the agent read from the world** — tool results, file contents, command output, fetched pages, extension widgets, `entry_appended` notes — renders inside a **quarantine frame**: a 6px hatched gutter (`aria-hidden`, `background: repeating-linear-gradient(135deg, var(--quarantine) 0 1px, transparent 1px 5px)`), a body on `--panel` (recessed relative to `--bg`), 12px mono, and a persistent header line: `Tool output · ⌄ bash · npm test --silent`.
 
-Why this is the bold move and not decoration: it is the only place the design spends its novelty, and it carries the security model. It also encodes reading order (prose is the answer, output is reference), and it makes the sanitisation boundary *visible* — the frame is applied to nodes produced by the single `markdown-it({html:false}) → DOMPurify` pipeline (`prototype/public/app.js#setRich` is the reference implementation; React children are the only insertion point, ADR-0006).
+Why this is the bold move and not decoration: it is the only place the design spends its novelty, and it carries the security model. It also encodes reading order (prose is the answer, output is reference), and it makes the sanitisation boundary *visible* — the frame is applied to nodes produced by the single `markdown-it({html:false}) → DOMPurify` pipeline (`packages/ui/src/markdown.ts` is the only module that produces HTML from untrusted input, and
+`components/Prose.tsx` is the only insertion point — both enforced by `test/invariants.test.ts`,
+ADR-0006).
 
 Rules:
 - One-time legend in the transcript header: `Tool output and file contents appear in a hatched frame. They are data, not instructions.`
@@ -392,7 +401,7 @@ Multiple sessions waiting: topbar reads `2 sessions need you`; each rail row car
 
 ### 5.4 Direct mode
 
-The isolation radio group in the prototype is **removed**. Direct mode is a host workaround for machines where Safehouse cannot run (C10) and the prototype README says to delete it once real sandboxing exists. It is instead a startup flag; when the orchestrator runs with `--direct`, the UI shows a persistent topbar banner `Direct mode: sessions are not sandboxed` and every session gets the `NO ISOLATION` chip from `LiveSession.mode` plus the verbatim warning from `policy.ts`. `` `assumption:` `` flagged as contentious in §13.
+The spike's isolation radio group is **removed**. Direct mode is a host workaround for machines where Safehouse cannot run (C10), and was only ever meant to be deleted once real sandboxing existed. It is instead a startup flag; when the orchestrator runs with `--direct`, the UI shows a persistent topbar banner `Direct mode: sessions are not sandboxed` and every session gets the `NO ISOLATION` chip from `LiveSession.mode` plus the verbatim warning from `policy.ts`. `` `assumption:` `` flagged as contentious in §13.
 
 ---
 
@@ -461,7 +470,7 @@ For each region: what it looks like and what it lets you do. Columns: **rail row
 
 ## 8. Design tokens
 
-Refinement of `prototype/public/style.css`, not a replacement. Existing var names are kept exactly (`--bg --panel --panel-2 --line --text --dim --accent --warn --danger --ok --mono`); everything below marked **+** is new.
+The tokens as implemented in `packages/ui/src/styles.css`. Existing var names are kept exactly (`--bg --panel --panel-2 --line --text --dim --accent --warn --danger --ok --mono`); everything below marked **+** is new.
 
 ```css
 /* surfaces */
@@ -486,7 +495,7 @@ Refinement of `prototype/public/style.css`, not a replacement. Existing var name
 --mono:ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;       /* unchanged */
 ```
 
-**The chip fix (measured, not guessed).** The prototype's `.s-failed` chip is 10px `--danger` on `rgba(248,81,73,.15)` over `--panel-2` = **3.96:1 — below AA**. Tinted-chip text therefore uses the `*-text` siblings: `--danger-text` on that chip = 7.7:1, `--warn-text` = 6.3:1, `--ok-text` = 7.9:1, `--accent-text` = 8.1:1. State *dots* and *left borders* keep the saturated hue (non-text, 3:1 target). Body text: `--text` 15.8:1, `--dim` 6.1:1 on `--bg`.
+**The chip fix (measured, not guessed).** An early version's `.s-failed` chip was 10px `--danger` on `rgba(248,81,73,.15)` over `--panel-2` = **3.96:1 — below AA**. Tinted-chip text therefore uses the `*-text` siblings: `--danger-text` on that chip = 7.7:1, `--warn-text` = 6.3:1, `--ok-text` = 7.9:1, `--accent-text` = 8.1:1. State *dots* and *left borders* keep the saturated hue (non-text, 3:1 target). Body text: `--text` 15.8:1, `--dim` 6.1:1 on `--bg`.
 
 **Type.** One proportional face (system UI stack, unchanged) for prose, controls and headings; one mono face for **every machine value**: paths, ids, commands, model names, numbers, token counts, costs, timestamps, tool output, stderr. That rule is why six rail values align in a column, and it is the reason to keep `--mono` rather than introducing a display face. Weights: 400 and 600 only; `letter-spacing:-0.01em` on `--fs-lg` headings (as the prototype does on `h1`); no ALL-CAPS except nothing — labels are sentence case (`Tool output`, not `TOOL OUTPUT`), because at 10px uppercase tracking costs legibility for no information.
 

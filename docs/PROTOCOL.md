@@ -1,8 +1,11 @@
 # RPC surface Pi Central depends on
 
 Reference for the Pi RPC API Pi Central consumes. Verified against Pi `1.4.0`.
-Canonical upstream docs: `docs/rpc.md`, `docs/rpc-commands.md`, `docs/json.md`,
-`docs/rpc-extension-ui.md` in the installed package.
+Canonical upstream references are Pi's own `rpc.md`, `rpc-commands.md`, `json.md`,
+`message-types.md` and `rpc-extension-ui.md`, which ship inside the installed
+`@earendil-works/pi-coding-agent` package under its `docs/` directory. They are named without
+paths here on purpose: they are **not** files in this repository, and writing them as bare
+`docs/...` invited exactly that misreading.
 
 ## Invocation
 

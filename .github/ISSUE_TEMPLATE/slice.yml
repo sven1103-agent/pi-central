@@ -1,0 +1,58 @@
+name: Slice
+description: One unit of work inside an increment, sized to land in a single pull request.
+title: "[slice] "
+labels: ["kind/slice"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A slice is done when its acceptance criteria are *falsifiable* and someone has
+        demonstrated them. See [docs/INCREMENTS.md](../../blob/main/docs/INCREMENTS.md) for what
+        makes a good one.
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What is true after this slice that is not true now? One or two sentences, in terms of what a person can do or see.
+      placeholder: A session's model can be changed from the rail, and Pi confirms the change.
+    validations:
+      required: true
+
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Acceptance criteria
+      description: Each must be checkable, and each must be able to FAIL. "Improve X" cannot fail; "the rail shows ctx 82% full at 80% and above" can.
+      value: |
+        - [ ] 
+        - [ ] 
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: How will you demonstrate each criterion? A test name, a rendered-markup assertion, a measured number, or "needs a plain terminal / browser".
+    validations:
+      required: true
+
+  - type: dropdown
+    id: verification
+    attributes:
+      label: Verification
+      options:
+        - verified/auto — enforced by the test suite
+        - verified/manual — needs a plain terminal or browser
+        - verified/measured — the issue states a number to reproduce
+    validations:
+      required: true
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Governing constraints
+      description: If this touches isolation, credentials, rendering, or session identity, name the constraint (C1–C14) or ADR. These are where a locally reasonable change is globally wrong.
+    validations:
+      required: false

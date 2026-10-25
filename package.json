@@ -1,9 +1,9 @@
 {
   "name": "pi-central",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Central station for Pi sessions: orchestrate multiple sandboxed Pi sessions across working directories.",
+  "description": "Local dashboard that orchestrates multiple sandboxed Pi coding-agent sessions across working directories.",
   "license": "MIT",
   "engines": {
     "node": ">=22.19.0"
@@ -19,7 +19,9 @@
     "smoke": "node packages/orchestrator/src/cli.ts",
     "server": "node packages/orchestrator/src/server.ts",
     "ui:dev": "npm run dev --workspace @pi-central/ui",
-    "ui:build": "npm run build --workspace @pi-central/ui"
+    "ui:build": "npm run build --workspace @pi-central/ui",
+    "check:docs": "node scripts/check-docs.mjs",
+    "verify": "npm run typecheck && npm test && npm run check:docs"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.4.0",

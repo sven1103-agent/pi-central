@@ -1,0 +1,43 @@
+name: Decision
+description: An unresolved choice that needs an ADR before code is written.
+title: "[decision] "
+labels: ["kind/decision"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Decisions live in [docs/decisions/](../../tree/main/docs/decisions) as ADRs, and code
+        follows them. Open this when a choice cannot be settled inside a slice — the right answer
+        is usually an ADR, not a comment thread.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: The question
+      description: Phrase it as a choice between real alternatives, not as a topic.
+    validations:
+      required: true
+
+  - type: textarea
+    id: options
+    attributes:
+      label: Options and their consequences
+      description: For each, what becomes easy, what becomes impossible, and what is being traded away.
+    validations:
+      required: true
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints that bear on it
+      description: C1–C14, existing ADRs, or a measured fact. A decision that ignores a constraint is not a decision.
+    validations:
+      required: true
+
+  - type: textarea
+    id: falsifier
+    attributes:
+      label: What would prove the chosen option wrong?
+      description: If nothing could, the ADR will not be useful in a year.
+    validations:
+      required: true

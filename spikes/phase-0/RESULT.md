@@ -24,7 +24,8 @@ safehouse --workdir <fixture>/repo-b -- pi --mode rpc --no-session
 
 Each probe was issued **through the model-facing `bash` tool inside the sandbox** — the
 same path a model-generated command takes — not by the orchestrator. `composePolicy` was
-reused from `prototype/src/policy.ts`, so the policy under test is the policy the product
+reused from the prototype's policy module (kept in git history; the product now lives in
+`packages/orchestrator/src/policy.ts`), so the policy under test is the policy the product
 will use.
 
 ## Results
@@ -88,4 +89,5 @@ session is confined to its own working directory, enforced by the OS, verified t
 model-facing tool path.
 
 This verifies **isolation**. It does not verify the wider product: `contextUsage`, resume
-behavior, and the UI remain untested (`prototype/README.md` records those gaps).
+behavior, and the UI remain untested. Those gaps were recorded in the prototype's README, which
+was removed once the product replaced it; the open items now live in `docs/ROADMAP.md`.

@@ -1,0 +1,44 @@
+name: Defect
+description: Something the product states or does that is not true.
+title: "[bug] "
+labels: ["kind/bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project treats a **displayed value that is wrong as a defect, not a cosmetic issue**.
+        Misleading counts, a mislabelled session id, and a permission error reported as a missing
+        directory were all shipped and all fixed as bugs. If the app works but says the wrong
+        thing, that still belongs here.
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: What you saw
+      description: Include the exact text or numbers shown. Screenshots welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What is actually true
+      description: The correct value, and how you know — a session file, a command, a count.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Steps, and whether it needs a real session, a browser, or a plain terminal.
+    validations:
+      required: true
+
+  - type: textarea
+    id: falsifier
+    attributes:
+      label: Was anything already checking this?
+      description: Which test should have caught it, and why it did not. If the answer is "none", that is the most useful thing in this report.
+    validations:
+      required: false
