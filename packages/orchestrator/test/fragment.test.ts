@@ -25,6 +25,15 @@ test("the host's credential paths are denied", () => {
   assert.match(fragment, /\(deny file-read\*\s*\n\s*\(home-prefix "\/\.gitconfig"\)/);
   assert.match(fragment, /\(home-subpath "\/\.config\/gh"\)/);
   assert.match(fragment, /\(home-subpath "\/\.ssh\/agent"\)/);
+  // The host's PRIVATE KEYS, which is the signing-specific half of the same boundary (issue #27):
+  // `user.signingkey` is a path, so a reachable host key is what would let an agent sign as the
+  // user. Every common key name must match, not only the one this machine happens to use.
+  // Matched as the SBPL regex strings the fragment actually contains, rather than as a loose
+  // pattern: a check that passes on a *mention* of a deny in a comment would be worthless here.
+  const denials = fragment.split("\n").filter((line) => line.includes("(regex #")).join("\n");
+  assert.ok(denials.includes("id_[^/]*$"), "every ~/.ssh/id_* key must be denied");
+  assert.ok(denials.includes(".*_ed25519$"), "an ed25519 host key must be denied");
+  assert.ok(denials.includes(".*_rsa$"), "an RSA host key must be denied");
 });
 
 test("Pi's auth store is NOT denied (C12, ADR-0010 Amendment 1)", () => {

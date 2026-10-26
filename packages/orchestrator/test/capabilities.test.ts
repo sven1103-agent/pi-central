@@ -51,6 +51,22 @@ function makeTree(withParts: { gitconfig?: boolean; gh?: boolean; ssh?: boolean;
   return root;
 }
 
+/**
+ * A gitconfig that is complete for signing as well as for identity.
+ *
+ * Needed because "a complete store" now means signing is configured too — that IS the issue. Fixtures
+ * that intend to be complete write this rather than the identity-only file, so their "no warnings"
+ * assertion keeps meaning what it says instead of being relaxed.
+ */
+function writeSignedGitconfig(root: string): void {
+  writeFileSync(
+    join(root, "gitconfig"),
+    `[user]\n\tname = sven1103-agent\n\temail = a@b.c\n\tsigningkey = ${join(root, "ssh", "github_login_ed25519")}\n` +
+      `[commit]\n\tgpgsign = true\n[tag]\n\tgpgsign = true\n[gpg]\n\tformat = ssh\n` +
+      `[gpg "ssh"]\n\tallowedSignersFile = ${join(root, "ssh", "allowed_signers")}\n`,
+  );
+}
+
 function assess(fixture: Fixture, overrides: Partial<Parameters<typeof assessAgentCapabilities>[0]> = {}) {
   const store = readStore(fixture.root, { ownership: "external" });
   const fragment =
@@ -76,6 +92,8 @@ function find(assessment: ReturnType<typeof assess>, id: string) {
 
 test("a complete, granted, readable store is usable with no warnings", () => {
   const root = makeTree({ gitconfig: true, gh: true, ssh: true });
+  writeSignedGitconfig(root);
+  writeFileSync(join(root, "ssh", "allowed_signers"), "sven1103-agent ssh-ed25519 AAAA\n");
   const assessment = assess({ root, agentRootGranted: root });
   assert.deepEqual(assessment.warnings, []);
   assert.equal(assessment.usable, true);
@@ -264,6 +282,8 @@ test("a fragment that only DESCRIBES the search list in a comment does not count
 
 test("direct mode never reports a policy problem, because there is no policy", () => {
   const root = makeTree({ gitconfig: true, gh: true, ssh: true });
+  writeSignedGitconfig(root);
+  writeFileSync(join(root, "ssh", "allowed_signers"), "sven1103-agent ssh-ed25519 AAAA\n");
   const assessment = assessAgentCapabilities({
     store: readStore(root, { ownership: "external" }),
     sandboxed: false,
@@ -310,3 +330,83 @@ function renderProviderFragmentFor(agentRoot: string, keychain: boolean): string
     ...(keychain ? { keychain: true, keychainPath: agentKeychainPath(agentRoot) } : {}),
   });
 }
+
+// --- Signing configuration (issue #27) -----------------------------------------------------------
+//
+// Reported SEPARATELY from `ssh-key`, and that separation is the bug: the key was present the entire
+// time commits were unsigned. A check for the key cannot see a `commit.gpgsign = false`.
+
+test("a present signing key does NOT make the signing capability ok", () => {
+  // The regression test for the reported bug, at the level the warning is actually produced. The old
+  // `ssh-key` check passes here and always did, which is why the problem went unnoticed.
+  const root = makeTree({ gitconfig: true, gh: true, ssh: true });
+  // The tree's real gitconfig has `gpgsign = false` and no signing settings.
+  writeFileSync(join(root, "gitconfig"), "[user]\n\tname = a\n\temail = a@b.c\n[commit]\n\tgpgsign = false\n[tag]\n\tgpgsign = false\n");
+  const result = assess({ root, agentRootGranted: root });
+  const signing = result.findings.filter((f) => f.id === "signing");
+  assert.equal(signing.length, 1, "signing must be reported even though the key is present");
+  assert.equal(signing[0]!.state, "not-provisioned");
+  assert.match(signing[0]!.message, /unsigned, SILENTLY/);
+  // The warning must carry the FIX, since Pi Central does not write to a user-maintained tree.
+  assert.match(signing[0]!.message, /git config --file .*commit\.gpgsign true/);
+  assert.match(signing[0]!.message, /--file .*gpg\.ssh\.allowedSignersFile/);
+});
+
+test("no gitconfig means NO signing finding, because the gitconfig finding already says it", () => {
+  // Two warnings for one missing file is noise, and noise is what trains a reader to ignore warnings.
+  const root = makeTree({ gh: true, ssh: true });
+  const result = assess({ root, agentRootGranted: root });
+  assert.equal(result.findings.filter((f) => f.id === "gitconfig").length, 1);
+  assert.equal(result.findings.filter((f) => f.id === "signing").length, 0);
+});
+
+test("a signing key OUTSIDE the agent root is reported as unreachable, not as a setup step", () => {
+  // "Not provisioned" would tell the user to run a command; the truth is that they are configured to
+  // sign as the host user, which is a different problem with a different response.
+  const root = makeTree({ gitconfig: true, gh: true, ssh: true });
+  writeFileSync(
+    join(root, "gitconfig"),
+    `[user]\n\tsigningkey = /Users/host/.ssh/id_ed25519\n[commit]\n\tgpgsign = true\n[tag]\n\tgpgsign = true\n[gpg]\n\tformat = ssh\n[gpg "ssh"]\n\tallowedSignersFile = ${join(root, "ssh", "allowed_signers")}\n`,
+  );
+  const signing = assess({ root, agentRootGranted: root }).findings.filter((f) => f.id === "signing");
+  assert.equal(signing[0]!.state, "unreachable");
+  assert.match(signing[0]!.message, /OUTSIDE the agent root/);
+});
+
+test("a correct gitconfig whose key file is GONE is reported, and differently", () => {
+  // `signingMaterial` answers a question the text cannot: complete config pointing at an absent key
+  // makes every commit FAIL rather than be created unsigned, and the repair is "put the key back".
+  const root = makeTree({ gitconfig: true, gh: true });
+  writeFileSync(
+    join(root, "gitconfig"),
+    `[user]\n\tsigningkey = ${join(root, "ssh", "github_login_ed25519")}\n[commit]\n\tgpgsign = true\n[tag]\n\tgpgsign = true\n[gpg]\n\tformat = ssh\n[gpg "ssh"]\n\tallowedSignersFile = ${join(root, "ssh", "allowed_signers")}\n`,
+  );
+  const signing = assess({ root, agentRootGranted: root }).findings.filter((f) => f.id === "signing");
+  assert.equal(signing.length, 1);
+  assert.match(signing[0]!.message, /missing/);
+  assert.ok(!/unsigned, SILENTLY/.test(signing[0]!.message), "this failure is loud, not silent");
+});
+
+test("a fully configured store produces no signing warning", () => {
+  const root = makeTree({ gitconfig: true, gh: true, ssh: true });
+  writeFileSync(join(root, "ssh", "allowed_signers"), "sven1103-agent ssh-ed25519 AAAA\n");
+  writeFileSync(
+    join(root, "gitconfig"),
+    `[user]\n\tsigningkey = ${join(root, "ssh", "github_login_ed25519")}\n[commit]\n\tgpgsign = true\n[tag]\n\tgpgsign = true\n[gpg]\n\tformat = ssh\n[gpg "ssh"]\n\tallowedSignersFile = ${join(root, "ssh", "allowed_signers")}\n`,
+  );
+  const result = assess({ root, agentRootGranted: root });
+  assert.equal(result.findings.filter((f) => f.id === "signing").length, 0);
+  assert.equal(result.usable, true);
+});
+
+test("the signing warning names no HOST credential path as the remedy", () => {
+  // The module's rule: no message may send the reader to a host credential. The remedy must be an
+  // agent-root path, or the "fix" would be to hand the agent the user's key.
+  const root = makeTree({ gitconfig: true, gh: true, ssh: true });
+  writeFileSync(join(root, "gitconfig"), "[commit]\n\tgpgsign = false\n");
+  const signing = assess({ root, agentRootGranted: root }).findings.filter((f) => f.id === "signing");
+  for (const path of ["/.ssh/id_", "/.gitconfig", "/.config/gh"]) {
+    assert.ok(!signing[0]!.message.includes(path), `the remedy must not name ${path}`);
+  }
+  assert.match(signing[0]!.message, new RegExp(root.replace(/[/.]/g, "\\$&")));
+});

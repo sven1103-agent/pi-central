@@ -135,6 +135,33 @@ function credentialProbeFor(): string {
     // A directory the agent root must expose for git to work: the ssh key it pushes with.
     `if [ -r "$GIT_CONFIG_GLOBAL" ] && git config --get user.name >/dev/null 2>&1; then echo AGENT_GIT_USABLE=yes; else echo AGENT_GIT_USABLE=no; fi`,
 
+    // --- Commit signing (issue #27), asked from INSIDE the session ------------------------------
+    //
+    // The issue's required evidence: `git config --get commit.gpgsign` inside the session must be
+    // `true`. That already goes beyond what the orchestrator can see, because it is read through the
+    // sandbox with the agent's own GIT_CONFIG_GLOBAL — but the VALUE alone still would not prove a
+    // commit is signed, so the probe also makes one and asks git to verify it.
+    `echo GPGSIGN=$(git config --get commit.gpgsign 2>/dev/null || echo unset)`,
+    `echo GPG_FORMAT=$(git config --get gpg.format 2>/dev/null || echo unset)`,
+    `echo SIGNINGKEY=$(git config --get user.signingkey 2>/dev/null || echo unset)`,
+    `echo ALLOWED_SIGNERS=$(git config --get gpg.ssh.allowedSignersFile 2>/dev/null || echo unset)`,
+    // The real question. `git verify-commit` needs `allowed_signers`, so a pass HERE proves the whole
+    // chain: the key is readable, signing is on, and the trust file resolves — all from inside the
+    // sandbox, none of which the orchestrator can observe. `git init` in a scratch directory under
+    // the session's cwd, so the probe leaves no evidence anywhere it should not.
+    //
+    // `ssh-keygen` is named explicitly rather than relying on PATH resolution, because git shells out
+    // to it and a session's PATH is a deliberate subset (C11).
+    // The probe directory is created under the session's OWN working directory rather than $TMPDIR:
+    // the cwd is the one path a session is always granted, whereas the temp directory is a policy
+    // question of its own — and a failure there would look like a signing failure.
+    `SIGNPROBE="./.pi-sign-probe-$$"; mkdir -p "$SIGNPROBE"; ` +
+      `if (cd "$SIGNPROBE" && git init -q . && echo x > f && git add f && ` +
+      `git -c gpg.ssh.program=/usr/bin/ssh-keygen commit -q -m probe >/dev/null 2>&1 && ` +
+      `git log --show-signature -1 2>&1 | grep -q 'Good .git. signature'); ` +
+      `then echo SIGNED_COMMIT=verified; else echo SIGNED_COMMIT=failed; fi; ` +
+      `rm -rf "$SIGNPROBE"`,
+
     // The appended policy fragment's identity denies.
     `if cat "$HOME/.gitconfig" >/dev/null 2>&1; then echo HOST_GITCONFIG=readable; else echo HOST_GITCONFIG=denied; fi`,
     `if ls "$HOME/.config/gh" >/dev/null 2>&1; then echo HOST_GH=readable; else echo HOST_GH=denied; fi`,
@@ -405,6 +432,38 @@ async function main(): Promise<number> {
         vars.AGENT_GIT_USABLE === "yes",
         `git config --get user.name: ${vars.AGENT_GIT_USABLE} — 'no' means the file is there and ` +
           `unusable, which is the failure that produced a host path in the error message`,
+      );
+
+      // --- Commit signing, from inside the session (issue #27) ------------------------------
+      //
+      // `commit.gpgsign` is asserted FIRST and independently of the commit, because the two can
+      // disagree: signing can be on while the key is unreachable, in which case every commit FAILS
+      // rather than being created unsigned — a different and more visible failure.
+      //
+      // What none of this proves: that the *host's* signing setup is untouched. That is a
+      // configuration statement rather than a sandbox one, and the fragment's identity denies above
+      // carry it.
+      check(
+        "commit signing is enabled inside the session",
+        vars.GPGSIGN === "true",
+        `commit.gpgsign=${vars.GPGSIGN} — 'false'/'unset' means commits are created UNSIGNED and ` +
+          `silently so, which is the bug this check exists for (ADR-0010 §4)`,
+      );
+      check(
+        "signing uses ssh and the agent's own key",
+        vars.GPG_FORMAT === "ssh" &&
+          typeof vars.SIGNINGKEY === "string" &&
+          vars.SIGNINGKEY.startsWith(config.agentRoot) &&
+          typeof vars.ALLOWED_SIGNERS === "string" &&
+          vars.ALLOWED_SIGNERS.startsWith(config.agentRoot),
+        `format=${vars.GPG_FORMAT} key=${vars.SIGNINGKEY} signers=${vars.ALLOWED_SIGNERS} — the key ` +
+          `and trust file must both be inside ${config.agentRoot}, or the agent signs as the host user`,
+      );
+      check(
+        "a commit made inside the sandbox verifies against the agent's allowed_signers",
+        vars.SIGNED_COMMIT === "verified",
+        `SIGNED_COMMIT=${vars.SIGNED_COMMIT} — 'failed' means the signature, the key or the trust ` +
+          `file did not survive the sandbox, which the config values alone cannot show`,
       );
 
       // --- The keychain split (ADR-0010 Amendment 1) -------------------------------------

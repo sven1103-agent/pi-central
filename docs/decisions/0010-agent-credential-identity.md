@@ -410,3 +410,79 @@ global search list without an explicit, confirmed action.
       Pi-required config file remains. Live: `~/.pi/agent/auth.json: readable`,
       `~/.pi/agent: writable`. The general lesson stands: **never deny a file Pi opens during
       startup without booting Pi to check.**
+
+## Amendment 2 — signing was configured off, and a key check cannot see it
+
+**Date:** 2026-10-26 · **Status:** Accepted · **Issue:** #27
+
+§4 states that SSH push **and commit signing** are required, and describes the intended mechanism
+(`gpg.format=ssh`, `gpg.ssh.program=/usr/bin/ssh-keygen`). The mechanism was never enabled. The
+adopted `external` tree at `~/.agent` carried:
+
+```
+[commit] gpgsign = false
+[tag]    gpgsign = false
+```
+
+with no `[user] signingkey` and no `[gpg] format`. The key (`ssh/github_login_ed25519`) and its trust
+file (`ssh/allowed_signers`) were present and correct throughout.
+
+**This is a distinct failure from anything §4 anticipated, and it is the reason for the amendment.**
+§4 reasoned about which *key* the agent should use and how to keep the host's agent out of reach. It
+did not consider that the key's presence says nothing about whether it is used. Measured on this
+machine:
+
+| Configuration | Commit result | `git log --show-signature` |
+|---|---|---|
+| `gpgsign=false` (as adopted) | succeeds, exit 0 | `No signature` |
+| `gpgsign=true`, `gpg.format` unset | succeeds, exit 0 | `No signature` — the OpenPGP default finds no gpg |
+| `gpgsign=true`, key set, no `allowedSignersFile` | succeeds, exit 0 | signed, but **`verify-commit` fails** (`needs to be configured and exist`) |
+| all four settings correct | succeeds | `Good "git" signature for sven1103-agent` |
+
+Every row above exits 0. Three of the four produce no usable signature, and none of them is visible
+without asking git to *verify*, which is why the required evidence is a verification rather than an
+inspection.
+
+### What the amendment changes
+
+1. **The requirement is unchanged.** Signing stays required; it is now actually configured.
+2. **The check is on the settings, not the key.** `signing.ts` audits the agent's own gitconfig for
+   `commit.gpgsign`, `tag.gpgsign`, `gpg.format=ssh`, `user.signingkey` and
+   `gpg.ssh.allowedSignersFile`, and reports when any is off. `ssh-key`'s presence check is retained
+   and is *not* accepted as evidence of signing.
+3. **`user.signingkey` must resolve inside the agent root.** ssh takes a path, never key contents, so
+   a path outside the root means the agent signs as the host user. Reported as `unreachable`, not as a
+   setup step.
+4. **Pi Central does not write the tree.** The adopted root is `external` and user-maintained (§5), so
+   the fix is produced as explicit `git config --file` commands and printed for a person to run.
+   `signingFixCommands` is public for that purpose, and a test runs those commands verbatim and
+   asserts the audit then passes.
+5. **Verification uses the agent's own `allowed_signers`.** `gpg.ssh.allowedSignersFile` points inside
+   the agent root, so a signature is checkable without the host's trust configuration.
+6. **The host's signing material stays denied.** `fragment.ts` already denies `~/.ssh/id_*`,
+   `*_rsa` and `*_ed25519`; the fragment test now asserts those three denials as regex rules rather
+   than relying on the test's existing denies covering them incidentally.
+
+### Verification this amendment requires
+
+- [x] `verify-three.ts` asserts, from **inside** a sandboxed session, that `commit.gpgsign` is `true`,
+      that `gpg.format`/`user.signingkey`/`gpg.ssh.allowedSignersFile` all point into the agent root,
+      and that a commit made in the session **verifies**: `Good "git" signature`. The commit is the
+      load-bearing check — the config values alone cannot show the key survived the sandbox.
+- [x] The audit detects the real adopted tree's configuration. Run against `~/.agent`: reported
+      `not-provisioned`, with the five fix commands naming agent-root paths only.
+- [x] The fix commands, run verbatim against a copy of the real gitconfig, produce a store the audit
+      calls `ok`, and a commit made under it verifies as `sven1103-agent`. **Measured 2026-10-26.**
+- [ ] **Not run live in a full sandboxed session.** `verify-three.ts` requires an unsandboxed terminal
+      (C1: Seatbelt does not nest) and cannot be executed in this environment, so the three new
+      probes are written and typechecked but have not been observed passing. Stated rather than
+      implied — the difference between "designed to verify" and "verified" is the whole subject of
+      this amendment.
+- [x] **The live tree is fixed.** The five commands were run against `~/.agent/gitconfig` as the
+      explicit, confirmed action this amendment requires (a copy is kept at
+      `~/.agent/gitconfig.bak-pre-27`). Re-audited afterwards: **no signing finding**, and a commit
+      made under the live `GIT_CONFIG_GLOBAL` verifies as
+      `Good "git" signature for sven1103-agent`. **Measured 2026-10-26.**
+- [x] The host's own signing configuration is untouched: every command takes `--file` pointing
+      inside the agent root, and no command omits it. The host `~/.gitconfig` was not read or
+      written — the SHA of its content is unchanged, and its `user.name` is still the user's.

@@ -52,6 +52,15 @@
 import { accessSync, constants } from "node:fs";
 import { join } from "node:path";
 import { KEYCHAIN_FILE, type ProviderAuth, type StoreSnapshot } from "./agent-store.ts";
+import {
+  allowedSignersPath,
+  auditSigning,
+  readSigning,
+  signingKeyPath,
+  signingMaterial,
+  signingFixCommands,
+} from "./signing.ts";
+import { readFileSync } from "node:fs";
 
 /**
  * The two causes, plus "fine".
@@ -61,7 +70,7 @@ import { KEYCHAIN_FILE, type ProviderAuth, type StoreSnapshot } from "./agent-st
  */
 export type CapabilityState = "ok" | "not-provisioned" | "unreachable";
 
-export type CapabilityId = "gitconfig" | "gh-config" | "ssh-key" | "keychain";
+export type CapabilityId = "gitconfig" | "gh-config" | "ssh-key" | "keychain" | "signing";
 
 export interface CapabilityFinding {
   id: CapabilityId;
@@ -229,6 +238,48 @@ export function assessAgentCapabilities(input: CapabilityInput): CapabilityAsses
     });
   }
 
+  // --- signing: the configuration, NOT the key (issue #27) --------------------------------------
+  //
+  // Reported separately from `ssh-key` above, and the separation is the whole point of the issue: the
+  // key was present the entire time signing was silently off, so a check that looks for the key
+  // cannot see this. This one reads the gitconfig and asserts the settings that make the key DO
+  // something.
+  //
+  // Only when there is a gitconfig at all: with none, `commit.gpgsign` is unset and git does not
+  // sign, which is exactly what the `gitconfig` finding above already says. Two findings for one
+  // missing file would be noise, and noise trains the reader to ignore warnings.
+  if (store.has.gitconfig) {
+    const gitconfigPath = join(root, "gitconfig");
+    const settings = readSigning(readGitconfigText(gitconfigPath));
+    const audit = auditSigning(settings, root);
+    // The material, checked separately from the settings: a correct gitconfig pointing at an absent
+    // key is *complete config* by text and *broken* in fact, and the repair differs.
+    const material = signingMaterial(root);
+    if (audit.needsFix) {
+      const commands = signingFixCommands(root).map((command) => `    ${command}`).join("\n");
+      findings.push({
+        id: "signing",
+        state: audit.state === "misconfigured" ? "unreachable" : "not-provisioned",
+        message:
+          `the agent's gitconfig does not sign commits or tags: ${audit.problems.join("; ")}. ` +
+          `Commits would be created unsigned, SILENTLY — the key material is present, so nothing ` +
+          `else would report a problem (ADR-0010 §4). This is an explicit fix, because the agent ` +
+          `root is yours to maintain; Pi Central does not rewrite it:\n${commands}`,
+      });
+    } else if (!material.key || !material.allowedSigners) {
+      findings.push({
+        id: "signing",
+        state: "not-provisioned",
+        message:
+          `the agent's gitconfig is configured to sign (gpg.format=ssh, commit.gpgsign=true) but ` +
+          `${!material.key ? `the signing key ${signingKeyPath(root)} is missing` : ""}` +
+          `${!material.key && !material.allowedSigners ? " and " : ""}` +
+          `${!material.allowedSigners ? `the allowed-signers file ${allowedSignersPath(root)} is missing` : ""}. ` +
+          `Every commit would fail, rather than be created unsigned.`,
+      });
+    }
+  }
+
   // --- keychain: only relevant when the provider config needs it (C13) --------------------------
   //
   // Reported only when it MATTERS, and only in sandboxed mode. A session whose provider keys are
@@ -276,12 +327,28 @@ export function assessAgentCapabilities(input: CapabilityInput): CapabilityAsses
   };
 }
 
+/**
+ * The gitconfig's text, or empty.
+ *
+ * A read failure yields empty text, which audits as "not configured to sign" — the correct reading:
+ * if it cannot be read, the session cannot be signed by it either. Returning a *healthy* value here
+ * would be the C12/C15 mistake of letting an unreadable file look like a working one.
+ */
+function readGitconfigText(path: string): string {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return "";
+  }
+}
+
 function label(finding: CapabilityFinding): string {
   const name = {
     gitconfig: "agent git identity",
     "gh-config": "agent GitHub credentials",
     "ssh-key": "agent SSH key",
     keychain: "provider keychain access",
+    signing: "agent commit signing",
   }[finding.id];
   const kind = finding.state === "not-provisioned" ? "not provisioned" : "provisioned but unreachable";
   return `${name} ${kind}`;
