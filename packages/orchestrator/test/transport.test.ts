@@ -103,6 +103,29 @@ class FakeSupervisor extends EventEmitter {
     this.calls.push({ method: "listThinkingLevels", args: [id] });
     return { ok: true as const, levels: ["off", "low", "high"] };
   }
+
+  /** Substitutable, so a test can make a listing or a read fail with a real `FileError`. */
+  listFilesImpl: (
+    id: string,
+    path: string,
+  ) => { ok: true; value: unknown } | { ok: false; error: { reason: string; code?: string; message: string } } =
+    () => ({ ok: true, value: { path: "", entries: [{ name: "a.txt", kind: "file", hidden: false }], truncated: false } });
+
+  listFiles(id: string, path: string) {
+    this.calls.push({ method: "listFiles", args: [id, path] });
+    return this.listFilesImpl(id, path);
+  }
+
+  readFileImpl: (
+    id: string,
+    path: string,
+  ) => { ok: true; value: unknown } | { ok: false; error: { reason: string; code?: string; message: string } } =
+    () => ({ ok: true, value: { path: "a.txt", text: "hello", bytes: 5 } });
+
+  readFile(id: string, path: string) {
+    this.calls.push({ method: "readFile", args: [id, path] });
+    return this.readFileImpl(id, path);
+  }
 }
 
 function makeSession(id: string, cwd: string, name?: string): LiveSession {
@@ -675,6 +698,122 @@ test("thinking-level controls are routed, and a failed read is not an empty list
     client.send({ kind: "setThinkingLevel", sessionId: "s1", level: "high" });
     await new Promise((resolve) => setTimeout(resolve, 100));
     assert.deepEqual(supervisor.calls.at(-1), { method: "setThinkingLevel", args: ["s1", "high"] });
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+// --- File browsing (issue #8) --------------------------------------------------------------------
+
+test("a listFiles control is routed to the supervisor, and its listing is broadcast", async () => {
+  const supervisor = new FakeSupervisor();
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "listFiles", sessionId: "s1", path: "src" });
+    const event = await client.next("files");
+    // The path is echoed as SENT, not normalized. The client keys its cache, its loading flag and its
+    // expansion by the requested path, so a different spelling would file the result under one key
+    // while the node waited on another — stranding it in "Reading…" forever.
+    assert.equal(event.kind === "files" && event.path, "src");
+    assert.deepEqual(event.kind === "files" && event.entries, [{ name: "a.txt", kind: "file", hidden: false }]);
+    // The relative path reaches the supervisor unchanged: resolution against the cwd is the
+    // supervisor's job, because it is the only component that knows the cwd.
+    assert.deepEqual(supervisor.calls.at(-1), { method: "listFiles", args: ["s1", "src"] });
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("a REFUSED listing is a fileError with request:list, never an empty listing", async () => {
+  // The distinction this slice exists to protect. An escape reported as `files` with no entries would
+  // tell the user the directory is empty when it was refused — the file-browser form of the
+  // "failed read shown as an empty transcript" bug.
+  const supervisor = new FakeSupervisor();
+  supervisor.listFilesImpl = () => ({
+    ok: false,
+    error: { reason: "escapes-cwd", message: "\"../secret\" resolves outside the working directory" },
+  });
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "listFiles", sessionId: "s1", path: "../secret" });
+    const event = await client.next("fileError");
+    assert.equal(event.kind === "fileError" && event.request, "list");
+    assert.equal(event.kind === "fileError" && event.reason, "escapes-cwd");
+    // The path is echoed as the CLIENT sent it, not as it resolved: the complaint is about what the
+    // user asked for, and a resolved path would name something they never typed.
+    assert.equal(event.kind === "fileError" && event.path, "../secret");
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("a readFile control returns the text and its byte count", async () => {
+  const supervisor = new FakeSupervisor();
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "readFile", sessionId: "s1", path: "a.txt" });
+    const event = await client.next("file");
+    assert.deepEqual(
+      { path: event.kind === "file" && event.path, text: event.kind === "file" && event.text, bytes: event.kind === "file" && event.bytes },
+      { path: "a.txt", text: "hello", bytes: 5 },
+    );
+    assert.deepEqual(supervisor.calls.at(-1), { method: "readFile", args: ["s1", "a.txt"] });
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("a refused READ is request:read, so the UI files it against the file and not the listing", async () => {
+  // `request` exists because the two caches are keyed by the same path. Without it the client would
+  // have to guess which question failed, and a listing and a read for one path would make that guess
+  // a coin flip — recording the failure against the wrong one.
+  const supervisor = new FakeSupervisor();
+  supervisor.readFileImpl = () => ({
+    ok: false,
+    error: { reason: "too-large", message: '"big.log" is 4.2 MB, above the 256.0 KB limit' },
+  });
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "readFile", sessionId: "s1", path: "big.log" });
+    const event = await client.next("fileError");
+    assert.equal(event.kind === "fileError" && event.request, "read");
+    assert.equal(event.kind === "fileError" && event.reason, "too-large");
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("a permission failure carries its errno, so it is not reported as a missing file", async () => {
+  const supervisor = new FakeSupervisor();
+  supervisor.readFileImpl = () => ({
+    ok: false,
+    error: { reason: "permission", code: "EACCES", message: 'cannot read "k" (EACCES)' },
+  });
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "readFile", sessionId: "s1", path: "k" });
+    const event = await client.next("fileError");
+    assert.equal(event.kind === "fileError" && event.code, "EACCES");
     client.close();
   } finally {
     await transport.close();

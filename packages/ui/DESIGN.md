@@ -610,6 +610,7 @@ src/
     QueueStrip, Composer, ComposerModeStrip, CommandHint
     HistoryList, HistoryRow, HistorySearch, HistoryFilters, ResumeRefusal, MissingDirBadge
     Inspector, IsolationBlock, PathsBlock, UsageBlock, NoticesBlock, SessionActionsBlock
+    FileTree, TreeNode, FilePane, FileErrorNote   (issue #8: confined to the session's cwd)
     StatusChips, StatusRegion (visually hidden polite announcer), ToastStack, Popover, CopyButton
     EmptyState, ErrorCard, DismissibleCard
 ```

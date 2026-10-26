@@ -57,6 +57,10 @@ A session that fails this way also gets the diagnosis attached to its error in t
 - **Quarantined tool output**: a hatched frame marks tool results and file contents as data
   rather than instructions, and renders them as escaped text rather than Markdown.
 - **History** searchable by content, with a clear refusal when a session's directory is gone.
+- **A file tree** (issue #8) of the focused session's working directory, lazily expanded, with a
+  dotfile toggle and a text viewer. Confined to the session's `cwd` — the state lives in
+  `src/files.ts` and the confinement in the orchestrator (ADR-0007). Every refusal states its reason: too large, binary,
+  permission, or outside the directory. A refusal is never rendered as an empty directory.
 
 ## Keyboard
 
@@ -71,7 +75,8 @@ A session that fails this way also gets the diagnosis attached to its error in t
 
 ## Deliberately not here yet
 
-- **File navigation.** No way to jump to a file or a line from the transcript.
+- **File editing and file operations.** Reading and listing only (issue #8). Create, rename, move and
+  delete are issue #10, and each destructive one will be confirmed explicitly.
 
 ## Development
 

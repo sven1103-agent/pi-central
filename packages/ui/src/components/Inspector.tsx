@@ -8,16 +8,30 @@
  */
 import type { LiveSession } from "@pi-central/protocol";
 import { formatCost, formatTokens, shortenPath } from "../format.ts";
+import { openFileFor, type FilesState } from "../files.ts";
 import { CopyButton } from "./CopyButton.tsx";
+import { FilePane, FileTree } from "./FileTree.tsx";
 
 export function Inspector({
   session,
   home,
+  files,
+  onExpandDirectory,
+  onCollapseDirectory,
+  onToggleHidden,
+  onOpenFile,
+  onCloseFile,
   onStop,
   onRename,
 }: {
   session: LiveSession | undefined;
   home: string | undefined;
+  files: FilesState;
+  onExpandDirectory: (path: string) => void;
+  onCollapseDirectory: (path: string) => void;
+  onToggleHidden: () => void;
+  onOpenFile: (path: string) => void;
+  onCloseFile: () => void;
   onStop: () => void;
   onRename: (name: string) => void;
 }) {
@@ -33,6 +47,10 @@ export function Inspector({
       </aside>
     );
   }
+
+  // Resolved once, so path and contents are produced by the same lookup rather than two that could
+  // disagree mid-render — and so the non-null assertion is not needed at all.
+  const open = openFileFor(files, session.id);
 
   return (
     <aside className="inspector" aria-label="Inspector">
@@ -128,8 +146,33 @@ export function Inspector({
         </dl>
       </section>
 
-      {session.warnings.length > 0 && (
+      {/**
+       * Files (issue #8). Labelled by SCOPE, not by "the agent's view": ADR-0007 is explicit that the
+       * browser can read files the agent cannot, so presenting it as the agent's view would be a false
+       * claim the moment anything browses wider than the workdir.
+       */}
+      <section>
+        <h3>Files</h3>
+        <FileTree
+          sessionId={session.id}
+          state={files}
+          cwd={session.cwd}
+          onExpand={onExpandDirectory}
+          onCollapse={onCollapseDirectory}
+          onToggleHidden={onToggleHidden}
+          onOpenFile={onOpenFile}
+        />
+      </section>
+
+      {open && (
         <section>
+          {/* The path/state pair came from ONE lookup, so the header can never name one file while
+              the body shows another. */}
+          <FilePane sessionId={session.id} path={open.path} state={open.state} onClose={onCloseFile} />
+        </section>
+      )}
+
+      {session.warnings.length > 0 && (        <section>
           <h3>Warnings</h3>
           {session.warnings.map((warning, index) => (
             <p key={index} style={{ color: "var(--warn-text)", fontSize: 11, margin: "0 0 6px" }}>

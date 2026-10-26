@@ -29,7 +29,7 @@ globalThis.document = dom.window.document;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 
 let server;
-let SessionRail, ToolTrace, DialogDock, TranscriptView, HistoryView, Composer, initialState;
+let SessionRail, ToolTrace, DialogDock, TranscriptView, HistoryView, Composer, FileTree, FilePane, initialState;
 
 before(async () => {
   // `root` must be the UI package, not the process CWD: Vite resolves the `/src/...` specifiers
@@ -48,6 +48,7 @@ before(async () => {
   // Loaded here rather than inside a test body: a test that assigned these made every later test
   // depend on it having run, which breaks the moment `--test-name-pattern` selects a subset.
   ({ Composer } = await server.ssrLoadModule("/src/components/Composer.tsx"));
+  ({ FileTree, FilePane } = await server.ssrLoadModule("/src/components/FileTree.tsx"));
   ({ initialState } = await server.ssrLoadModule("/src/store.ts"));
 });
 
@@ -1166,4 +1167,133 @@ test("the overlay cannot swallow the click that opens the select", async () => {
   assert.match(rule[1], /pointer-events:\s*none/, "the overlay must not intercept clicks");
   // And the label must be positioned over the closed control, or it would render as a second field.
   assert.match(rule[1], /position:\s*absolute/);
+});
+
+// --- The file tree (issue #8) --------------------------------------------------------------------
+
+/** A FilesState with one directory loaded. Built directly, since the reducer's own tests cover it. */
+async function filesState(directories = {}, extra = {}) {
+  const { initialFilesState } = await server.ssrLoadModule("/src/files.ts");
+  return {
+    ...initialFilesState(),
+    directories,
+    ...extra,
+  };
+}
+
+test("an unloaded directory says it is not loaded, rather than rendering as empty", async () => {
+  // The distinction the whole file-tree state module exists to protect. "Not asked" and "empty" are
+  // different facts, and rendering the first as the second is a claim about the disk nobody made.
+  const state = await filesState();
+  const html = renderToString(createElement(FileTree, {
+    sessionId: "s1", state, cwd: "/work",
+    onExpand() {}, onCollapse() {}, onToggleHidden() {}, onOpenFile() {},
+  }));
+  assert.match(html, /Not loaded yet/);
+  assert.ok(!/is empty/i.test(html), "an unloaded directory must not claim to be empty");
+});
+
+test("a loaded-but-empty directory says it is empty, and is NOT an error", async () => {
+  const state = await filesState({ "s1\u0000": { status: "loaded", entries: [], truncated: false } });
+  const html = renderToString(createElement(FileTree, {
+    sessionId: "s1", state, cwd: "/work",
+    onExpand() {}, onCollapse() {}, onToggleHidden() {}, onOpenFile() {},
+  }));
+  assert.match(html, /This directory is empty/);
+  assert.ok(!/filetree-error/.test(html), "an empty directory is not a refusal");
+});
+
+test("a REFUSED listing states the reason, and never reads as empty", async () => {
+  // The claim this slice is built around. A refusal rendered as an empty directory would tell the
+  // user a directory is empty when the request was denied.
+  const state = await filesState({
+    "s1\u0000../secret": { status: "error", reason: "escapes-cwd", message: '"../secret" resolves outside the working directory' },
+  });
+  // Root loaded and expanded so the error node for `../secret` is reachable in the markup.
+  state.directories["s1\u0000"] = { status: "loaded", entries: [{ name: "secret-link", kind: "directory", hidden: false }], truncated: false };
+  state.expanded["s1\u0000secret-link"] = true;
+  state.directories["s1\u0000secret-link"] = { status: "error", reason: "escapes-cwd", message: '"secret-link" resolves outside the working directory' };
+
+  const html = renderToString(createElement(FileTree, {
+    sessionId: "s1", state, cwd: "/work",
+    onExpand() {}, onCollapse() {}, onToggleHidden() {}, onOpenFile() {},
+  }));
+  assert.match(html, /Outside the working directory/, "the reason must be stated in words");
+  assert.ok(!/is empty/i.test(html), "a refusal must never be rendered as an empty directory");
+});
+
+test("a too-large refusal names both sizes, because the reader has to judge", async () => {
+  const state = await filesState();
+  const html = renderToString(createElement(FilePane, {
+    sessionId: "s1", path: "big.log",
+    state: { status: "error", reason: "too-large", message: '"big.log" is 4.2 MB, above the 256.0 KB limit and was not read' },
+    onClose() {},
+  }));
+  assert.match(html, /Too large to read/);
+  assert.match(html, /4\.2 MB/);
+  assert.match(html, /256\.0 KB/);
+});
+
+test("a truncated listing says so, so it cannot be read as complete", async () => {
+  const state = await filesState({
+    "s1\u0000": { status: "loaded", entries: [{ name: "a", kind: "file", hidden: false }], truncated: true },
+  });
+  const html = renderToString(createElement(FileTree, {
+    sessionId: "s1", state, cwd: "/work",
+    onExpand() {}, onCollapse() {}, onToggleHidden() {}, onOpenFile() {},
+  }));
+  assert.match(html, /Showing the first entries only/);
+});
+
+test("a nested truncated directory says so too, not only the root", async () => {
+  // The root's notice speaks for the root. A capped NESTED directory that ended silently would read
+  // as complete — the same false claim one level down.
+  const state = await filesState();
+  state.directories["s1\u0000"] = { status: "loaded", entries: [{ name: "big", kind: "directory", hidden: false }], truncated: false };
+  state.directories["s1\u0000big"] = { status: "loaded", entries: [{ name: "a", kind: "file", hidden: false }], truncated: true };
+  state.expanded["s1\u0000big"] = true;
+
+  const html = renderToString(createElement(FileTree, {
+    sessionId: "s1", state, cwd: "/work",
+    onExpand() {}, onCollapse() {}, onToggleHidden() {}, onOpenFile() {},
+  }));
+  assert.match(html, /Showing the first entries only/, "the nested cap must be stated where it applies");
+});
+
+test("file contents are rendered as text, never as markup", async () => {
+  // ADR-0006: file content is untrusted for the same reason a transcript is — it may have been
+  // written by the agent, by a dependency, or by whoever sent the repository.
+  const state = await filesState();
+  const payload = '<img src=x onerror="alert(1)"><script>alert(2)</script>';
+  const html = renderToString(createElement(FilePane, {
+    sessionId: "s1", path: "x.txt",
+    state: { status: "loaded", text: payload, bytes: payload.length },
+    onClose() {},
+  }));
+  assert.ok(!/<img/i.test(html) && !/<script>alert/i.test(html), `markup must be escaped, got: ${html}`);
+  assert.match(html, /&lt;img/);
+});
+
+test("the tree is labelled by SCOPE, not as the agent's view", async () => {
+  // ADR-0007: the browser reads at the user's UID and can reach files the agent cannot. Presenting it
+  // as the agent's view would be a false claim the moment anything browses wider than the workdir.
+  const state = await filesState({ "s1\u0000": { status: "loaded", entries: [], truncated: false } });
+  const html = renderToString(createElement(FileTree, {
+    sessionId: "s1", state, cwd: "/work",
+    onExpand() {}, onCollapse() {}, onToggleHidden() {}, onOpenFile() {},
+  }));
+  assert.match(html, /Working directory/);
+  assert.ok(!/agent.s view|what the agent/i.test(html), "must not imply the sandboxed agent's view");
+});
+
+test("the dotfile toggle's label states the ACTION, not the current state", async () => {
+  // A button labelled by its state is read as a status and then clicked twice by anyone who takes it
+  // for one. With dotfiles hidden it must therefore offer to SHOW them.
+  const state = await filesState({ "s1\u0000": { status: "loaded", entries: [], truncated: false } });
+  const html = renderToString(createElement(FileTree, {
+    sessionId: "s1", state, cwd: "/work",
+    onExpand() {}, onCollapse() {}, onToggleHidden() {}, onOpenFile() {},
+  }));
+  assert.match(html, /Show dotfiles/);
+  assert.match(html, /aria-pressed="false"/);
 });

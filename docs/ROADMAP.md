@@ -243,10 +243,18 @@ URL. `npm run ui:dev` remains for hot reload while editing the UI.
 File access runs **directly at the user's UID** — no sidecar, no sandbox in this path
 ([ADR-0007](decisions/0007-filesystem-access-model.md)).
 
-- [ ] List and read under the orchestrator's `fs`, confined to the session's `cwd`.
-- [ ] Lazy directory expansion; hidden-file toggle; size caps; binary detection and refusal.
-- [ ] Containment: canonicalize with `realpath`, then verify inside `cwd`. No string
-      prefix checks; symlinks resolved before the check.
+- [x] List and read under the orchestrator's `fs`, confined to the session's `cwd` (issue #8). Split
+      into a pure `orchestrator/src/files.ts` (the whole confinement surface, zero UI dependency) and
+      a supervisor method — the supervisor is the only component that knows a session's `cwd`, so the
+      root has exactly one source. A refusal is a distinct event from an empty result, and the text
+      is displayed inert.
+- [x] Lazy directory expansion; hidden-file toggle; size caps; binary detection and refusal (issue #8).
+      Oversized is **refused, not truncated** (both sizes named); binary is detected by a NUL sniff
+      *and* a strict UTF-8 decode, because either alone misses a case.
+- [x] Containment: canonicalize with `realpath`, then verify inside `cwd`. No string prefix checks;
+      symlinks resolved before the check (issue #8). Containment compares path **segments** — the
+      prefix form is the bug `own-installation.ts` already shipped once. The lexical check runs
+      first so a nonexistent escape is reported as an escape, not as "missing".
 - [ ] File operations: create file/dir, rename, move, delete — destructive actions behind
       explicit confirmation, never an implicit recursive delete.
 - [ ] Content editing stays out of scope; Pi mutates file contents from inside its sandbox.
@@ -254,6 +262,11 @@ File access runs **directly at the user's UID** — no sidecar, no sandbox in th
       confirmed.
 
 **Deliverable:** file tree + viewer + basic file operations, with the guardrail tests.
+
+**Status:** read and list are done (issue #8). Remaining: file operations (#10) and the preview
+refinements of #9. A session whose `cwd` **is** `$HOME` still grants the agent read/write over the
+whole home tree — the boundary itself is correct, but the choice of root is not validated (#49). Whether such a
+session should be refused outright is #49's question and is deliberately not decided here.
 
 ## Phase 3 — Fleet ergonomics
 

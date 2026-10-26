@@ -12,6 +12,13 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import type { Control, HistoricalSession, LiveSession, ModelOption } from "@pi-central/protocol";
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
 import {
+  directoryAt,
+  initialFilesState,
+  reduceFiles,
+  showsHidden,
+  splitFileKey,
+} from "./files.ts";
+import {
   composerMode,
   fleetCounts,
   focusedSession,
@@ -49,11 +56,63 @@ export function App() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
 
+  // The file tree has its own reducer: a directory tree is keyed by `(session, path)` and grows on
+  // demand, a different lifecycle from session state (issue #8). `filesRef` mirrors it so the
+  // connection's event handler can read current state without being rebound on every change.
+  const [files, dispatchFiles] = useReducer(reduceFiles, undefined, initialFilesState);
+  const filesRef = useRef(files);
+  filesRef.current = files;
+
   const connectionRef = useRef<Connection | undefined>(undefined);
 
   useEffect(() => {
     const connection = new Connection(socketUrl(), {
-      onEvent: (event) => dispatch(event),
+      onEvent: (event) => {
+        dispatch(event);
+        // File messages drive their own reducer (issue #8). They are routed here rather than inside
+        // `store.ts` because a directory tree is keyed by `(session, path)` and grows on demand,
+        // which is a different lifecycle from session state. Everything else is a session event.
+        switch (event.kind) {
+          case "files":
+            dispatchFiles({
+              kind: "filesLoaded",
+              sessionId: event.sessionId,
+              path: event.path,
+              entries: event.entries,
+              truncated: event.truncated,
+            });
+            break;
+          case "file":
+            dispatchFiles({ kind: "fileLoaded", sessionId: event.sessionId, path: event.path, text: event.text, bytes: event.bytes });
+            break;
+          case "fileError":
+            // `request` says which question failed, so this routes to the right cache instead of
+            // guessing. A refused listing becomes `filesFailed` (an error directory), never an empty
+            // one — "could not read" and "is empty" are opposite facts.
+            if (event.request === "list") {
+              dispatchFiles({
+                kind: "filesFailed",
+                sessionId: event.sessionId,
+                path: event.path,
+                reason: event.reason,
+                ...(event.code === undefined ? {} : { code: event.code }),
+                message: event.message,
+              });
+            } else {
+              dispatchFiles({
+                kind: "fileFailed",
+                sessionId: event.sessionId,
+                path: event.path,
+                reason: event.reason,
+                ...(event.code === undefined ? {} : { code: event.code }),
+                message: event.message,
+              });
+            }
+            break;
+          default:
+            break;
+        }
+      },
       onStatus: (status, detail) => {
         setConnectionStatus(status);
         setConnectionDetail(detail);
@@ -74,6 +133,99 @@ export function App() {
   }, []);
 
   const focused = focusedSession(state);
+
+  // --- file browsing (issue #8) -----------------------------------------------------------
+
+  /**
+   * Request a directory, stating whether dotfiles are wanted.
+   *
+   * `includeHidden` is sent with EVERY request rather than being a client-side filter. The
+   * orchestrator's listing is capped at 2000 entries and sorted directory-first, so filtering 2,000
+   * entries here would silently drop dotfiles that the cap had already displaced — the user would
+   * turn the toggle on and see nothing change. The flag travels to the read, so the cap is applied
+   * to what was asked for.
+   */
+  const listDirectoryFor = useCallback(
+    (sessionId: string, path: string, includeHidden: boolean) => {
+      dispatchFiles({ kind: "filesLoading", sessionId, path });
+      send({ kind: "listFiles", sessionId, path, includeHidden });
+    },
+    [send],
+  );
+
+  /**
+   * Expand a directory, fetching it only when its contents are not already known.
+   *
+   * The cache check is what makes reopening instant: a directory already loaded is not requested
+   * again, so the tree does not flicker through `loading` on every toggle.
+   */
+  const expandDirectory = useCallback(
+    (path: string) => {
+      if (!focused) return;
+      dispatchFiles({ kind: "setExpanded", sessionId: focused.id, path, expanded: true });
+      if (directoryAt(filesRef.current, focused.id, path).status === "loaded") return;
+      listDirectoryFor(focused.id, path, showsHidden(filesRef.current, focused.id));
+    },
+    [focused, listDirectoryFor],
+  );
+
+  const openFile = useCallback(
+    (path: string) => {
+      if (!focused) return;
+      dispatchFiles({ kind: "openFile", sessionId: focused.id, path });
+      // Re-read on every open, deliberately: unlike a directory listing, a file may have changed on
+      // disk since it was last looked at, and showing a stale buffer as current is worse than a
+      // re-read. (Directories are cacheable because a tree that reflows under the pointer is its own
+      // problem; #10 will add explicit refresh.)
+      dispatchFiles({ kind: "fileLoading", sessionId: focused.id, path });
+      send({ kind: "readFile", sessionId: focused.id, path });
+    },
+    [focused, send],
+  );
+
+  /**
+   * Flip the dotfile toggle, and re-request every directory that is currently on screen.
+   *
+   * Re-requesting rather than re-filtering is the point: the cached listing was produced with the
+   * OLD setting, so it genuinely does not contain the hidden entries. Showing them from the cache is
+   * impossible, and pretending otherwise is what the toggle would look like if this were omitted —
+   * an on/off switch that changes nothing.
+   */
+  const toggleHidden = useCallback(() => {
+    if (!focused) return;
+    const sessionId = focused.id;
+    const next = !showsHidden(filesRef.current, sessionId);
+    dispatchFiles({ kind: "toggleHidden", sessionId });
+    // Every loaded or loading directory for this session, since each was fetched under the old flag.
+    const prefix = `${sessionId}\u0000`;
+    for (const key of Object.keys(filesRef.current.directories)) {
+      if (!key.startsWith(prefix)) continue;
+      listDirectoryFor(sessionId, key.slice(prefix.length), next);
+    }
+  }, [focused, listDirectoryFor]);
+
+  // Load a newly focused session's root once. Keyed on the id, not on `focused`, so switching between
+  // two sessions does not refetch a tree already in hand; and skipped for a session already loaded,
+  // which is what stops the effect from re-requesting on every re-render.
+  const focusedId = focused?.id;
+  useEffect(() => {
+    if (!focusedId) return;
+    if (directoryAt(filesRef.current, focusedId, "").status !== "unloaded") return;
+    listDirectoryFor(focusedId, "", showsHidden(filesRef.current, focusedId));
+  }, [focusedId, listDirectoryFor]);
+
+  // A stopped session's tree is dropped, so a later session cannot inherit a stale one — and so the
+  // cache does not grow without bound as sessions come and go.
+  const liveIds = state.live.map((s) => s.id).join("\u0000");
+  useEffect(() => {
+    const present = new Set(state.live.map((s) => s.id));
+    for (const key of Object.keys(filesRef.current.directories)) {
+      const { sessionId } = splitFileKey(key);
+      if (!present.has(sessionId)) dispatchFiles({ kind: "forgetSession", sessionId });
+    }
+    // `liveIds` is the change signal; `state.live` is read through the closure fresh on each run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveIds]);
   const transcript = transcriptFor(state, focused?.id);
   const fleet = fleetCounts(state);
   // HOME arrives with the first snapshot, so it is undefined until then. Paths render in full
@@ -293,6 +445,18 @@ export function App() {
         <Inspector
           session={tab === "sessions" ? focused : undefined}
           home={home}
+          files={files}
+          onExpandDirectory={expandDirectory}
+          onCollapseDirectory={(path) => {
+            if (!focused) return;
+            dispatchFiles({ kind: "setExpanded", sessionId: focused.id, path, expanded: false });
+          }}
+          onToggleHidden={toggleHidden}
+          onOpenFile={openFile}
+          onCloseFile={() => {
+            if (!focused) return;
+            dispatchFiles({ kind: "closeFile", sessionId: focused.id });
+          }}
           onStop={() => focused && setConfirmStop(focused)}
           onRename={(name) => focused && send({ kind: "rename", sessionId: focused.id, name })}
         />

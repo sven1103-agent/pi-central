@@ -138,3 +138,35 @@ agent's view.
 - Binary files are refused, not rendered.
 - Recursive delete requires explicit confirmation.
 - No `safehouse` invocation appears anywhere in the orchestrator's file I/O path.
+
+## Amendment 1 — what shipped for issue #8 (list and read)
+
+The decision above is unchanged; this records how the first slice realised it, and the
+points where the implementation is deliberately narrower or more explicit than the text.
+
+**Where the code lives.** Containment is `packages/orchestrator/src/files.ts` — a pure module over
+`node:fs` and `node:path`, with no UI dependency and, as the "Verification" section requires, no
+`safehouse` and no `child_process` anywhere near it. The transport does not call it directly: it goes
+through the **supervisor**, which is the only component that knows a session's `cwd`. That keeps one
+answer to "what is this session confined to" rather than a root assembled per call site.
+
+**Containment is by path segment, not by prefix.** `containsPath(parent, child)` compares segments, so
+`/a/read` does not contain `/a/readme.md`. This is not hypothetical: the prefix form is the bug this
+repository already shipped once in `own-installation.ts` (issue #25).
+
+**The check runs twice, and the first pass earns its place.** Once lexically, before touching disk,
+and again on the `realpath` result — the second is what catches a symlink whose *target* is outside
+the root. The first is not redundant: without it an escape that does not exist is reported as
+`not-found` rather than as an escape, which is the same class of misreporting as a permission failure
+shown as a missing file.
+
+**Refuse, don't truncate.** A file above the 256 KB cap is refused with both sizes named, rather than
+returned in part. Binary is detected by a NUL byte in the first 8 KB *and* by a strict UTF-8 decode,
+because either test alone passes a file it should refuse.
+
+**The UI must not imply the agent's view.** The tree is labelled by *working directory*. The two
+views coincide today only because the browser's root is the session's `cwd`; the label is what stays
+honest when that stops being true.
+
+**Not yet done.** File operations (create, rename, move, delete) are issue #10, and each destructive
+one is to sit behind explicit confirmation. Nothing in #8 writes.

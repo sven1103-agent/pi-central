@@ -91,6 +91,49 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Added
 
+- **A read-only file tree, confined to the session's working directory** (issue #8, ADR-0007). The
+  inspector shows the focused session's directory and opens text files, so the answer to "what is
+  this agent working on" is a tree rather than a shell command the user runs elsewhere.
+
+  The confinement is the whole feature, and it lives in `orchestrator/src/files.ts` with **no UI
+  dependency**: an absolute path, a `..` that escapes, and a symlink whose **target** escapes are all
+  refused. Containment is checked by path **segments**, not by string prefix — the prefix form is the
+  bug this repository already shipped once in `own-installation.ts`, where `…/read` matched
+  `…/readme.md`. The check runs twice: once lexically, so a nonexistent escape is reported as an
+  escape rather than as "missing", and again after `realpath`, which is what catches a symlink.
+
+  Three behaviours are stated rather than implied, each because the alternative asserts something
+  false:
+
+  - **An oversized file is refused, not truncated**, with both sizes named (`4.2 MB, above the
+    256.0 KB limit`). A truncated file rendered as whole is a silently wrong answer.
+  - **Binary is detected two ways** — a NUL in the first 8 KB *and* a strict UTF-8 decode — because
+    either alone misses a case: NUL alone passes a Latin-1 file that renders as replacement
+    characters, and the decode alone rejects it only after the whole buffer is read.
+  - **A permission failure reports its errno**, never "missing". The two need different responses,
+    and collapsing them is the same defect as a failed transcript read shown as an empty one.
+
+  The same distinction is carried through the whole path. The protocol gained `files`, `file` and
+  `fileError`, and `fileError` states **which question failed** (`request: "list" | "read"`) because
+  the UI keys a listing and a read by the same path — without it the client would have to guess, and
+  a refusal of one could be filed against the other. A refused **listing** becomes an error
+  directory, never `loaded: []`: "this directory is empty" and "this directory could not be read"
+  are opposite facts. Routing goes through the **supervisor**, not straight to `files.ts`, because it
+  is the only component that knows a session's `cwd` — so there is exactly one answer to what a
+  session is confined to. An unknown session is refused as such rather than resolved against some
+  other root.
+
+  The file text is displayed **inert** (ADR-0006) and the pane is labelled "working directory",
+  never "the agent's view": ADR-0007 requires that a browser reading at the user's UID not be
+  presented as what the sandboxed agent can see, and the two coincide today only because the scope is
+  the workdir.
+
+  Twenty-nine orchestrator tests and seventeen UI tests, all with fixtures under `mkdtemp`. Four
+  behaviours were **falsified** before landing: rooting the listing at `process.cwd()`, collapsing a
+  refused listing into `loaded: []`, dropping the NUL from the session-key separator (so forgetting
+  `s1` would also drop `s10`'s tree), and echoing the *normalized* path where the client had keyed its
+  request by the path it sent.
+
 - **Compaction and retry banners** (issue #5). A session that is compacting, retrying, or recovering
   from a provider failure now says so inline instead of appearing to stall. The two retry mechanisms
   are distinguished — `auto_retry` (the provider call failed) and `summarization_retry_*` (a

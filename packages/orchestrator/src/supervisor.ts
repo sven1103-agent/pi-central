@@ -30,6 +30,13 @@ import { agentRoutingEnv } from "./env.ts";
 import { KEYCHAIN_FILE, inspectProviderAuth, readStore } from "./agent-store.ts";
 import { assessAgentCapabilities } from "./capabilities.ts";
 import { renderPolicyFragment } from "./fragment.ts";
+import {
+  listDirectory,
+  readFileText,
+  type DirListing,
+  type FileContent,
+  type Result,
+} from "./files.ts";
 import { resolveInstallationRoot } from "./installation-root.ts";
 import { ownInstallationWarning } from "@pi-central/protocol";
 import { interpretRecord } from "./state.ts";
@@ -647,6 +654,44 @@ export class Supervisor extends EventEmitter {
 
   async stopAll(): Promise<void> {
     await Promise.all([...this.#processes.keys()].map((id) => this.stop(id)));
+  }
+
+  /**
+   * List a session's working directory (issue #8, ADR-0007).
+   *
+   * Synchronous and plain `fs`, at the orchestrator's UID — no sandbox, no RPC round trip. The
+   * confinement is the session's own `cwd`, which is why this goes through the supervisor: it is the
+   * component that knows what that cwd is, so there is exactly one answer to "what is this session
+   * confined to".
+   *
+   * An unknown session is REFUSED rather than resolved against some other root. Falling back would
+   * mean a stale session id browsed a directory that had nothing to do with it.
+   */
+  listFiles(
+    id: string,
+    path: string,
+    options: { includeHidden?: boolean } = {},
+  ): Result<DirListing> {
+    const session = this.#sessions.get(id);
+    if (!session) {
+      return {
+        ok: false,
+        error: { reason: "not-found", message: `no session ${id}, so there is no working directory to list` },
+      };
+    }
+    return listDirectory(session.cwd, path, options);
+  }
+
+  /** Read one text file from a session's working directory, confined the same way. */
+  readFile(id: string, path: string): Result<FileContent> {
+    const session = this.#sessions.get(id);
+    if (!session) {
+      return {
+        ok: false,
+        error: { reason: "not-found", message: `no session ${id}, so there is no working directory to read from` },
+      };
+    }
+    return readFileText(session.cwd, path);
   }
 
   /**
