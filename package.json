@@ -1,10 +1,13 @@
 {
   "name": "pi-central",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.2.0",
   "type": "module",
   "description": "Local dashboard that orchestrates multiple sandboxed Pi coding-agent sessions across working directories.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sven1103-agent/pi-central.git"
+  },
   "engines": {
     "node": ">=22.19.0"
   },
@@ -23,14 +26,15 @@
     "packages/ui"
   ],
   "scripts": {
-    "test": "node --test \"packages/*/test/**/*.test.ts\" \"packages/*/test/**/*.test.mjs\"",
+    "test": "node --test \"packages/*/test/**/*.test.ts\" \"packages/*/test/**/*.test.mjs\" \"scripts/**/*.test.mjs\"",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json",
     "smoke": "node packages/orchestrator/src/cli.ts",
     "server": "node packages/orchestrator/src/server.ts",
     "ui:dev": "npm run dev --workspace @pi-central/ui",
     "ui:build": "npm run build --workspace @pi-central/ui",
     "check:docs": "node scripts/check-docs.mjs",
-    "verify": "npm run typecheck && npm test && npm run check:docs",
+    "check:version": "node scripts/check-version.mjs",
+    "verify": "npm run typecheck && npm test && npm run check:docs && npm run check:version",
     "build:package": "node scripts/build-package.mjs",
     "pack": "npm run build:package && npm pack",
     "serve:package": "node bin/pi-central.js"
