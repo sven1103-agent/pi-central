@@ -108,10 +108,8 @@ transcripts reconstructed from Pi's delta-only stream; the approval dock (`confi
 searchable by content, with a clear refusal when a session's directory is gone; agent-scoped
 credentials with the host's own credentials denied.
 
-**Not yet:** file navigation and syntax highlighting are absent
-(the RPC surface Pi Central uses cannot express it, and the composer says so rather than showing a
-control that cannot work); no syntax highlighting; no compaction or retry banners; no file
-navigation. Each of these is an issue rather than a wish — see below.
+**Not yet:** no compaction or retry banners, and no file navigation. Both are issues rather than
+wishes — see below.
 
 ## Working on this project
 

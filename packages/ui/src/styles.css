@@ -1146,3 +1146,38 @@ select.btn { font-family: var(--sans); }
   box-shadow: 0 2px 10px rgb(0 0 0 / 0.25);
 }
 .jump-latest:hover { border-color: var(--accent); }
+
+/* --- Fenced code (issue #4) --------------------------------------------------------------------- */
+
+.code-block { margin: 0 0 0.7em; }
+.code-lang {
+  font-family: var(--mono); font-size: var(--fs-xs); opacity: 0.65;
+  padding: 0 0 2px; letter-spacing: 0.02em;
+}
+.code-lang-note { opacity: 0.8; }
+.code-body pre, .code-plain { margin: 0; }
+
+/* The palette, as CLASSES rather than inline styles.
+ *
+ * Shiki's string output writes `style="color:#ff7b72"` on its spans. Rendering that would mean
+ * allowing `style` through DOMPurify's allow-list — a new injection surface opened where none
+ * existed, and the only reason it would be needed. Instead the theme was measured: github-dark-
+ * default uses **11 distinct foreground colours**, so the tokens carry the hex, this module maps it
+ * to one of eleven class names, and the colours live here beside every other colour in the app.
+ *
+ * A token whose colour is not in this list falls back to the block's foreground, which is the
+ * correct degradation for a theme change: readable, merely less colourful. */
+.shiki { font-family: var(--mono); font-size: var(--fs-sm); overflow-x: auto; }
+.shiki .line { display: block; }
+.shiki .tk-i { font-style: italic; }
+.shiki .tk-161b22 { color: #161b22; }
+.shiki .tk-79c0ff { color: #79c0ff; }
+.shiki .tk-7ee787 { color: #7ee787; }
+.shiki .tk-8b949e { color: #8b949e; }
+.shiki .tk-a5d6ff { color: #a5d6ff; }
+.shiki .tk-d2a8ff { color: #d2a8ff; }
+.shiki .tk-e6edf3 { color: #e6edf3; }
+.shiki .tk-f0f6fc { color: #f0f6fc; }
+.shiki .tk-ff7b72 { color: #ff7b72; }
+.shiki .tk-ffa198 { color: #ffa198; }
+.shiki .tk-ffa657 { color: #ffa657; }

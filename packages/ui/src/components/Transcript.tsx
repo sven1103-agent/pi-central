@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Transcript as TranscriptModel } from "../transcript.ts";
 import { assistantText, hasProse, planTranscript, toolRunSummary, type ToolExecution, type TranscriptMessage } from "../transcript.ts";
-import { Prose } from "./Prose.tsx";
+import { MessageBody } from "./MessageBody.tsx";
 
 /**
  * How close to the bottom still counts as "following the tail".
@@ -316,7 +316,10 @@ function Turn({ message }: { message: TranscriptMessage }) {
         </details>
       ))}
 
-      {text.length > 0 && <Prose text={text} streaming={message.streaming} />}
+      {/* Through MessageBody rather than Prose directly: prose still goes to the one sanitized
+          insertion site, while a fenced code block becomes React elements and contributes no HTML
+          to sanitize (issue #4). A message with no code takes the Prose path unchanged. */}
+      {text.length > 0 && <MessageBody text={text} streaming={message.streaming} />}
     </article>
   );
 }

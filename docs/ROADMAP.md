@@ -182,10 +182,11 @@ Stack is fixed: React + Vite UI, WebSocket over loopback, TypeScript orchestrato
 - [x] History: content search, project, age, size, `cwdExists` badge, and a refusal with a way
       forward when the directory is gone (US-4, US-5).
 - [x] Session switching = focus switch between live processes (C2).
-- [ ] **Shiki syntax highlighting with lazy grammar loading.** Deferred: code renders in a
-      styled `<pre>` today. Shiki adds ~200 kB plus its own lazy-loading path, so it is worth
-      doing deliberately rather than tacked on — and it is the one Phase 2 item that is
-      cosmetic rather than behavioural.
+- [x] **Shiki syntax highlighting with lazy grammar loading** (issue #4). One chunk per grammar,
+      fetched on first encounter; the name→chunk index is lazy too, or its ~46 kB of URLs would
+      put most of the saving back. The entry chunk grew **+5.04 kB** for it, measured — see
+      [BUNDLE.md](BUNDLE.md). A grammar's colours reach the DOM as **classes**, never as a `style`
+      attribute, so the sanitizer's allow-list did not have to widen.
 - [x] **The orchestrator serves the built UI**, so no dev server is required and the CSP's
       `connect-src 'self'` is same-origin by construction (issue #24). `static-ui.ts`, tested.
 - [x] **The model picker** (issue #1): a `Control` for `set_model` plus the catalogue, grouped by

@@ -35,8 +35,14 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
-    // Shiki's grammars are large and loaded on demand, so a single big chunk is expected
-    // rather than a problem to be warned about.
+    // Shiki emits one chunk per grammar, and a few of them are very large (`elisp` is 790 kB;
+    // `cpp` is 501 kB). They are all loaded on demand, so a big individual chunk is expected
+    // rather than a problem — but the limit is raised deliberately rather than to silence a
+    // message, and the numbers behind that decision are in `docs/BUNDLE.md`.
+    //
+    // Sourcemaps are on by default, and grammars carry large ones: `dist/` is ~8.7 MB of JS with
+    // them and ~8.2 MB without. They are kept because a production stack trace from a supervised
+    // session is worth more than the disk.
     chunkSizeWarningLimit: 2000,
   },
 });

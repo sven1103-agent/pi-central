@@ -725,3 +725,58 @@ test("the transcript scroller and the jump control are siblings, so the control 
   assert.match(html, /class="transcript-wrap"/);
   assert.match(html, /class="transcript"/);
 });
+
+// --- Fenced code: prose path vs a block (issue #4) -----------------------------------------------
+
+let MessageBody;
+
+test("a message with no code still takes the plain Prose path", async () => {
+  // The common case must be byte-for-byte the previous behaviour: one sanitized insertion, no
+  // wrapper, no extra element.
+  ({ MessageBody } = await server.ssrLoadModule("/src/components/MessageBody.tsx"));
+  const html = renderToString(createElement(MessageBody, { text: "Just **prose**." }));
+  assert.match(html, /class="prose"/);
+  assert.ok(!/data-has-code/.test(html), "a code-free message must not claim to have code");
+  assert.ok(!/code-block/.test(html), "no code block for prose");
+});
+
+test("a fenced block renders its code as escaped text, never as nothing", async () => {
+  // On the first render the grammar has not loaded, so this is the fallback path — and the fallback
+  // must show the code. A block that rendered empty would be the worst possible degradation.
+  const html = renderToString(createElement(MessageBody, {
+    text: "Before\n\n```ts\nconst x = 1;\n```\n\nAfter",
+  }));
+  assert.match(html, /code-block/);
+  assert.match(html, /class="code-lang"[^>]*>ts</);
+  assert.match(text(html), /const x = 1;/);
+  assert.match(text(html), /Before/);
+  assert.match(text(html), /After/);
+  assert.match(html, /data-has-code="true"/);
+});
+
+test("an unknown language is labelled and still shows its code", async () => {
+  // An unknown language falls back to plain text rather than rendering nothing. The label says so,
+  // so the reader is not left wondering why this block has no colours.
+  const html = renderToString(createElement(MessageBody, {
+    text: "```klingon\nnuqneH\n```",
+  }));
+  assert.match(text(html), /nuqneH/);
+  assert.match(html, /class="code-lang"[^>]*>klingon</);
+});
+
+test("a fence with no language renders no language label", async () => {
+  const html = renderToString(createElement(MessageBody, {
+    text: "```\nplain text\n```",
+  }));
+  assert.match(text(html), /plain text/);
+  assert.ok(!/code-lang/.test(html), "a fence naming no language has nothing to label");
+});
+
+test("code text is escaped, so a fence cannot inject markup", async () => {
+  // React escapes the text, so this is structural rather than a property of the highlighter.
+  const html = renderToString(createElement(MessageBody, {
+    text: "```ts\nconst s = \"<img src=x onerror=alert(1)>\";\n```",
+  }));
+  assert.ok(!/<img/.test(html), "code content must never become markup");
+  assert.ok(text(html).includes("<img src=x onerror=alert(1)>"), "but it must be VISIBLE as text");
+});
