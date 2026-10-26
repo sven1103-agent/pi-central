@@ -33,6 +33,7 @@ import {
   type ServerPayload,
 } from "@pi-central/protocol";
 import type { Supervisor } from "./supervisor.ts";
+import type { FileError } from "./files.ts";
 import { discover } from "./registry.ts";
 import type { Config } from "./config.ts";
 import { createUiRequestHandler, resolveUiDistDir } from "./static-ui.ts";
@@ -73,6 +74,8 @@ const KNOWN_CONTROL_KINDS: ReadonlySet<string> = new Set<Control["kind"]>([
   "listThinkingLevels",
   "answerDialog",
   "resume",
+  "listFiles",
+  "readFile",
 ]);
 
 /** Reject a malformed envelope with a reason, rather than closing silently. */
@@ -361,7 +364,80 @@ export class Transport {
       case "answerDialog":
         this.#supervisor.answerDialog(control.sessionId, control.dialogId, control.answer);
         return;
+      // --- File browsing (issue #8, ADR-0007) ------------------------------------------------
+      //
+      // Resolved through the SUPERVISOR, not straight to `files.ts`, because the root is the
+      // session's cwd and only the supervisor knows it. That keeps one answer to "which directory is
+      // this session confined to" — and it means a request for an unknown session is refused as
+      // such, rather than being resolved against some path the transport guessed.
+      //
+      // Everything below is read at the ORCHESTRATOR's UID, deliberately (ADR-0007). No sandbox is
+      // involved: Safehouse confines agents, and this serves the person.
+      case "listFiles": {
+        const result = this.#supervisor.listFiles(control.sessionId, control.path, {
+          ...(control.includeHidden === undefined ? {} : { includeHidden: control.includeHidden }),
+        });
+        if (result.ok) {
+          this.#broadcast({
+            kind: "files",
+            sessionId: control.sessionId,
+            // The path as the CLIENT sent it, not the normalized one the orchestrator resolved.
+            // The client keys its cache, its `loading` state and its expansion flag by the path it
+            // requested, so echoing a different spelling would file the result under one key while
+            // the node waited on another — leaving it in "Reading…" forever. Normalization stays
+            // inside the orchestrator, where it is used for the filesystem work and for messages.
+            path: control.path,
+            entries: result.value.entries,
+            truncated: result.value.truncated,
+          });
+        } else {
+          this.#broadcastFileError(control.sessionId, control.path, "list", result.error);
+        }
+        return;
+      }
+      case "readFile": {
+        const result = this.#supervisor.readFile(control.sessionId, control.path);
+        if (result.ok) {
+          this.#broadcast({
+            kind: "file",
+            sessionId: control.sessionId,
+            // As sent, for the same reason as `files`: one key for the client's bookkeeping.
+            path: control.path,
+            text: result.value.text,
+            bytes: result.value.bytes,
+          });
+        } else {
+          this.#broadcastFileError(control.sessionId, control.path, "read", result.error);
+        }
+        return;
+      }
     }
+  }
+
+  /**
+   * Report a refused file request.
+   *
+   * `path` is echoed as the client SENT it, not as it resolved — the complaint is about what was
+   * asked for, and a resolved path would describe something the user never typed.
+   *
+   * `request` distinguishes a failed listing from a failed read, so the client routes the error to the
+   * right cache instead of guessing which request it answered.
+   */
+  #broadcastFileError(
+    sessionId: string,
+    path: string,
+    request: "list" | "read",
+    error: FileError,
+  ): void {
+    this.#broadcast({
+      kind: "fileError",
+      request,
+      sessionId,
+      path,
+      reason: error.reason,
+      ...(error.code === undefined ? {} : { code: error.code }),
+      message: error.message,
+    });
   }
 
   /** Fan out to every client. One slow client must not stall the others. */

@@ -275,6 +275,17 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
     case "history":
       return { ...state, history: event.history, historyTotal: event.total, ready: true };
 
+    // --- File browsing (issue #8) ---------------------------------------------------------
+    //
+    // Both handled here as no-ops on the SESSION state, because the file tree lives in its own store
+    // (`files.ts`, driven by App.tsx). They are cases rather than an omission so the switch stays
+    // exhaustive: a new event kind must be considered here, and "this does not touch session state"
+    // is a decision worth writing down rather than an accident of the default branch.
+    case "files":
+    case "file":
+    case "fileError":
+      return state;
+
     case "error":
       return {
         ...state,

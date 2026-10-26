@@ -29,7 +29,7 @@ globalThis.document = dom.window.document;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 
 let server;
-let SessionRail, ToolTrace, DialogDock, TranscriptView, HistoryView, Composer, initialState;
+let SessionRail, ToolTrace, DialogDock, TranscriptView, HistoryView, Composer, FileTree, FilePane, Panel, FilesPanel, initialState;
 
 before(async () => {
   // `root` must be the UI package, not the process CWD: Vite resolves the `/src/...` specifiers
@@ -48,6 +48,10 @@ before(async () => {
   // Loaded here rather than inside a test body: a test that assigned these made every later test
   // depend on it having run, which breaks the moment `--test-name-pattern` selects a subset.
   ({ Composer } = await server.ssrLoadModule("/src/components/Composer.tsx"));
+  ({ FileTree } = await server.ssrLoadModule("/src/components/FileTree.tsx"));
+  ({ FilePane } = await server.ssrLoadModule("/src/components/FilePane.tsx"));
+  ({ Panel } = await server.ssrLoadModule("/src/components/Panel.tsx"));
+  ({ FilesPanel } = await server.ssrLoadModule("/src/components/FilesPanel.tsx"));
   ({ initialState } = await server.ssrLoadModule("/src/store.ts"));
 });
 
@@ -313,7 +317,7 @@ test("the tool output panel carries the QUARANTINE frame, not merely the words",
   // The hatch is a background, so the class is only meaningful if a rule carries the gradient.
   // Asserted against the stylesheet rather than the class name, because a class with no rule is
   // exactly the state this bug was in.
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const css = readCss();
   const rule = /\.trace-detail\.is-quarantined\s*\{([^}]*)\}/.exec(css);
   assert.ok(rule, "a .trace-detail.is-quarantined rule must exist");
   assert.match(rule[1], /repeating-linear-gradient/, "the rule must actually draw the hatch");
@@ -325,7 +329,7 @@ test("the quarantine hatch is not defeated by cascade order", () => {
   // `.trace-detail` is declared LATER, so stacking both classes would let the plain background win
   // on source order — markup correct, frame invisible. This asserts the property directly: whatever
   // rule gives the panel its hatch must be declared after any rule that would override it.
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const css = readCss();
   const hatchAt = css.indexOf(".trace-detail.is-quarantined {");
   assert.ok(hatchAt > 0);
   // Every later rule that sets `background` on a bare `.trace-detail` would win. There must be none.
@@ -438,7 +442,7 @@ test("the direct-mode banner is rendered, not just styled", () => {
   // The CSS for `.direct-banner` existed from the start but NOTHING rendered it, so `--direct`
   // mode was signalled only by a chip inside the inspector. Running unsandboxed is the single
   // most important fact about a session and deserves top-of-window prominence.
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const css = readCss();
   assert.match(css, /\.direct-banner/, "the class should still be defined");
 
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
@@ -1160,10 +1164,277 @@ test("the overlay cannot swallow the click that opens the select", async () => {
   // The overlay covers the select, so without `pointer-events: none` the control would stop opening —
   // a fix for a cosmetic bug that breaks the interaction. Asserted against the stylesheet because the
   // markup cannot express it, and because this is invisible to any rendering test.
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const css = readCss();
   const rule = /\.picker-display\s*\{([^}]*)\}/.exec(css);
   assert.ok(rule, "the overlay must have a rule");
   assert.match(rule[1], /pointer-events:\s*none/, "the overlay must not intercept clicks");
   // And the label must be positioned over the closed control, or it would render as a second field.
   assert.match(rule[1], /position:\s*absolute/);
+});
+
+// --- The file tree (issue #8) --------------------------------------------------------------------
+
+/** A FilesState with one directory loaded. Built directly, since the reducer's own tests cover it. */
+async function filesState(directories = {}, extra = {}) {
+  const { initialFilesState } = await server.ssrLoadModule("/src/files.ts");
+  return {
+    ...initialFilesState(),
+    directories,
+    ...extra,
+  };
+}
+
+test("an unloaded directory says it is not loaded, rather than rendering as empty", async () => {
+  // The distinction the whole file-tree state module exists to protect. "Not asked" and "empty" are
+  // different facts, and rendering the first as the second is a claim about the disk nobody made.
+  const state = await filesState();
+  const html = renderToString(createElement(FileTree, {
+    sessionId: "s1", state, cwd: "/work",
+    onExpand() {}, onCollapse() {}, onToggleHidden() {}, onOpenFile() {},
+  }));
+  assert.match(html, /Not loaded yet/);
+  assert.ok(!/is empty/i.test(html), "an unloaded directory must not claim to be empty");
+});
+
+test("a loaded-but-empty directory says it is empty, and is NOT an error", async () => {
+  const state = await filesState({ "s1\u0000": { status: "loaded", entries: [], truncated: false } });
+  const html = renderToString(createElement(FileTree, {
+    sessionId: "s1", state, cwd: "/work",
+    onExpand() {}, onCollapse() {}, onToggleHidden() {}, onOpenFile() {},
+  }));
+  assert.match(html, /This directory is empty/);
+  assert.ok(!/filetree-error/.test(html), "an empty directory is not a refusal");
+});
+
+test("a REFUSED listing states the reason, and never reads as empty", async () => {
+  // The claim this slice is built around. A refusal rendered as an empty directory would tell the
+  // user a directory is empty when the request was denied.
+  const state = await filesState({
+    "s1\u0000../secret": { status: "error", reason: "escapes-cwd", message: '"../secret" resolves outside the working directory' },
+  });
+  // Root loaded and expanded so the error node for `../secret` is reachable in the markup.
+  state.directories["s1\u0000"] = { status: "loaded", entries: [{ name: "secret-link", kind: "directory", hidden: false }], truncated: false };
+  state.expanded["s1\u0000secret-link"] = true;
+  state.directories["s1\u0000secret-link"] = { status: "error", reason: "escapes-cwd", message: '"secret-link" resolves outside the working directory' };
+
+  const html = renderToString(createElement(FileTree, {
+    sessionId: "s1", state, cwd: "/work",
+    onExpand() {}, onCollapse() {}, onToggleHidden() {}, onOpenFile() {},
+  }));
+  assert.match(html, /Outside the working directory/, "the reason must be stated in words");
+  assert.ok(!/is empty/i.test(html), "a refusal must never be rendered as an empty directory");
+});
+
+test("a too-large refusal names both sizes, because the reader has to judge", async () => {
+  const state = await filesState();
+  const html = renderToString(createElement(FilePane, {
+    path: "big.log",
+    state: { status: "error", reason: "too-large", message: '"big.log" is 4.2 MB, above the 256.0 KB limit and was not read' },
+    onClose() {},
+  }));
+  assert.match(html, /Too large to read/);
+  assert.match(html, /4\.2 MB/);
+  assert.match(html, /256\.0 KB/);
+});
+
+test("a truncated listing says so, so it cannot be read as complete", async () => {
+  const state = await filesState({
+    "s1\u0000": { status: "loaded", entries: [{ name: "a", kind: "file", hidden: false }], truncated: true },
+  });
+  const html = renderToString(createElement(FileTree, {
+    sessionId: "s1", state, cwd: "/work",
+    onExpand() {}, onCollapse() {}, onToggleHidden() {}, onOpenFile() {},
+  }));
+  assert.match(html, /Showing the first entries only/);
+});
+
+test("a nested truncated directory says so too, not only the root", async () => {
+  // The root's notice speaks for the root. A capped NESTED directory that ended silently would read
+  // as complete — the same false claim one level down.
+  const state = await filesState();
+  state.directories["s1\u0000"] = { status: "loaded", entries: [{ name: "big", kind: "directory", hidden: false }], truncated: false };
+  state.directories["s1\u0000big"] = { status: "loaded", entries: [{ name: "a", kind: "file", hidden: false }], truncated: true };
+  state.expanded["s1\u0000big"] = true;
+
+  const html = renderToString(createElement(FileTree, {
+    sessionId: "s1", state, cwd: "/work",
+    onExpand() {}, onCollapse() {}, onToggleHidden() {}, onOpenFile() {},
+  }));
+  assert.match(html, /Showing the first entries only/, "the nested cap must be stated where it applies");
+});
+
+test("file contents are rendered as text, never as markup", async () => {
+  // ADR-0006: file content is untrusted for the same reason a transcript is — it may have been
+  // written by the agent, by a dependency, or by whoever sent the repository.
+  const state = await filesState();
+  const payload = '<img src=x onerror="alert(1)"><script>alert(2)</script>';
+  const html = renderToString(createElement(FilePane, {
+    path: "x.txt",
+    state: { status: "loaded", text: payload, bytes: payload.length },
+    onClose() {},
+  }));
+  assert.ok(!/<img/i.test(html) && !/<script>alert/i.test(html), `markup must be escaped, got: ${html}`);
+  assert.match(html, /&lt;img/);
+});
+
+test("the tree is labelled by SCOPE, not as the agent's view", async () => {
+  // ADR-0007: the browser reads at the user's UID and can reach files the agent cannot. Presenting it
+  // as the agent's view would be a false claim the moment anything browses wider than the workdir.
+  const state = await filesState({ "s1\u0000": { status: "loaded", entries: [], truncated: false } });
+  const html = renderToString(createElement(FileTree, {
+    sessionId: "s1", state, cwd: "/work",
+    onExpand() {}, onCollapse() {}, onToggleHidden() {}, onOpenFile() {},
+  }));
+  assert.match(html, /Working directory/);
+  assert.ok(!/agent.s view|what the agent/i.test(html), "must not imply the sandboxed agent's view");
+});
+
+test("the dotfile toggle's label states the ACTION, not the current state", async () => {
+  // A button labelled by its state is read as a status and then clicked twice by anyone who takes it
+  // for one. With dotfiles hidden it must therefore offer to SHOW them.
+  const state = await filesState({ "s1\u0000": { status: "loaded", entries: [], truncated: false } });
+  const html = renderToString(createElement(FileTree, {
+    sessionId: "s1", state, cwd: "/work",
+    onExpand() {}, onCollapse() {}, onToggleHidden() {}, onOpenFile() {},
+  }));
+  assert.match(html, /Show dotfiles/);
+  assert.match(html, /aria-pressed="false"/);
+});
+
+
+/**
+ * The stylesheet with comments removed.
+ *
+ * Assertions about CSS must not be satisfiable by PROSE. A falsification caught this: removing
+ * `container-type: inline-size` still passed, because the same phrase appears in the explanatory
+ * comment above the rule. Comments are documentation, and a test that a comment can satisfy is not
+ * testing the stylesheet.
+ */
+function readCss() {
+  return readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+// --- The panel region and its modes (issue #8, reworked) ------------------------------------------
+
+/** The minimum a Panel needs. Width and handlers are supplied per test. */
+function panelProps(extra = {}) {
+  return {
+    mode: "session", onMode() {}, width: 360, onWidth() {}, viewportWidth: 1600,
+    ...extra,
+  };
+}
+
+test("the panel offers both modes, and marks the active one", () => {
+  const html = renderToString(createElement(Panel, panelProps(), createElement("p", null, "body")));
+  assert.match(html, /role="tablist"/);
+  assert.match(html, /role="tab"/);
+  // Both modes are present; exactly one is selected.
+  assert.equal((html.match(/role="tab"/g) ?? []).length, 2);
+  assert.equal((html.match(/aria-selected="true"/g) ?? []).length, 1);
+  assert.match(html, /aria-selected="true"[^>]*>Session</);
+});
+
+test("only the selected TAB is in the tab order (roving tabindex)", () => {
+  // Scoped to the tabs on purpose: the resize separator is also tabbable, and counting every
+  // `tabindex="0"` in the panel conflated the two — which is how the first version of this test
+  // passed for the wrong reason.
+  const html = renderToString(createElement(Panel, panelProps(), createElement("p", null, "body")));
+  const tabs = html.match(/<button[^>]*role="tab"[^>]*>/g) ?? [];
+  assert.equal(tabs.length, 2, "expected two tabs");
+  const selected = tabs.filter((t) => t.includes('aria-selected="true"'));
+  const other = tabs.filter((t) => t.includes('aria-selected="false"'));
+  assert.equal(selected.length, 1);
+  assert.equal(other.length, 1);
+  assert.match(selected[0], /tabindex="0"/, "the selected tab must be reachable by Tab");
+  assert.match(other[0], /tabindex="-1"/, "the unselected tab must be skipped");
+});
+
+test("the body is tied to the tab that labels it", () => {
+  // `aria-labelledby` on the tabpanel is what makes the region announce as "Files, tab panel"
+  // rather than as an unlabelled group.
+  const html = renderToString(createElement(Panel, panelProps({ mode: "files" }), createElement("p", null, "body")));
+  assert.match(html, /id="panel-body-files"[^>]*aria-labelledby="panel-tab-files"/);
+});
+
+test("the resize handle is an operable separator with its bounds stated", () => {
+  // The bounds are what make it a separator a screen reader can act on rather than a decorative
+  // line. `aria-valuetext` carries the unit, because "512" alone says nothing.
+  const html = renderToString(createElement(Panel, panelProps({ width: 512 }), createElement("p", null, "body")));
+  assert.match(html, /role="separator"/);
+  assert.match(html, /aria-orientation="vertical"/);
+  assert.match(html, /aria-valuenow="512"/);
+  assert.match(html, /aria-valuemin="280"/);
+  assert.match(html, /aria-valuetext="512 pixels"/);
+  assert.match(html, /tabindex="0"/);
+});
+
+test("the handle is absent when there is no edge to drag", () => {
+  // Below 1440px the panel is a sheet over the transcript; a separator that does nothing is a lie.
+  const html = renderToString(createElement(Panel, panelProps({ resizable: false }), createElement("p", null, "body")));
+  assert.ok(!/role="separator"/.test(html), "a non-resizable panel must not offer a separator");
+});
+
+test("Files mode shows the tree, and Session mode does NOT", () => {
+  // THE regression guard for the defect that prompted this rework: the file browser was inside the
+  // inspector, which is a list of session facts. If it creeps back, this fails.
+  const files = { directories: { "s1\u0000": { status: "loaded", entries: [], truncated: false } }, files: {}, expanded: {}, openFile: {}, showHidden: {} };
+  const inFiles = renderToString(createElement(FilesPanel, {
+    sessionId: "s1", files, cwd: "/work",
+    onExpand() {}, onCollapse() {}, onToggleHidden() {}, onOpenFile() {}, onCloseFile() {},
+  }));
+  assert.match(inFiles, /filetree/, "Files mode must render the tree");
+
+  const { Inspector } = { Inspector: null };
+  // The Inspector is asserted by source, not by render: it takes a LiveSession, and building a
+  // faithful one here would test the fixture rather than the placement.
+  const source = readFileSync(new URL("../src/components/Inspector.tsx", import.meta.url), "utf8");
+  assert.ok(!/FileTree|FilePane|filetree/.test(source), "the Inspector must not contain the file browser");
+});
+
+test("the document gets its own scroll, and is not capped inside the panel", () => {
+  // The nested-scroll defect: a `max-height` on the document inside an already-scrolling panel gives
+  // two scrollbars competing for one wheel. Asserted on the stylesheet because no render can see it.
+  const css = readCss();
+  const lines = /\.filepane-lines\s*\{([^}]*)\}/.exec(css);
+  assert.ok(lines, "the document body must have a rule");
+  assert.ok(!/max-height/.test(lines[1]), "the document must not cap its own height");
+  assert.match(lines[1], /list-style:\s*none/);
+  // And the scrolling container is the document pane, which is a grid area rather than a block in a
+  // shared column.
+  const doc = /\.files-doc\s*\{([^}]*)\}/.exec(css);
+  assert.ok(doc && /overflow:\s*auto/.test(doc[1]), "the document pane must own the scrolling");
+});
+
+test("the panel is a named query container, and the split query targets that name", () => {
+  // The panel is resizable, so the window can be 2560px while the panel is 300px. A viewport media
+  // query would answer the wrong question and split the pane at the wrong moment.
+  //
+  // Asserted as the PAIRING rather than by extracting `.panel`'s rule body: `String.match` returns
+  // the first match, and a `@media` block later in the file also declares `.panel`, so a rule-body
+  // regex silently reads the wrong one. A `@container NAME` query can only match an element that
+  // declares `container-name: NAME`, so asserting both — with the same name — is the real property.
+  const css = readCss();
+  assert.match(css, /container-type:\s*inline-size/, "the panel must be a size container");
+  assert.match(css, /container-name:\s*panel\b/, "the container must be named");
+  assert.match(css, /@container panel \(min-width: 560px\)/, "the split must query that name");
+});
+
+test("the panel column is sized by a custom property, so only one thing writes the width", () => {
+  const css = readCss();
+  const panes = /\.panes\s*\{([^}]*)\}/.exec(css);
+  assert.ok(panes, "the shell grid must have a rule");
+  assert.match(panes[1], /grid-template-columns:[^;]*var\(--panel-width/);
+});
+
+test("no viewport rule hides the panel", () => {
+  // It used to be `display: none` below 1440px, which was defensible while the panel held only
+  // reference material. It now hosts the file browser, so an unreachable pane is worse than a narrow
+  // one. The overlay that briefly replaced it was worse still — it covered the transcript with no way
+  // to dismiss it — so the panel is simply never hidden, and the resizer is how you make room.
+  const css = readCss();
+  assert.ok(!/\.panel\s*\{[^}]*display:\s*none/.test(css), "the panel must not be hidden outright");
+  assert.ok(!/\.inspector\s*\{[^}]*display:\s*none/.test(css), "nor may the inspector be hidden");
+  // And the shell grid still reserves a column for it at every width.
+  assert.ok(!/@media \(max-width: 1439px\)\s*\{[^}]*\.panes\s*\{[^}]*grid-template-columns:\s*288px 1fr;/.test(css),
+    "the panel column must not be dropped at narrow widths");
 });

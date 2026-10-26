@@ -143,6 +143,20 @@ export type Control =
   /** Ask which thinking levels the CURRENT model supports. */
   | { kind: "listThinkingLevels"; sessionId: string }
   | { kind: "answerDialog"; sessionId: string; dialogId: string; answer: { value: string } | { confirmed: boolean } | { cancelled: true } }
+  /**
+   * List a session's working directory (issue #8).
+   *
+   * Paths are **relative to the session's cwd** and never absolute. That is not a convenience: the
+   * orchestrator resolves each relative path and verifies the result is inside the cwd, so an
+   * absolute path would mean the client and the boundary disagreed about what was being asked for.
+   * The orchestrator refuses one outright rather than interpreting it (`files.ts`).
+   *
+   * `sessionId` rather than a bare path, because the confinement is per session: the root is that
+   * session's cwd, so "which directory" is answered by "which session".
+   */
+  | { kind: "listFiles"; sessionId: string; path: string; includeHidden?: boolean }
+  /** Read one text file, confined the same way. Answered with `file` or `fileError`. */
+  | { kind: "readFile"; sessionId: string; path: string }
   | { kind: "resume"; path: string; mode?: "sandboxed" | "direct" };
 
 /**
@@ -248,9 +262,90 @@ export type Event =
    * the composer's draft, which is a different place, so they are a different event.
    */
   | { kind: "queueCleared"; sessionId: string; steering: string[]; followUp: string[] }
+  /**
+   * A directory listing, in response to `listFiles` (issue #8).
+   *
+   * `path` is echoed so the client can tell WHICH request this answers after a rapid series of
+   * expansions — without it, a slow listing for one directory could be rendered under another's
+   * heading, which is the class of bug that shows stale content as current.
+   */
+  | { kind: "files"; sessionId: string; path: string; entries: FileEntry[]; truncated: boolean }
+  /**
+   * A file's contents, in response to `readFile`.
+   *
+   * Text, and **untrusted**: it is displayed inert, never rendered as markup (ADR-0006).
+   */
+  | { kind: "file"; sessionId: string; path: string; text: string; bytes: number }
+  /**
+   * A file request was refused.
+   *
+   * A distinct event from an empty listing, for the same reason `transcriptError` is distinct from
+   * an empty transcript: "this directory is empty" and "this directory could not be read" are
+   * opposite facts, and collapsing them made the UI assert something false. `reason` is a closed set
+   * so the client must handle each case rather than print prose the orchestrator chose.
+   *
+   * `request` says WHICH question failed. Without it the client would have to guess from whichever
+   * cache happened to be pending, and two requests for the same path (a listing and a read) would
+   * make that guess a coin flip — with the failure then recorded against the wrong one.
+   */
+  | { kind: "fileError"; sessionId: string; path: string; request: "list" | "read"; reason: FileErrorReason; code?: string | undefined; message: string }
   | { kind: "error"; message: string; sessionId?: string | undefined };
 
-export const PROTOCOL_VERSION = 1 as const;
+/** One entry in a directory listing. Metadata only: a listing never reads file contents. */
+export interface FileEntry {
+  name: string;
+  kind: "file" | "directory" | "symlink" | "other";
+  /**
+   * For a symlink, what it points at (`stat`, following the link), or `missing` when it dangles.
+   *
+   * `kind` stays `symlink` — the entry *is* a link, and calling it a directory would hide that
+   * following it may leave the root. This only tells the UI whether the link can be entered.
+   */
+  linkTarget?: "file" | "directory" | "other" | "missing" | undefined;
+  /** Size in bytes, for regular files only. */
+  size?: number | undefined;
+  hidden: boolean;
+  /** `lstat` failed: the entry exists but its type could not be established. */
+  unreadable?: boolean | undefined;
+}
+
+/**
+ * Why a file request was refused. Mirrors `FileFailure` in the orchestrator's `files.ts`.
+ *
+ * A closed union rather than a string, so the client cannot silently ignore a new reason: adding one
+ * here is a compile error at every handler that switches on it.
+ */
+export type FileErrorReason =
+  | "absolute-path"
+  | "escapes-cwd"
+  /** Not a usable path: a NUL byte, or a non-string. Malformed input, not a boundary violation. */
+  | "invalid-path"
+  | "not-a-directory"
+  | "is-directory"
+  | "too-large"
+  | "binary"
+  | "not-found"
+  | "permission"
+  | "unreadable";
+
+/**
+ * The wire version, checked by BOTH sides on `hello`.
+ *
+ * **Bump this whenever a Control or Event kind is added, removed, or renamed.** That is the whole
+ * point of the handshake: adding a kind is a protocol change, and it is exactly the case where
+ * nobody remembers to bump, because nothing local fails — the author's UI and orchestrator are the
+ * same commit. The failure appears later, on someone else's machine, as an unrelated-looking
+ * `unknown kind` from a connection that reported itself compatible.
+ *
+ * That is not hypothetical: issue #8 added five kinds without a bump, and the symptom was
+ * `bad control: unknown kind 'listFiles'` against a v1 orchestrator that had said `hello`.
+ *
+ * Enforced by `test/wire-surface.test.ts`, which pins the kind set against this number in both
+ * directions — so the surface and the version cannot move independently.
+ *
+ * 1 → 2: `listFiles`, `readFile`, `files`, `file`, `fileError` (issue #8).
+ */
+export const PROTOCOL_VERSION = 2 as const;
 
 export interface Hello {
   kind: "hello";

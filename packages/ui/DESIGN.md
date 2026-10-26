@@ -30,10 +30,10 @@ approvals, tool trace, and the sanitized `.md` pipeline are all named in `docs/S
 ```
 ┌ topbar 44px ───────────────────────────────────────────────────────────────┐
 │ Pi Central · [Sessions|History] · fleet counts · isolation · connection     │
-├ rail 288px (240–420) ─┬─ transcript column 1fr ─┬─ inspector 320px ─────────┤
-│ New session (primary) │ session header          │ Isolation                │
-│ Open in a directory…  │ ctx/tokens/cost chips   │ Paths                    │
-│ filter (/)            │ run bar                 │ Usage                    │
+├ rail 288px (240–420) ─┬─ transcript column 1fr ─┬─ panel var, 280–1200 ────┤
+│ New session (primary) │ session header          │ [Session|Files]  ← modes  │
+│ Open in a directory…  │ ctx/tokens/cost chips   │ Session: Isolation,Paths │
+│ filter (/)            │ run bar                 │ Files:   tree + document │
 │ ── Needs you ──       │ warnings strip          │ Warnings & notices       │
 │ ── Running ──         │ dialog dock             │ Actions                  │
 │ ── Idle ──            │ transcript (scroll)     │                          │
@@ -73,7 +73,9 @@ One sentence: **a fixed 288px triage rail, a single wide document column optimis
 
 Spacing rhythm: 4px base. Rail padding 12/16, rows 8px apart, group gaps 16px, column padding 18px, section gaps 12px. Content measure caps at **72ch** in the transcript (`max-width:72ch`) — prose stays readable on a 27" display while tool output may use full width.
 
-Responsive: `≥1440` three panes; `1024–1439` two panes (inspector becomes a tab in the transcript header, opened as a 380px right sheet); `<1024` the rail becomes a left drawer (⌘\, `aria-expanded`), inspector a bottom sheet. Phase 2 floor is 1024px.
+Responsive: `≥1440` three panes; `1024–1439` three panes too, with the panel narrower (it is resizable, so the user makes room); `<1024` the rail becomes a left drawer (⌘\, `aria-expanded`). Phase 2 floor is 1024px.
+
+**The panel is never hidden.** It used to be `display: none` below 1440px, which was defensible while it held only reference material. It now hosts the file browser, and a pane you cannot reach at all is worse than a narrow one. The `1024–1439` sheet in the previous revision of this line was **not implemented**: a fixed overlay covered the transcript with no way to dismiss it, which is a worse bug than the one it fixed. A sheet needs a topbar toggle to accompany it; that is deferred rather than silently dropped.
 
 **Why not mobile.** The orchestrator binds `127.0.0.1` (STACK operational rule 2, C5), so no phone can reach it. A phone layout would be dead code that still costs accessibility surface. Stated once here, not designed.
 
@@ -90,7 +92,7 @@ Responsive: `≥1440` three panes; `1024–1439` two panes (inspector becomes a 
 
 ## 3. Wireframes
 
-Geometry: rail 288px · gutter 1px `--line` · inspector 320px · topbar 44px · rail row 68px · transcript header 56px · run bar 2px · composer min 96px.
+Geometry: rail 288px · gutter 1px `--line` · **panel** 360px default, 280px min, max `min(1200, 60vw)`, stored as `--panel-width` · topbar 44px · rail row 68px · transcript header 56px · run bar 2px · composer min 96px.
 
 **W1 — First run (nothing live, no history at all)**
 
@@ -536,7 +538,7 @@ A per-delta announcement of streaming text is the failure mode this design exist
 
 **No-colour-alone inventory.** State ⇒ dot colour **+** state word **+** rail border. Needs-you ⇒ amber **+** the ask text **+** topbar count. Missing directory ⇒ `--warn-text` **+** `⚠` **+** `directory is gone`. Scratch ⇒ chip **+** `scratch · <id>` text. Quarantine ⇒ hatch **+** `Tool output` header. Dirty/streaming ⇒ run bar **+** elapsed clock **+** `●run`.
 
-**Heading structure.** One `h1` (`Pi Central`, visually hidden beyond the topbar wordmark), `h2` per pane (`Sessions`, `History`, `Session s7`, `Inspector`), `h3` for rail groups and inspector blocks. Landmarks: `banner` (topbar), `navigation` (rail), `main` (transcript column), `complementary` (inspector), `search` (history search). Virtualization must keep the region's `aria-label` and `aria-busy` on the stable wrapper, not on recycled rows.
+**Heading structure.** One `h1` (`Pi Central`, visually hidden beyond the topbar wordmark), `h2` per pane (`Sessions`, `History`, `Session s7`, `Session`/`Files` panel tab), `h3` for rail groups and inspector blocks. Landmarks: `banner` (topbar), `navigation` (rail), `main` (transcript column), `complementary` (**the panel**, not the inspector — they are no longer the same thing, and the inspector is a plain `div` inside the panel so there is exactly one `complementary` region rather than two nested ones), `search` (history search). Virtualization must keep the region's `aria-label` and `aria-busy` on the stable wrapper, not on recycled rows.
 
 **Copy affordance.** Every path, command, id and error string has a `Copy` button (44×24 min) that announces `Path copied` through the status region — because sniffing a truncated mono string is impossible otherwise.
 
@@ -609,7 +611,9 @@ src/
     DialogDock, ConfirmDialog, SelectDialog, InputDialog, EditorDialog, DestructiveModal
     QueueStrip, Composer, ComposerModeStrip, CommandHint
     HistoryList, HistoryRow, HistorySearch, HistoryFilters, ResumeRefusal, MissingDirBadge
+    Panel, ModeTabs (the panel's Session|Files tab strip), PanelResizer
     Inspector, IsolationBlock, PathsBlock, UsageBlock, NoticesBlock, SessionActionsBlock
+    FilesPanel, FileTree, TreeNode, FilePane, FileErrorNote   (issue #8: confined to the cwd)
     StatusChips, StatusRegion (visually hidden polite announcer), ToastStack, Popover, CopyButton
     EmptyState, ErrorCard, DismissibleCard
 ```
@@ -628,6 +632,31 @@ States per component (minimum): `default · hover · focus-visible · active · 
   is reading" — and which therefore cannot move focus at all once it is set (issue #40).
 - **Enter** in the composer sends per §4. **⌘Enter** also sends. **Shift+Enter** newline. **↑** on an empty composer recalls the last sent message (per session).
 - **⌘N** new session · **⌘⇧O** open-in-directory · **⌘K** jump-to-session (optional) · **/** focus filter · **Esc** per the §4.3 ladder · **⌘.** abort · **⌘\\** toggle rail.
+- **Panel modes.** The right panel shows `Session` (the auditable facts) or `Files` (the working
+  directory). A tab strip, so it reads like the topbar's `Sessions|History`. Both bodies stay mounted
+  under one stable `role="tabpanel"` id — remounting on switch would lose the document's scroll
+  position and jump the reader back to line 1.
+- **Panel resize.** Drag the panel's left edge; `←`/`→` nudge by 16px, `Home`/`End` jump to
+  min/max, double-click resets to 360px. It is a `role="separator"` with `aria-valuenow/min/max` and
+  `aria-valuetext` in pixels. Bounds: 280px floor, `min(1200, 60vw)` ceiling — a fraction, because the
+  panel must never be able to swallow the transcript on any window size. The width persists in
+  `localStorage`, written on gesture **end** rather than per pointermove.
+- **`Files` widens the panel once.** Entering `Files` at 360px would reproduce the clipped document
+  this rework exists to fix, so it opens at 720px — but **only** while the user has never dragged the
+  panel. After that nothing moves it: a panel that resizes itself after you have placed it is worse
+  than one that is too narrow.
+- **Narrow panel, `Files` mode.** Below 560px of *panel* width (a container query, not a viewport
+  one — the window can be 2560px while the panel is 300px) the document takes the whole panel and a
+  `‹ Files` row returns to the tree. Above it, the tree is a 210px column beside the document. A
+  280px split gives neither pane a usable width, so it is not offered.
+- **Long lines do not wrap in the document.** Wrapping makes line numbers lie; the panel is resizable,
+  so making room is the reader's call. This is why the resize work and the file browser shipped
+  together rather than as separate slices.
+- **Copy path, for the prompt.** Pi's `@path` reference is an **argv** feature (`pi [@files…]`) and Pi
+  `exit(1)`s if it is used in RPC mode — verified in Pi's `parseArgs`/`prepareInitialMessage`. So there
+  is no `@` to delegate to, and copying the **relative path** is the honest substitute: no new wire
+  kind, no Pi cooperation, and the agent already has a `read` tool. Offered on the open document's
+  header and (later) on tree rows.
 - **Focus changes only from user action** (§5.1 rule 5). Nothing in the app moves the focused session on its own.
 - **Destructive confirmation.** `Stop session` while `streaming` or `awaiting-approval` → modal `Stop this session?`. While `idle`/`stopped` → immediate, because nothing is in flight and the transcript is on disk. `Abort` is never confirmed: the queue returns to the composer, so it is recoverable. Deleting a scratch workspace (Phase 2.5) requires typing the session id — it is the only irreversible filesystem action.
 - **Validation.** The directory sheet validates on submit: empty → `Enter a directory`; nonexistent → `That directory doesn't exist. Check the path, or use New session for a scratch workspace.`; not a directory → `That path is a file, not a directory.`; inside a forbidden root (`checkWorkspaceRoot`, D-5) → the warning verbatim + `Use it anyway` only for non-D-5 warnings (D-5 bans are hard refusals). Validation is on the submit row, focus moves to the field, `aria-describedby` links the message, and the field gets `aria-invalid`.

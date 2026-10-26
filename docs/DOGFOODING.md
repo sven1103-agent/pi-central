@@ -24,6 +24,16 @@ to another branch, the UI is built from branch B while the running orchestrator 
 mismatch is *detected* — the client compares `PROTOCOL_VERSION` on `hello` and reports a protocol
 mismatch rather than silently misrendering — but a detected mismatch is still a broken dashboard.
 
+That detection only works if the version was **bumped when the wire changed**, and that is the step
+that gets missed: adding a kind breaks nothing locally, because the author's UI and orchestrator are
+the same commit. Issue #8 added five kinds (`listFiles`, `readFile`, `files`, `file`, `fileError`)
+and left `PROTOCOL_VERSION` at 1, so the handshake agreed and the real complaint arrived later and
+elsewhere — `bad control: unknown kind 'listFiles'` on the first expanded directory. If you see an
+unknown kind, the fix is to **restart the orchestrator** (see #3 above) so both halves are one
+commit; if the restart does not clear it, the version was not bumped and both halves need updating.
+`packages/protocol/test/wire-surface.test.ts` now pins the kind set against the version so this
+cannot recur silently.
+
 **3. If the agent breaks the orchestrator, you lose the tool you need to fix it.** Node caches
 ESM modules after loading them, so a running orchestrator mostly survives edits to its source. The
 next *restart* is the problem: it loads whatever is on disk. If that does not start, Pi Central is

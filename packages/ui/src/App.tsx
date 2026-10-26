@@ -12,6 +12,13 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import type { Control, HistoricalSession, LiveSession, ModelOption } from "@pi-central/protocol";
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
 import {
+  directoryAt,
+  initialFilesState,
+  reduceFiles,
+  showsHidden,
+  splitFileKey,
+} from "./files.ts";
+import {
   composerMode,
   fleetCounts,
   focusedSession,
@@ -27,6 +34,19 @@ import { ToolTrace } from "./components/ToolTrace.tsx";
 import { Composer, type QueueBehavior } from "./components/Composer.tsx";
 import { DialogDock, type DialogAnswer } from "./components/DialogDock.tsx";
 import { Inspector } from "./components/Inspector.tsx";
+import { FilesPanel } from "./components/FilesPanel.tsx";
+import { Panel } from "./components/Panel.tsx";
+import {
+  PANEL_DEFAULT_WIDTH,
+  PANEL_FILES_DEFAULT_WIDTH,
+  PANEL_PREFS_KEY,
+  clampPanelWidth,
+  defaultPanelPrefs,
+  parsePanelPrefs,
+  serializePanelPrefs,
+  type PanelMode,
+  type PanelPrefs,
+} from "./panel.ts";
 import { ModelPicker } from "./components/ModelPicker.tsx";
 import { OpenDirectorySheet } from "./components/OpenDirectorySheet.tsx";
 import { ThinkingPicker } from "./components/ThinkingPicker.tsx";
@@ -48,12 +68,128 @@ export function App() {
   // by Esc: that keystroke belongs to the agent.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
+  // The right panel's geometry and mode, restored from the last visit (issue #8; #15 generalises
+  // this to drafts and focus). Read through the initialiser so a corrupt value cannot throw during
+  // the first render — `parsePanelPrefs` validates every field rather than trusting the JSON.
+  const [panel, setPanel] = useState<PanelPrefs>(() => {
+    try {
+      return parsePanelPrefs(localStorage.getItem(PANEL_PREFS_KEY));
+    } catch {
+      // `localStorage` throws outright when storage is disabled or the origin is opaque, which is a
+      // real configuration rather than a bug — the panel just does not remember itself.
+      return defaultPanelPrefs();
+    }
+  });
+  // The viewport width is read for clamping and re-read on resize, because the panel's maximum is a
+  // fraction of the window: a window narrowed after a drag must not leave the panel wider than the
+  // transcript can survive.
+  const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 1440 : window.innerWidth));
+  useEffect(() => {
+    const onResize = () => {
+      setViewportWidth(window.innerWidth);
+      setPanel((current) => ({ ...current, width: clampPanelWidth(current.width, window.innerWidth) }));
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const setPanelWidth = useCallback((width: number, userSized: boolean) => {
+    setPanel((current) => ({ ...current, width, userSized }));
+  }, []);
+
+  const persistPanel = useCallback(() => {
+    // Persisted on gesture END, not per pointermove: a drag emits hundreds of moves and writing
+    // `localStorage` synchronously on each one makes the drag stutter.
+    setPanel((current) => {
+      try {
+        localStorage.setItem(PANEL_PREFS_KEY, serializePanelPrefs(current));
+      } catch {
+        // Storage full or disabled. Losing the remembered width is not worth failing a render over.
+      }
+      return current;
+    });
+  }, []);
+
+  const setPanelMode = useCallback(
+    (mode: PanelMode) => {
+      setPanel((current) => {
+        // Widening for `Files` happens ONCE, and only while the user has never dragged the panel.
+        // Entering `Files` at 360px would reproduce the original defect — a clipped document — but
+        // moving a panel the user has placed is worse than leaving it narrow.
+        const width =
+          mode === "files" && !current.userSized
+            ? clampPanelWidth(PANEL_FILES_DEFAULT_WIDTH, viewportWidth)
+            : current.width;
+        const next = { ...current, mode, width };
+        try {
+          localStorage.setItem(PANEL_PREFS_KEY, serializePanelPrefs(next));
+        } catch {
+          // As above.
+        }
+        return next;
+      });
+    },
+    [viewportWidth],
+  );
+
+
+  // The file tree has its own reducer: a directory tree is keyed by `(session, path)` and grows on
+  // demand, a different lifecycle from session state (issue #8). `filesRef` mirrors it so the
+  // connection's event handler can read current state without being rebound on every change.
+  const [files, dispatchFiles] = useReducer(reduceFiles, undefined, initialFilesState);
+  const filesRef = useRef(files);
+  filesRef.current = files;
 
   const connectionRef = useRef<Connection | undefined>(undefined);
 
   useEffect(() => {
     const connection = new Connection(socketUrl(), {
-      onEvent: (event) => dispatch(event),
+      onEvent: (event) => {
+        dispatch(event);
+        // File messages drive their own reducer (issue #8). They are routed here rather than inside
+        // `store.ts` because a directory tree is keyed by `(session, path)` and grows on demand,
+        // which is a different lifecycle from session state. Everything else is a session event.
+        switch (event.kind) {
+          case "files":
+            dispatchFiles({
+              kind: "filesLoaded",
+              sessionId: event.sessionId,
+              path: event.path,
+              entries: event.entries,
+              truncated: event.truncated,
+            });
+            break;
+          case "file":
+            dispatchFiles({ kind: "fileLoaded", sessionId: event.sessionId, path: event.path, text: event.text, bytes: event.bytes });
+            break;
+          case "fileError":
+            // `request` says which question failed, so this routes to the right cache instead of
+            // guessing. A refused listing becomes `filesFailed` (an error directory), never an empty
+            // one — "could not read" and "is empty" are opposite facts.
+            if (event.request === "list") {
+              dispatchFiles({
+                kind: "filesFailed",
+                sessionId: event.sessionId,
+                path: event.path,
+                reason: event.reason,
+                ...(event.code === undefined ? {} : { code: event.code }),
+                message: event.message,
+              });
+            } else {
+              dispatchFiles({
+                kind: "fileFailed",
+                sessionId: event.sessionId,
+                path: event.path,
+                reason: event.reason,
+                ...(event.code === undefined ? {} : { code: event.code }),
+                message: event.message,
+              });
+            }
+            break;
+          default:
+            break;
+        }
+      },
       onStatus: (status, detail) => {
         setConnectionStatus(status);
         setConnectionDetail(detail);
@@ -74,6 +210,99 @@ export function App() {
   }, []);
 
   const focused = focusedSession(state);
+
+  // --- file browsing (issue #8) -----------------------------------------------------------
+
+  /**
+   * Request a directory, stating whether dotfiles are wanted.
+   *
+   * `includeHidden` is sent with EVERY request rather than being a client-side filter. The
+   * orchestrator's listing is capped at 2000 entries and sorted directory-first, so filtering 2,000
+   * entries here would silently drop dotfiles that the cap had already displaced — the user would
+   * turn the toggle on and see nothing change. The flag travels to the read, so the cap is applied
+   * to what was asked for.
+   */
+  const listDirectoryFor = useCallback(
+    (sessionId: string, path: string, includeHidden: boolean) => {
+      dispatchFiles({ kind: "filesLoading", sessionId, path });
+      send({ kind: "listFiles", sessionId, path, includeHidden });
+    },
+    [send],
+  );
+
+  /**
+   * Expand a directory, fetching it only when its contents are not already known.
+   *
+   * The cache check is what makes reopening instant: a directory already loaded is not requested
+   * again, so the tree does not flicker through `loading` on every toggle.
+   */
+  const expandDirectory = useCallback(
+    (path: string) => {
+      if (!focused) return;
+      dispatchFiles({ kind: "setExpanded", sessionId: focused.id, path, expanded: true });
+      if (directoryAt(filesRef.current, focused.id, path).status === "loaded") return;
+      listDirectoryFor(focused.id, path, showsHidden(filesRef.current, focused.id));
+    },
+    [focused, listDirectoryFor],
+  );
+
+  const openFile = useCallback(
+    (path: string) => {
+      if (!focused) return;
+      dispatchFiles({ kind: "openFile", sessionId: focused.id, path });
+      // Re-read on every open, deliberately: unlike a directory listing, a file may have changed on
+      // disk since it was last looked at, and showing a stale buffer as current is worse than a
+      // re-read. (Directories are cacheable because a tree that reflows under the pointer is its own
+      // problem; #10 will add explicit refresh.)
+      dispatchFiles({ kind: "fileLoading", sessionId: focused.id, path });
+      send({ kind: "readFile", sessionId: focused.id, path });
+    },
+    [focused, send],
+  );
+
+  /**
+   * Flip the dotfile toggle, and re-request every directory that is currently on screen.
+   *
+   * Re-requesting rather than re-filtering is the point: the cached listing was produced with the
+   * OLD setting, so it genuinely does not contain the hidden entries. Showing them from the cache is
+   * impossible, and pretending otherwise is what the toggle would look like if this were omitted —
+   * an on/off switch that changes nothing.
+   */
+  const toggleHidden = useCallback(() => {
+    if (!focused) return;
+    const sessionId = focused.id;
+    const next = !showsHidden(filesRef.current, sessionId);
+    dispatchFiles({ kind: "toggleHidden", sessionId });
+    // Every loaded or loading directory for this session, since each was fetched under the old flag.
+    const prefix = `${sessionId}\u0000`;
+    for (const key of Object.keys(filesRef.current.directories)) {
+      if (!key.startsWith(prefix)) continue;
+      listDirectoryFor(sessionId, key.slice(prefix.length), next);
+    }
+  }, [focused, listDirectoryFor]);
+
+  // Load a newly focused session's root once. Keyed on the id, not on `focused`, so switching between
+  // two sessions does not refetch a tree already in hand; and skipped for a session already loaded,
+  // which is what stops the effect from re-requesting on every re-render.
+  const focusedId = focused?.id;
+  useEffect(() => {
+    if (!focusedId) return;
+    if (directoryAt(filesRef.current, focusedId, "").status !== "unloaded") return;
+    listDirectoryFor(focusedId, "", showsHidden(filesRef.current, focusedId));
+  }, [focusedId, listDirectoryFor]);
+
+  // A stopped session's tree is dropped, so a later session cannot inherit a stale one — and so the
+  // cache does not grow without bound as sessions come and go.
+  const liveIds = state.live.map((s) => s.id).join("\u0000");
+  useEffect(() => {
+    const present = new Set(state.live.map((s) => s.id));
+    for (const key of Object.keys(filesRef.current.directories)) {
+      const { sessionId } = splitFileKey(key);
+      if (!present.has(sessionId)) dispatchFiles({ kind: "forgetSession", sessionId });
+    }
+    // `liveIds` is the change signal; `state.live` is read through the closure fresh on each run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveIds]);
   const transcript = transcriptFor(state, focused?.id);
   const fleet = fleetCounts(state);
   // HOME arrives with the first snapshot, so it is undefined until then. Paths render in full
@@ -194,7 +423,7 @@ export function App() {
         />
       )}
 
-      <div className="panes">
+      <div className="panes" style={{ "--panel-width": `${panel.width}px` } as React.CSSProperties}>
         <SessionRail
           sessions={state.live}
           focusedId={state.focusedId}
@@ -290,12 +519,38 @@ export function App() {
           </main>
         )}
 
-        <Inspector
-          session={tab === "sessions" ? focused : undefined}
-          home={home}
-          onStop={() => focused && setConfirmStop(focused)}
-          onRename={(name) => focused && send({ kind: "rename", sessionId: focused.id, name })}
-        />
+        <Panel
+          mode={panel.mode}
+          onMode={setPanelMode}
+          width={panel.width}
+          onWidth={setPanelWidth}
+          viewportWidth={viewportWidth}
+          onCommit={persistPanel}
+        >
+          {panel.mode === "session" ? (
+            <Inspector
+              session={tab === "sessions" ? focused : undefined}
+              home={home}
+              onStop={() => focused && setConfirmStop(focused)}
+              onRename={(name) => focused && send({ kind: "rename", sessionId: focused.id, name })}
+            />
+          ) : focused ? (
+            <FilesPanel
+              sessionId={focused.id}
+              files={files}
+              cwd={focused.cwd}
+              onExpand={expandDirectory}
+              onCollapse={(path) => dispatchFiles({ kind: "setExpanded", sessionId: focused.id, path, expanded: false })}
+              onToggleHidden={toggleHidden}
+              onOpenFile={openFile}
+              onCloseFile={() => dispatchFiles({ kind: "closeFile", sessionId: focused.id })}
+            />
+          ) : (
+            // No session to browse. Said rather than showing an empty tree, which would claim the
+            // directory is empty — the distinction the file state module exists to protect.
+            <p className="panel-empty">Select a session to browse its working directory.</p>
+          )}
+        </Panel>
       </div>
 
       {sheetOpen && (

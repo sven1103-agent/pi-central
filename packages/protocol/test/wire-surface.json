@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "control": [
+    "abort",
+    "answerDialog",
+    "clearQueue",
+    "list",
+    "listFiles",
+    "listModels",
+    "listThinkingLevels",
+    "prompt",
+    "readFile",
+    "rename",
+    "resume",
+    "setModel",
+    "setThinkingLevel",
+    "start",
+    "stop"
+  ],
+  "event": [
+    "error",
+    "file",
+    "fileError",
+    "files",
+    "history",
+    "models",
+    "modelsError",
+    "queue",
+    "queueCleared",
+    "record",
+    "session",
+    "snapshot",
+    "thinkingLevels",
+    "thinkingLevelsError",
+    "transcript",
+    "transcriptError"
+  ]
+}

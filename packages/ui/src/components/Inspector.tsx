@@ -23,19 +23,19 @@ export function Inspector({
 }) {
   if (!session) {
     return (
-      <aside className="inspector" aria-label="Inspector">
+      <div className="inspector">
         <section>
           <h3>Inspector</h3>
           <p style={{ color: "var(--dim)", fontSize: 12 }}>
             Select a session to see its isolation, paths, and usage.
           </p>
         </section>
-      </aside>
+      </div>
     );
   }
 
   return (
-    <aside className="inspector" aria-label="Inspector">
+    <div className="inspector">
       <section>
         <h3>Isolation</h3>
         <dl className="kv">
@@ -128,8 +128,7 @@ export function Inspector({
         </dl>
       </section>
 
-      {session.warnings.length > 0 && (
-        <section>
+      {session.warnings.length > 0 && (        <section>
           <h3>Warnings</h3>
           {session.warnings.map((warning, index) => (
             <p key={index} style={{ color: "var(--warn-text)", fontSize: 11, margin: "0 0 6px" }}>
@@ -157,7 +156,7 @@ export function Inspector({
           </button>
         </div>
       </section>
-    </aside>
+    </div>
   );
 }
 

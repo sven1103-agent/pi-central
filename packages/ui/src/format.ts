@@ -5,6 +5,8 @@
  * align in a column and use one convention each. Scattering `toFixed` across components is how
  * `$0.0142` and `0.014` end up in adjacent rows.
  */
+export { formatBytes } from "@pi-central/protocol";
+
 import type { LiveSession } from "@pi-central/protocol";
 
 /**

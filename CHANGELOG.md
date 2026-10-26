@@ -91,6 +91,49 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Added
 
+- **A read-only file tree, confined to the session's working directory** (issue #8, ADR-0007). The
+  inspector shows the focused session's directory and opens text files, so the answer to "what is
+  this agent working on" is a tree rather than a shell command the user runs elsewhere.
+
+  The confinement is the whole feature, and it lives in `orchestrator/src/files.ts` with **no UI
+  dependency**: an absolute path, a `..` that escapes, and a symlink whose **target** escapes are all
+  refused. Containment is checked by path **segments**, not by string prefix — the prefix form is the
+  bug this repository already shipped once in `own-installation.ts`, where `…/read` matched
+  `…/readme.md`. The check runs twice: once lexically, so a nonexistent escape is reported as an
+  escape rather than as "missing", and again after `realpath`, which is what catches a symlink.
+
+  Three behaviours are stated rather than implied, each because the alternative asserts something
+  false:
+
+  - **An oversized file is refused, not truncated**, with both sizes named (`4.2 MB, above the
+    256.0 KB limit`). A truncated file rendered as whole is a silently wrong answer.
+  - **Binary is detected two ways** — a NUL in the first 8 KB *and* a strict UTF-8 decode — because
+    either alone misses a case: NUL alone passes a Latin-1 file that renders as replacement
+    characters, and the decode alone rejects it only after the whole buffer is read.
+  - **A permission failure reports its errno**, never "missing". The two need different responses,
+    and collapsing them is the same defect as a failed transcript read shown as an empty one.
+
+  The same distinction is carried through the whole path. The protocol gained `files`, `file` and
+  `fileError`, and `fileError` states **which question failed** (`request: "list" | "read"`) because
+  the UI keys a listing and a read by the same path — without it the client would have to guess, and
+  a refusal of one could be filed against the other. A refused **listing** becomes an error
+  directory, never `loaded: []`: "this directory is empty" and "this directory could not be read"
+  are opposite facts. Routing goes through the **supervisor**, not straight to `files.ts`, because it
+  is the only component that knows a session's `cwd` — so there is exactly one answer to what a
+  session is confined to. An unknown session is refused as such rather than resolved against some
+  other root.
+
+  The file text is displayed **inert** (ADR-0006) and the pane is labelled "working directory",
+  never "the agent's view": ADR-0007 requires that a browser reading at the user's UID not be
+  presented as what the sandboxed agent can see, and the two coincide today only because the scope is
+  the workdir.
+
+  Twenty-nine orchestrator tests and seventeen UI tests, all with fixtures under `mkdtemp`. Four
+  behaviours were **falsified** before landing: rooting the listing at `process.cwd()`, collapsing a
+  refused listing into `loaded: []`, dropping the NUL from the session-key separator (so forgetting
+  `s1` would also drop `s10`'s tree), and echoing the *normalized* path where the client had keyed its
+  request by the path it sent.
+
 - **Compaction and retry banners** (issue #5). A session that is compacting, retrying, or recovering
   from a provider failure now says so inline instead of appearing to stall. The two retry mechanisms
   are distinguished — `auto_retry` (the provider call failed) and `summarization_retry_*` (a
@@ -165,6 +208,76 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The Content-Security-Policy is now sent as an **HTTP header** as well as a `<meta>` tag. A header
   applies before the document is parsed; the meta tag does not. A test asserts the two are equal,
   so they cannot drift.
+
+### Changed
+
+- **The right pane stopped being "the inspector" and became a panel with modes and a resizable edge**
+  (issue #8, reworked after a real window showed the first attempt was unusable). Two screenshots
+  settled it. In the first, the document text was clipped **mid-word** — `Notable changes per release.
+  Forr…` — with a horizontal scrollbar, because a fixed 320px column is not a readable measure for a
+  document. In the second, the file viewer sat at the *bottom* of one long scroll region, below
+  `Command` and `Usage`, so reaching a file meant scrolling past every session fact; the transcript
+  column beside it was half empty. Three separate faults, all mine:
+
+  - **The wrong region.** A file browser is not a session fact, and `Inspector` had grown to hold both
+    — isolation, paths, command, usage, warnings, errors, actions, a tree and a document. The panel now
+    has modes (`Session` | `Files`) and takes `children` for its body; it does not know what a session
+    or a file is. `Inspector` goes back to session facts only, and a test asserts the file browser is
+    not in it so it cannot creep back.
+  - **A fixed width.** The panel is now draggable (280px floor, `min(1200, 60vw)` ceiling — a fraction,
+    so it can never swallow the transcript), with `←`/`→` nudges, `Home`/`End` jumps, double-click
+    reset, and persistence. It is a `role="separator"` with `aria-valuenow/min/max` and
+    `aria-valuetext` in pixels.
+  - **One scroll column.** The document is now a grid area that fills the remaining height and owns its
+    own scrolling. The `max-height: 340px` I had put *inside* an already-scrolling panel — two
+    scrollbars fighting over one wheel — is gone, and a test asserts the document does not cap itself.
+
+  Two more consequences. The panel is **no longer hidden** below 1440px: that was defensible while it
+  held only reference material, but it now hosts the file browser, and an unreachable pane is worse
+  than a narrow one. (The fixed-overlay replacement was itself a bug — it covered the transcript with
+  no way to dismiss it — so the panel simply stays a grid column and the resizer is how you make room;
+  the `1024–1439` sheet in DESIGN.md is deferred, not silently dropped.) And in `Files` mode the
+  layout follows the **panel's** width via a container query rather than the window's, because the
+  panel is resizable: a 2560px window can hold a 300px panel, and a viewport query would answer the
+  wrong question.
+
+  Entering `Files` widens the panel once, to 720px, and **only** while the user has never dragged it —
+  entering at 360px would reproduce the clipped document, but moving a panel the user has placed is
+  worse than leaving it narrow.
+
+  Six behaviours were **falsified** before landing: putting the tree back into the Inspector, restoring
+  the nested `max-height`, dropping `container-type`, replacing the `@container` query with a viewport
+  media query, hiding the panel at narrow widths, and inverting the drag sign. Two of those initially
+  passed and were **my tests' fault, not the code's**: the `container-type` assertion matched the same
+  phrase inside a CSS *comment*, so it is now asserted against the stylesheet with comments stripped;
+  and inverting the clamp order is genuinely a no-op, so a comment claiming "the clamp order matters"
+  was false and is corrected. A test a comment can satisfy is not testing the stylesheet.
+
+### Fixed
+
+- **The protocol version was not bumped when the wire changed, so the handshake reported a
+  compatibility it did not have** (found by dogfooding issue #8). Adding `listFiles`, `readFile`,
+  `files`, `file` and `fileError` left `PROTOCOL_VERSION` at `1`. Both halves announced v1, `hello`
+  agreed, and the mismatch surfaced only on the first expanded directory:
+
+  ```
+  bad control: unknown kind 'listFiles'
+  ```
+
+  That message names an unknown kind — a symptom — for a version skew the version check exists to
+  catch. It is the failure mode of a handshake nobody remembers to update: adding a kind breaks
+  nothing where it is written, because the author's UI and orchestrator are the same commit, and
+  breaks everything on the next machine that has one of each. Bumped to `2`.
+
+  A version number alone would rot the same way, so `packages/protocol/test/wire-surface.test.ts`
+  now pins the set of `Control` and `Event` kinds against it **in both directions**: a kind added
+  without a bump fails, and a bump without a kind fails. The failure prints the recorded and actual
+  kind lists. The union spans are bounded by the next top-level `export` rather than by line numbers,
+  which matters concretely — `FileEntry` sits between `Event` and the version and declares
+  `kind: "file"`, so a slice that ran long would read a directory entry as an event kind. Three
+  falsifications: adding a kind without a bump, bumping the version without changing the surface,
+  and renaming a union (which must fail rather than make the guard vacuous). Field-level changes on
+  an existing kind are **not** covered, and the test says so rather than implying more.
 
 ### Security
 
