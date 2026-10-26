@@ -13,8 +13,10 @@ import {
   assistantText,
   emptyTranscript,
   hasProse,
+  noticeIsOpen,
   planTranscript,
   seedTranscript,
+  type RunNotice,
   type Transcript,
 } from "../src/transcript.ts";
 
@@ -741,4 +743,130 @@ test("unrecorded calls are ordered by where they were made, not appended", () =>
     { role: "assistant", content: [{ type: "toolCall", id: "later", name: "read", arguments: {} }] },
   ]);
   assert.deepEqual(t.tools.map((x) => x.afterMessage), [1, 3]);
+});
+
+// --- Notices about the run itself (issue #5) -----------------------------------------------------
+
+/** Fold a sequence of records, which is how the notices actually arrive. */
+function notices(records: Record<string, unknown>[]): RunNotice[] {
+  let transcript: Transcript = emptyTranscript();
+  for (const record of records) transcript = applyRecord(transcript, record);
+  return transcript.notices ?? [];
+}
+
+test("a compaction start produces an OPEN notice, and the end closes it", () => {
+  // The pair is the unit: a start alone means "still compacting", which is what the banner must say.
+  const started = notices([{ type: "compaction_start", reason: "overflow" }]);
+  assert.equal(started.length, 1);
+  assert.equal(started[0]!.kind, "compaction");
+  assert.equal(noticeIsOpen(started[0]!), true, "a started compaction is still running");
+  assert.equal(started[0]!.kind === "compaction" && started[0]!.reason, "overflow");
+
+  const ended = notices([
+    { type: "compaction_start", reason: "overflow" },
+    {
+      type: "compaction_end",
+      reason: "overflow",
+      aborted: false,
+      willRetry: false,
+      result: { tokensBefore: 118_000, tokensAfter: 41_000 },
+    },
+  ]);
+  assert.equal(ended.length, 1, "the end must CLOSE the notice, not add a second one");
+  assert.equal(noticeIsOpen(ended[0]!), false);
+  assert.equal(ended[0]!.kind === "compaction" && ended[0]!.tokensBefore, 118_000);
+  assert.equal(ended[0]!.kind === "compaction" && ended[0]!.tokensAfter, 41_000);
+});
+
+test("an ABORTED compaction is recorded as aborted, not as completed", () => {
+  // Collapsing these would report a failure as a success, which is the lie that matters most here.
+  const ended = notices([
+    { type: "compaction_start", reason: "manual" },
+    { type: "compaction_end", reason: "manual", aborted: true, willRetry: false, result: undefined },
+  ]);
+  assert.equal(ended[0]!.kind === "compaction" && ended[0]!.ended?.aborted, true);
+});
+
+test("a retry records the attempt number and the bound", () => {
+  const started = notices([{ type: "auto_retry_start", attempt: 2, maxAttempts: 3, delayMs: 4000, errorMessage: "529" }]);
+  assert.equal(started.length, 1);
+  assert.equal(started[0]!.kind === "retry" && started[0]!.attempt, 2);
+  assert.equal(started[0]!.kind === "retry" && started[0]!.maxAttempts, 3);
+  assert.equal(noticeIsOpen(started[0]!), true);
+  assert.equal(started[0]!.kind === "retry" && started[0]!.errorMessage, "529");
+});
+
+test("a successful retry and a failed one are different notices", () => {
+  const recovered = notices([
+    { type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 1000, errorMessage: "529" },
+    { type: "auto_retry_end", success: true, attempt: 1 },
+  ]);
+  assert.equal(recovered[0]!.kind === "retry" && recovered[0]!.ended?.success, true);
+  assert.equal(recovered[0]!.kind === "retry" && recovered[0]!.ended?.finalError, undefined);
+
+  const gaveUp = notices([
+    { type: "auto_retry_start", attempt: 3, maxAttempts: 3, delayMs: 1000, errorMessage: "529" },
+    { type: "auto_retry_end", success: false, attempt: 3, finalError: "provider unavailable" },
+  ]);
+  assert.equal(gaveUp[0]!.kind === "retry" && gaveUp[0]!.ended?.success, false);
+  assert.equal(gaveUp[0]!.kind === "retry" && gaveUp[0]!.ended?.finalError, "provider unavailable");
+});
+
+test("summarization retries are SURFACED rather than swallowed", () => {
+  // The issue asks specifically for this: these are a different mechanism from `auto_retry`, and
+  // were previously invisible.
+  const started = notices([{ type: "summarization_retry_scheduled", attempt: 1, maxAttempts: 2, delayMs: 500, errorMessage: "timeout" }]);
+  assert.equal(started.length, 1);
+  assert.equal(started[0]!.kind, "summarization");
+  assert.equal(noticeIsOpen(started[0]!), true);
+});
+
+test("a scheduled summarization retry and its attempt are ONE notice, not two", () => {
+  // Pi emits both for a single retry. Two notices would misreport the attempt count, and the count
+  // is the information the reader needs.
+  const both = notices([
+    { type: "summarization_retry_scheduled", attempt: 1, maxAttempts: 2, delayMs: 500, errorMessage: "timeout" },
+    { type: "summarization_retry_attempt_start", source: "compaction", reason: "overflow" },
+    { type: "summarization_retry_finished" },
+  ]);
+  assert.equal(both.length, 1, "one retry must be one notice");
+  assert.equal(both[0]!.kind === "summarization" && both[0]!.source, "compaction");
+  assert.equal(noticeIsOpen(both[0]!), false, "finished closes it");
+});
+
+test("an END with no matching start does not fabricate a notice", () => {
+  // After a page reload the start is not in the buffer. Inventing one would claim to have seen
+  // something this client never received — the same rule as the queue's unknown texts.
+  const orphan = notices([{ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false, result: undefined }]);
+  assert.deepEqual(orphan, []);
+});
+
+test("two compactions in sequence are two notices, each closed by its own end", () => {
+  // "The most recent open notice of that kind" is the only correspondence available, since Pi sends
+  // no id. Consecutive compactions must therefore still pair up correctly.
+  const two = notices([
+    { type: "compaction_start", reason: "threshold" },
+    { type: "compaction_end", reason: "threshold", aborted: false, willRetry: false, result: { tokensBefore: 100, tokensAfter: 50 } },
+    { type: "compaction_start", reason: "overflow" },
+    { type: "compaction_end", reason: "overflow", aborted: true, willRetry: false, result: undefined },
+  ]);
+  assert.equal(two.length, 2);
+  assert.equal(two[0]!.kind === "compaction" && two[0]!.ended?.aborted, false);
+  assert.equal(two[1]!.kind === "compaction" && two[1]!.ended?.aborted, true);
+});
+
+test("notices do not touch messages or tools", () => {
+  // A notice is neither a message nor a tool call, and putting it in either would claim the agent
+  // said something or that something ran.
+  const transcript = [{ type: "compaction_start", reason: "overflow" }, { type: "auto_retry_start", attempt: 1, maxAttempts: 2, delayMs: 100, errorMessage: "x" }]
+    .reduce((t, r) => applyRecord(t, r), emptyTranscript());
+  assert.deepEqual(transcript.messages, []);
+  assert.deepEqual(transcript.tools, []);
+  assert.equal(transcript.notices?.length, 2);
+});
+
+test("a transcript made before notices existed still reads as having none", () => {
+  // `notices` defaults rather than being optional, so a reader never has to distinguish "absent"
+  // from "empty" — and an old transcript cannot be mistaken for one full of notices.
+  assert.deepEqual(emptyTranscript().notices, []);
 });

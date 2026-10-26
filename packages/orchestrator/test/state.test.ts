@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { LiveSession } from "@pi-central/protocol";
+import type { LiveSession, PiRecord } from "@pi-central/protocol";
 import { blockingDialogMethods, fireAndForgetUiMethods, interpretRecord } from "../src/state.ts";
 import { clearQueueVia, describeExitFailure } from "../src/supervisor.ts";
 
@@ -258,4 +258,38 @@ test("a clear_queue answer with no lists is empty, not a crash or a fabricated e
     assert.deepEqual(result.steering, []);
     assert.deepEqual(result.followUp, []);
   });
+});
+
+// --- Compaction and retry records must not change the session's state (issue #5) -----------------
+
+test("compaction and retry records do NOT move the session out of streaming", () => {
+  // The issue's fifth criterion, and the reason it exists: `agent_end` is not `agent_settled` (C8),
+  // and a retry or a compaction can follow a failed turn. A banner rendered from one of these
+  // records must therefore never be a state transition — a session that flipped to `idle` mid-retry
+  // would invite a teardown or a second prompt while Pi was still working.
+  const records: PiRecord[] = [
+    { type: "compaction_start", reason: "overflow" },
+    { type: "compaction_end", reason: "overflow", aborted: false, willRetry: false, result: undefined },
+    { type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 1000, errorMessage: "529" },
+    { type: "auto_retry_end", success: true, attempt: 1 },
+    // The FAILING variant is the one that matters, and its absence is why this test first failed to
+    // catch a falsification: a retry that gave up is the most tempting record to read as "the run is
+    // over", and it is exactly the one that must not be. Pi may still be recovering.
+    { type: "auto_retry_end", success: false, attempt: 3, finalError: "provider unavailable" },
+    { type: "summarization_retry_scheduled", attempt: 1, maxAttempts: 2, delayMs: 500, errorMessage: "x" },
+    { type: "summarization_retry_finished" },
+  ];
+  for (const record of records) {
+    const effect = interpretRecord(session({ state: "streaming" }), record);
+    assert.equal(effect.patch?.state, undefined, `${record.type} must not change the run state`);
+    assert.equal(effect.dialog, undefined, `${record.type} must not open a dialog`);
+    // `compaction_end` is the ONE exception, and it refreshes stats for a reason: the meter has to
+    // show the drop the compaction just produced (criterion 1), or it keeps displaying the pressure
+    // that was relieved and the reader decides on a stale number.
+    if (record.type === "compaction_end") {
+      assert.equal(effect.refreshStats, true, "the context meter must reflect the drop");
+    } else {
+      assert.equal(effect.refreshStats, undefined, `${record.type} must not trigger a stats refresh`);
+    }
+  }
 });

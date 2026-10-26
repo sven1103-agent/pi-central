@@ -21,6 +21,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Transcript as TranscriptModel } from "../transcript.ts";
 import { assistantText, hasProse, planTranscript, toolRunSummary, type ToolExecution, type TranscriptMessage } from "../transcript.ts";
 import { MessageBody } from "./MessageBody.tsx";
+import { RunNotices } from "./RunNotices.tsx";
 
 /**
  * How close to the bottom still counts as "following the tail".
@@ -219,6 +220,10 @@ export function TranscriptView({
           )}
         </>
       )}
+        {/* Above the end sentinel, inside the scroller: a compaction or retry is part of what is
+            happening, so following the tail should follow it too. Outside the transcript's own
+            content so that `aria-busy` on the region does not imply the notices are unfinished. */}
+        <RunNotices notices={transcript.notices} />
         <div ref={endRef} />
       </div>
       {/*

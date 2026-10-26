@@ -99,10 +99,70 @@ export interface Transcript {
   /** Pi records seen, for the "is anything happening" indicator. */
   lastRecordType?: string | undefined;
   lastRecordAt?: number | undefined;
+  /**
+   * Notices about what Pi is doing to the RUN rather than saying: compaction and retries (#5).
+   *
+   * Kept OUT of `messages` and `tools`, deliberately. Those two are the conversation and its work,
+   * and both are declared by Pi. A compaction or a retry is neither: it is an event about the
+   * machinery. Putting it in `messages` would give it a role and a turn, which is a claim that the
+   * agent said something; putting it in `tools` would give it a tool call, which is a claim something
+   * ran. It is a third kind of thing, so it is a third field.
+   *
+   * Ordering is by arrival, because these are notices about the sequence of attempts and the
+   * sequence is the information.
+   *
+   * OPTIONAL, and that is not laziness: `Transcript` is also built from whole conversations fetched
+   * after a reload, where there are no notices because notices are records and records are not
+   * replayed. A required field would force every such construction site to invent an empty array,
+   * and `undefined` already means exactly "none were seen". `applyRecord` and `emptyTranscript` both
+   * set it, so the live path always has one.
+   */
+  notices?: RunNotice[] | undefined;
 }
 
+/**
+ * One notice about the run itself.
+ *
+ * Discriminated by `kind` so the renderer cannot mix up a compaction with a retry: their wording,
+ * their duration and their meaning all differ, and the only thing they share is that neither is a
+ * message.
+ */
+export type RunNotice =
+  | {
+      kind: "compaction";
+      /** Why it started, since "overflow" and "manual" call for different things from the reader. */
+      reason: string;
+      startedAt: number;
+      /** Present once `compaction_end` arrives. `undefined` while it is still running. */
+      ended?: { aborted: boolean; willRetry: boolean; errorMessage?: string | undefined } | undefined;
+      /** Token counts, when the result reported them. Always optional: Pi may not have them. */
+      tokensBefore?: number | undefined;
+      tokensAfter?: number | undefined;
+    }
+  | {
+      kind: "retry";
+      /** 1-based, as Pi reports it. */
+      attempt: number;
+      maxAttempts: number;
+      delayMs: number;
+      errorMessage: string;
+      /** Present once `auto_retry_end` arrives. */
+      ended?: { success: boolean; finalError?: string | undefined } | undefined;
+    }
+  | {
+      kind: "summarization";
+      /** Which summarizer is retrying — a branch summary and a compaction differ in consequence. */
+      source: string;
+      attempt: number;
+      maxAttempts: number;
+      errorMessage?: string | undefined;
+      finished: boolean;
+    };
+
 export function emptyTranscript(): Transcript {
-  return { messages: [], tools: [] };
+  // `notices` defaults to an empty array rather than being optional, so every reader can map over it
+  // without a guard and a missing field cannot be mistaken for "no notices".
+  return { messages: [], tools: [], notices: [] };
 }
 
 /**
@@ -240,15 +300,132 @@ function currentAssistant(transcript: Transcript): TranscriptMessage | undefined
  */
 export function applyRecord(transcript: Transcript, record: Record<string, unknown>): Transcript {
   const type = String(record.type ?? "");
-  const next: Transcript = {
+  // A LOCAL type that makes `notices` definite, so the notice branches below need no `?? []` at
+  // every use. The public field stays optional because a transcript rebuilt from a fetched
+  // conversation genuinely has none; inside the reducer, one has just been created.
+  const next: Transcript & { notices: RunNotice[] } = {
     ...transcript,
     messages: [...transcript.messages],
     tools: [...transcript.tools],
+    notices: [...(transcript.notices ?? [])],
     lastRecordType: type,
     lastRecordAt: Date.now(),
   };
 
   switch (type) {
+    // --- Notices about the run itself (#5) ------------------------------------------------------
+    //
+    // Each of these is a START/END pair, and the END finds its notice by walking back for the most
+    // recent one of the same kind that is still open. Matching on a Pi-supplied id would be better,
+    // but Pi does not send one: these events carry no identifier, so "the most recent open one" is
+    // the only correspondence available. That is stated here rather than assumed, because it is the
+    // one place where two concurrent compactions would be conflated — which Pi does not do.
+    case "compaction_start": {
+      next.notices = [
+        ...next.notices,
+        {
+          kind: "compaction",
+          reason: String(record.reason ?? "unknown"),
+          startedAt: Date.now(),
+        },
+      ];
+      return next;
+    }
+
+    case "compaction_end": {
+      const result = record.result as { tokensBefore?: number; tokensAfter?: number } | undefined;
+      next.notices = closeNotice(next.notices, "compaction", (notice) => ({
+        ...notice,
+        ended: {
+          aborted: record.aborted === true,
+          willRetry: record.willRetry === true,
+          ...(typeof record.errorMessage === "string" ? { errorMessage: record.errorMessage } : {}),
+        },
+        ...(typeof result?.tokensBefore === "number" ? { tokensBefore: result.tokensBefore } : {}),
+        ...(typeof result?.tokensAfter === "number" ? { tokensAfter: result.tokensAfter } : {}),
+      }));
+      return next;
+    }
+
+    case "auto_retry_start": {
+      next.notices = [
+        ...next.notices,
+        {
+          kind: "retry",
+          attempt: Number(record.attempt ?? 1),
+          maxAttempts: Number(record.maxAttempts ?? 1),
+          delayMs: Number(record.delayMs ?? 0),
+          errorMessage: String(record.errorMessage ?? ""),
+        },
+      ];
+      return next;
+    }
+
+    case "auto_retry_end": {
+      next.notices = closeNotice(next.notices, "retry", (notice) => ({
+        ...notice,
+        ended: {
+          success: record.success === true,
+          ...(typeof record.finalError === "string" ? { finalError: record.finalError } : {}),
+        },
+      }));
+      return next;
+    }
+
+    // Summarization retries are a DIFFERENT mechanism from `auto_retry` (a summarizer failing while
+    // compacting, rather than a provider call failing) and the issue asks for them to be surfaced
+    // rather than swallowed. Pi emits a scheduled event followed by an attempt-start, so both are
+    // folded into one notice: two notices for one retry would misreport the attempt number, and the
+    // count is the information.
+    case "summarization_retry_scheduled": {
+      next.notices = [
+        ...next.notices,
+        {
+          kind: "summarization",
+          // The source is not known until `attempt_start`; "unknown" is honest rather than a guess,
+          // and is replaced when the next record arrives.
+          source: "unknown",
+          attempt: Number(record.attempt ?? 1),
+          maxAttempts: Number(record.maxAttempts ?? 1),
+          ...(typeof record.errorMessage === "string" ? { errorMessage: record.errorMessage } : {}),
+          finished: false,
+        },
+      ];
+      return next;
+    }
+
+    case "summarization_retry_attempt_start": {
+      // Updates the pending notice in place rather than adding one: scheduled + attempt-start are
+      // two events about ONE retry.
+      let updated = false;
+      next.notices = next.notices.map((notice) => {
+        if (updated || notice.kind !== "summarization" || notice.finished) return notice;
+        updated = true;
+        return { ...notice, source: String(record.source ?? "unknown") };
+      });
+      if (!updated) {
+        next.notices = [
+          ...next.notices,
+          {
+            kind: "summarization",
+            source: String(record.source ?? "unknown"),
+            attempt: 1,
+            maxAttempts: 1,
+            finished: false,
+          },
+        ];
+      }
+      return next;
+    }
+
+    case "summarization_retry_finished": {
+      next.notices = closeNotice(next.notices, "summarization", (notice) => ({
+        ...notice,
+        finished: true,
+      }));
+      return next;
+    }
+
     case "message_start": {
       const message = record.message as { role?: string } | undefined;
       const role = (message?.role ?? "assistant") as TranscriptMessage["role"];
@@ -796,6 +973,44 @@ export type TranscriptEntry =
  * Tools requested by message `i` run after it, so a stretch of tools is emitted immediately
  * before the next turn that has something to read.
  */
+/**
+ * Mark the most recent OPEN notice of a kind as ended.
+ *
+ * The END events carry no id to match against — Pi does not send one — so this finds the last notice
+ * of that kind that has not been closed yet. A notice arriving without a matching start is left
+ * alone rather than fabricated: `compaction_end` with no `compaction_start` means the start happened
+ * before this page loaded, and inventing one would claim to have seen something it did not.
+ */
+function closeNotice<K extends RunNotice["kind"]>(
+  notices: RunNotice[],
+  kind: K,
+  update: (notice: Extract<RunNotice, { kind: K }>) => Extract<RunNotice, { kind: K }>,
+): RunNotice[] {
+  for (let index = notices.length - 1; index >= 0; index -= 1) {
+    const notice = notices[index]!;
+    if (notice.kind !== kind) continue;
+    const closed = "ended" in notice ? notice.ended !== undefined : (notice as { finished?: boolean }).finished === true;
+    if (closed) continue;
+    const result = [...notices];
+    result[index] = update(notice as Extract<RunNotice, { kind: K }>);
+    return result;
+  }
+  return notices;
+}
+
+/**
+ * Is a notice still in flight?
+ *
+ * Exported so the renderer decides "running" from ONE definition. A component that tested
+ * `ended === undefined` itself would drift from this the first time a kind gained a different
+ * completion marker — which `summarization` already has (`finished`, not `ended`), so the drift
+ * would have started immediately.
+ */
+export function noticeIsOpen(notice: RunNotice): boolean {
+  if (notice.kind === "summarization") return !notice.finished;
+  return notice.ended === undefined;
+}
+
 export function planTranscript(transcript: Transcript): TranscriptEntry[] {
   const entries: TranscriptEntry[] = [];
   const leading = leadingTools(transcript);

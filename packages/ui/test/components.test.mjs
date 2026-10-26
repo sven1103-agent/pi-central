@@ -841,3 +841,126 @@ test("the sheet says nothing when the installation root is unknown", async () =>
   }));
   assert.ok(!/hazard/.test(html));
 });
+
+// --- Compaction and retry banners (issue #5) -----------------------------------------------------
+
+async function notices(records) {
+  const { applyRecord, emptyTranscript } = await server.ssrLoadModule("/src/transcript.ts");
+  return records.reduce((t, r) => applyRecord(t, r), emptyTranscript()).notices;
+}
+
+test("a running compaction says so, and is not a live region", async () => {
+  // A still transcript reads as "Pi Central has stopped doing anything". The banner exists to say
+  // what Pi is doing instead — and it must not be announced per delta (DESIGN.md §9).
+  const { RunNotices } = await server.ssrLoadModule("/src/components/RunNotices.tsx");
+  const html = renderToString(createElement(RunNotices, {
+    notices: await notices([{ type: "compaction_start", reason: "overflow" }]),
+  }));
+  assert.match(text(html), /Compacting context/);
+  assert.match(text(html), /the context was full/, "the reason changes what the reader expects");
+  assert.ok(!/aria-live/.test(html), "a banner that updates per attempt must not be a live region");
+  assert.ok(!/role="alert"/.test(html), "an alert would interrupt a screen reader on every attempt");
+});
+
+test("a completed compaction reports the token drop, and never claims the turn is over", async () => {
+  const { RunNotices } = await server.ssrLoadModule("/src/components/RunNotices.tsx");
+  const html = renderToString(createElement(RunNotices, {
+    notices: await notices([
+      { type: "compaction_start", reason: "overflow" },
+      { type: "compaction_end", reason: "overflow", aborted: false, willRetry: false, result: { tokensBefore: 118000, tokensAfter: 41000 } },
+    ]),
+  }));
+  assert.match(text(html), /118\.0k → 41\.0k tokens/);
+  // The banner describes the compaction, not the run. "Done" would claim the session finished.
+  assert.ok(!/\bdone\b/i.test(text(html)), "a banner must not claim completion");
+});
+
+test("an ABORTED compaction does not read as a success", async () => {
+  // The distinction that matters most: reporting a failure with the success sentence is the kind of
+  // lie this project treats as worse than a missing feature.
+  const { RunNotices } = await server.ssrLoadModule("/src/components/RunNotices.tsx");
+  const html = renderToString(createElement(RunNotices, {
+    notices: await notices([
+      { type: "compaction_start", reason: "manual" },
+      { type: "compaction_end", reason: "manual", aborted: true, willRetry: false, result: undefined },
+    ]),
+  }));
+  assert.match(text(html), /compaction stopped/);
+  assert.ok(!/compacted/i.test(text(html)), "an aborted compaction must not say it compacted");
+});
+
+test("a retry banner includes the attempt number AND the bound", async () => {
+  const { RunNotices } = await server.ssrLoadModule("/src/components/RunNotices.tsx");
+  const html = renderToString(createElement(RunNotices, {
+    notices: await notices([{ type: "auto_retry_start", attempt: 2, maxAttempts: 3, delayMs: 4000, errorMessage: "provider returned 529" }]),
+  }));
+  const body = text(html);
+  assert.match(body, /Retrying \(2\/3\)/);
+  assert.match(body, /4s/);
+  // Without the bound, "retrying" reads as an unbounded loop and the reader cannot tell whether to
+  // wait.
+  assert.match(body, /provider returned 529/);
+});
+
+test("a retry that succeeded and one that gave up are different sentences", async () => {
+  const { RunNotices } = await server.ssrLoadModule("/src/components/RunNotices.tsx");
+  const recovered = renderToString(createElement(RunNotices, {
+    notices: await notices([
+      { type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 1000, errorMessage: "529" },
+      { type: "auto_retry_end", success: true, attempt: 1 },
+    ]),
+  }));
+  assert.match(text(recovered), /Recovered after 1 retry/);
+
+  const gaveUp = renderToString(createElement(RunNotices, {
+    notices: await notices([
+      { type: "auto_retry_start", attempt: 3, maxAttempts: 3, delayMs: 1000, errorMessage: "529" },
+      { type: "auto_retry_end", success: false, attempt: 3, finalError: "provider unavailable" },
+    ]),
+  }));
+  assert.match(text(gaveUp), /Gave up after 3 attempts/);
+  assert.match(text(gaveUp), /provider unavailable/);
+  assert.ok(!/Recovered/.test(text(gaveUp)), "a failure must not be described as a recovery");
+});
+
+test("a summarization retry is attributed to the summarizer, not to the provider", async () => {
+  // A different mechanism: nothing was wrong with the provider, and saying there was would send the
+  // reader looking in the wrong place.
+  const { RunNotices } = await server.ssrLoadModule("/src/components/RunNotices.tsx");
+  const html = renderToString(createElement(RunNotices, {
+    notices: await notices([
+      { type: "summarization_retry_scheduled", attempt: 1, maxAttempts: 2, delayMs: 500, errorMessage: "timeout" },
+      { type: "summarization_retry_attempt_start", source: "compaction", reason: "overflow" },
+    ]),
+  }));
+  assert.match(text(html), /context summary/);
+  assert.ok(!/provider/i.test(text(html)), "a summarizer failure is not a provider failure");
+});
+
+test("no notices renders nothing at all", async () => {
+  // The overwhelmingly common case must add no element and no whitespace to the transcript.
+  const { RunNotices } = await server.ssrLoadModule("/src/components/RunNotices.tsx");
+  assert.equal(renderToString(createElement(RunNotices, { notices: [] })), "");
+});
+
+test("the transcript renders the notices it is given, above the tail sentinel", async () => {
+  const html = renderToString(createElement(TranscriptView, {
+    transcript: {
+      messages: [], tools: [],
+      notices: [{ kind: "retry", attempt: 1, maxAttempts: 2, delayMs: 1000, errorMessage: "529" }],
+    },
+    busy: true,
+    sessionLabel: "s1",
+  }));
+  assert.match(text(html), /Retrying \(1\/2\)/);
+});
+
+test("a transcript with no notices is unchanged in the markup", async () => {
+  // A guard on the common path: adding the feature must not alter a transcript that has no notices.
+  const html = renderToString(createElement(TranscriptView, {
+    transcript: { messages: [], tools: [], notices: [] },
+    busy: false,
+    sessionLabel: "s1",
+  }));
+  assert.ok(!/run-notice/.test(html));
+});
