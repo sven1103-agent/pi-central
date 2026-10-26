@@ -209,6 +209,32 @@ They are kept because each one is the reason a constraint or an invariant test e
   applies before the document is parsed; the meta tag does not. A test asserts the two are equal,
   so they cannot drift.
 
+### Fixed
+
+- **The protocol version was not bumped when the wire changed, so the handshake reported a
+  compatibility it did not have** (found by dogfooding issue #8). Adding `listFiles`, `readFile`,
+  `files`, `file` and `fileError` left `PROTOCOL_VERSION` at `1`. Both halves announced v1, `hello`
+  agreed, and the mismatch surfaced only on the first expanded directory:
+
+  ```
+  bad control: unknown kind 'listFiles'
+  ```
+
+  That message names an unknown kind — a symptom — for a version skew the version check exists to
+  catch. It is the failure mode of a handshake nobody remembers to update: adding a kind breaks
+  nothing where it is written, because the author's UI and orchestrator are the same commit, and
+  breaks everything on the next machine that has one of each. Bumped to `2`.
+
+  A version number alone would rot the same way, so `packages/protocol/test/wire-surface.test.ts`
+  now pins the set of `Control` and `Event` kinds against it **in both directions**: a kind added
+  without a bump fails, and a bump without a kind fails. The failure prints the recorded and actual
+  kind lists. The union spans are bounded by the next top-level `export` rather than by line numbers,
+  which matters concretely — `FileEntry` sits between `Event` and the version and declares
+  `kind: "file"`, so a slice that ran long would read a directory entry as an event kind. Three
+  falsifications: adding a kind without a bump, bumping the version without changing the surface,
+  and renaming a union (which must fail rather than make the guard vacuous). Field-level changes on
+  an existing kind are **not** covered, and the test says so rather than implying more.
+
 ### Security
 
 - The static handler refuses any request target that resolves outside the served root: a `..`

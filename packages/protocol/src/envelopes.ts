@@ -328,7 +328,24 @@ export type FileErrorReason =
   | "permission"
   | "unreadable";
 
-export const PROTOCOL_VERSION = 1 as const;
+/**
+ * The wire version, checked by BOTH sides on `hello`.
+ *
+ * **Bump this whenever a Control or Event kind is added, removed, or renamed.** That is the whole
+ * point of the handshake: adding a kind is a protocol change, and it is exactly the case where
+ * nobody remembers to bump, because nothing local fails — the author's UI and orchestrator are the
+ * same commit. The failure appears later, on someone else's machine, as an unrelated-looking
+ * `unknown kind` from a connection that reported itself compatible.
+ *
+ * That is not hypothetical: issue #8 added five kinds without a bump, and the symptom was
+ * `bad control: unknown kind 'listFiles'` against a v1 orchestrator that had said `hello`.
+ *
+ * Enforced by `test/wire-surface.test.ts`, which pins the kind set against this number in both
+ * directions — so the surface and the version cannot move independently.
+ *
+ * 1 → 2: `listFiles`, `readFile`, `files`, `file`, `fileError` (issue #8).
+ */
+export const PROTOCOL_VERSION = 2 as const;
 
 export interface Hello {
   kind: "hello";
