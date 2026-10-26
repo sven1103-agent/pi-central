@@ -28,6 +28,7 @@ import { Composer, type QueueBehavior } from "./components/Composer.tsx";
 import { DialogDock, type DialogAnswer } from "./components/DialogDock.tsx";
 import { Inspector } from "./components/Inspector.tsx";
 import { ModelPicker } from "./components/ModelPicker.tsx";
+import { OpenDirectorySheet } from "./components/OpenDirectorySheet.tsx";
 import { ThinkingPicker } from "./components/ThinkingPicker.tsx";
 import { HistoryView } from "./components/History.tsx";
 import { displayName, formatContext, formatCost, formatTokens, headerLocation } from "./format.ts";
@@ -294,7 +295,11 @@ export function App() {
       </div>
 
       {sheetOpen && (
-        <OpenDirectorySheet onClose={() => setSheetOpen(false)} onOpen={onOpenDirectory} />
+        <OpenDirectorySheet
+          installationRoot={state.installationRoot}
+          onClose={() => setSheetOpen(false)}
+          onOpen={onOpenDirectory}
+        />
       )}
 
       {confirmStop && (
@@ -548,96 +553,6 @@ function ConfirmStop({
             Keep running
           </button>
         </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * The secondary path: naming a directory to work in.
- *
- * Deliberately a sheet rather than the greeting. The common case is a session with no path
- * (US-1); this exists for the case where the work already has a home.
- */
-function OpenDirectorySheet({
-  onClose,
-  onOpen,
-}: {
-  onClose: () => void;
-  onOpen: (cwd: string) => void;
-}) {
-  const [path, setPath] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
-
-  const trimmed = path.trim();
-  // Client-side validation is advisory only: the orchestrator validates the directory before
-  // spawning, and a directory can vanish between the two checks (D-4).
-  const problem = useMemo(() => {
-    if (trimmed.length === 0) return "Enter a directory.";
-    if (!trimmed.startsWith("/")) return "Enter an absolute path, starting with /.";
-    return undefined;
-  }, [trimmed]);
-
-  return (
-    <div className="modal-backdrop" onClick={onClose} role="presentation">
-      <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="open-dir-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <h3 id="open-dir-title">Open in a directory</h3>
-        <p style={{ marginBottom: 12 }}>
-          The session is sandboxed to this directory. Pi Central does not change a session's
-          directory later, so start it where the work belongs.
-        </p>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (problem === undefined) onOpen(trimmed);
-          }}
-        >
-          <input
-            ref={inputRef}
-            type="text"
-            value={path}
-            spellCheck={false}
-            placeholder="/absolute/path/to/project"
-            aria-label="Working directory"
-            aria-invalid={problem !== undefined && path.length > 0}
-            onChange={(event) => setPath(event.target.value)}
-            style={{
-              width: "100%",
-              background: "var(--bg)",
-              border: "1px solid var(--line-strong)",
-              borderRadius: 6,
-              padding: "8px 10px",
-              color: "var(--text)",
-              font: "13px var(--mono)",
-            }}
-          />
-          {problem !== undefined && path.length > 0 && (
-            <p style={{ color: "var(--warn-text)", fontSize: 12, margin: "6px 0 0" }}>{problem}</p>
-          )}
-          <div className="dialog-actions">
-            <button type="submit" className="btn" disabled={problem !== undefined}>
-              Open here
-            </button>
-            <button type="button" className="btn btn-ghost" onClick={onClose}>
-              Cancel
-            </button>
-          </div>
-        </form>
       </div>
     </div>
   );

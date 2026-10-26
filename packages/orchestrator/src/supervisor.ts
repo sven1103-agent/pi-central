@@ -30,6 +30,8 @@ import { agentRoutingEnv } from "./env.ts";
 import { KEYCHAIN_FILE, inspectProviderAuth, readStore } from "./agent-store.ts";
 import { assessAgentCapabilities } from "./capabilities.ts";
 import { renderPolicyFragment } from "./fragment.ts";
+import { resolveInstallationRoot } from "./installation-root.ts";
+import { ownInstallationWarning } from "@pi-central/protocol";
 import { interpretRecord } from "./state.ts";
 
 export interface StartRequest {
@@ -69,6 +71,9 @@ export class Supervisor extends EventEmitter {
   constructor(config: Config) {
     super();
     this.#config = config;
+    // Resolved from THIS module's URL rather than configured: a configured path would be right for
+    // exactly one checkout — the author's — and silently wrong everywhere else (issue #25).
+    this.#installationRoot = resolveInstallationRoot();
   }
 
   list(): LiveSession[] {
@@ -254,11 +259,18 @@ export class Supervisor extends EventEmitter {
       tokensTotal: null,
       cost: null,
       dialogs: [],
-      // Policy warnings plus whatever the credential configuration needs to say. A session that
-      // starts and cannot think, or cannot use its own identity, is the failure this surfaces
-      // (C13, C15). Assembled through `assessAgentCapabilities` so an "is it provisioned" and an
-      // "is it reachable" are reported as the different problems they are (issue #28).
-      warnings: [...policy.warnings, ...capabilities.warnings],
+      // Policy warnings, credential warnings, and the self-hosting hazard (issues #28, #25).
+      // A session that starts and cannot think, or cannot use its own identity, is one failure this
+      // surfaces (C13, C15); a session pointed at the checkout Pi Central is running from is
+      // another, and it is warned about rather than refused — the user may have a good reason, and
+      // the consequences are what they need in order to judge (issue #25).
+      warnings: [
+        ...policy.warnings,
+        ...capabilities.warnings,
+        ...(ownInstallationWarning(input.cwd, this.#installationRoot) !== undefined
+          ? [ownInstallationWarning(input.cwd, this.#installationRoot)!]
+          : []),
+      ],
       startedAt: Date.now(),
       ...(input.sessionPath ? { sessionFile: input.sessionPath } : {}),
     };
@@ -635,6 +647,21 @@ export class Supervisor extends EventEmitter {
 
   async stopAll(): Promise<void> {
     await Promise.all([...this.#processes.keys()].map((id) => this.stop(id)));
+  }
+
+  /**
+   * Where this Pi Central installation lives, resolved once.
+   *
+   * Overridable so a test can supply a path rather than depending on where the test file happens to
+   * be — the same seam `#config` provides for everything else. `undefined` means the walk could not
+   * identify it, in which case no session is warned: an unidentifiable path is not evidence of
+   * safety, but a warning on every session would be noise, so the honest report is the absence of a
+   * claim. The startup banner says so instead, once.
+   */
+  #installationRoot: string | undefined;
+
+  setInstallationRoot(path: string | undefined): void {
+    this.#installationRoot = path;
   }
 
   #patch(id: string): void {

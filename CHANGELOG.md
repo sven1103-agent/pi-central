@@ -11,6 +11,17 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Added
 
+- **A session pointed at Pi Central's own installation is warned about** (issue #25). Pointing a
+  session at the checkout Pi Central is running from produces a dashboard that mysteriously stops
+  working — the UI hot-reloads into a mid-edit error, a branch switch desynchronises the two halves,
+  and a broken orchestrator cannot be restarted when it is needed. The warning names those three
+  consequences rather than the condition, appears in the "Open in a directory" sheet **before** the
+  session exists, and persists on the session row. It is **not** blocking: the user may have a good
+  reason. The predicate lives in `@pi-central/protocol` so the sheet and the orchestrator cannot
+  disagree, and it does **not** fire for a sibling clone — the setup `docs/DOGFOODING.md`
+  recommends. The installation root is derived from the runner's module URL at runtime, never
+  configured, because a configured path would be right for exactly one checkout.
+
 - **Fenced code is syntax-highlighted, lazily** (issue #4). Shiki grammars load one at a time, on
   first encounter of a language: a transcript that shows no code fetches none of it, and one that
   shows TypeScript fetches ~11 kB rather than the ~8.2 MB that exists. The name→chunk index had to

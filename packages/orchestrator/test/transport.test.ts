@@ -138,6 +138,9 @@ function emptyConfig(): Config {
     fragmentDir: "/nonexistent/policy",
     agentRootManaged: true,
     providerAgentDir: "/nonexistent/provider",
+    // Explicitly undefined, so a transport test can never depend on where the test file happens to
+    // sit in a checkout — the same reason every other path here is `/nonexistent`.
+    installationRoot: undefined,
     home: "/Users/tester",
   };
 }

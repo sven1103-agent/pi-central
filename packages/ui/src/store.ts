@@ -25,6 +25,14 @@ export interface UiState {
   historyTotal: number;
   /** The orchestrator's `$HOME`, for path abbreviation. Absent until the first snapshot. */
   home: string | undefined;
+  /**
+   * Where the orchestrator's own installation lives, for the self-hosting warning (issue #25).
+   *
+   * From the snapshot rather than computed here: "am I pointing at my own checkout?" is a fact
+   * about the *orchestrator*, and the browser cannot discover it. `undefined` means unknown, which
+   * the UI reports as unknown rather than as safe.
+   */
+  installationRoot: string | undefined;
   /** Transcripts keyed by session id, built from that session's records. */
   transcripts: Record<string, Transcript>;
   /**
@@ -81,6 +89,7 @@ export function initialState(): UiState {
     history: [],
     historyTotal: 0,
     home: undefined,
+    installationRoot: undefined,
     transcripts: {},
     transcriptErrors: {},
     models: {},
@@ -141,6 +150,7 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
         history: event.history,
         historyTotal: event.historyTotal,
         home: event.home,
+        installationRoot: event.installationRoot,
         focusedId,
         ready: true,
       };

@@ -187,6 +187,10 @@ Stack is fixed: React + Vite UI, WebSocket over loopback, TypeScript orchestrato
       put most of the saving back. The entry chunk grew **+5.04 kB** for it, measured — see
       [BUNDLE.md](BUNDLE.md). A grammar's colours reach the DOM as **classes**, never as a `style`
       attribute, so the sanitizer's allow-list did not have to widen.
+- [x] **A session pointed at Pi Central's own installation is warned about** (issue #25): the
+      directory sheet says so before the session exists, and the warning persists on the rail. The
+      predicate is pure and shared, so the two surfaces cannot disagree, and it does not fire for a
+      sibling clone — the recommended setup. Derived from the runner's module URL, never configured.
 - [x] **The orchestrator serves the built UI**, so no dev server is required and the CSP's
       `connect-src 'self'` is same-origin by construction (issue #24). `static-ui.ts`, tested.
 - [x] **The model picker** (issue #1): a `Control` for `set_model` plus the catalogue, grouped by

@@ -520,3 +520,42 @@ test("a local queueRestored action cannot be mistaken for a protocol event", () 
   assert.deepEqual(after.restoredQueue, {});
   assert.equal(after.live, before.live);
 });
+
+
+// --- The installation root reaches the UI (issue #25) --------------------------------------------
+
+test("a snapshot carries the installation root, so the sheet can warn without a session", () => {
+  // The sheet warns BEFORE any session exists, so the fact cannot come from a `LiveSession`. It
+  // comes from the snapshot, and must be `undefined` rather than invented when the orchestrator
+  // could not identify its own root.
+  const known = reduce(initialState(), {
+    kind: "snapshot",
+    live: [],
+    history: [],
+    historyTotal: 0,
+    home: "/Users/x",
+    installationRoot: "/Users/x/git/pi-central",
+  });
+  assert.equal(known.installationRoot, "/Users/x/git/pi-central");
+
+  const unknown = reduce(initialState(), {
+    kind: "snapshot",
+    live: [],
+    history: [],
+    historyTotal: 0,
+    home: "/Users/x",
+  });
+  assert.equal(unknown.installationRoot, undefined, "unknown must stay unknown, not become safe");
+});
+
+test("a later snapshot can update the root, since it is authoritative", () => {
+  let state = reduce(initialState(), {
+    kind: "snapshot", live: [], history: [], historyTotal: 0, home: "/Users/x",
+    installationRoot: "/old/checkout",
+  });
+  state = reduce(state, {
+    kind: "snapshot", live: [], history: [], historyTotal: 0, home: "/Users/x",
+    installationRoot: "/new/checkout",
+  });
+  assert.equal(state.installationRoot, "/new/checkout");
+});

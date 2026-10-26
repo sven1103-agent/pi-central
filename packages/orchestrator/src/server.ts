@@ -107,6 +107,19 @@ async function main(): Promise<number> {
   console.log(`  default workspace: ${config.workspaceRoot}`);
   console.log(`  agent root: ${config.agentRoot}${config.agentRootManaged ? " (managed)" : " (external)"}`);
   console.log(`  isolation: ${options.mode}`);
+  // Where Pi Central thinks its own installation is (issue #25). Printed because the per-session
+  // warning is SILENT when the path cannot be identified — and "no warning appeared" would otherwise
+  // be indistinguishable from "the warning is broken". Saying it once, here, makes the difference
+  // between an unidentifiable path and a safe one visible.
+  if (config.installationRoot === undefined) {
+    console.log(
+      `Self-hosting check: could not identify this installation's own directory, so sessions are\n` +
+        `  not warned when they point at it. Point a session at a checkout of Pi Central and you may\n` +
+        `  still hit the problems in docs/DOGFOODING.md.`,
+    );
+  } else {
+    console.log(`Self-hosting check: this installation is ${config.installationRoot}`);
+  }
   console.log("");
   // The UI is served from this same origin (issue #24), so the dashboard needs no second process
   // and no dev server. If it has not been built, say so ONCE here — naming the fix — rather than

@@ -18,6 +18,7 @@ const config = (over: Partial<Config> = {}): Config => ({
   agentRoot: join(root, "agent"),
   fragmentDir: join(root, "state", "policy"),
   agentRootManaged: true,
+  installationRoot: undefined,
   providerAgentDir: join(root, "provider-agent"),
   home: "/Users/tester",
   ...over,

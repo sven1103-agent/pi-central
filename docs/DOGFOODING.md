@@ -32,6 +32,19 @@ unavailable precisely when you want it to supervise the repair.
 There is a fourth, quieter one: two writers on one checkout. Two sessions editing the same working
 tree lose each other's changes in ways neither can see.
 
+## Pi Central now says so
+
+This used to be advice you had to have read. Pointing a session at the running checkout is now
+surfaced twice: the "Open in a directory" sheet warns as you type the path, and the warning stays on
+the session row afterwards. It names the three consequences above rather than just the condition,
+and it does **not** block — you may have a good reason, and the point is to inform the decision
+rather than to make it.
+
+There is one case it deliberately stays quiet about: a **sibling clone** (`pi-central-dev` beside
+`pi-central`) is the recommended setup and is protected by the sandbox, so warning about it would
+train you to dismiss the warning. If the running installation cannot identify its own directory, the
+startup banner says so — an unidentifiable path is reported as unknown, never as safe.
+
 ## What to do
 
 **Run Pi Central from one checkout. Let agents work in another.**
