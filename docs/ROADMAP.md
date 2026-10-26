@@ -277,9 +277,10 @@ File access runs **directly at the user's UID** — no sidecar, no sandbox in th
 - [ ] **A workdir of `$HOME` defeats every path-based credential deny.** The base emits
       `(allow file-read* file-write* (subpath <cwd>))` *before* the fragment, so opening a session
       on a credential-bearing root makes the fragment's denies the only control — and `~/.aws`,
-      `~/.netrc` and the rest are not denied at all. This is the general form of the bug behind
-      issue #46, and closing `~/.ssh` did not close it. Needs a decision (warn, refuse, or narrow
-      the grant), not a fragment edit.
+      `~/.netrc`, `~/.npmrc`, `~/.docker` and `~/.kube` are not denied at all. This is the general
+      form of the bug behind issue #46, and closing `~/.ssh` did not close it; a session's cwd is
+      never validated, while the workspace root is (`checkWorkspaceRoot`). Tracked as issue #49 —
+      it needs a decision (refuse, warn, or narrow the grant), not a fragment edit.
 - [ ] XSS regression suite: `<img onerror>`, `<script>`, `javascript:` links in transcripts
       and in browsed Markdown files.
 - [ ] File-browser guardrail suite: containment, symlink escape, confirmation on delete.

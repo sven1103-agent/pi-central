@@ -615,7 +615,9 @@ directory — no `~/.ssh` at all:
 
 A workdir of `$HOME` (or `/`) still defeats every path-based deny in this fragment, because the base
 workdir grant is emitted first and is `subpath`-wide. Closing `~/.ssh` is a real improvement, but it
-is not a general answer: `~/.aws/credentials`, `~/.netrc` and anything else under `$HOME` remain
-readable in that configuration. The general answer is a **workdir policy** — warn, refuse, or
-restrict the grant when a session's cwd is a credential-bearing root — which is a product decision
-rather than a fragment edit.
+is not a general answer: `~/.aws/credentials`, `~/.netrc`, `~/.npmrc`, `~/.docker/config.json` and
+`~/.kube/config` remain readable in that configuration — measured against the composed policy after
+this amendment. The general answer is a **workdir policy** — warn, refuse, or restrict the grant
+when a session's cwd is a credential-bearing root — which is a product decision rather than a
+fragment edit, and is tracked as **issue #49**. The validation already exists for the *workspace
+root* (`checkWorkspaceRoot`, D-5); it is simply never applied to a session's cwd.
