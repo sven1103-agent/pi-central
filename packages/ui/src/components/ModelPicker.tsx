@@ -24,7 +24,18 @@
  */
 import type { LiveSession, ModelOption } from "@pi-central/protocol";
 import { useState } from "react";
+import { truncateMiddle } from "../format.ts";
 import { isCurrentModel, modelChangeTiming, modelsByProvider } from "../store.ts";
+
+/**
+ * How many characters the closed control shows before the middle is elided.
+ *
+ * Matches `.picker-select`'s `max-width: 22ch`, so the shortened label is what fits rather than a
+ * second guess at the width. Kept here rather than only in CSS because the shortening decision needs
+ * the number, and having CSS clip a *pre-shortened* string is the difference between a well-chosen
+ * elision and a trailing cut (issue #42).
+ */
+const LABEL_MAX = 22;
 
 export interface ModelPickerProps {
   session: LiveSession;
@@ -87,14 +98,43 @@ export function ModelPicker({ session, models, error, onRequest, onSelect }: Mod
       ? `${session.provider}/${session.model}`
       : session.model;
 
+  // The full label for the current model, matching whatever the corresponding `<option>` says so the
+  // overlay and the list cannot disagree: a loaded catalogue shows the friendly `name`, and before it
+  // arrives the raw `provider/id` is all there is.
+  const selected = models?.find((model) => isCurrentModel(session, model));
+  const fullLabel = selected ? (selected.name ?? selected.id) : current;
+  const displayLabel = truncateMiddle(fullLabel, LABEL_MAX);
+
   return (
     <div className="picker">
       <label className="picker-label" htmlFor={`model-${session.id}`}>
         Model
       </label>
-      <select
-        id={`model-${session.id}`}
-        className="picker-select"
+      <div className="picker-field">
+        {/*
+          * The SHORTENED view, drawn over the select; the select beneath keeps full option text.
+          *
+          * A native `<select>` renders the selected option's text in its closed state, so "compact
+          * when closed, complete when open" is not expressible through option text alone — and both
+          * halves are required here: the header must stay identifying while the list must stay
+          * readable, because picking from truncated names is how you choose the wrong model.
+          *
+          * `aria-hidden` because it is a visual restatement of the select's own value: a screen
+          * reader should hear the FULL name once, from the select, rather than a shortened one
+          * twice. The `title` carries the full value for a pointer, so no one has to decode an
+          * elision to find out which model is in use.
+          */}
+        <span
+          className={`picker-display mono${usable ? "" : " is-disabled"}`}
+          aria-hidden="true"
+          title={fullLabel}
+        >
+          {displayLabel}
+        </span>
+        <select
+          id={`model-${session.id}`}
+          className="picker-select"
+          title={fullLabel}
         // Controlled by the session, not by local state: the shown value is Pi's, so a refused
         // change leaves the select exactly where it was instead of showing the requested value.
         value={models === undefined ? "" : currentKey(session, models)}
@@ -107,24 +147,28 @@ export function ModelPicker({ session, models, error, onRequest, onSelect }: Mod
           const [provider, ...rest] = event.target.value.split("/");
           if (provider !== undefined && rest.length > 0) onSelect(provider, rest.join("/"));
         }}
-      >
-        {/* The current value must exist as an option or the select cannot display it. When the
-            catalogue has not loaded, this is the only entry — which is why the select reads as the
-            model rather than as empty. */}
-        {models === undefined && <option value="">{current}</option>}
-        {models !== undefined && models.length === 0 && <option value="">no models available</option>}
-        {models !== undefined &&
-          modelsByProvider(models).map((group) => (
-            <optgroup key={group.provider} label={group.provider}>
-              {group.models.map((model) => (
-                <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>
-                  {model.name ?? model.id}
-                  {model.reasoning ? " · thinking" : ""}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-      </select>
+        >
+          {/* The current value must exist as an option or the select cannot display it. When the
+              catalogue has not loaded, this is the only entry — which is why the select reads as the
+              model rather than as empty. */}
+          {models === undefined && <option value="">{current}</option>}
+          {models !== undefined && models.length === 0 && <option value="">no models available</option>}
+          {/* Full names, deliberately: this list is where a model is chosen, and the overlay covers
+              the closed control only. Truncating here would put the elision where the decision is
+              made. */}
+          {models !== undefined &&
+            modelsByProvider(models).map((group) => (
+              <optgroup key={group.provider} label={group.provider}>
+                {group.models.map((model) => (
+                  <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>
+                    {model.name ?? model.id}
+                    {model.reasoning ? " · thinking" : ""}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+        </select>
+      </div>
       {loading && <span className="picker-note">reading the model list…</span>}
       {timing !== "" && <span className="picker-note">{timing}</span>}
     </div>

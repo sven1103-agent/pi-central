@@ -1061,3 +1061,109 @@ test("focus is marked with aria-current so the focus is not colour-only", async 
   // The second session renders after the first, and it is the one that must be marked.
   assert.ok(rows[1].includes('aria-current="true"'), "the focused session must be the marked one");
 });
+
+// --- The model label is shortened well, not clipped (issue #42) ----------------------------------
+
+test("the closed model control shows a MIDDLE-elided name, not a trailing cut", async () => {
+  // The screenshot's symptom: `litellm/deepseek-`, which is the raw string clipped by CSS. Both ends
+  // of a model name carry identity — the provider says where it runs, the tail distinguishes variants
+  // — so a trailing cut throws away the part a reader scans for.
+  const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  const html = renderToString(createElement(ModelPicker, {
+    session: session({ model: "deepseek-V4.1-Flash", provider: "litellm" }),
+    models: undefined, error: undefined, onRequest() {}, onSelect() {},
+  }));
+  const shown = /class="picker-display[^"]*"[^>]*>([^<]*)</.exec(html)?.[1];
+  assert.equal(shown, "litellm/deep…4.1-Flash");
+  assert.ok(!shown.endsWith("-"), "a trailing cut is the bug: it loses the identifying tail");
+  assert.ok(shown.includes("…"), "an elision must be marked as one");
+  assert.ok(shown.length <= 22, "the label must actually fit the control's width");
+});
+
+test("the full model name is always available, so an elision is never the only answer", async () => {
+  // Truncation may not be the only way to learn which model is in use. `title` gives a pointer the
+  // full name, and the select keeps the complete option text for assistive technology.
+  const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  const html = renderToString(createElement(ModelPicker, {
+    session: session({ model: "deepseek-V4.1-Flash", provider: "litellm" }),
+    models: undefined, error: undefined, onRequest() {}, onSelect() {},
+  }));
+  assert.match(html, /title="litellm\/deepseek-V4\.1-Flash"/, "the full name must be on the control");
+  assert.match(html, /<option value=""[^>]*>litellm\/deepseek-V4\.1-Flash</, "the option keeps the full name");
+});
+
+test("the shortened overlay is hidden from assistive technology", async () => {
+  // It is a visual restatement of the select's own value. Announcing it would read the model twice,
+  // and read the SHORTENED version — so the one surface a screen reader gets would be the elision.
+  const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  const html = renderToString(createElement(ModelPicker, {
+    session: session({ model: "gpt-5", provider: "openai" }),
+    models: undefined, error: undefined, onRequest() {}, onSelect() {},
+  }));
+  assert.match(html, /class="picker-display[^"]*"[^>]*aria-hidden="true"/);
+});
+
+test("the OPTIONS are never truncated, because that is where the choice is made", async () => {
+  // The counterpart to the first test, and the reason an overlay exists at all: a native <select>
+  // renders the selected option's text when closed, so a shortened closed label and full list entries
+  // cannot both come from option text. If this ever regresses, picking a model becomes guesswork.
+  const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  const long = "DeepSeek V4 Flash Vision Exp";
+  const html = renderToString(createElement(ModelPicker, {
+    session: session({ model: "deepseek-v4-flash-vision-exp", provider: "litellm" }),
+    models: [{ provider: "litellm", id: "deepseek-v4-flash-vision-exp", name: long }],
+    error: undefined, onRequest() {}, onSelect() {},
+  }));
+  assert.ok(html.includes(`>${long}<`) || html.includes(`>${long}<!-- -->`),
+    "the option must carry the full name");
+  const shown = /class="picker-display[^"]*"[^>]*>([^<]*)</.exec(html)?.[1];
+  assert.notEqual(shown, long, "and the closed label must still be shortened");
+  // The overlay must shorten the FRIENDLY name, not the raw id. Asserting only that it differs from
+  // the long name is too weak: shortening the raw id also differs, while showing a different string
+  // from the option the user is actually on. The tail is what proves which one it read.
+  assert.ok(shown.endsWith("sion Exp"), `the overlay must elide the option's name, got ${JSON.stringify(shown)}`);
+});
+
+test("the label shortens with the shared helper, so surfaces cannot drift", async () => {
+  // `format.ts` exists so one value has one convention. Asserted against the helper itself rather
+  // than against a literal, because this bug WAS the picker not using it.
+  const { truncateMiddle } = await server.ssrLoadModule("/src/format.ts");
+  const name = "deepseek-v4-flash-vision-exp";
+  // 22 characters exactly, keeping the head (the provider-prefixed family) and the tail (the
+  // variant). Asserted with the length so a future change to the split is caught here rather than
+  // discovered as a trailing cut.
+  assert.equal(truncateMiddle(name, 22), "deepseek-v4-…ision-exp");
+  assert.equal(truncateMiddle(name, 22).length, 22);
+  assert.equal(truncateMiddle("openai/gpt-5", 22), "openai/gpt-5", "a name that fits is untouched");
+});
+
+test("a short name is left alone rather than elided for no reason", async () => {
+  const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  const html = renderToString(createElement(ModelPicker, {
+    session: session({ model: "gpt-5", provider: "openai" }),
+    models: undefined, error: undefined, onRequest() {}, onSelect() {},
+  }));
+  assert.match(html, /class="picker-display[^"]*"[^>]*>openai\/gpt-5</);
+  assert.ok(!/openai\/gpt-5[^<]*…/.test(html), "a name that fits must not be elided");
+});
+
+test("the disabled overlay is marked, so it does not look actionable when the select is not", async () => {
+  const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  const html = renderToString(createElement(ModelPicker, {
+    session: session({ state: "stopped", model: "gpt-5", provider: "openai" }),
+    models: undefined, error: undefined, onRequest() {}, onSelect() {},
+  }));
+  assert.match(html, /class="picker-display[^"]*is-disabled/);
+});
+
+test("the overlay cannot swallow the click that opens the select", async () => {
+  // The overlay covers the select, so without `pointer-events: none` the control would stop opening —
+  // a fix for a cosmetic bug that breaks the interaction. Asserted against the stylesheet because the
+  // markup cannot express it, and because this is invisible to any rendering test.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const rule = /\.picker-display\s*\{([^}]*)\}/.exec(css);
+  assert.ok(rule, "the overlay must have a rule");
+  assert.match(rule[1], /pointer-events:\s*none/, "the overlay must not intercept clicks");
+  // And the label must be positioned over the closed control, or it would render as a second field.
+  assert.match(rule[1], /position:\s*absolute/);
+});
