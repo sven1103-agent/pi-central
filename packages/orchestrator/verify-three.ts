@@ -165,6 +165,24 @@ function credentialProbeFor(): string {
     // The appended policy fragment's identity denies.
     `if cat "$HOME/.gitconfig" >/dev/null 2>&1; then echo HOST_GITCONFIG=readable; else echo HOST_GITCONFIG=denied; fi`,
     `if ls "$HOME/.config/gh" >/dev/null 2>&1; then echo HOST_GH=readable; else echo HOST_GH=denied; fi`,
+    // --- The SSH boundary (issue #46), asked from INSIDE the session ---------------------------
+    //
+    // The fragment denies `~/.ssh` wholesale rather than by key name. Three separate facts are
+    // checked, because they are three different claims and previously only one was made:
+    //
+    //   1. The host's CONFIG is unreadable. This is the one the old rationale deliberately left
+    //      open ("denying it breaks git-over-SSH"), and it holds 58 host aliases.
+    //   2. A key whose NAME the old patterns did not match is unreadable. `cupserver` really exists
+    //      on the machine this was found on; the probe does not depend on it existing, because a
+    //      deny on the directory means an ENOENT-or-EPERM distinction is not needed to prove the
+    //      rule: what is asserted is that the read does not SUCCEED.
+    //   3. The agent's OWN ssh tree is still readable -- the half that makes this a fix rather than
+    //      a capability regression.
+    `if cat "$HOME/.ssh/config" >/dev/null 2>&1; then echo HOST_SSH_CONFIG=readable; else echo HOST_SSH_CONFIG=denied; fi`,
+    `if head -c 1 "$HOME/.ssh/cupserver" >/dev/null 2>&1; then echo HOST_SSH_UNNAMED_KEY=readable; else echo HOST_SSH_UNNAMED_KEY=denied; fi`,
+    `if ls "$HOME/.ssh" >/dev/null 2>&1; then echo HOST_SSH_LISTABLE=yes; else echo HOST_SSH_LISTABLE=no; fi`,
+    `if [ -r "$(dirname "$GIT_CONFIG_GLOBAL")/ssh/config" ]; then echo AGENT_SSH_CONFIG=readable; else echo AGENT_SSH_CONFIG=blocked; fi`,
+    `if [ -r "$(dirname "$GIT_CONFIG_GLOBAL")/ssh/github_login_ed25519" ]; then echo AGENT_SSH_KEY=readable; else echo AGENT_SSH_KEY=blocked; fi`,
     `if ssh-add -l >/dev/null 2>&1; then echo SSHAGENT=reachable; else echo SSHAGENT=unreachable; fi`,
     // Pi's auth store must be READABLE, not denied: Pi reads it at startup and a deny makes
     // it exit 1 (C12), and it holds `!command` indirections rather than secrets.
@@ -371,6 +389,39 @@ async function main(): Promise<number> {
       // The identity denies (ADR-0010). Each of these is granted by Safehouse's base policy.
       check("the host gitconfig is denied", vars.HOST_GITCONFIG === "denied", `~/.gitconfig: ${vars.HOST_GITCONFIG}`);
       check("the host gh config is denied", vars.HOST_GH === "denied", `~/.config/gh: ${vars.HOST_GH}`);
+
+      // --- The SSH boundary (issue #46), asserted from INSIDE the session ----------------------
+      //
+      // `~/.ssh` is denied as a DIRECTORY. Three claims, and the second is the one that was wrong:
+      // the old fragment matched key names, leaving `cupserver`/`jenkins`/`sven1103-agent-strongbox`
+      // out, and left ~/.ssh/config readable on purpose.
+      check(
+        "the host ssh config is denied (it maps every host alias)",
+        vars.HOST_SSH_CONFIG === "denied",
+        `~/.ssh/config: ${vars.HOST_SSH_CONFIG} — the old fragment left this readable deliberately`,
+      );
+      check(
+        "a key whose name no pattern predicted is denied",
+        vars.HOST_SSH_UNNAMED_KEY === "denied",
+        `~/.ssh/cupserver: ${vars.HOST_SSH_UNNAMED_KEY} — name-based matching is what failed`,
+      );
+      check(
+        "the host ssh directory cannot even be listed",
+        vars.HOST_SSH_LISTABLE === "no",
+        `ls ~/.ssh: ${vars.HOST_SSH_LISTABLE} (listing is how the leak was found)`,
+      );
+      // The other half: the fix must not be a capability regression. Without these the session
+      // cannot push or sign over SSH, which is a requirement (ADR-0010 §4).
+      check(
+        "the agent's own ssh config survives the blanket deny",
+        vars.AGENT_SSH_CONFIG === "readable",
+        `agent ssh/config: ${vars.AGENT_SSH_CONFIG}`,
+      );
+      check(
+        "the agent's own ssh key survives the blanket deny",
+        vars.AGENT_SSH_KEY === "readable",
+        `agent ssh key: ${vars.AGENT_SSH_KEY}`,
+      );
 
       // Pi's own store is REQUIRED to be readable (C12, ADR-0010 Amendment 1). This assertion
       // is inverted from the pre-amendment version, which asserted it was denied -- the deny

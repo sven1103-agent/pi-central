@@ -444,3 +444,55 @@ takes a key *path*, never key contents (ADR-0010 §4), so `user.signingkey` poin
 root is not a lesser misconfiguration — it is the leak. It is therefore reported as `unreachable`
 rather than as a setup step, and checked as a **segment** comparison, because `/a/agent-other` is not
 inside `/a/agent` however much it looks like it.
+
+### C15c — A deny is only authoritative relative to the composition, and a name list is not a boundary
+
+C15 is delivery, C15a is usability, C15b is configuration. The fourth failure — issue #46 — is that
+a deny rule can be **present, correctly ordered, and still not the thing that decides**, while
+simultaneously being the *only* thing that decides in the one case it gets wrong.
+
+Two properties, measured on the appended fragment:
+
+**1. A deny's effect is decided by the composed policy, not by its text.** The base policy emits the
+workdir grant as a single rule:
+
+```scheme
+(allow file-read* file-write* (subpath "$HOME"))
+```
+
+For a session whose cwd is an ordinary project directory this is narrow. For a session whose cwd is
+`$HOME` it grants the entire home directory, and every path-based credential deny is then the only
+control left. The same fragment text therefore means two different things depending on an input that
+appears nowhere in it.
+
+**2. Enumerating names fails open.** The fragment denied `~/.ssh` by key-name pattern:
+
+```scheme
+(regex #"^.*/\.ssh/id_[^/]*$") (regex #"^.*/\.ssh/.*_rsa$") (regex #"^.*/\.ssh/.*_ed25519$")
+```
+
+Evaluated against the real `~/.ssh`, three genuine private keys — `cupserver`, `jenkins`,
+`sven1103-agent-strongbox` — matched **no** pattern, and `~/.ssh/config` was left readable *on
+purpose*, on a rationale that turned out to be false. With a project workdir the list was redundant
+(the base granted only two literals; `deny default` covered the rest); with a `$HOME` workdir it was
+the only control, and it failed open.
+
+| Condition | Where it is checked | Failure looks like |
+|---|---|---|
+| Rule present and correctly ordered | `fragment.test.ts` | — |
+| Rule actually decides, for **every** input | `ssh-boundary.test.ts` (composes through `safehouse`) | a readable key, silently |
+| The capability it closes is not needed | `AGENT-SETUP.md`, verified with an empty `HOME` | a broken push or an unsigned commit |
+
+**Consequence:** test a deny as a **coverage property** — "does any rule deny this path?" — against a
+*composed* policy, and name the specific paths the previous version missed as falsifiers. Asserting
+the presence of a rule is how the broken version passed: it *did* emit a deny naming `~/.ssh/agent`
+and three patterns, so a test looking for a deny under `~/.ssh` was satisfied throughout.
+
+**Consequence:** the unit of a path boundary is the **directory**, not a list of names under it. A
+name list fails open on the next name nobody predicted, and the failure is invisible — the rule
+still reads as protection.
+
+**Consequence:** closing a capability requires demonstrating that nothing used it. It was safe to
+close `~/.ssh` only because `ssh -F <agentRoot>/ssh/config` **replaces** the per-user config, proven
+by authenticating and signing with `HOME` pointed at an empty directory. Without that measurement,
+the change would have been a hardening claim and a capability regression at once.

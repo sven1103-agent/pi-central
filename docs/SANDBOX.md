@@ -56,9 +56,32 @@ restrictions.
 >
 > The fragment is where the credential denies live ([ADR-0010](decisions/0010-agent-credential-identity.md)):
 > the host's `~/.gitconfig`, `~/.config/gh`, `~/.pi/agent/auth.json` (C6), the user's
-> ssh-agent sockets, and `~/.ssh` private keys. Denials are proven at the policy layer and
-> are asserted by `fragment.test.ts`; proving them against a *live* session needs a plain
-> terminal (C1).
+> ssh-agent sockets, and the user's **whole `~/.ssh` tree**. Denials are proven at the policy
+> layer and are asserted by `fragment.test.ts`; proving them against a *live* session needs a
+> plain terminal (C1).
+
+### `~/.ssh` is denied as a directory, not as a list of key names
+
+The fragment previously denied three key-name patterns (`id_*`, `*_rsa`, `*_ed25519`) and left
+`~/.ssh/config` readable, on the stated rationale that denying the config "breaks git-over-SSH".
+Both halves of that were wrong (issue #46):
+
+- **The rationale was false.** The agent's git runs `ssh -F <agentRoot>/ssh/config` through
+  `core.sshCommand`, and `-F` **replaces** the per-user config. The agent never reads `~/.ssh/config`.
+- **The name list failed open.** The base policy's workdir grant is
+  `(allow file-read* file-write* (subpath <workdir>))`, emitted *before* the fragment. For a session
+  opened on `$HOME` that grant covers all of `~/.ssh`, so the enumeration was the only remaining
+  control — and it did not match `cupserver`, `jenkins`, or `sven1103-agent-strongbox`, which are real
+  private keys, nor `~/.ssh/config`, which maps internal hosts.
+
+So `~/.ssh` is now denied wholesale (`file-read*`, `file-write*`, `file-read-metadata`), with the
+base policy's own narrower literals restated at matching specificity because SBPL resolves a
+conflict by last-matching rule and a literal is more specific than a subpath.
+
+This is safe because the agent's SSH identity is self-contained: its key, `config`, `known_hosts`,
+`allowed_signers` and wrapper all live under the agent root, and its gitconfig points at them. See
+[AGENT-SETUP.md](AGENT-SETUP.md) for how to create one, and to reproduce the verification with an
+empty `HOME`.
 
 ### Environment is not handled by Safehouse
 
@@ -131,6 +154,8 @@ basename still matches, or pass the profile explicitly.
 | `/tmp`, `/private/tmp`, `/var/folders`, `/private/var/folders` | read/write | subprocess temp + IPC sockets |
 | `~/.pi` | read/write | **all** sessions' transcripts (C6) |
 | `~/Library` | read-metadata only | |
+| `~/.ssh` | **denied entirely** | the user's keys, host aliases, and known hosts (issue #46) |
+| `<agentRoot>/ssh` | read/write | the agent's own key, config, known_hosts, allowed_signers |
 | elsewhere in `$HOME` | **denied** | verified: `~/Documents` is `EPERM` |
 | `/` | denied unless `wide-read` | |
 

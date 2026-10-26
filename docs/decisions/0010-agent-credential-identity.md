@@ -93,9 +93,18 @@ That is F4.
 
 The agent needs no agent. Its git-over-SSH uses an explicit `IdentityFile` with
 `IdentitiesOnly=yes`; signing uses the same key via `gpg.format=ssh` and
-`gpg.ssh.program=/usr/bin/ssh-keygen`. The appended fragment **denies** `~/.ssh/agent` and
-the launchd `Listeners` sockets, so the exposure is closed at the policy layer as well as
-the environment layer.
+`gpg.ssh.program=/usr/bin/ssh-keygen`. The appended fragment **denies `~/.ssh` wholesale** — the
+directory, not a list of key names — and the launchd `Listeners` sockets, so the exposure is closed
+at the policy layer as well as the environment layer. See
+[Amendment 3](#amendment-3--the-ssh-boundary-is-the-directory-not-a-list-of-key-names) for why the
+original name-pattern version was both redundant and, in one case, load-bearing in the wrong
+direction.
+
+**This is safe only because the agent's SSH world is self-contained.** Its `config` (github.com
+only), key, `known_hosts`, `allowed_signers` and `ssh-github.sh` all live under the agent root, and
+its `core.sshCommand` runs `ssh -F <agentRoot>/ssh/config` — where `-F` **replaces** the per-user
+config rather than adding to it. `docs/AGENT-SETUP.md` is the recipe, and it is verified with `HOME`
+pointed at an empty directory.
 
 **This is the one credential that is not encrypted at rest.** SSH reads key *files*, and
 there is no keychain indirection for it, so the alternatives were a plaintext `0600` key or a
@@ -486,3 +495,127 @@ inspection.
 - [x] The host's own signing configuration is untouched: every command takes `--file` pointing
       inside the agent root, and no command omits it. The host `~/.gitconfig` was not read or
       written — the SHA of its content is unchanged, and its `user.name` is still the user's.
+
+## Amendment 3 — the SSH boundary is the directory, not a list of key names
+
+**Date:** 2026-10-26 · **Status:** Accepted · **Issue:** #46
+
+§4 required that "the user's private keys" stay out of reach, and the fragment implemented that as
+three name patterns:
+
+```scheme
+(regex #"^.*/\.ssh/id_[^/]*$")
+(regex #"^.*/\.ssh/.*_rsa$")
+(regex #"^.*/\.ssh/.*_ed25519$")
+```
+
+plus a deny on `~/.ssh/agent`, and it **deliberately left `~/.ssh/config` readable**, with the
+rationale recorded in the fragment: *"denying it breaks git-over-SSH for no gain - the file holds no
+private key."* The defect was reported by the user asking a live session whether it could read
+`.ssh`, and the session listed it.
+
+### What was actually wrong
+
+**1. The rationale was false.** The agent does not read `~/.ssh/config`. Its `core.sshCommand` runs
+`ssh -F <agentRoot>/ssh/config`, and `-F` *replaces* the per-user config. Measured:
+
+```
+$ ssh -G rdm                                 -> hostname 134.2.24.101   identityfile ~/.ssh/id_qbic
+$ <agentRoot>/ssh/ssh-github.sh -G rdm       -> hostname rdm            identityfile <agentRoot>/ssh/github_login_ed25519
+```
+
+`rdm` is defined **only** in the host's config. Through the wrapper it is not consulted at all. So
+the file was left readable to protect a capability that never used it — while exposing 58 `Host`
+blocks, 32 non-public hostnames, 56 `User` directives and 5 `ProxyCommand`s.
+
+**2. The name list was redundant where it looked essential.** The base policy grants only
+`~/.ssh/config` and `~/.ssh/known_hosts`, as literals; everything else under `~/.ssh` was already
+`(deny default)`. With an ordinary project workdir, `cupserver` was denied by the *default*, not by
+the regex list.
+
+**3. …and load-bearing in the one case it got wrong.** The base workdir grant is
+`(allow file-read* file-write* (subpath <workdir>))`, emitted **before** the fragment. For a session
+opened on `$HOME` it covers the entire home directory, so the enumeration became the only control
+left. Evaluated against that composition, with the real `~/.ssh`:
+
+| path | size | matched by a name pattern? | readable with workdir = `$HOME`? |
+|---|---|---|---|
+| `id_rsa`, `id_ed25519`, `id_qbic`, `id_private`, `sven_id_rsa`, `id_borg`, `id_ml_cloud` | — | yes | no |
+| **`cupserver`** | 3326 B (+ `.pub`) | **no** | **yes** |
+| **`jenkins`** | 3243 B (+ `.pub`) | **no** | **yes** |
+| **`sven1103-agent-strongbox`** | 444 B (+ `.pub`) | **no** | **yes** |
+| **`~/.ssh/config`** | 7475 B | **no** (left open on purpose) | **yes** |
+
+Three real private keys and the host map were readable, and the rules simultaneously did nothing in
+the common case. Note also that `~/.aws/credentials` and `~/.netrc` are readable under a `$HOME`
+workdir: **a workdir of `$HOME` defeats every path-based credential deny in this fragment**, and is
+worth a separate decision (§ "Open" below).
+
+### What changed
+
+`~/.ssh` is denied **wholesale** — `file-read*`, `file-write*`, `file-read-metadata` on
+`(home-subpath "/.ssh")` — and the base policy's own narrower grants are restated at matching
+specificity:
+
+```scheme
+(deny file-read* file-write* file-read-metadata (home-subpath "/.ssh"))
+(deny file-read* file-write* file-read-metadata
+    (home-literal "/.ssh") (home-literal "/.ssh/config") (home-literal "/.ssh/known_hosts")
+    (home-literal "/.ssh/known_hosts.old") (home-literal "/.ssh/allowed_signers")
+    (home-subpath "/.ssh/config.d"))
+```
+
+The duplication is deliberate. SBPL resolves a conflict by **last-matching rule**, and Safehouse's
+own profiles note that a more specific filter can beat a broader one *regardless of order*
+(`10-system-runtime.sb`, the `ssh-agent-default-deny` comment). A `home-literal` is strictly more
+specific than a `home-subpath`, so a deny is stated at each baseline's own specificity and wins
+under either reading.
+
+The `~/.ssh/agent` **file** deny is removed as subsumed; the **network** deny on the launchd
+`Listeners` sockets is retained, because a file deny does not cover `connect()` on a unix socket.
+
+### Why the capability is not lost
+
+`ssh -F` already made the agent independent of `~/.ssh`. Verified with `HOME` pointed at an **empty**
+directory — no `~/.ssh` at all:
+
+- `git ls-remote git@github.com:sven1103-agent/pi-central.git` → resolved ✅
+- `ssh -T git@github.com` → `Hi sven1103-agent! You've successfully authenticated` ✅
+- a commit whose `git log --show-signature` reads `Good "git" signature for sven1103-agent` ✅
+
+### Consequences
+
+- **The agent can reach GitHub over SSH and nothing else.** A project whose `origin` is
+  `git@<internal-host>:…` will now fail. That is the intended trade — an agent should have its *own*
+  identity, not a route into the user's infrastructure — but it is a capability reduction and is
+  documented in `docs/AGENT-SETUP.md` rather than left to be discovered.
+- **A `managed` agent root has no SSH identity at all.** Nothing scaffolds `ssh/` there, and denying
+  the host's tree does not change that (see "Open").
+- **`docs/AGENT-SETUP.md` is new**, and is the reproducible provisioning recipe the fresh-install
+  path previously lacked.
+
+### Verification
+
+- [x] `fragment.test.ts` asserts a **coverage property** (does any deny rule cover this path?)
+      rather than the text of a rule, and asserts that no name pattern survives in any spelling.
+      It names the three keys the old list missed as explicit falsifiers.
+- [x] A new `ssh-boundary.test.ts` composes the real fragment through `safehouse --append-profile`
+      and evaluates the emitted SBPL for **two workdirs** — a project directory and `$HOME` —
+      asserting `~/.ssh/config` and each unnamed key are denied, and that the agent's own `ssh/`
+      tree stays readable. It also asserts the premise (that the base grants the whole workdir), so
+      the finding cannot silently become untrue.
+- [x] **Falsified:** reverting the fragment to the three regexes makes both workdir cases fail
+      (`~/.ssh/config must be denied`), and the evaluator shows `cupserver`, `jenkins` and
+      `sven1103-agent-strongbox` flipping to `allow` under `$HOME`. Restored; 25/25 pass.
+- [ ] **Not yet observed in a live sandboxed session.** `verify-three.ts` gains probes for this, but
+      it needs an unsandboxed terminal (C1). Stated rather than implied — the same distinction
+      Amendment 2 drew.
+
+### Open, and deliberately not decided here
+
+A workdir of `$HOME` (or `/`) still defeats every path-based deny in this fragment, because the base
+workdir grant is emitted first and is `subpath`-wide. Closing `~/.ssh` is a real improvement, but it
+is not a general answer: `~/.aws/credentials`, `~/.netrc` and anything else under `$HOME` remain
+readable in that configuration. The general answer is a **workdir policy** — warn, refuse, or
+restrict the grant when a session's cwd is a credential-bearing root — which is a product decision
+rather than a fragment edit.

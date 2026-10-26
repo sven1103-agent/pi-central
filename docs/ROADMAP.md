@@ -270,6 +270,16 @@ File access runs **directly at the user's UID** — no sidecar, no sandbox in th
 - [ ] Loopback-only binding with an explicit access check (C5: loopback is not a control).
 - [ ] Refuse to start when an inherited sandbox is detected (C1) — easy mistake in this
       environment, where `pi` is normally launched via `safehouse`.
+- [x] **Deny the user's `~/.ssh` wholesale, and keep the agent's own identity working** (issue #46,
+      C15c, ADR-0010 Amendment 3). Was a name list that missed three real keys and left
+      `~/.ssh/config` readable on a rationale that was false. Policy-level evidence in
+      `ssh-boundary.test.ts`; live proof still needs a plain terminal (C1).
+- [ ] **A workdir of `$HOME` defeats every path-based credential deny.** The base emits
+      `(allow file-read* file-write* (subpath <cwd>))` *before* the fragment, so opening a session
+      on a credential-bearing root makes the fragment's denies the only control — and `~/.aws`,
+      `~/.netrc` and the rest are not denied at all. This is the general form of the bug behind
+      issue #46, and closing `~/.ssh` did not close it. Needs a decision (warn, refuse, or narrow
+      the grant), not a fragment edit.
 - [ ] XSS regression suite: `<img onerror>`, `<script>`, `javascript:` links in transcripts
       and in browsed Markdown files.
 - [ ] File-browser guardrail suite: containment, symlink escape, confirmation on delete.
@@ -278,7 +288,11 @@ File access runs **directly at the user's UID** — no sidecar, no sandbox in th
 - [ ] Verify per-session env: no credential leaks across sessions (C4).
 - [ ] Process-group teardown verified under SIGKILL of the orchestrator.
 - [ ] Document the `~/.pi` cross-transcript exposure as a known limitation (C6).
-- [ ] Packaging: `pi install` package vs standalone app — decide and implement.
+- [ ] Packaging: `pi install` package vs standalone app — decide and implement. **Deferred**: how Pi
+      Central should be configurable (shipping skills, extensions, or packages) is an open question
+      in [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md#q8--naming-and-packaging), deliberately not decided
+      in the SSH slice. Nothing needs shipping for the current setup: a user's own skills already
+      reach a session through `~/.pi` (C6) and the agent's `gh` token.
 
 ## Backlog / ideas
 

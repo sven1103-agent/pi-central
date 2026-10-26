@@ -9,7 +9,43 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
-### Fixed
+### Security
+
+- **A session could read the user's `~/.ssh`, and the key denies missed every key that was not
+  named `id_*`** (issue #46). Reported by the user asking a live session whether it could read
+  `.ssh` — and it listed it. Two independent faults, and the second is the interesting one:
+
+  - The fragment denied `~/.ssh` by three **name patterns** (`id_*`, `*_rsa`, `*_ed25519`). Against
+    the real `~/.ssh` those matched seven keys and missed three genuine private keys — `cupserver`,
+    `jenkins`, `sven1103-agent-strongbox` — along with `~/.ssh/config` itself, which was left
+    readable *on purpose*.
+  - That rationale was **false**. The fragment said denying the config "breaks git-over-SSH". It
+    does not: the agent's `core.sshCommand` runs `ssh -F <agentRoot>/ssh/config`, and `-F`
+    **replaces** the per-user config. Measured — a host defined only in `~/.ssh/config` resolves to
+    the *agent's* key through the wrapper, not the user's.
+
+  Where it mattered was narrower and worse than "keys are exposed". The base policy emits the
+  workdir grant as `(allow file-read* file-write* (subpath <cwd>))` **before** the fragment, so for
+  a session opened on `$HOME` that grant covers the entire home directory and the name list became
+  the only control standing there — where it failed open. With a project workdir the same rules
+  decided nothing, because `deny default` already covered what the base did not grant.
+
+  `~/.ssh` is now denied **wholesale** — the directory, not a list of names — with the base policy's
+  narrower literals restated at matching specificity (SBPL resolves by last-matching rule, and Safehouse's own
+  profiles note a more specific filter can beat a broader one regardless of order). The `~/.ssh`
+  file deny subsumes the old `~/.ssh/agent` rule; the **network** deny on the launchd `Listeners`
+  sockets stays, because a file deny does not cover `connect()` on a unix socket.
+
+  The capability is untouched, and that was measured rather than assumed: with `HOME` pointed at an
+  **empty** directory the agent still authenticated to GitHub (`Hi sven1103-agent!`) and produced a
+  commit whose signature git verifies as `Good "git" signature for sven1103-agent`. New
+  `docs/AGENT-SETUP.md` is the reproducible recipe for provisioning that identity on a fresh
+  install, previously undocumented. New constraint **C15c** and **ADR-0010 Amendment 3**.
+
+  The test that would have caught this asserts a **coverage property** — "does any rule deny this
+  path?", evaluated against the policy **Safehouse actually composes**, for both a project workdir
+  and `$HOME` — instead of matching the text of a rule. The old version passed a test of the latter
+  shape: it did emit a deny naming `~/.ssh/agent`.
 
 - **The model picker truncated from the end, losing the identifying part of the name** (issue #42).
   The header showed `litellm/deepseek-` — the raw string clipped by CSS — while `format.ts` already
