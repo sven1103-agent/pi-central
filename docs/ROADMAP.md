@@ -302,11 +302,19 @@ session should be refused outright is #49's question and is deliberately not dec
 - [ ] Verify per-session env: no credential leaks across sessions (C4).
 - [ ] Process-group teardown verified under SIGKILL of the orchestrator.
 - [ ] Document the `~/.pi` cross-transcript exposure as a known limitation (C6).
-- [ ] Packaging: `pi install` package vs standalone app — decide and implement. **The "package"
-      half is settled against**: Pi Central ships no skill, no extension, and no settings into a
-      user's Pi environment (README principle 9). It is a peer app, and the remaining packaging
-      question is how it is distributed, not what it installs into Pi. See
-      [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md#q8--naming-and-packaging).
+- [x] Packaging: `pi install` package vs standalone app — **settled**: a peer app, not a Pi
+      package. Pi Central ships no skill, no extension, and no settings into a user's Pi environment
+      (README principle 9), so the question was only ever how it is *distributed*.
+- [x] How it is distributed: **one bundled npm artifact** — `bin/pi-central.js` plus the built UI —
+      because TypeScript cannot be loaded from `node_modules`
+      (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`). Bundled rather than `tsc`-emitted, so 39 `.ts`
+      import specifiers did not have to be rewritten. Issue #52, [ADR-0011](decisions/0011-distribution-and-update.md).
+- [ ] The release workflow: one version source, a signed tag, a GitHub Release, a provenance-attested
+      publish. Issue #53.
+- [ ] Update detection, off unless enabled — the product's first outbound egress, and it carries
+      nothing but the package name. Issue #55.
+- [ ] Applying an update: one explicit action, integrity-verified, refusing while sessions run.
+      Issue #56.
 
 ## Backlog / ideas
 

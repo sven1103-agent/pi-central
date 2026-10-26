@@ -91,6 +91,52 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Added
 
+- **Pi Central is now a package, not only a checkout** (issue #52, ADR-0011). `npm run build:package`
+  produces the artifact and `npm pack` shows exactly what ships:
+
+  ```
+  bin/pi-central.js   one bundled ESM file — orchestrator + protocol
+  dist/ui/            the built UI
+  package.json  README.md  LICENSE
+  ```
+
+  **No TypeScript is shipped, because none can be.** Importing a `.ts` file from `node_modules`
+  fails with `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` — Node will not strip types there, and
+  npm installs globals there — so a `.ts` entry point is unrunnable however the package is installed.
+  Verified with a minimal package before choosing the design.
+
+  The orchestrator is therefore **bundled**, not compiled file-by-file: the sources use 39 explicit
+  `.ts` import specifiers (required by `allowImportingTsExtensions`, which itself requires `noEmit`),
+  so a `tsc` emit would mean rewriting every one of them or adding a second resolution scheme for the
+  published build alone. `esbuild --bundle` follows them as written and emits one file, and the
+  inlined sourcemap means a stack trace from a supervised session still points at real TypeScript.
+
+  Three things that were only findable by installing the tarball and running it:
+
+  - **`ws` must not be bundled.** It is CommonJS and calls `require()` internally; bundled into ESM,
+    esbuild's `__require` shim **throws at load time**, and because the module graph is eager that
+    made even `--version` fail. The workspace build looked perfect. `ws` is now `external` and
+    declared, so the package has exactly one runtime dependency.
+  - **The UI path was wrong once bundled.** `resolveUiDistDir` derived `../../ui/dist` from the
+    module's URL — right for a checkout, and for `bin/pi-central.js` a path *outside the installed
+    package*, where it can match a directory belonging to the consumer. Both layouts are now anchored
+    to the package root, found by **name** (`pi-central`) rather than by taking the nearest
+    `package.json`, which from source is a different package whose version merely agrees today.
+  - **Both UI directories can exist at once.** Run `build:package` in a checkout and `dist/ui` sits
+    beside `packages/ui/dist`; a fixed preference would serve the stale one, and the symptom is a
+    developer rebuilding and seeing no change. The layout the module was loaded from decides.
+
+  `pi-central --version` reads the version from the **shipped** `package.json` and never restates it,
+  and `--help` lists the flags that exist. Both answer before the sandbox probe and before any config
+  is read, so they work in a sandbox, on a host with no Safehouse, and with no home directory — the
+  questions someone asks when something is already wrong.
+
+  Measured: tarball **1.63 MiB** packed / 9.07 MiB unpacked, 273 files, **no `.ts`**; bundle
+  232 KiB with the inline sourcemap. Verified by installing the tarball with `--omit=dev` into an
+  empty directory: `--version` prints `pi-central 0.1.0`, the app serves its UI from
+  `node_modules/pi-central/dist/ui` (`GET /` 200, assets 200), a traversal returns **403**, and the
+  **C1 guard still refuses** inside a sandbox — the check that must not be lost to a bundler.
+
 - **A read-only file tree, confined to the session's working directory** (issue #8, ADR-0007). The
   inspector shows the focused session's directory and opens text files, so the answer to "what is
   this agent working on" is a tree rather than a shell command the user runs elsewhere.

@@ -14,6 +14,7 @@ import { Supervisor } from "./supervisor.ts";
 import { Transport } from "./transport.ts";
 import { assertNotSandboxed, SandboxedEnvironmentError } from "./sandbox-guard.ts";
 import { hasBuiltUi, resolveUiDistDir } from "./static-ui.ts";
+import { findOwnPackage, PACKAGE_NAME } from "./package-meta.ts";
 
 interface Options {
   port: number;
@@ -22,6 +23,43 @@ interface Options {
   allowUnsandboxedHost: boolean;
   /** The built UI to serve, or `null` to serve the socket only (issue #24). */
   uiDir: string | null;
+  /** `--version`: print and exit, without binding a port or touching config. */
+  showVersion: boolean;
+  /** `--help`: print and exit, likewise. */
+  showHelp: boolean;
+}
+
+/**
+ * The installed version, read from the shipped `package.json`.
+ *
+ * Never a constant: `--version` must report the version that was actually published, and the whole
+ * point of asking is to establish which artifact is running. A restated number could be wrong, and a
+ * wrong answer here poisons every bug report that follows it. `findOwnPackage` resolves the package
+ * by NAME rather than taking the nearest `package.json`, so running from source does not report
+ * `@pi-central/orchestrator`'s version by accident (see `package-meta.ts`).
+ */
+function versionLine(): string {
+  const own = findOwnPackage();
+  if (own === undefined) return `${PACKAGE_NAME} (version unknown: no package.json found)`;
+  return `${own.name} ${own.version}`;
+}
+
+/** What `--help` prints. Deliberately the flags that exist, and nothing aspirational. */
+function printHelp(): void {
+  console.log(`${versionLine()}\n
+Usage: ${PACKAGE_NAME} [options]
+
+Options:
+  --port <n>                 Port to listen on (default 8787; 0 asks for any free one)
+  --direct                   Start sessions WITHOUT the sandbox (feasibility only)
+  --ui-dist <dir>            Serve a built UI from this directory
+  --no-ui                    Serve the socket only (use with a dev server)
+  --allow-unsandboxed-host   Skip the sandbox probe, for a host with no sandbox-exec (C10)
+  --version, -v              Print the version and exit
+  --help, -h                 Print this and exit
+
+Pi Central starts sessions with \`pi\` under Agent Safehouse. Run it from a PLAIN terminal:
+Seatbelt does not nest, so a sandboxed shell cannot start a sandboxed session (C1).`);
 }
 
 /**
@@ -42,10 +80,16 @@ function parseArgs(argv: string[]): Options {
     mode: "sandboxed",
     allowUnsandboxedHost: false,
     uiDir: resolveUiDistDir(),
+    showVersion: false,
+    showHelp: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === "--port") {
+    if (arg === "--version" || arg === "-v") {
+      options.showVersion = true;
+    } else if (arg === "--help" || arg === "-h") {
+      options.showHelp = true;
+    } else if (arg === "--port") {
       const value = Number(argv[++i]);
       // Accepts 0 explicitly: "give me any free port" is a real request, not a mistake.
       if (Number.isInteger(value) && value >= 0 && value <= 65535) options.port = value;
@@ -77,6 +121,18 @@ function parseArgs(argv: string[]): Options {
 
 async function main(): Promise<number> {
   const options = parseArgs(process.argv.slice(2));
+
+  // Answered before the sandbox probe and before any config is read. `--version` must work in a
+  // sandbox, on a host with no Safehouse, and with no home directory — it is the question someone
+  // asks when something is already wrong, so it must not be able to fail for the same reason.
+  if (options.showVersion) {
+    console.log(versionLine());
+    return 0;
+  }
+  if (options.showHelp) {
+    printHelp();
+    return 0;
+  }
 
   // Check BEFORE binding a port or reading config, so a misinvocation is the first thing the
   // user sees rather than a confusing spawn failure minutes later.

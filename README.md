@@ -75,6 +75,21 @@ npm run server        # the orchestrator, which also serves the UI
 
 Then open <http://127.0.0.1:8787> — the URL the server prints.
 
+### From the packaged artifact
+
+Nothing is published yet, but the artifact is buildable and installable today (issue #52):
+
+```bash
+npm run build:package     # bundles the orchestrator, copies the built UI
+npm pack --dry-run        # show exactly what would ship
+npm run serve:package     # run the packaged binary from ./bin
+```
+
+It ships as JavaScript — TypeScript cannot be loaded from `node_modules` — as **one bundled ESM
+file plus the built UI**, with a single runtime dependency. `pi-central --version` reports the
+version of the package it was actually shipped in, read from that `package.json` rather than
+restated in code. See [ADR-0011](docs/decisions/0011-distribution-and-update.md).
+
 Serving the UI from the orchestrator is not only convenience. A Vite dev server watches
 `packages/ui/src`, so an agent editing a component reloads the interface you are using out from
 under you, mid-edit, into a syntax-error overlay. A built UI removes the watcher. It also makes
