@@ -405,3 +405,42 @@ between a user fixing their machine and a user reporting a bug.
 document can pass while the intended thing is dead — which is why `assessAgentCapabilities` reports
 the positive, and why the same facts are probed from *inside* a live session in `verify-three.ts`
 rather than inferred from the policy text.
+
+### C15b — Material, configuration and delivery are three different things
+
+C15 is delivery, C15a is usability. There is a third failure that both of them miss, and it is the
+one issue #27 was filed for: **the material can be present, delivered, reachable, and still do
+nothing, because the configuration that acts on it is switched off.**
+
+The agent tree held a valid signing key and a matching `ssh/allowed_signers` while its gitconfig said
+
+```
+[commit] gpgsign = false
+[tag]    gpgsign = false
+```
+
+with no `user.signingkey` and no `gpg.format`. Every check for the *key* passed. Commits were
+unsigned, and **nothing reported it** — an unsigned commit is well-formed, exit code 0.
+
+Three conditions, then, not two, and they fail with different symptoms:
+
+| Condition | Where it is checked | Failure looks like |
+|---|---|---|
+| Material exists | `signingMaterial()`, `agent-store.ts` | signing *fails loudly* — every commit errors |
+| Configured to use it | `auditSigning()` in `signing.ts` | signing **silently does nothing** |
+| Delivered (C15) | `env.ts` + `--env-pass` | the tool uses the host's settings, or none |
+
+**Consequence:** "is the key there?" is not a test of whether signing happens. The audit reads the
+settings *that act on the key*, and the two questions are answered separately because the repairs
+differ: absent material means "put the key back", disabled configuration means "run these commands".
+
+**Consequence:** `git config --list` is the wrong instrument for this. It resolves includes and
+merges system and global config, so it reports the *effective* value while hiding that the agent's
+own file disagrees — and it reads the host's configuration to do so. The audit parses the agent's
+own file, because that is the file the requirement is about.
+
+**Consequence:** a path is the only thing between "the agent signed" and "the user signed". `ssh`
+takes a key *path*, never key contents (ADR-0010 §4), so `user.signingkey` pointing outside the agent
+root is not a lesser misconfiguration — it is the leak. It is therefore reported as `unreachable`
+rather than as a setup step, and checked as a **segment** comparison, because `/a/agent-other` is not
+inside `/a/agent` however much it looks like it.

@@ -83,6 +83,13 @@ items need an unsandboxed run (C1).*
       missing capability is surfaced as a session warning. It distinguishes *not provisioned* (a
       setup step) from *provisioned but unreachable* (a defect in Pi Central), because the original
       `gh` failure named a host path and read as "the sandbox is blocking my config". See C15a.
+- [x] **Agent commit signing is actually configured** (issue #27, [ADR-0010
+      Amendment 2](decisions/0010-agent-credential-identity.md#amendment-2--signing-was-configured-off-and-a-key-check-cannot-see-it)).
+      ADR-0010 §4 required it; the adopted tree had `commit.gpgsign = false` beside a valid key, so
+      commits were unsigned and silent. The audit is on the **settings that act on the key**, not the
+      key's presence (C15b) — a distinction no key check can make, since all four failing
+      configurations exit 0. `signing.ts`; the fix is printed, not applied, because the tree is
+      user-maintained.
 - [x] **`FORBIDDEN_ENABLE` now covers `ssh`, `keychain`, `cloud-credentials`,
       `cloud-storage`.** Verified by policy diff that `--enable=ssh` appends an SSH
       integration block and `keychain` grants keychain RW + `SecurityServer` mach-lookups.

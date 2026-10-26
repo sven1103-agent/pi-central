@@ -106,7 +106,8 @@ Stated plainly, because a dashboard that overstates itself is worse than one tha
 transcripts reconstructed from Pi's delta-only stream; the approval dock (`confirm` / `select` /
 `input` / `editor`) answerable for any session; a bounded tool trace with full traversal; history
 searchable by content, with a clear refusal when a session's directory is gone; agent-scoped
-credentials with the host's own credentials denied.
+credentials with the host's own credentials denied, and commits signed as the agent when the store is
+configured to sign.
 
 **Not yet:** no file navigation. It is an issue rather than a wish — see below.
 

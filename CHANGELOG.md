@@ -9,6 +9,18 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+### Fixed
+
+- **Agent commits were never signed** (issue #27). ADR-0010 §4 requires it; the adopted agent
+  `gitconfig` said `gpgsign = false` with no `signingkey` and no `gpg.format`, so commits were created
+  unsigned while the signing key sat right beside them — and nothing reported it, because an unsigned
+  commit is well-formed and exits 0. Signing is now audited on the **settings that act on the key**
+  (`signing.ts`), not on the key's presence, and `verify-three.ts` asserts from inside a sandboxed
+  session that a commit made there **verifies** (`Good "git" signature`) against the agent's own
+  `allowed_signers`. `user.signingkey` pointing outside the agent root is reported as a leak of the
+  user's identity rather than as a setup step. The fix is produced as explicit `git config` commands,
+  not applied: the agent root is user-maintained, so Pi Central instructs rather than rewrites.
+
 ### Added
 
 - **Compaction and retry banners** (issue #5). A session that is compacting, retrying, or recovering
