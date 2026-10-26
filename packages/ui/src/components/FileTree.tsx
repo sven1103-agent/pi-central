@@ -25,7 +25,6 @@ import type { FileEntry } from "@pi-central/protocol";
 import {
   childPath,
   directoryAt,
-  fileAt,
   isBrokenLink,
   isEnterable,
   isExpanded,
@@ -34,6 +33,7 @@ import {
   type FilesState,
 } from "../files.ts";
 import { formatBytes } from "../format.ts";
+import { FileErrorNote } from "./FileErrorNote.tsx";
 
 export function FileTree({
   sessionId,
@@ -276,132 +276,5 @@ function ChildList({
         </p>
       )}
     </>
-  );
-}
-
-/**
- * A refusal, stated with its reason.
- *
- * The reason is a closed set from the protocol, so each case is handled rather than printed as
- * whatever prose arrived. That matters because the *fix* differs per reason: a binary file is not
- * going to become readable, a permission failure is a chmod, an escape is a path bug, and an
- * oversized file is a judgement call. A generic "could not read" would hide all four.
- */
-export function FileErrorNote({
-  path,
-  reason,
-  code,
-  message,
-  depth = 0,
-}: {
-  path: string;
-  reason: string;
-  code?: string | undefined;
-  message: string;
-  depth?: number;
-}) {
-  return (
-    <p
-      className="filetree-note filetree-error"
-      role="note"
-      style={{ paddingLeft: `${depth * 12}px` }}
-      title={path === "" ? undefined : path}
-    >
-      <strong>{reasonLabel(reason)}</strong>
-      {/* The orchestrator's message is shown verbatim: it carries the OS code and the sizes, and
-          rewording it here would be a second place that could disagree with the first. */}
-      <span className="filetree-error-detail">{message}</span>
-      {code !== undefined && <span className="filetree-kind">{code}</span>}
-    </p>
-  );
-}
-
-/** A short human label for a refusal reason. The long explanation is the orchestrator's message. */
-function reasonLabel(reason: string): string {
-  switch (reason) {
-    case "escapes-cwd":
-      return "Outside the working directory";
-    case "absolute-path":
-      return "Not a relative path";
-    case "invalid-path":
-      return "Not a usable path";
-    case "too-large":
-      return "Too large to read";
-    case "binary":
-      return "Not a text file";
-    case "permission":
-      return "Permission denied";
-    case "not-found":
-      return "Not found";
-    case "not-a-directory":
-      return "Not a directory";
-    case "is-directory":
-      return "That is a directory";
-    default:
-      return "Could not read";
-  }
-}
-
-/**
- * The open file's contents (issue #8).
- *
- * Text, displayed **inert** — never rendered as markup (ADR-0006). It is untrusted for the same
- * reason a transcript is: it came off the filesystem, and a file in a working directory may have been
- * written by the agent, by a dependency, or by whoever sent the repository.
- */
-export function FilePane({
-  sessionId,
-  path,
-  state,
-  onClose,
-}: {
-  sessionId: string;
-  path: string;
-  state: ReturnType<typeof fileAt>;
-  onClose: () => void;
-}) {
-  const lines = state.status === "loaded" ? state.text.split("\n") : [];
-
-  return (
-    <div className="filepane">
-      <div className="filepane-head">
-        <span className="filepane-path" title={path}>
-          {path}
-        </span>
-        {state.status === "loaded" && (
-          <span className="filepane-meta">
-            {lines.length} line{lines.length === 1 ? "" : "s"} · {formatBytes(state.bytes)}
-          </span>
-        )}
-        <button type="button" className="btn btn-quiet" onClick={onClose} aria-label="Close file">
-          Close
-        </button>
-      </div>
-
-      {state.status === "unloaded" || state.status === "loading" ? (
-        <p className="filetree-note" role="status">
-          Reading…
-        </p>
-      ) : state.status === "error" ? (
-        <FileErrorNote path={path} reason={state.reason} code={state.code} message={state.message} />
-      ) : (
-        /*
-          Line numbers and the text as separate elements, so a line number cannot be selected as part
-          of the content and a copy of the code does not begin with its numbering.
-        */
-        <ol className="filepane-lines">
-          {lines.map((line, index) => (
-            <li key={index}>
-              <span className="filepane-line-no" aria-hidden="true">
-                {index + 1}
-              </span>
-              {/* Rendered as a text node: React escapes it, and there is no `dangerouslySetInnerHTML`
-                  anywhere near this — ADR-0006's single insertion point is in `MessageBody`. */}
-              <span className="filepane-line-text">{line === "" ? "\u00a0" : line}</span>
-            </li>
-          ))}
-        </ol>
-      )}
-    </div>
   );
 }

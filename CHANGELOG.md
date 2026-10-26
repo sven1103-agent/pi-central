@@ -209,6 +209,50 @@ They are kept because each one is the reason a constraint or an invariant test e
   applies before the document is parsed; the meta tag does not. A test asserts the two are equal,
   so they cannot drift.
 
+### Changed
+
+- **The right pane stopped being "the inspector" and became a panel with modes and a resizable edge**
+  (issue #8, reworked after a real window showed the first attempt was unusable). Two screenshots
+  settled it. In the first, the document text was clipped **mid-word** — `Notable changes per release.
+  Forr…` — with a horizontal scrollbar, because a fixed 320px column is not a readable measure for a
+  document. In the second, the file viewer sat at the *bottom* of one long scroll region, below
+  `Command` and `Usage`, so reaching a file meant scrolling past every session fact; the transcript
+  column beside it was half empty. Three separate faults, all mine:
+
+  - **The wrong region.** A file browser is not a session fact, and `Inspector` had grown to hold both
+    — isolation, paths, command, usage, warnings, errors, actions, a tree and a document. The panel now
+    has modes (`Session` | `Files`) and takes `children` for its body; it does not know what a session
+    or a file is. `Inspector` goes back to session facts only, and a test asserts the file browser is
+    not in it so it cannot creep back.
+  - **A fixed width.** The panel is now draggable (280px floor, `min(1200, 60vw)` ceiling — a fraction,
+    so it can never swallow the transcript), with `←`/`→` nudges, `Home`/`End` jumps, double-click
+    reset, and persistence. It is a `role="separator"` with `aria-valuenow/min/max` and
+    `aria-valuetext` in pixels.
+  - **One scroll column.** The document is now a grid area that fills the remaining height and owns its
+    own scrolling. The `max-height: 340px` I had put *inside* an already-scrolling panel — two
+    scrollbars fighting over one wheel — is gone, and a test asserts the document does not cap itself.
+
+  Two more consequences. The panel is **no longer hidden** below 1440px: that was defensible while it
+  held only reference material, but it now hosts the file browser, and an unreachable pane is worse
+  than a narrow one. (The fixed-overlay replacement was itself a bug — it covered the transcript with
+  no way to dismiss it — so the panel simply stays a grid column and the resizer is how you make room;
+  the `1024–1439` sheet in DESIGN.md is deferred, not silently dropped.) And in `Files` mode the
+  layout follows the **panel's** width via a container query rather than the window's, because the
+  panel is resizable: a 2560px window can hold a 300px panel, and a viewport query would answer the
+  wrong question.
+
+  Entering `Files` widens the panel once, to 720px, and **only** while the user has never dragged it —
+  entering at 360px would reproduce the clipped document, but moving a panel the user has placed is
+  worse than leaving it narrow.
+
+  Six behaviours were **falsified** before landing: putting the tree back into the Inspector, restoring
+  the nested `max-height`, dropping `container-type`, replacing the `@container` query with a viewport
+  media query, hiding the panel at narrow widths, and inverting the drag sign. Two of those initially
+  passed and were **my tests' fault, not the code's**: the `container-type` assertion matched the same
+  phrase inside a CSS *comment*, so it is now asserted against the stylesheet with comments stripped;
+  and inverting the clamp order is genuinely a no-op, so a comment claiming "the clamp order matters"
+  was false and is corrected. A test a comment can satisfy is not testing the stylesheet.
+
 ### Fixed
 
 - **The protocol version was not bumped when the wire changed, so the handshake reported a

@@ -34,6 +34,19 @@ import { ToolTrace } from "./components/ToolTrace.tsx";
 import { Composer, type QueueBehavior } from "./components/Composer.tsx";
 import { DialogDock, type DialogAnswer } from "./components/DialogDock.tsx";
 import { Inspector } from "./components/Inspector.tsx";
+import { FilesPanel } from "./components/FilesPanel.tsx";
+import { Panel } from "./components/Panel.tsx";
+import {
+  PANEL_DEFAULT_WIDTH,
+  PANEL_FILES_DEFAULT_WIDTH,
+  PANEL_PREFS_KEY,
+  clampPanelWidth,
+  defaultPanelPrefs,
+  parsePanelPrefs,
+  serializePanelPrefs,
+  type PanelMode,
+  type PanelPrefs,
+} from "./panel.ts";
 import { ModelPicker } from "./components/ModelPicker.tsx";
 import { OpenDirectorySheet } from "./components/OpenDirectorySheet.tsx";
 import { ThinkingPicker } from "./components/ThinkingPicker.tsx";
@@ -54,6 +67,70 @@ export function App() {
   // Drafts are per session and in memory, so switching focus never loses typing. Never cleared
   // by Esc: that keystroke belongs to the agent.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+
+  // The right panel's geometry and mode, restored from the last visit (issue #8; #15 generalises
+  // this to drafts and focus). Read through the initialiser so a corrupt value cannot throw during
+  // the first render — `parsePanelPrefs` validates every field rather than trusting the JSON.
+  const [panel, setPanel] = useState<PanelPrefs>(() => {
+    try {
+      return parsePanelPrefs(localStorage.getItem(PANEL_PREFS_KEY));
+    } catch {
+      // `localStorage` throws outright when storage is disabled or the origin is opaque, which is a
+      // real configuration rather than a bug — the panel just does not remember itself.
+      return defaultPanelPrefs();
+    }
+  });
+  // The viewport width is read for clamping and re-read on resize, because the panel's maximum is a
+  // fraction of the window: a window narrowed after a drag must not leave the panel wider than the
+  // transcript can survive.
+  const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 1440 : window.innerWidth));
+  useEffect(() => {
+    const onResize = () => {
+      setViewportWidth(window.innerWidth);
+      setPanel((current) => ({ ...current, width: clampPanelWidth(current.width, window.innerWidth) }));
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const setPanelWidth = useCallback((width: number, userSized: boolean) => {
+    setPanel((current) => ({ ...current, width, userSized }));
+  }, []);
+
+  const persistPanel = useCallback(() => {
+    // Persisted on gesture END, not per pointermove: a drag emits hundreds of moves and writing
+    // `localStorage` synchronously on each one makes the drag stutter.
+    setPanel((current) => {
+      try {
+        localStorage.setItem(PANEL_PREFS_KEY, serializePanelPrefs(current));
+      } catch {
+        // Storage full or disabled. Losing the remembered width is not worth failing a render over.
+      }
+      return current;
+    });
+  }, []);
+
+  const setPanelMode = useCallback(
+    (mode: PanelMode) => {
+      setPanel((current) => {
+        // Widening for `Files` happens ONCE, and only while the user has never dragged the panel.
+        // Entering `Files` at 360px would reproduce the original defect — a clipped document — but
+        // moving a panel the user has placed is worse than leaving it narrow.
+        const width =
+          mode === "files" && !current.userSized
+            ? clampPanelWidth(PANEL_FILES_DEFAULT_WIDTH, viewportWidth)
+            : current.width;
+        const next = { ...current, mode, width };
+        try {
+          localStorage.setItem(PANEL_PREFS_KEY, serializePanelPrefs(next));
+        } catch {
+          // As above.
+        }
+        return next;
+      });
+    },
+    [viewportWidth],
+  );
 
 
   // The file tree has its own reducer: a directory tree is keyed by `(session, path)` and grows on
@@ -346,7 +423,7 @@ export function App() {
         />
       )}
 
-      <div className="panes">
+      <div className="panes" style={{ "--panel-width": `${panel.width}px` } as React.CSSProperties}>
         <SessionRail
           sessions={state.live}
           focusedId={state.focusedId}
@@ -442,24 +519,38 @@ export function App() {
           </main>
         )}
 
-        <Inspector
-          session={tab === "sessions" ? focused : undefined}
-          home={home}
-          files={files}
-          onExpandDirectory={expandDirectory}
-          onCollapseDirectory={(path) => {
-            if (!focused) return;
-            dispatchFiles({ kind: "setExpanded", sessionId: focused.id, path, expanded: false });
-          }}
-          onToggleHidden={toggleHidden}
-          onOpenFile={openFile}
-          onCloseFile={() => {
-            if (!focused) return;
-            dispatchFiles({ kind: "closeFile", sessionId: focused.id });
-          }}
-          onStop={() => focused && setConfirmStop(focused)}
-          onRename={(name) => focused && send({ kind: "rename", sessionId: focused.id, name })}
-        />
+        <Panel
+          mode={panel.mode}
+          onMode={setPanelMode}
+          width={panel.width}
+          onWidth={setPanelWidth}
+          viewportWidth={viewportWidth}
+          onCommit={persistPanel}
+        >
+          {panel.mode === "session" ? (
+            <Inspector
+              session={tab === "sessions" ? focused : undefined}
+              home={home}
+              onStop={() => focused && setConfirmStop(focused)}
+              onRename={(name) => focused && send({ kind: "rename", sessionId: focused.id, name })}
+            />
+          ) : focused ? (
+            <FilesPanel
+              sessionId={focused.id}
+              files={files}
+              cwd={focused.cwd}
+              onExpand={expandDirectory}
+              onCollapse={(path) => dispatchFiles({ kind: "setExpanded", sessionId: focused.id, path, expanded: false })}
+              onToggleHidden={toggleHidden}
+              onOpenFile={openFile}
+              onCloseFile={() => dispatchFiles({ kind: "closeFile", sessionId: focused.id })}
+            />
+          ) : (
+            // No session to browse. Said rather than showing an empty tree, which would claim the
+            // directory is empty — the distinction the file state module exists to protect.
+            <p className="panel-empty">Select a session to browse its working directory.</p>
+          )}
+        </Panel>
       </div>
 
       {sheetOpen && (

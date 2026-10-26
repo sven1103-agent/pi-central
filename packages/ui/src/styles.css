@@ -148,16 +148,26 @@ button { font: inherit; color: inherit; }
  */
 .panes {
   display: grid;
-  grid-template-columns: 288px 1fr 320px;
+  /* The panel column is set by the resizer (issue #8), via a custom property so the grid still owns
+     the track definition and `--panel-width` is the only thing JavaScript writes. */
+  grid-template-columns: 288px 1fr var(--panel-width, 320px);
   gap: 1px;
   background: var(--line);
   min-height: 0;
 }
 
-@media (max-width: 1439px) {
-  .panes { grid-template-columns: 288px 1fr; }
-  .inspector { display: none; }
-}
+/*
+ * There is deliberately no narrow-viewport rule for the panel any more.
+ *
+ * It used to be `display: none` below 1440px. That was defensible while the panel held only reference
+ * material, but it now hosts the file browser, and a pane you cannot reach at all is worse than a
+ * narrow one. The first replacement attempt overlaid the panel on the transcript as a fixed sheet —
+ * which covered the transcript with no way to dismiss it, a worse bug than the one it fixed, because
+ * the panel is not modal and nothing said how to close it. A toggle is the right answer and needs a
+ * control in the topbar; until that exists, the panel stays a grid column at every width and the
+ * resizer is how you make room. The `1024–1439` sheet behaviour in DESIGN.md is deferred, not
+ * silently dropped.
+ */
 
 @media (max-width: 1023px) {
   .panes { grid-template-columns: 1fr; }
@@ -768,11 +778,16 @@ select.btn { font-family: var(--sans); }
 
 /* ------------------------------------------------------------------ inspector */
 
+/*
+ * Fills the panel body and scrolls itself. The Panel is now the `complementary` landmark, so this is
+ * a plain div rather than a nested `<aside>` — two `complementary` landmarks, one inside the other,
+ * is worse than none, because a screen-reader user cannot tell which region they are in.
+ */
 .inspector {
-  background: var(--panel);
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--sp-4) 18px;
-  min-height: 0;
   font-size: var(--fs-sm);
 }
 .inspector h3 {
@@ -1345,6 +1360,8 @@ select.btn { font-family: var(--sans); }
 /* --- the open file pane ------------------------------------------------------------------------- */
 
 .filepane { display: flex; flex-direction: column; min-height: 0; }
+/* The header is the slot a future edit toolbar joins; it must not scroll away from the content. */
+.filepane-head { position: sticky; top: 0; background: var(--panel); z-index: 1; }
 .filepane-head {
   display: flex; align-items: baseline; gap: var(--sp-2);
   padding-bottom: 4px; border-bottom: 1px solid var(--line); margin-bottom: 6px;
@@ -1357,9 +1374,13 @@ select.btn { font-family: var(--sans); }
 
 /* Scrolls within the inspector rather than growing it, so a long file cannot push the rest of the
    auditable facts off screen. */
+/*
+ * No `max-height`. The first version capped this at 340px inside an already-scrolling panel, which
+ * produced two scrollbars fighting over the same wheel — visible in the screenshot that prompted this
+ * rework. The document scrolls because `.files-doc` scrolls, and it is the only thing that does.
+ */
 .filepane-lines {
   list-style: none; margin: 0; padding: 0;
-  max-height: 340px; overflow: auto;
   font-family: var(--mono); font-size: var(--fs-xs); line-height: 1.5;
 }
 .filepane-lines li { display: flex; gap: 8px; }
@@ -1368,3 +1389,136 @@ select.btn { font-family: var(--sans); }
   color: var(--dim); opacity: 0.6; user-select: none;
 }
 .filepane-line-text { white-space: pre; }
+
+/* --- The panel: a region with modes, and a draggable edge (issue #8, reworked) ------------------
+
+   This was the inspector: a fixed 320px column. A real window showed why that fails once it hosts a
+   document — the text was clipped mid-word with a horizontal scrollbar. So the region has modes and
+   a resizable edge, and the three rules below are what make a document usable inside it:
+
+     1. The panel is a flex COLUMN of fixed height. Its header does not scroll; its body does.
+     2. The body is the only scrolling element, so nothing nested can fight it.
+     3. The document fills the remaining height and scrolls inside itself, with no `max-height`.
+
+   `container-type: inline-size` makes the panel the query container for its own contents. That is
+   deliberate over a viewport media query: the panel is resizable, so the window can be 2560px while
+   the panel is 300px, and a viewport query would answer the wrong question. */
+
+.panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--panel);
+  container-type: inline-size;
+  container-name: panel;
+}
+
+.panel-head {
+  flex: none;
+  padding: var(--sp-2) var(--sp-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+.panel-head .tabs { padding-bottom: var(--sp-2); }
+
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.panel-body:focus-visible { outline: none; box-shadow: var(--focus); }
+
+.panel-empty {
+  margin: 0;
+  padding: var(--sp-4) 18px;
+  color: var(--dim);
+  font-size: var(--fs-sm);
+}
+
+/* The handle sits over the 1px gutter as a child of the panel, so the shell's grid stays three
+   columns. 1px is not grabbable, hence the wider hit area with a transparent border box. */
+.panel-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 7px;
+  cursor: col-resize;
+  z-index: 5;
+  /* No background: the gutter's --line already draws the edge. Only the cursor and hit area change,
+     so the visual weight of the layout is untouched. */
+  background: transparent;
+  touch-action: none;
+}
+.panel-resizer:hover,
+.panel-resizer:focus-visible {
+  background: var(--accent);
+  opacity: 0.4;
+}
+.panel-resizer:focus-visible { outline: none; box-shadow: var(--focus); }
+
+/* --- Files mode --------------------------------------------------------------------------------- */
+
+.files-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+/* Only shown when the panel is too narrow for both panes; the container query below hides it. */
+.files-back {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+.files-back-path {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* One grid, one row, filling the panel. The tree and the document are separate areas, so a long
+   document cannot push the tree away — the defect the single scroll column caused. */
+.files-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+.files-body > * { min-height: 0; min-width: 0; }
+
+.files-tree { overflow: auto; padding: var(--sp-3) 12px var(--sp-4); }
+
+/* Narrow: the document takes the whole panel and the tree is out of the way. A 280px split would
+   give neither pane a usable width, so it is not offered. */
+.files-body.has-file .files-tree { display: none; }
+
+.files-doc {
+  overflow: auto;
+  padding: var(--sp-3) 14px var(--sp-4);
+}
+
+/* Wide enough for both: the tree returns as a fixed navigation column beside the document. The
+   breakpoint is mirrored in `panel.ts` as FILES_SPLIT_MIN_WIDTH and a test asserts the two agree,
+   because CSS cannot import TypeScript. */
+@container panel (min-width: 560px) {
+  .files-back { display: none; }
+  .files-body.has-file { grid-template-columns: 210px 1fr; }
+  .files-body.has-file .files-tree {
+    display: block;
+    border-right: 1px solid var(--line);
+  }
+}
