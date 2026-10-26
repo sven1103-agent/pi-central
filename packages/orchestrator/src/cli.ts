@@ -64,11 +64,11 @@ function printHelp(workspaceRoot: string): void {
   console.log(`pi-central orchestrator (Phase 1 smoke)
 
 Usage:
-  cli.ts history                       list discovered sessions
-  cli.ts run [--cwd DIR] [--prompt S]  start a session and prompt it
-  cli.ts run --prompt S                start in the app-owned default workspace
-  cli.ts resume <id|path> [--prompt S]  resume a session in its own recorded directory
-  cli.ts run --direct                  skip the sandbox (feasibility only)
+  pi-central history                    list discovered sessions
+  pi-central run [--cwd DIR] [--prompt S]  start a session and prompt it
+  pi-central run --prompt S             start in the app-owned default workspace
+  pi-central resume <id|path> [--prompt S]  resume a session in its own recorded directory
+  pi-central run --direct               skip the sandbox (feasibility only)
 
 The default workspace is ${workspaceRoot}
 
@@ -100,7 +100,7 @@ async function history(config: ReturnType<typeof defaultConfig>): Promise<number
  */
 async function resume(config: ReturnType<typeof defaultConfig>, options: Options & { target?: string }): Promise<number> {
   if (!options.target) {
-    console.error("usage: cli.ts resume <id|path> [--prompt S]");
+    console.error("usage: pi-central resume <id|path> [--prompt S]");
     return 2;
   }
 
@@ -219,7 +219,7 @@ async function run(config: ReturnType<typeof defaultConfig>, options: Options): 
   if (session.error) console.log(`error: ${session.error}`);
 
   await supervisor.stopAll();
-  console.log("stopped. sessions on disk are now resumable with `cli.ts history`.");
+  console.log("stopped. sessions on disk are now resumable with `pi-central history`.");
   return settled && stateNow() !== "failed" ? 0 : 1;
 }
 

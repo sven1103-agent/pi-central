@@ -125,18 +125,27 @@ deliberately unsandboxed so it can spawn sandboxed sessions at all (C1).
 
 ## Q8 — Naming and packaging
 
-Repo `pi-central` under the `sven1103-agent` org, MIT, matching `pi-metrics`
-conventions. Unresolved:
+**Decided (2026-10-26, [ADR-0011](decisions/0011-distribution-and-update.md)).**
 
-- npm package name: `@sven1103-agent/pi-central`?
-- Is it a `pi install`-able package (extensions only) or a standalone app? The
-  orchestrator is **not** a Pi extension (C1), so it cannot be a package that loads
-  inside Pi. It is a *peer* application.
+- **It is a peer application, not a Pi package.** The orchestrator is not a Pi extension (C1), so
+  it cannot be something that loads inside Pi, and Pi Central ships no skill, extension or settings
+  into a user's Pi environment (README principle 9). Settled.
+- **Unscoped name `pi-central`.** Checked available on the public registry; the artifact is a CLI a
+  person installs deliberately, which is what an unscoped name is for. Scoped names are for
+  packages consumed as dependencies of something else. (Reconsider if that ever changes.)
+- **Distribution:** one bundled npm artifact — `bin/pi-central.js` plus the built UI — because
+  TypeScript cannot be loaded from `node_modules`
+  (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`). Issue #52.
 
-**Working default:** standalone app in the org, published to npm only if it ships an
-optional Pi-side companion extension (e.g. an approval-policy extension).
+Still open, and deliberately not guessed here: **the first published version number.**
+`package.json` is `0.1.0` and `CHANGELOG.md` already records a `## [0.1.0] — first iteration` for
+Increment 1, while nothing has ever been tagged or published. Issue #53 proposes `0.2.0` (nothing
+is rewritten) over relabelling the historical section.
 
-**Decision needed:** confirm it is a peer app, not a Pi package.
+One consequence worth naming: the package has a **single runtime dependency** (`ws`, external
+because it is CommonJS). Everything else is bundled, which keeps the surface of the component that
+runs unsandboxed small — but "zero dependencies" is not a property this project has, and claiming it
+would be false.
 
 ### How should Pi Central be *configurable*? (deferred 2026-10-26)
 

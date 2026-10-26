@@ -35,8 +35,9 @@
  */
 import { createReadStream, existsSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { extname, posix, resolve, sep } from "node:path";
+import { extname, join, posix, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { findOwnPackage } from "./package-meta.ts";
 
 /**
  * The Content-Security-Policy, as a header.
@@ -80,14 +81,68 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
  *
  * Derived from this module's own URL rather than configured, for the same reason issue #25 gives
  * for the installation path: a configured path would be correct for exactly one checkout — the
- * author's. `packages/orchestrator/src/static-ui.ts` → `packages/ui/dist`.
+ * author's.
  *
- * `PI_CENTRAL_UI_DIST` overrides, which is what a packaged app (or a test) needs.
+ * There are **two** layouts, and a single relative path cannot serve both (issue #52):
+ *
+ *   - **From source** — the built UI is `packages/ui/dist`, where `vite build` writes.
+ *   - **From the published bundle** — the built UI is `dist/ui`, where the build script copies it.
+ *
+ * The old single candidate (`../../ui/dist`, relative to THIS MODULE) is right for the first and
+ * wrong for the second: from `bin/pi-central.js` it resolves to `<parent-of-package>/ui/dist`, which
+ * is *outside the installed package* and therefore matches whatever the consumer happens to have
+ * there. Deriving both candidates from the **package root** instead — found by name, via
+ * `findOwnPackage` — means neither can escape the package, so a stray directory cannot be mistaken
+ * for the UI. That is the same "own installation" resolution the self-hosting warning uses (#25).
+ *
+ * The first candidate containing an `index.html` wins, and **the order depends on the layout this
+ * module was loaded from.** That is not decoration: both directories can exist at once, because a
+ * checkout where someone has run `npm run build:package` has `dist/ui` (the packaged copy) AND
+ * `packages/ui/dist` (the fresh `vite build` output). A fixed order would then serve the wrong one
+ * — and the symptom is the worst kind: a developer edits a component, rebuilds, sees no change,
+ * because the orchestrator has been serving a stale copy from the other directory all along.
+ *
+ * So a module loaded from source prefers the workspace output, and a bundled module prefers the
+ * packaged one. When neither exists the same distinction decides which path the startup message
+ * names, so a developer who has not built the UI yet is told about `packages/ui/dist`.
+ *
+ * `PI_CENTRAL_UI_DIST` overrides everything, which is what a test or an unusual install needs.
+ *
+ * `from` is injectable so the packaged shape can be tested without building a tarball: a test hands
+ * it a `file:///…/bin/pi-central.js` URL inside a temp package and asserts which directory comes
+ * back.
  */
-export function resolveUiDistDir(env: NodeJS.ProcessEnv = process.env): string {
+export function resolveUiDistDir(
+  env: NodeJS.ProcessEnv = process.env,
+  from: string = import.meta.url,
+): string {
   const explicit = env["PI_CENTRAL_UI_DIST"];
   if (explicit !== undefined && explicit !== "") return resolve(explicit);
-  return fileURLToPath(new URL("../../ui/dist", import.meta.url));
+
+  const own = findOwnPackage(from);
+  if (own === undefined) {
+    // No owning package.json: fall back to the module-relative workspace path. Not an error — it
+    // means an unusual layout, and the caller reports a missing UI the same way it always would.
+    return fileURLToPath(new URL("../../ui/dist", from));
+  }
+
+  const packaged = join(own.root, "dist", "ui");
+  const workspace = join(own.root, "packages", "ui", "dist");
+  // `runningFromSource` is a statement about where this module was loaded FROM, and it is what
+  // resolves the case where both directories exist. A heuristic, but a checkable one, and getting it
+  // wrong costs a developer a rebuild they cannot explain.
+  const fromSource = runningFromSource(from);
+  const candidates = fromSource ? [workspace, packaged] : [packaged, workspace];
+  for (const candidate of candidates) {
+    if (hasBuiltUi(candidate)) return candidate;
+  }
+  // Neither exists: a message problem, not a serving problem. Name the path this layout expects.
+  return fromSource ? workspace : packaged;
+}
+
+/** Is `from` inside a `packages/<name>/src/` tree, i.e. a checkout running from source? */
+function runningFromSource(from: string): boolean {
+  return /[\\/]packages[\\/][^\\/]+[\\/]src[\\/]/.test(fileURLToPath(from));
 }
 
 export type StaticResolution =

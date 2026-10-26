@@ -101,6 +101,23 @@ trying to escape.
 Fuzzing the policy composer, testing the boundary with adversarial content, and turning each
 finding into an invariant test.
 
+## Increment 6 — Ship it: installable and updatable
+
+**Goal:** Pi Central is a thing you install and update, not only a checkout you run.
+
+Everything so far has been run from a git checkout, with the UI built by hand and the orchestrator
+loading TypeScript off disk. That is why the product has been able to improve quickly — and it is
+also why there is no artifact, no way to say which version is running, and a manual `git pull` in the
+loop when the tool is used to build the tool.
+
+Slices: the distributable artifact (issue #52, **done**); the release workflow — one version source,
+a tag, a GitHub Release, a provenance-attested publish (#53); prerequisite checks for `pi` and
+`safehouse` (#54); update detection that is off unless enabled (#55); and applying an update — one
+explicit action, integrity-verified, refusing while sessions run (#56). The trust model is
+[ADR-0011](decisions/0011-distribution-and-update.md); the measured findings behind it — TypeScript
+cannot be loaded from `node_modules`, and the product has had zero outbound network calls until now
+— are recorded there rather than re-derived per slice.
+
 ## Out of scope
 
 Recorded in [ROADMAP.md](ROADMAP.md#explicitly-out-of-scope) rather than as issues, so that the

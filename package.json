@@ -8,6 +8,15 @@
   "engines": {
     "node": ">=22.19.0"
   },
+  "bin": {
+    "pi-central": "bin/pi-central.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "workspaces": [
     "packages/protocol",
     "packages/orchestrator",
@@ -21,11 +30,18 @@
     "ui:dev": "npm run dev --workspace @pi-central/ui",
     "ui:build": "npm run build --workspace @pi-central/ui",
     "check:docs": "node scripts/check-docs.mjs",
-    "verify": "npm run typecheck && npm test && npm run check:docs"
+    "verify": "npm run typecheck && npm test && npm run check:docs",
+    "build:package": "node scripts/build-package.mjs",
+    "pack": "npm run build:package && npm pack",
+    "serve:package": "node bin/pi-central.js"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.4.0",
     "@types/node": "^22.10.2",
+    "esbuild": "^0.28.2",
     "typescript": "^5.7.2"
   }
 }

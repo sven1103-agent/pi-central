@@ -16,6 +16,7 @@ reader can tell whether a decision still holds.
 | [0008](0008-no-mid-session-workdir-change.md) | No mid-session working-directory change | Accepted |
 | [0009](0009-direct-session-discovery.md) | Discovery parses session files directly; no Pi agent core at runtime | Accepted |
 | [0010](0010-agent-credential-identity.md) | Agent credential identity: agent-owned secrets, delivered per session | Accepted |
+| [0011](0011-distribution-and-update.md) | Distribution by bundled npm artifact; update = detect freely, apply on request | Accepted (application pending #56) |
 
 ## Format
 
