@@ -29,6 +29,28 @@ export interface ConnectionHandlers {
 /** Backoff schedule in ms. Bounded, because a local orchestrator restarts in seconds. */
 const BACKOFF_MS = [500, 1000, 2000, 3000, 5000];
 
+/**
+ * What to say when the two halves disagree about the wire version, or `undefined` when they agree.
+ *
+ * Split out of the socket handler because **this message is the entire value of the check**, and the
+ * failure it guards is a message that says the wrong thing. Issue #8 added five wire kinds without
+ * bumping `PROTOCOL_VERSION`, so the handshake agreed and the user met the mismatch as
+ * `bad control: unknown kind 'listFiles'` — a symptom, from a connection that had just reported
+ * itself compatible. The check exists to name the skew instead, so the check's wording is pinned by
+ * a test rather than left inline where only a live socket could reach it.
+ *
+ * Both versions are named, and the recovery is a restart rather than a reload alone: in a dev
+ * checkout the orchestrator is a long-running process holding the OLD module, so reloading the
+ * browser cannot fix it.
+ */
+export function versionSkew(orchestratorProtocol: number): string | undefined {
+  if (orchestratorProtocol === PROTOCOL_VERSION) return undefined;
+  return (
+    `protocol mismatch: the orchestrator speaks v${orchestratorProtocol} and this UI speaks ` +
+    `v${PROTOCOL_VERSION}. Reload the UI; if that fails, restart the orchestrator.`
+  );
+}
+
 export class Connection {
   #socket: WebSocket | undefined;
   #handlers: ConnectionHandlers;
@@ -81,14 +103,8 @@ export class Connection {
         return;
       }
       if (payload.kind === "hello") {
-        if (payload.protocol !== PROTOCOL_VERSION) {
-          this.#handlers.onEvent({
-            kind: "error",
-            message:
-              `protocol mismatch: the orchestrator speaks v${payload.protocol} and this UI speaks ` +
-              `v${PROTOCOL_VERSION}. Reload the UI; if that fails, restart the orchestrator.`,
-          });
-        }
+        const skew = versionSkew(payload.protocol);
+        if (skew !== undefined) this.#handlers.onEvent({ kind: "error", message: skew });
         return;
       }
       this.#handlers.onEvent(payload);
