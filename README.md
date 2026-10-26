@@ -136,11 +136,12 @@ file still *looks* authoritative. It has caught real rot more than once.
 | Document | What it covers |
 |---|---|
 | [docs/USER-STORIES.md](docs/USER-STORIES.md) | What users need, and the constraints those needs create |
-| [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) | The Seatbelt nesting limit and its consequences (C1–C14) |
+| [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) | The Seatbelt nesting limit and its consequences (C1–C15c) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, trust boundaries, lifecycle |
 | [docs/STACK.md](docs/STACK.md) | TypeScript/Node orchestrator, React UI, rendering pipeline |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | The Pi RPC surface Pi Central depends on |
-| [docs/SANDBOX.md](docs/SANDBOX.md) | How safehouse is invoked per session |
+| [docs/SANDBOX.md](docs/SANDBOX.md) | How safehouse is invoked per session, and what the composed policy denies |
+| [docs/AGENT-SETUP.md](docs/AGENT-SETUP.md) | Creating the agent identity a session runs as: SSH key, gitconfig, signing, `gh` |
 | [docs/INCREMENTS.md](docs/INCREMENTS.md) | Increments, slices, and how work is sequenced |
 | [docs/DOGFOODING.md](docs/DOGFOODING.md) | Using Pi Central to develop Pi Central, and what breaks if you run it from the checkout you edit |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Phases, verification status, and out-of-scope items |

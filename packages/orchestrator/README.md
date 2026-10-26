@@ -15,6 +15,7 @@ decoration.
 | `resume.ts` | Validate recorded cwd before spawning | US-5, D-4, C2 |
 | `capabilities.ts` | Is the agent credential store usable? Provisioned vs unreachable | C15a, ADR-0010 |
 | `signing.ts` | Is the agent's commit/tag signing **configured**, not merely keyed? | C15b, ADR-0010 §4, Amendment 2 |
+| `fragment.ts` | The appended policy fragment: the credential denies | C15c, ADR-0010 §4, Amendment 3 |
 | `transport.ts` | WebSocket + serve the built UI from one origin | ADR-0006, C5 |
 | `static-ui.ts` | Serve `packages/ui/dist`, with containment and the CSP header | ADR-0006, C5 |
 | `cli.ts` | Smoke command: start, prompt, observe | ROADMAP Phase 1 |

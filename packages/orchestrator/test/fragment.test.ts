@@ -24,16 +24,91 @@ test("the host's credential paths are denied", () => {
   // Each of these is granted by Safehouse's generated policy, so a deny must override it.
   assert.match(fragment, /\(deny file-read\*\s*\n\s*\(home-prefix "\/\.gitconfig"\)/);
   assert.match(fragment, /\(home-subpath "\/\.config\/gh"\)/);
-  assert.match(fragment, /\(home-subpath "\/\.ssh\/agent"\)/);
-  // The host's PRIVATE KEYS, which is the signing-specific half of the same boundary (issue #27):
-  // `user.signingkey` is a path, so a reachable host key is what would let an agent sign as the
-  // user. Every common key name must match, not only the one this machine happens to use.
-  // Matched as the SBPL regex strings the fragment actually contains, rather than as a loose
-  // pattern: a check that passes on a *mention* of a deny in a comment would be worthless here.
-  const denials = fragment.split("\n").filter((line) => line.includes("(regex #")).join("\n");
-  assert.ok(denials.includes("id_[^/]*$"), "every ~/.ssh/id_* key must be denied");
-  assert.ok(denials.includes(".*_ed25519$"), "an ed25519 host key must be denied");
-  assert.ok(denials.includes(".*_rsa$"), "an RSA host key must be denied");
+  assert.match(fragment, /\(home-subpath "\/\.ssh"\)/);
+});
+
+/**
+ * Does any deny rule in `fragment` cover this absolute path?
+ *
+ * A deliberately small SBPL filter matcher, over the kinds this fragment emits. It exists so the
+ * SSH boundary is tested as a **coverage property** rather than by string-matching a rule that
+ * merely looks right: the previous three name regexes passed every assertion here while leaving
+ * `cupserver` readable. A rule that does not name a path cannot be checked by naming it.
+ */
+function deniesPath(fragment: string, path: string): boolean {
+  const rules = fragment
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith(";;"))
+    .join("\n");
+  const blocks = rules.split(/\)\s*(?=\(|$)/);
+  return blocks.some((block) => {
+    if (!/^\(deny\b/.test(block.trim()) || !/file-read\*/.test(block)) return false;
+    return [...block.matchAll(/\((home-subpath|home-literal|home-prefix|subpath|literal|prefix) "([^"]*)"\)/g)].some(
+      ([, kind, value]) => {
+        // HOME is the real home, because that is what the fragment's HOME_DIR resolves to.
+        const abs = kind!.startsWith("home-") ? join(homedir(), value!) : value!;
+        switch (kind!.replace(/^home-/, "")) {
+          case "literal":
+            return path === abs;
+          case "prefix":
+            return path.startsWith(abs);
+          default:
+            return path === abs || path.startsWith(`${abs}/`);
+        }
+      },
+    );
+  });
+}
+
+test("every path under ~/.ssh is denied, not just the keys whose names were predicted", () => {
+  // Issue #46. The boundary was three regexes over key NAMES (id_*, *_rsa, *_ed25519). They were
+  // redundant where they looked essential — deny-default already covered everything the base
+  // policy did not grant — and load-bearing in the one case they got wrong: with a session's cwd
+  // at $HOME, the base workdir grant covers all of ~/.ssh, and the names it did not predict
+  // (`cupserver`, `jenkins`, `sven1103-agent-strongbox` — all real private keys on the machine
+  // this was found on) became readable.
+  const fragment = renderPolicyFragment({ agentRoot: "/state/agents/default" });
+  const home = homedir();
+  for (const path of [
+    "config", // 58 Host blocks, internal hostnames: the recon map the old rationale left open
+    "known_hosts",
+    "known_hosts.old",
+    "allowed_signers",
+    "config.d/extra",
+    "id_rsa",
+    "id_ed25519",
+    // The three the name list missed. These are the falsifiers: each was readable under a
+    // $HOME workdir before this fix, so a regression to name matching fails here.
+    "cupserver",
+    "jenkins",
+    "sven1103-agent-strongbox",
+    "agent/s.abc", // the agent socket directory
+  ]) {
+    assert.ok(deniesPath(fragment, join(home, ".ssh", path)), `~/.ssh/${path} must be denied`);
+  }
+  // The directory entry itself, so it cannot even be listed.
+  assert.ok(deniesPath(fragment, join(home, ".ssh")), "~/.ssh itself must be denied");
+});
+
+test("the SSH deny is by directory, not by key name: no name pattern survives", () => {
+  // The rule that failed is not permitted to come back in any spelling. A name list fails open
+  // on the next key somebody creates, which is the whole finding of issue #46.
+  const rules = renderPolicyFragment({ agentRoot: "/state/agents/default" })
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith(";;"))
+    .join("\n");
+  for (const pattern of ["id_[^/]*", "_rsa", "_ed25519", "(regex #"]) {
+    assert.ok(!rules.includes(pattern), `no ~/.ssh rule may match by name: found ${pattern}`);
+  }
+});
+
+test("the SSH deny does not reach the agent's own ssh tree", () => {
+  // The fix must close the host's directory without closing the agent's. `~/.agent/ssh` is not
+  // under `~/.ssh`, and the comparison is by path SEGMENT: `/h/.ssh-other` is not inside `/h/.ssh`.
+  const fragment = renderPolicyFragment({ agentRoot: "/Users/x/.agent" });
+  assert.ok(!deniesPath(fragment, "/Users/x/.agent/ssh/config"), "the agent's ssh config must stay readable");
+  assert.ok(!deniesPath(fragment, "/Users/x/.agent/ssh/github_login_ed25519"), "the agent's key must stay readable");
+  assert.ok(!deniesPath(fragment, "/Users/x/.ssh-other/thing"), "a sibling prefix is not inside ~/.ssh");
 });
 
 test("Pi's auth store is NOT denied (C12, ADR-0010 Amendment 1)", () => {
@@ -125,7 +200,9 @@ test("keychain access without a path is refused rather than guessed", () => {
 });
 
 test("the ssh-agent sockets are denied at the network layer too", () => {
-  // A file deny alone does not cover `connect()` on a unix socket. Both are needed.
+  // A file deny alone does not cover `connect()` on a unix socket. Both are needed. The FILE
+  // half of this (`~/.ssh/agent`) is now subsumed by the wholesale `~/.ssh` deny rather than
+  // stated separately, which is why only the network rule is asserted here.
   const fragment = renderPolicyFragment();
   assert.match(fragment, /\(deny network-outbound/);
   assert.match(fragment, /com\\\.apple\\\.launchd/);
