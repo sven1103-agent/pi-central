@@ -1133,6 +1133,49 @@ select.btn { font-family: var(--sans); }
 }
 .picker-select:focus-visible { outline: none; box-shadow: var(--focus); border-color: var(--accent); }
 .picker-select:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/*
+ * The shortened model label (issue #42).
+ *
+ * A native <select> renders the selected option's text when closed, so the control cannot show an
+ * elided name while its list keeps full ones — both are the same string. The header needs the first
+ * (it is scanned and must stay identifying) and the list needs the second (it is where a model is
+ * chosen, and an elision there is an elision at the moment of decision). So the shortened label is a
+ * separate, non-interactive element drawn over the closed control.
+ *
+ * It covers the select with an opaque background rather than making the select's text transparent.
+ * The transparent-text technique is common but affects the option list too in some engines, where the
+ * popup inherits the element's colour — and a dropdown of invisible model names would be a far worse
+ * bug than the one being fixed. Covering the closed state leaves the select's own rendering alone
+ * everywhere it is visible.
+ *
+ * `pointer-events: none` is load-bearing: the select must receive every click, or the control stops
+ * opening. The label is `aria-hidden` in the markup, so the full name is announced once by the select
+ * rather than a shortened one twice.
+ */
+.picker-field { position: relative; display: inline-flex; align-items: center; max-width: 22ch; }
+.picker-display {
+  position: absolute;
+  left: 1px;
+  /* The native dropdown arrow sits at the right edge; the label stops short of it rather than
+     drawing over it, which would hide the affordance that says "this opens". */
+  right: 20px;
+  top: 1px;
+  bottom: 1px;
+  display: flex;
+  align-items: center;
+  padding-left: 6px;
+  background: var(--panel-3);
+  border-radius: 4px 0 0 4px;
+  font-size: var(--fs-xs);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  pointer-events: none;
+}
+/* While the control cannot act, the overlay must look as inert as the select beneath it. A modifier
+   class rather than `:has()`, which would make correctness depend on selector support. */
+.picker-display.is-disabled { opacity: 0.55; }
 .picker-note { font-size: var(--fs-xs); color: var(--dim); flex-basis: 100%; text-align: right; }
 /* --warn-text, not --warn: the design's no-colour-alone rule means the text carries the meaning
    and the colour only reinforces it. */

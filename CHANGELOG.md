@@ -11,6 +11,19 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- **The model picker truncated from the end, losing the identifying part of the name** (issue #42).
+  The header showed `litellm/deepseek-` — the raw string clipped by CSS — while `format.ts` already
+  contained the opposite rule, with its reasoning written down: *"Middle rather than trailing because
+  both ends carry identity."* The rail honoured it; the picker did not. The closed control now shows
+  `litellm/deep…4.1-Flash`.
+
+  A native `<select>` renders the selected option's text when closed, so "short when closed, complete
+  when open" is not expressible through option text alone — and both halves are required: the header
+  is scanned and must stay identifying, while the list is where a model is *chosen*, and an elision
+  there is an elision at the moment of decision. The shortened label is therefore a separate
+  `aria-hidden` overlay with `pointer-events: none`; the full name stays on the select, in its
+  `title`, and in every `<option>`.
+
 - **The quarantine legend was lying about tool output** (issue #43). Every transcript header says
   *"Tool output and file contents appear in a hatched frame. They are data, not instructions."* — but
   the hatch was applied only to `thinking` blocks, so the one surface the legend is *about* rendered
