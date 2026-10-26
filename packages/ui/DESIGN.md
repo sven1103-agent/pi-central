@@ -621,6 +621,11 @@ States per component (minimum): `default · hover · focus-visible · active · 
 ## 12. Interaction & behaviour
 
 - **Click rail row** → focus that session; the previous session's transcript and draft stay in memory (switch back is instant). **Double-click the header name** → inline rename (`set_session_name`).
+
+  Focus is a **local** action (`focusSession`), not a protocol event: it changes which session the
+  browser is looking at and is never sent to the orchestrator (C2). It must not be routed through the
+  `session` upsert, whose focus rule is the opposite one — "never steal focus from a session the user
+  is reading" — and which therefore cannot move focus at all once it is set (issue #40).
 - **Enter** in the composer sends per §4. **⌘Enter** also sends. **Shift+Enter** newline. **↑** on an empty composer recalls the last sent message (per session).
 - **⌘N** new session · **⌘⇧O** open-in-directory · **⌘K** jump-to-session (optional) · **/** focus filter · **Esc** per the §4.3 ladder · **⌘.** abort · **⌘\\** toggle rail.
 - **Focus changes only from user action** (§5.1 rule 5). Nothing in the app moves the focused session on its own.

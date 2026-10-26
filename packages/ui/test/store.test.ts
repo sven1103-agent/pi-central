@@ -575,3 +575,66 @@ test("a compaction record reaching the store produces a notice, end to end", () 
   assert.equal(notices[0]!.kind, "compaction");
   assert.equal(noticeIsOpen(notices[0]!), true);
 });
+
+// --- Focusing another session (the rail's entire purpose) ----------------------------------------
+
+test("focusSession moves the focus to the named session", () => {
+  // The bug this exists for: the rail dispatched a `session` event to switch sessions, and that
+  // event is an UPSERT whose focus rule is `state.focusedId ?? event.session.id` — "focus a NEWLY
+  // STARTED session, but never steal focus from one the user is reading". With focus already set,
+  // it keeps the OLD id, so clicking a rail row updated the row's data and changed nothing visible.
+  let state = reduce(initialState(), { kind: "session", session: live({ id: "s1" }) });
+  state = reduce(state, { kind: "session", session: live({ id: "s2" }) });
+  assert.equal(state.focusedId, "s1", "the first session keeps focus, as designed");
+
+  state = reduce(state, { kind: "focusSession", sessionId: "s2" });
+  assert.equal(state.focusedId, "s2", "an explicit focus request must move the focus");
+  assert.equal(focusedSession(state)?.id, "s2");
+});
+
+test("focusSession does NOT touch the session list", () => {
+  // The separation that makes this safe: focusing is a view change, while `session` events carry
+  // data from the orchestrator. Routing focus through the data event is what caused the bug, so
+  // this action must not be able to mutate a session at all.
+  let state = reduce(initialState(), { kind: "session", session: live({ id: "s1" }) });
+  const before = state.live;
+  state = reduce(state, { kind: "focusSession", sessionId: "s1" });
+  assert.equal(state.live, before, "the live array must be the same reference, untouched");
+});
+
+test("focusSession ignores a session that is not live", () => {
+  // Focus and presence are different facts. Focusing a session the UI does not have would make
+  // `focusedSession` return undefined and blank the main column — a worse outcome than ignoring
+  // the request, and reachable by clicking a row for a session that was stopped concurrently.
+  let state = reduce(initialState(), { kind: "session", session: live({ id: "s1" }) });
+  state = reduce(state, { kind: "focusSession", sessionId: "ghost" });
+  assert.equal(state.focusedId, "s1", "an unknown id must not clear the focus");
+  assert.equal(focusedSession(state)?.id, "s1");
+});
+
+test("a local focus action is routed locally, never as a protocol event", () => {
+  // `reduce` narrows on `kind` before delegating to `applyEvent`, so a local action whose name
+  // collided with a server event would be swallowed. The direction that matters is this one: an
+  // unknown kind falls through to `applyEvent`, which ignores it — so a focus request sent as an
+  // unrecognized EVENT would silently do nothing, which is the bug class this whole change is about.
+  let base = reduce(initialState(), { kind: "session", session: live({ id: "s1" }) });
+  // Both must be live first, or the presence guard (correctly) refuses the focus and the test would
+  // be asserting the guard rather than the routing.
+  base = reduce(base, { kind: "session", session: live({ id: "s2" }) });
+  const viaEvent = reduce(base, { kind: "session", session: live({ id: "s2" }) });
+  assert.equal(viaEvent.focusedId, "s1", "a session EVENT must not move focus (its own rule)");
+  const viaLocal = reduce(base, { kind: "focusSession", sessionId: "s2" });
+  assert.equal(viaLocal.focusedId, "s2", "the local action must move it");
+});
+
+test("switching focus preserves the other session's transcript", () => {
+  // DESIGN §Shortcuts: "the previous session's transcript and draft stay in memory (switch back is
+  // instant)". A focus change that rebuilt or dropped transcripts would make switching lossy.
+  let state = reduce(initialState(), { kind: "session", session: live({ id: "s1" }) });
+  state = reduce(state, { kind: "session", session: live({ id: "s2" }) });
+  state = reduce(state, { kind: "record", sessionId: "s1", record: { type: "message_start", message: { role: "assistant" } } });
+  state = reduce(state, { kind: "focusSession", sessionId: "s2" });
+  assert.equal(state.transcripts["s1"]?.messages.length, 1, "s1's transcript must survive the switch");
+  state = reduce(state, { kind: "focusSession", sessionId: "s1" });
+  assert.equal(state.transcripts["s1"]?.messages.length, 1, "and still be there when switching back");
+});

@@ -11,6 +11,14 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- **Clicking a session in the rail did nothing** (issue #40). With several sessions live, selecting
+  one left the transcript column showing the previously focused session and no row marked. The rail
+  dispatched a `session` **upsert** to switch sessions, and that event's focus rule — "never steal
+  focus from one the user is reading" — is deliberate and correct (DESIGN §5), so with focus already
+  set it kept the old id. The click refreshed the row's data and moved nothing. Focus is now a
+  dedicated `focusSession` **local action**: a view change the browser owns, not a fact the
+  orchestrator sends, and never routed through a data event.
+
 - **Agent commits were never signed** (issue #27). ADR-0010 §4 requires it; the adopted agent
   `gitconfig` said `gpgsign = false` with no `signingkey` and no `gpg.format`, so commits were created
   unsigned while the signing key sat right beside them — and nothing reported it, because an unsigned
