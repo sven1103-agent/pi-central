@@ -17,6 +17,7 @@
  * is not granted by any base profile, and it is not a tmp or agent dir.
  */
 import { homedir } from "node:os";
+import { resolveInstallationRoot } from "./installation-root.ts";
 import { join, resolve, sep } from "node:path";
 import { looksLikeAgentTree } from "./agent-store.ts";
 
@@ -58,6 +59,18 @@ export interface Config {
    * with it, which is what makes a list of 20 rows scannable.
    */
   home: string;
+  /**
+   * Where this Pi Central installation lives, if it could be identified (issue #25).
+   *
+   * Travels in the snapshot so the UI can warn about it LIVE, as the user types a directory into
+   * the sheet — before any session exists to carry the warning. Without it the browser would have to
+   * guess, and a guess about "am I pointing at my own checkout?" is exactly the kind of claim the UI
+   * is not allowed to invent (C8's family).
+   *
+   * `undefined` when the walk could not identify it, which is reported as unknown rather than as
+   * safe.
+   */
+  installationRoot: string | undefined;
   /**
    * The agent directory holding Pi's provider configuration (`auth.json`).
    *
@@ -117,6 +130,10 @@ export function defaultConfig(): Config {
     // because Pi Central does not currently pass `PI_CODING_AGENT_DIR`; if that changes, this
     // must follow, or the policy would grant keychain access for the wrong location.
     providerAgentDir: process.env.PI_CODING_AGENT_DIR ?? join(home, ".pi", "agent"),
+    // Derived from the ORCHESTRATOR's module URL, never from configuration (issue #25): see
+    // `installation-root.ts`. `defaultConfig` is the orchestrator's entry point, so resolving here
+    // means the answer is the running installation and not whatever a config file claims.
+    installationRoot: resolveInstallationRoot(),
   };
 }
 

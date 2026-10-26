@@ -214,6 +214,7 @@ export class Transport {
       history,
       historyTotal,
       home: this.#config.home,
+      installationRoot: this.#config.installationRoot,
     });
 
     // Then the CURRENT conversation for each live session, FETCHED rather than replayed.
@@ -279,6 +280,7 @@ export class Transport {
           history: discovered.sessions,
           historyTotal: discovered.total,
           home: this.#config.home,
+          installationRoot: this.#config.installationRoot,
         });
         return;
       }

@@ -173,6 +173,14 @@ export type Event =
        * the `~/…` form that makes rows scannable.
        */
       home: string;
+      /**
+       * Where the orchestrator's own installation lives, if it could identify it (issue #25).
+       *
+       * Sent so the UI can warn LIVE, while a directory is being typed into the sheet — before any
+       * session exists to carry the warning. `undefined` means the orchestrator could not identify
+       * its own root, which is reported as unknown rather than as safe.
+       */
+      installationRoot?: string | undefined;
     }
   | { kind: "session"; session: LiveSession }
   | { kind: "record"; sessionId: string; record: PiRecord }

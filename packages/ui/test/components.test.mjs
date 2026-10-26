@@ -780,3 +780,64 @@ test("code text is escaped, so a fence cannot inject markup", async () => {
   assert.ok(!/<img/.test(html), "code content must never become markup");
   assert.ok(text(html).includes("<img src=x onerror=alert(1)>"), "but it must be VISIBLE as text");
 });
+
+// --- The self-hosting hazard in the sheet (issue #25) --------------------------------------------
+
+test("the directory sheet warns when the path is Pi Central's own installation", async () => {
+  // The warning must appear BEFORE a session exists, while the path is being typed — that is the
+  // point at which it can still change the decision.
+  const { OpenDirectorySheet } = await server.ssrLoadModule("/src/components/OpenDirectorySheet.tsx");
+  const html = renderToString(createElement(OpenDirectorySheet, {
+    installationRoot: "/Users/x/git/pi-central",
+    initialPath: "/Users/x/git/pi-central/packages/ui",
+    onClose() {},
+    onOpen() {},
+  }));
+  assert.match(html, /hazard/);
+  assert.match(text(html), /hot-reload/);
+  assert.match(text(html), /desynchronise/);
+  assert.match(text(html), /separate clone/);
+});
+
+test("the warning does not make submission impossible, and is not an error", async () => {
+  // Non-blocking is an explicit requirement: the user may have a good reason, and refusing would be
+  // worse than warning. The Open button must stay enabled and the notice must not be role="alert",
+  // which would interrupt a screen reader on every keystroke as the path is typed.
+  const { OpenDirectorySheet } = await server.ssrLoadModule("/src/components/OpenDirectorySheet.tsx");
+  const html = renderToString(createElement(OpenDirectorySheet, {
+    installationRoot: "/Users/x/git/pi-central",
+    initialPath: "/Users/x/git/pi-central/packages/ui",
+    onClose() {},
+    onOpen() {},
+  }));
+  assert.ok(!/disabled/.test(html), "the hazard must not disable the Open button");
+  assert.match(html, /role="status"/);
+  assert.ok(!/role="alert"/.test(html), "a live-typed advisory must not be an alert");
+});
+
+test("a separate clone is NOT warned about — the recommended setup must be quiet", async () => {
+  // `docs/DOGFOODING.md` recommends running from one checkout and working in a sibling clone.
+  // Warning there would train the user to dismiss the warning, which is worse than none at all.
+  const { OpenDirectorySheet } = await server.ssrLoadModule("/src/components/OpenDirectorySheet.tsx");
+  const html = renderToString(createElement(OpenDirectorySheet, {
+    installationRoot: "/Users/x/git/pi-central",
+    initialPath: "/Users/x/git/pi-central-dev",
+    onClose() {},
+    onOpen() {},
+  }));
+  assert.ok(!/hazard/.test(html), "a sibling clone must not be nagged about");
+});
+
+test("the sheet says nothing when the installation root is unknown", async () => {
+  // Unknown is reported as unknown, not as safe — but a warning that could not be evaluated must not
+  // be invented either. The startup banner reports the unidentifiable root once, where that is
+  // actionable; the sheet stays quiet.
+  const { OpenDirectorySheet } = await server.ssrLoadModule("/src/components/OpenDirectorySheet.tsx");
+  const html = renderToString(createElement(OpenDirectorySheet, {
+    installationRoot: undefined,
+    initialPath: "/Users/x/git/anything",
+    onClose() {},
+    onOpen() {},
+  }));
+  assert.ok(!/hazard/.test(html));
+});
