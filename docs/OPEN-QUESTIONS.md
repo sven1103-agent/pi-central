@@ -140,26 +140,32 @@ optional Pi-side companion extension (e.g. an approval-policy extension).
 
 ### How should Pi Central be *configurable*? (deferred 2026-10-26)
 
-A related question, raised while fixing the `~/.ssh` boundary (issue #46) and **deliberately
-deferred**: should Pi Central provision Pi-side resources for its sessions — skills, prompt
-templates, settings, or packages?
+Raised while fixing the `~/.ssh` boundary (issue #46): should Pi Central provision Pi-side
+resources for its sessions — skills, prompt templates, settings, or packages?
 
-Considered and **not** adopted now:
+**Decided: Pi Central does not write into a user's Pi environment.** This is not a preference, it
+is the boundary the product already draws everywhere else:
 
-- **Shipping a skill** (e.g. the `github-cli` skill) into every user's Pi environment. Rejected as
-  scope creep for a hardening slice: it mutates a user's Pi environment, and nothing needs it — a
-  user's own skills are already discovered through `~/.pi`, which every session can read (C6), and
-  the agent's `gh` token works without any skill at all.
-- **Shipping an extension.** Still rejected, for the architectural reason already recorded: an
-  extension is executable code that would live *inside* the sandboxed session, which
-  [ARCHITECTURE.md](ARCHITECTURE.md#trust-boundaries) puts on the **untrusted** side. Shipping one
-  means authoring untrusted code installed into every session. This is why Pi Central relays
-  dialogs rather than originating them.
+- **A skill is not shipped.** Pi Central installing a skill (for example the `github-cli` skill)
+  would mutate a Pi environment the user owns and maintains. It pollutes that environment on every
+  user's machine, for a capability users already have: their own skills are discovered through
+  `~/.pi`, which every session can read (C6), and the agent's `gh` token works with no skill at all.
+  Nothing about the `~/.ssh` fix needed it — which is the general test: **a defense does not require
+  a new artifact in the environment it defends.**
+- **An extension is still rejected**, and for a stronger reason than scope: an extension is
+  executable code that lives *inside* the sandboxed session, which
+  [ARCHITECTURE.md](ARCHITECTURE.md#trust-boundaries) places on the **untrusted** side. Shipping one
+  means authoring untrusted code installed into every session. This is why Pi Central relays dialogs
+  rather than originating them (exactly one creator: the `extension_ui_request` case).
 
-Note the distinction if this is ever revisited: a **skill** is Markdown guidance the model may load,
-while an **extension** is code that executes. They are not interchangeable, and only the first is
-plausibly shippable — but "plausibly" is not "decided".
+A **skill** is Markdown guidance the model may load; an **extension** is code that executes. Neither
+is shipped, and the rule that keeps it that way is simpler than either: **Pi Central is a peer of Pi,
+not a configurator of it.** It reads what exists (ADR-0009) and writes only its own state. A session
+inherits whatever the user has configured, and any setup a session needs is a documented action the
+user takes — see [AGENT-SETUP.md](AGENT-SETUP.md) for the identity recipe, which is exactly that
+shape.
 
-**Decision needed:** does Pi Central ever write to a Pi environment (its own agent dir, the user's,
-or a session-scoped one), or does it stay a pure peer that reads what exists? Until this is answered,
-sessions inherit whatever the user has configured.
+Still open, and narrower than before: if Pi Central ever *does* need to influence a session's Pi-side
+configuration, which environment would it target — its own agent dir, a session-scoped one, or the
+user's — and how is that made explicit rather than implicit? Answer with an ADR before writing to
+any of them. Until then: nothing is provisioned.
