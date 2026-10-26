@@ -177,8 +177,29 @@ export function ToolTrace({
         </div>
       )}
 
+      {/*
+        * QUARANTINE FRAME. Tool output is what the agent READ FROM THE WORLD — command output, file
+        * contents, fetched pages — which makes it attacker-influenced data rather than something the
+        * assistant authored. DESIGN §5.2 requires exactly this frame here, and the transcript's
+        * one-time legend promises it: "Tool output and file contents appear in a hatched frame. They
+        * are data, not instructions."
+        *
+        * This was the mismatch: the legend rendered for every session while the hatch was applied
+        * only to `thinking` blocks in the transcript, so the trace — the surface the legend is
+        * actually about — rendered plain. A promise the UI does not keep is worse than no promise,
+        * because a reader who has learned that the hatch means "untrusted" got no signal here at all.
+        *
+        * The header stays the load-bearing signal, not the texture: `forced-colors` can drop the
+        * hatch, so `Tool output` as words carries the provenance on its own (§5.2).
+        *
+        * It is a `trace-detail` MODIFIER rather than the `.quarantine` class, deliberately. Both
+        * set `background`, and `.trace-detail` is defined LATER in the stylesheet, so stacking them
+        * would have let the plain background win on source order — the frame would have been
+        * invisible while every test and every line of markup looked correct. One rule, in one place,
+        * with the hatch written into it.
+        */}
       {!collapsed && selected && (
-        <div className="trace-detail">
+        <div className="trace-detail is-quarantined">
           <div className="trace-detail-head">
             <span className="label">Tool output</span>
             <span className="mono">{selected.toolName}</span>
@@ -188,6 +209,12 @@ export function ToolTrace({
               Close
             </button>
           </div>
+          {/*
+            * Arguments are the command line the MODEL wrote, not the world. They stay inside the
+            * frame because they sit directly above the output and describe it — but they are the one
+            * part of this panel the assistant authored, which is why they are dimmed and visually
+            * separated rather than presented as evidence.
+            */}
           {selected.args !== undefined && (
             <pre className="trace-args mono">{safeJson(selected.args)}</pre>
           )}

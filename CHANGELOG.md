@@ -11,6 +11,17 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- **The quarantine legend was lying about tool output** (issue #43). Every transcript header says
+  *"Tool output and file contents appear in a hatched frame. They are data, not instructions."* — but
+  the hatch was applied only to `thinking` blocks, so the one surface the legend is *about* rendered
+  plain. DESIGN §5.2 is explicit that the frame "carries the security model": it is how a reader tells
+  "the assistant said this" from "the agent read this somewhere", and tool output is the most
+  attacker-influenced content in the product. Fixed with a purpose-built
+  `.trace-detail.is-quarantined` rule rather than by stacking `.quarantine` — both set `background`
+  and `.trace-detail` is declared later, so source order would have won and the frame would have been
+  **invisible while every test passed**. A test now asserts the frame reaches the DOM *and* that no
+  later rule can override it.
+
 - **Clicking a session in the rail did nothing** (issue #40). With several sessions live, selecting
   one left the transcript column showing the previously focused session and no row marked. The rail
   dispatched a `session` **upsert** to switch sessions, and that event's focus rule — "never steal
