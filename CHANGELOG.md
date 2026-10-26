@@ -11,6 +11,16 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Added
 
+- **Compaction and retry banners** (issue #5). A session that is compacting, retrying, or recovering
+  from a provider failure now says so inline instead of appearing to stall. The two retry mechanisms
+  are distinguished — `auto_retry` (the provider call failed) and `summarization_retry_*` (a
+  summarizer failed while compacting) — because attributing one to the other sends the reader looking
+  in the wrong place. An **aborted** compaction says it stopped rather than claiming it compacted, a
+  retry states both the attempt and the bound, and nothing claims the turn is over. No notice is a
+  live region (a retry updates per attempt, so announcing each would be hostile) or a state change:
+  `agent_end` is still not `agent_settled` (C8), and a test asserts a failed retry does not move the
+  session out of `streaming`.
+
 - **A session pointed at Pi Central's own installation is warned about** (issue #25). Pointing a
   session at the checkout Pi Central is running from produces a dashboard that mysteriously stops
   working — the UI hot-reloads into a mid-edit error, a branch switch desynchronises the two halves,

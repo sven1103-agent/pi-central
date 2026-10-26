@@ -1187,3 +1187,21 @@ select.btn { font-family: var(--sans); }
   color: var(--warn-text); font-size: 12px; margin: 6px 0 0;
   border-left: 3px solid var(--warn-text); padding-left: 8px;
 }
+
+/* --- Compaction and retry banners (issue #5) ----------------------------------------------------- */
+
+/* Deliberately quiet: these report machinery, not conversation, so they must not read as a turn.
+   A left rule rather than a filled card, and no `aria-live` anywhere — a retry updates on every
+   attempt, and announcing each one would be worse than silence (DESIGN.md §9). */
+.run-notices { margin: 4px 0 8px; display: flex; flex-direction: column; gap: 4px; }
+.run-notice {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: var(--fs-sm); color: var(--dim);
+  border-left: 3px solid var(--line-strong); padding: 2px 0 2px 10px;
+}
+.run-notice[data-kind="compaction"] { border-left-color: var(--accent-text); }
+.run-notice[data-kind="retry"][data-open] { border-left-color: var(--warn-text); }
+.run-notice[data-kind="summarization"] { border-left-color: var(--warn-text); }
+.notice-glyph { font-family: var(--mono); }
+.notice-text { flex: 1; }
+.notice-note { opacity: 0.75; font-style: italic; }

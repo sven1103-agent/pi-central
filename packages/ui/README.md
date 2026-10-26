@@ -72,8 +72,6 @@ A session that fails this way also gets the diagnosis attached to its error in t
 ## Deliberately not here yet
 
 - **File navigation.** No way to jump to a file or a line from the transcript.
-- **File navigation.** No way to jump to a file or a line from the transcript.
-- **Compaction / retry banners.**
 
 ## Development
 

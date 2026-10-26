@@ -108,8 +108,7 @@ transcripts reconstructed from Pi's delta-only stream; the approval dock (`confi
 searchable by content, with a clear refusal when a session's directory is gone; agent-scoped
 credentials with the host's own credentials denied.
 
-**Not yet:** no compaction or retry banners, and no file navigation. Both are issues rather than
-wishes — see below.
+**Not yet:** no file navigation. It is an issue rather than a wish — see below.
 
 ## Working on this project
 

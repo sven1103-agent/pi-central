@@ -51,6 +51,16 @@ export function interpretRecord(session: LiveSession, record: PiRecord): RecordE
       // teardown or a re-prompt mid-run.
       return {};
 
+    case "compaction_end":
+      // A stats refresh, and ONLY a stats refresh (#5). Compaction's whole purpose is to shrink the
+      // context, so `contextPercent` is stale the moment it finishes — the meter would keep showing
+      // the pressure that was just relieved, and the reader's next decision (prompt now, or compact
+      // again?) would be made on the old number. An `agent_settled`-only refresh would hide the drop
+      // for the entire rest of the turn.
+      //
+      // No state patch: a compaction can be followed by a retry, so it is not completion (C8).
+      return { refreshStats: true };
+
     case "agent_settled":
       // THIS is completion (C8).
       return {

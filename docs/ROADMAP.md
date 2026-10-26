@@ -182,6 +182,10 @@ Stack is fixed: React + Vite UI, WebSocket over loopback, TypeScript orchestrato
 - [x] History: content search, project, age, size, `cwdExists` badge, and a refusal with a way
       forward when the directory is gone (US-4, US-5).
 - [x] Session switching = focus switch between live processes (C2).
+- [x] **Compaction and retry banners** (issue #5): a session that is compacting, retrying or
+      recovering from a provider failure says so inline, in the transcript. Two mechanisms are
+      distinguished (`auto_retry` and `summarization_retry_*`), an aborted compaction never reads as
+      a success, and no notice is a live region or a state change (C8). `RunNotices.tsx`, tested.
 - [x] **Shiki syntax highlighting with lazy grammar loading** (issue #4). One chunk per grammar,
       fetched on first encounter; the name→chunk index is lazy too, or its ~46 kB of URLs would
       put most of the saving back. The entry chunk grew **+5.04 kB** for it, measured — see

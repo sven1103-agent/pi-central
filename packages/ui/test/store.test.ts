@@ -25,7 +25,7 @@ import {
   transcriptFor,
 } from "../src/store.ts";
 import type { HistoricalSession, LiveSession } from "@pi-central/protocol";
-import { emptyTranscript } from "../src/transcript.ts";
+import { emptyTranscript, noticeIsOpen } from "../src/transcript.ts";
 
 function live(over: Partial<LiveSession> = {}): LiveSession {
   return {
@@ -558,4 +558,20 @@ test("a later snapshot can update the root, since it is authoritative", () => {
     installationRoot: "/new/checkout",
   });
   assert.equal(state.installationRoot, "/new/checkout");
+});
+
+test("a compaction record reaching the store produces a notice, end to end", () => {
+  // The reducer is tested directly in transcript.test.ts, but that does not prove the record ever
+  // ARRIVES: the store only folds types it recognises, and a notice is useless if the plumbing drops
+  // it. This drives the store with the wire event, which is what actually happens.
+  let state = reduce(initialState(), { kind: "session", session: live({ id: "s1" }) });
+  state = reduce(state, {
+    kind: "record",
+    sessionId: "s1",
+    record: { type: "compaction_start", reason: "overflow" },
+  });
+  const notices = state.transcripts["s1"]?.notices ?? [];
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0]!.kind, "compaction");
+  assert.equal(noticeIsOpen(notices[0]!), true);
 });
