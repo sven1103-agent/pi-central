@@ -160,6 +160,31 @@ export type Control =
   | { kind: "resume"; path: string; mode?: "sandboxed" | "direct" };
 
 /**
+ * Facts about the running installation, for the Settings surface (issue #58).
+ *
+ * These are things the browser cannot discover for itself — the orchestrator is a local process that
+ * already knows them, and three of the four were previously printed ONLY to the terminal at startup,
+ * so a user who closed that terminal could not answer "where are my sessions on disk?".
+ */
+export interface InstallFacts {
+  /**
+   * The orchestrator's own version, read from the `package.json` it was shipped in (ADR-0011).
+   *
+   * Never a constant in either codebase: it must report the artifact that is actually running, or
+   * "is this the build with the fix?" cannot be answered from the process being asked.
+   */
+  version: string;
+  /** Where Pi's session files are discovered from. */
+  sessionsRoot: string;
+  /** The app-owned workspace used when a session is started without a directory (US-1). */
+  workspaceRoot: string;
+  /** The agent's credential/identity root. */
+  agentRoot: string;
+  /** True when Pi Central manages that root itself, rather than using an external one. */
+  agentRootManaged: boolean;
+}
+
+/**
  * A page of history plus the true total it was drawn from.
  *
  * Kept as a pair so a caller cannot accidentally present the page size as the total. The two
@@ -177,6 +202,18 @@ export type Event =
       kind: "snapshot";
       live: LiveSession[];
       history: HistoricalSession[];
+      /**
+       * Facts about the running installation (issue #58).
+       *
+       * Optional, and **a new optional field is deliberately NOT a protocol-version change**: a
+       * receiver ignores a field it does not know, so an older UI meeting a newer orchestrator is
+       * unaffected, and a newer UI meeting an older orchestrator renders "not reported" (the UI
+       * handles the absent case rather than assuming it). `wire-surface.test.ts` fingerprints KINDS,
+       * and this is the gap it documents — which is why the absent case is a tested state here
+       * rather than an afterthought. The alternative, sending three new events, would have been a
+       * breaking change to fix a cosmetic one.
+       */
+      install?: InstallFacts | undefined;
       /** True history total, as distinct from the length of `history`. */
       historyTotal: number;
       /**

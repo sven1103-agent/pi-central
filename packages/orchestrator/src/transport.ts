@@ -28,10 +28,12 @@ import {
   type Envelope,
   type Event,
   type HistoricalSession,
+  type InstallFacts,
   type LiveSession,
   type PiRecord,
   type ServerPayload,
 } from "@pi-central/protocol";
+import { findOwnPackage } from "./package-meta.ts";
 import type { Supervisor } from "./supervisor.ts";
 import type { FileError } from "./files.ts";
 import { discover } from "./registry.ts";
@@ -112,6 +114,7 @@ export class Transport {
   #wss: WebSocketServer | undefined;
   #clients = new Set<WebSocket>();
   #address: TransportAddress | undefined;
+  #install: InstallFacts | undefined;
 
   constructor(supervisor: Supervisor, config: Config, options: TransportOptions = {}) {
     this.#supervisor = supervisor;
@@ -199,6 +202,29 @@ export class Transport {
     socket.on("error", () => this.#clients.delete(socket));
   }
 
+  /**
+   * Facts about this installation, for the Settings surface (issue #58).
+   *
+   * Computed once and cached: `findOwnPackage` walks the directory tree, and this is sent on every
+   * connection. The version cannot change while the process runs, so recomputing it per connection
+   * would be work done to produce a value already known to be identical.
+   */
+  #installFacts(): InstallFacts {
+    if (this.#install !== undefined) return this.#install;
+    const own = findOwnPackage();
+    this.#install = {
+      // "unknown" rather than a substituted "0.0.0": a version that cannot be determined is a
+      // packaging fault, and saying so is truthful. A plausible-looking default would be believed,
+      // and every question asked afterwards would start from a false premise.
+      version: own?.version ?? "unknown",
+      sessionsRoot: this.#config.sessionsRoot,
+      workspaceRoot: this.#config.workspaceRoot,
+      agentRoot: this.#config.agentRoot,
+      agentRootManaged: this.#config.agentRootManaged,
+    };
+    return this.#install;
+  }
+
   async #sendSnapshot(socket: WebSocket): Promise<void> {
     let history: HistoricalSession[] = [];
     let historyTotal = 0;
@@ -218,6 +244,7 @@ export class Transport {
       historyTotal,
       home: this.#config.home,
       installationRoot: this.#config.installationRoot,
+      install: this.#installFacts(),
     });
 
     // Then the CURRENT conversation for each live session, FETCHED rather than replayed.
