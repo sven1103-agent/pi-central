@@ -182,6 +182,16 @@ export interface InstallFacts {
   agentRoot: string;
   /** True when Pi Central manages that root itself, rather than using an external one. */
   agentRootManaged: boolean;
+  /**
+   * The wire version the orchestrator speaks.
+   *
+   * Also carried on `hello`, and duplicated here deliberately: `hello` is consumed once by the
+   * connection and never stored, while this surface must render the pair (orchestrator vs UI) from
+   * the authoritative snapshot — including after a reconnect. Recovering it from `hello` would mean a
+   * second piece of connection state kept in parallel with `store.ts`, which is exactly the split
+   * this codebase avoids: everything the UI shows comes from an event (`store.ts`).
+   */
+  protocol: number;
 }
 
 /**

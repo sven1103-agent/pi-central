@@ -221,6 +221,7 @@ export class Transport {
       workspaceRoot: this.#config.workspaceRoot,
       agentRoot: this.#config.agentRoot,
       agentRootManaged: this.#config.agentRootManaged,
+      protocol: PROTOCOL_VERSION,
     };
     return this.#install;
   }

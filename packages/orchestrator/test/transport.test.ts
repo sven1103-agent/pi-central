@@ -334,6 +334,41 @@ test("a client receives the protocol version, then a snapshot", async () => {
   }
 });
 
+test("the snapshot carries the installation facts the Settings surface renders (issue #58)", async () => {
+  // These three paths were previously printed ONLY to the terminal at startup, so a user who closed
+  // it could not answer "where are my sessions on disk?" from the app. The version was reported
+  // nowhere at all. Asserted here because the snapshot is the only route they can take.
+  const supervisor = new FakeSupervisor();
+  const config = emptyConfig();
+  const transport = new Transport(supervisor as never, config, { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    const snapshot = await client.next("snapshot");
+    const install = snapshot.kind === "snapshot" ? snapshot.install : undefined;
+    assert.ok(install, "the snapshot must carry the installation facts");
+
+    // The paths come from the CONFIG, so they must match it rather than a copy made anywhere else.
+    assert.equal(install.sessionsRoot, config.sessionsRoot);
+    assert.equal(install.workspaceRoot, config.workspaceRoot);
+    assert.equal(install.agentRoot, config.agentRoot);
+    assert.equal(install.agentRootManaged, config.agentRootManaged);
+
+    // The version is READ from the package, never restated (ADR-0011). Running from a checkout, the
+    // owning package is findable, so a real version must come back — "unknown" would mean the walk up
+    // failed in the one layout where it must not.
+    assert.notEqual(install.version, "unknown", "the owning package.json must be findable from a test run");
+    assert.match(install.version, /^\d+\.\d+\.\d+/);
+
+    // And the protocol version, so the on-screen pair can be compared. It must agree with what
+    // `hello` declared: a disagreement would be a bug in this field, not a skew to display.
+    assert.equal(install.protocol, PROTOCOL_VERSION);
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
 test("a start command is routed to the supervisor and its session broadcast", async () => {
   const supervisor = new FakeSupervisor();
   const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });

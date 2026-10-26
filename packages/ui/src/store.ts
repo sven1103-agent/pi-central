@@ -15,7 +15,13 @@
  *    produce an authoritative snapshot; merging would leave a session showing as live after
  *    the orchestrator had stopped it.
  */
-import type { HistoricalSession, LiveSession, ModelOption, PiRecord } from "@pi-central/protocol";
+import type {
+  HistoricalSession,
+  InstallFacts,
+  LiveSession,
+  ModelOption,
+  PiRecord,
+} from "@pi-central/protocol";
 import { applyRecord, emptyTranscript, seedTranscript, type Transcript } from "./transcript.ts";
 
 export interface UiState {
@@ -33,6 +39,15 @@ export interface UiState {
    * the UI reports as unknown rather than as safe.
    */
   installationRoot: string | undefined;
+  /**
+   * Facts about the running installation, for the Settings surface (issue #58).
+   *
+   * `undefined` until the first snapshot, and in principle forever when talking to an orchestrator
+   * older than this field. The UI renders that as "not reported", never as an empty string — the same
+   * distinction `home` makes, and the reason the protocol could add this field without a version
+   * bump: a receiver that does not know it ignores it, and one that expects it says so.
+   */
+  install: InstallFacts | undefined;
   /** Transcripts keyed by session id, built from that session's records. */
   transcripts: Record<string, Transcript>;
   /**
@@ -90,6 +105,7 @@ export function initialState(): UiState {
     historyTotal: 0,
     home: undefined,
     installationRoot: undefined,
+    install: undefined,
     transcripts: {},
     transcriptErrors: {},
     models: {},
@@ -179,6 +195,7 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
         historyTotal: event.historyTotal,
         home: event.home,
         installationRoot: event.installationRoot,
+        install: event.install,
         focusedId,
         ready: true,
       };

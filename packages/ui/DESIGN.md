@@ -614,6 +614,7 @@ src/
     Panel, ModeTabs (the panel's Session|Files tab strip), PanelResizer
     Inspector, IsolationBlock, PathsBlock, UsageBlock, NoticesBlock, SessionActionsBlock
     FilesPanel, FileTree, TreeNode, FilePane, FileErrorNote   (issue #8: confined to the cwd)
+    Settings, Fact                (issue #58: which build is running, and where it keeps things)
     StatusChips, StatusRegion (visually hidden polite announcer), ToastStack, Popover, CopyButton
     EmptyState, ErrorCard, DismissibleCard
 ```
@@ -636,6 +637,14 @@ States per component (minimum): `default · hover · focus-visible · active · 
   directory). A tab strip, so it reads like the topbar's `Sessions|History`. Both bodies stay mounted
   under one stable `role="tabpanel"` id — remounting on switch would lose the document's scroll
   position and jump the reader back to line 1.
+- **Settings** (issue #58) is a labelled button at the right of the topbar, not a gear glyph: the
+  version is the reason it exists, and an icon makes it undiscoverable to anyone who reads words.
+  It opens a modal, `Esc` closes it, focus moves in on open and **returns to the trigger** on close —
+  a surface you can enter with the keyboard and not leave with it drops focus to the document body.
+  It renders only facts the orchestrator sent; a fact that has not arrived says **"not reported"**
+  rather than showing a blank, and it contains **no preference control** until update checking
+  (#55) works, because a control that looks functional and is not is worse than its absence.
+
 - **Panel resize.** Drag the panel's left edge; `←`/`→` nudge by 16px, `Home`/`End` jump to
   min/max, double-click resets to 360px. It is a `role="separator"` with `aria-valuenow/min/max` and
   `aria-valuetext` in pixels. Bounds: 280px floor, `min(1200, 60vw)` ceiling — a fraction, because the
