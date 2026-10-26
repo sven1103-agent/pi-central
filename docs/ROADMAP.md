@@ -288,11 +288,11 @@ File access runs **directly at the user's UID** — no sidecar, no sandbox in th
 - [ ] Verify per-session env: no credential leaks across sessions (C4).
 - [ ] Process-group teardown verified under SIGKILL of the orchestrator.
 - [ ] Document the `~/.pi` cross-transcript exposure as a known limitation (C6).
-- [ ] Packaging: `pi install` package vs standalone app — decide and implement. **Deferred**: how Pi
-      Central should be configurable (shipping skills, extensions, or packages) is an open question
-      in [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md#q8--naming-and-packaging), deliberately not decided
-      in the SSH slice. Nothing needs shipping for the current setup: a user's own skills already
-      reach a session through `~/.pi` (C6) and the agent's `gh` token.
+- [ ] Packaging: `pi install` package vs standalone app — decide and implement. **The "package"
+      half is settled against**: Pi Central ships no skill, no extension, and no settings into a
+      user's Pi environment (README principle 9). It is a peer app, and the remaining packaging
+      question is how it is distributed, not what it installs into Pi. See
+      [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md#q8--naming-and-packaging).
 
 ## Backlog / ideas
 

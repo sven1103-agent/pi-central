@@ -166,6 +166,10 @@ file still *looks* authoritative. It has caught real rot more than once.
 8. **Never state something false.** A displayed value that is wrong is a defect, not a cosmetic
    issue: this project has shipped misleading counts, a mislabelled session id, and a permission
    error reported as a missing directory, and treats each as a bug.
+9. **A peer, not a configurator.** Pi Central does not write into a user's Pi environment — no
+   skills, no extensions, no settings. It reads what exists and writes only its own state. A
+   defense does not require a new artifact in the environment it defends, and any setup a session
+   needs is a documented action the user takes (see [docs/AGENT-SETUP.md](docs/AGENT-SETUP.md)).
 
 ## License
 
