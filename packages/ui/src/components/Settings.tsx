@@ -21,18 +21,30 @@
  * here instead is a sentence saying so, because "why can I not turn this on?" deserves an answer
  * rather than a missing box.
  *
- * ## Every fact is allowed to be absent
+ * ## A placeholder is not a value
  *
- * `install` is `undefined` until a snapshot arrives, and stays undefined against an orchestrator
- * older than the field. That renders as **"not reported"**, never as an empty string or a zero: the
- * UI must not claim a version it does not have, and a blank where a path belongs reads as a bug in
- * the surface rather than as a fact that was never sent.
+ * Every fact is allowed to be absent: `install` is `undefined` until a snapshot arrives, and stays
+ * undefined against an orchestrator older than the field. Two consequences, and the first was a real
+ * bug found by looking at a screenshot of this very surface:
+ *
+ *   1. **An absent fact is not copyable.** The first version passed `install?.sessionsRoot ??
+ *      "not reported"` and rendered a copy button beside it, so the button put the literal string
+ *      `not reported` on the clipboard. Offering to copy a placeholder is worse than offering
+ *      nothing, so `Fact` takes `string | undefined` and derives the placeholder itself.
+ *   2. **The reason is stated once, not six times.** Each row said "the orchestrator has not sent this
+ *      yet", which is six repetitions of one fact and buries the actionable part.
  */
 import { useEffect, useRef } from "react";
 import { PROTOCOL_VERSION, type InstallFacts } from "@pi-central/protocol";
 import { CopyButton } from "./CopyButton.tsx";
 
-/** A row of the `key: value` table, with a copy button when the value is worth copying. */
+/**
+ * A row of the `key: value` table.
+ *
+ * `value` is `string | undefined` rather than a pre-substituted string, deliberately: the placeholder
+ * is derived HERE, so no call site can hand a placeholder to the copy button by forgetting to check.
+ * That makes the bug above unrepresentable rather than merely fixed.
+ */
 function Fact({
   label,
   value,
@@ -41,29 +53,52 @@ function Fact({
   note,
 }: {
   label: string;
-  value: string;
+  value: string | undefined;
   copyable?: boolean;
   monospace?: boolean;
   note?: string | undefined;
 }) {
+  const missing = value === undefined;
   return (
     <>
       <dt>{label}</dt>
       <dd>
-        <span className={monospace ? "settings-mono" : undefined}>{value}</span>
-        {copyable && <CopyButton text={value} label={label} />}
+        {/*
+          The placeholder is NOT styled as a machine string. "not reported" is prose about an absence;
+          rendering it in the mono face would make it look like a value that happens to read oddly.
+        */}
+        <span className={missing ? "settings-absent" : monospace ? "settings-mono" : undefined}>
+          {missing ? "not reported" : value}
+        </span>
+        {copyable && !missing && <CopyButton text={value} label={label} />}
         {note !== undefined && <span className="settings-note">{note}</span>}
       </dd>
     </>
   );
 }
 
-export function Settings({ install, onClose }: { install: InstallFacts | undefined; onClose: () => void }) {
+export function Settings({
+  install,
+  ready,
+  onClose,
+}: {
+  install: InstallFacts | undefined;
+  /**
+   * Whether a snapshot has arrived yet.
+   *
+   * The difference between "the orchestrator has not answered yet" and "this orchestrator does not
+   * send these facts" — which are different problems with different fixes, and only the second means
+   * something is out of date. Without it the surface would have to say "not reported" and leave the
+   * reader to guess, which is how the version skew in issue #8 stayed confusing.
+   */
+  ready: boolean;
+  onClose: () => void;
+}) {
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    // Focus moves INTO the surface, so the keyboard is not left on the page behind it — and `Esc`
-    // is bound to the window rather than to the surface, because a user who has tabbed to a control
+    // Focus moves INTO the surface, so the keyboard is not left on the page behind it — and `Esc` is
+    // bound to the window rather than to the surface, because a user who has tabbed to a control
     // still expects Esc to close it.
     closeRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
@@ -73,8 +108,8 @@ export function Settings({ install, onClose }: { install: InstallFacts | undefin
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
-  // The orchestrator's protocol version, when it has told us. Compared against this UI's below —
-  // the pair is the diagnostic for the exact failure that motivated this surface: a skew reported as
+  // The orchestrator's protocol version, when it has told us. Compared against this UI's below — the
+  // pair is the diagnostic for the exact failure that motivated this surface: a skew reported as
   // `unknown kind`, from a connection that had said `hello`.
   const orchestratorProtocol = install?.protocol;
   const skew = orchestratorProtocol !== undefined && orchestratorProtocol !== PROTOCOL_VERSION;
@@ -90,17 +125,36 @@ export function Settings({ install, onClose }: { install: InstallFacts | undefin
       >
         <h3 id="settings-title">This installation</h3>
 
+        {/*
+          One explanation, stated once. `role="status"` rather than `alert`: it describes a state the
+          user opened the surface to read, so announcing it assertively would be noise.
+
+          When a snapshot HAS arrived and the facts are still absent, the cause is knowable — this
+          orchestrator does not send the field — so the message names it and gives the fix. That is
+          the same move as the version-skew message in `connection.ts`: turn a state that looks like a
+          broken UI into one that says what to do.
+        */}
+        {install === undefined && (
+          <p className="settings-absent-note" role="status">
+            {ready ? (
+              <>
+                <strong>This orchestrator is older than this UI.</strong> It does not report the facts
+                below, so nothing here can be shown. Restart it to pick up the current build — see{" "}
+                <code>docs/DOGFOODING.md</code>.
+              </>
+            ) : (
+              <>Waiting for the orchestrator to send these facts…</>
+            )}
+          </p>
+        )}
+
         <section>
           <h4>This build</h4>
           <dl className="kv">
-            <Fact
-              label="Version"
-              value={install?.version ?? "not reported"}
-              note={install === undefined ? "the orchestrator has not sent this yet" : undefined}
-            />
+            <Fact label="Version" value={install?.version} />
             <Fact
               label="Protocol"
-              value={orchestratorProtocol === undefined ? "not reported" : `v${orchestratorProtocol}`}
+              value={orchestratorProtocol === undefined ? undefined : `v${orchestratorProtocol}`}
               note={
                 orchestratorProtocol === undefined
                   ? undefined
@@ -115,11 +169,11 @@ export function Settings({ install, onClose }: { install: InstallFacts | undefin
         <section>
           <h4>Where things live</h4>
           <dl className="kv">
-            <Fact label="Sessions" value={install?.sessionsRoot ?? "not reported"} copyable monospace />
-            <Fact label="Workspaces" value={install?.workspaceRoot ?? "not reported"} copyable monospace />
+            <Fact label="Sessions" value={install?.sessionsRoot} copyable monospace />
+            <Fact label="Workspaces" value={install?.workspaceRoot} copyable monospace />
             <Fact
               label="Agent root"
-              value={install?.agentRoot ?? "not reported"}
+              value={install?.agentRoot}
               copyable
               monospace
               note={

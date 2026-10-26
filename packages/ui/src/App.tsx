@@ -574,6 +574,7 @@ export function App() {
       {settingsOpen && (
         <Settings
           install={state.install}
+          ready={state.ready}
           onClose={() => {
             setSettingsOpen(false);
             settingsTriggerRef.current?.focus();

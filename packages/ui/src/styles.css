@@ -1554,6 +1554,23 @@ select.btn { font-family: var(--sans); }
   user-select: text;
 }
 .settings-note { color: var(--dim); font-size: var(--fs-xs); font-style: italic; }
+/* The placeholder is prose about an absence, so it is dim and NOT mono — see Settings.tsx. */
+.settings-absent { color: var(--dim); font-size: var(--fs-xs); font-style: italic; }
+/* One explanation for a whole surface of absent facts, so it is set apart from the rows rather than
+   repeated inside them. A left rule in the warning hue, matching the file tree's refusal treatment:
+   this is a state the user should act on, not a caption. */
+.settings-absent-note {
+  margin: var(--sp-3) 0 0;
+  padding: 6px 0 6px 10px;
+  border-left: 3px solid var(--warn-text);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+.settings-absent-note code {
+  font-family: var(--mono);
+  color: var(--dim);
+}
 
 /* The update statement. Italic and dim like a note, but set apart because it is an ANSWER to
    "why can I not turn this on?" rather than a caption on a value. */

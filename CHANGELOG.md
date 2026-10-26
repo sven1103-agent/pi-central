@@ -112,6 +112,17 @@ They are kept because each one is the reason a constraint or an invariant test e
   on?"* — and a test asserts the absence of any `input`, `checkbox` or `switch`, so the gap cannot be
   closed silently by someone helpfully adding one.
 
+  **A defect found by looking at a screenshot of this surface while every test was green.** The first
+  version passed `install?.sessionsRoot ?? "not reported"` into the row and rendered a copy button
+  beside it — so the button put the literal string `not reported` on the clipboard. A placeholder is
+  not a value, so `Fact` now takes `string | undefined` and derives the placeholder itself, which
+  makes the bug **unrepresentable** rather than merely fixed, and a test asserts no copy button exists
+  without a value (with a companion test asserting present values *are* copyable, so deleting the
+  feature could not pass). The absence is also explained **once** instead of in all six rows, and the
+  message distinguishes "the orchestrator has not answered yet" from "this orchestrator is older than
+  this UI" — only the second is actionable, and conflating them is how the version skew in issue #8
+  stayed confusing.
+
   Every fact is allowed to be **absent**, and renders as "not reported" rather than a blank or a
   zero — the case an orchestrator older than the field produces, which is why the protocol could add
   it as an optional snapshot field without a version bump (a receiver that does not know it ignores
