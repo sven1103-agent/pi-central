@@ -638,3 +638,67 @@ test("switching focus preserves the other session's transcript", () => {
   state = reduce(state, { kind: "focusSession", sessionId: "s1" });
   assert.equal(state.transcripts["s1"]?.messages.length, 1, "and still be there when switching back");
 });
+
+// --- Facts about the installation (issue #58) ----------------------------------------------------
+
+test("a snapshot carries the installation facts into the state", () => {
+  // The Settings surface renders from `state.install`, so the snapshot is the only source. A reducer
+  // that dropped the field would leave Settings permanently at "not reported" while the orchestrator
+  // was sending the answer — a surface that always looks broken.
+  const state = reduce(initialState(), {
+    kind: "snapshot",
+    live: [],
+    history: [],
+    historyTotal: 0,
+    home: "/Users/x",
+    install: {
+      version: "9.9.9-witness",
+      protocol: 4242,
+      sessionsRoot: "/s",
+      workspaceRoot: "/w",
+      agentRoot: "/a",
+      agentRootManaged: false,
+    },
+  });
+  assert.equal(state.install?.version, "9.9.9-witness");
+  assert.equal(state.install?.protocol, 4242);
+  assert.equal(state.install?.agentRootManaged, false);
+});
+
+test("installation facts are absent until a snapshot arrives, and are NOT invented", () => {
+  // The state an orchestrator older than the field produces. `undefined` is the honest value; a
+  // default like `{ version: "unknown" }` would make "the orchestrator did not say" indistinguishable
+  // from "the orchestrator said unknown", which are different facts.
+  assert.equal(initialState().install, undefined);
+});
+
+test("a snapshot that omits the facts CLEARS them, because a snapshot is authoritative", () => {
+  // The rule store.ts states at the top, applied to this field: a snapshot replaces rather than
+  // merges. If it merged, reconnecting to an older orchestrator would keep showing the previous
+  // orchestrator's version — a stale claim about which build is running, which is the one thing this
+  // surface exists to answer.
+  const withFacts = reduce(initialState(), {
+    kind: "snapshot",
+    live: [],
+    history: [],
+    historyTotal: 0,
+    home: "/Users/x",
+    install: {
+      version: "9.9.9-witness",
+      protocol: 4242,
+      sessionsRoot: "/s",
+      workspaceRoot: "/w",
+      agentRoot: "/a",
+      agentRootManaged: true,
+    },
+  });
+  assert.ok(withFacts.install, "precondition: the first snapshot set them");
+  const afterOlder = reduce(withFacts, {
+    kind: "snapshot",
+    live: [],
+    history: [],
+    historyTotal: 0,
+    home: "/Users/x",
+  });
+  assert.equal(afterOlder.install, undefined, "a snapshot without the facts must not retain older ones");
+});

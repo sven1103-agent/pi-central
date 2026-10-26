@@ -24,4 +24,6 @@ packages/ui/dist/
 bin/
 
 # Screenshots pasted for review, not repository content. Issue #7 tracks real README images.
-img_*.png
+# `img*.png` rather than `img_*.png`: the paste tool emits `img.png` as well as `img_1.png`, and the
+# narrower pattern let the un-suffixed one be committed by a `git add -A` while reviewing a slice.
+img*.png

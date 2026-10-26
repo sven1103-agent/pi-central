@@ -29,7 +29,7 @@ globalThis.document = dom.window.document;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 
 let server;
-let SessionRail, ToolTrace, DialogDock, TranscriptView, HistoryView, Composer, FileTree, FilePane, Panel, FilesPanel, initialState;
+let SessionRail, ToolTrace, DialogDock, TranscriptView, HistoryView, Composer, FileTree, FilePane, Panel, FilesPanel, Settings, initialState;
 
 before(async () => {
   // `root` must be the UI package, not the process CWD: Vite resolves the `/src/...` specifiers
@@ -52,6 +52,7 @@ before(async () => {
   ({ FilePane } = await server.ssrLoadModule("/src/components/FilePane.tsx"));
   ({ Panel } = await server.ssrLoadModule("/src/components/Panel.tsx"));
   ({ FilesPanel } = await server.ssrLoadModule("/src/components/FilesPanel.tsx"));
+  ({ Settings } = await server.ssrLoadModule("/src/components/Settings.tsx"));
   ({ initialState } = await server.ssrLoadModule("/src/store.ts"));
 });
 
@@ -1437,4 +1438,147 @@ test("no viewport rule hides the panel", () => {
   // And the shell grid still reserves a column for it at every width.
   assert.ok(!/@media \(max-width: 1439px\)\s*\{[^}]*\.panes\s*\{[^}]*grid-template-columns:\s*288px 1fr;/.test(css),
     "the panel column must not be dropped at narrow widths");
+});
+
+// --- Settings: this installation (issue #58) -----------------------------------------------------
+
+/** Facts shaped like the snapshot's, with values deliberately unlike the real ones. */
+function installFacts(overrides = {}) {
+  return {
+    version: "9.9.9-witness",
+    protocol: 4242,
+    sessionsRoot: "/sessions-root-witness",
+    workspaceRoot: "/workspace-root-witness",
+    agentRoot: "/agent-root-witness",
+    agentRootManaged: true,
+    ...overrides,
+  };
+}
+
+test("Settings shows the version the SNAPSHOT carried, never one it knows itself", async () => {
+  // The provenance assertion. Nothing in the UI bundle can know the orchestrator's version, so the
+  // value must come from the event — and the fixture is deliberately unlike any real version, so a
+  // hardcoded number in the component cannot pass this.
+  const html = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {} }));
+  assert.match(html, /9\.9\.9-witness/);
+  assert.ok(!/0\.\d+\.\d+/.test(html.replace(/4242/g, "")), `no real-looking version may appear: ${html}`);
+});
+
+test("Settings says 'not reported' rather than showing a blank or a zero", async () => {
+  // The state an orchestrator older than this field produces, and the state before the first
+  // snapshot. A blank where a version belongs reads as a bug in the surface; "not reported" is a
+  // fact. This is the case that let the protocol add the field without a version bump.
+  const html = renderToString(createElement(Settings, { install: undefined, ready: true, onClose() {} }));
+  assert.match(html, /not reported/);
+  assert.ok(!/0\.0\.0|unknown version|v0\b/.test(html), `must not invent a version: ${html}`);
+});
+
+test("Settings shows where things live, copyable", async () => {
+  const html = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {} }));
+  for (const path of ["/sessions-root-witness", "/workspace-root-witness", "/agent-root-witness"]) {
+    assert.ok(html.includes(path), `the path ${path} must be shown`);
+  }
+  // Copyable, because the reason to look a path up is to paste it somewhere. Asserted as one copy
+  // button PER path rather than "a button exists": the failure worth catching is a path added
+  // without one, which a presence check would wave through.
+  assert.match(html, /title="Copy sessions"/);
+  assert.match(html, /title="Copy workspaces"/);
+  assert.match(html, /title="Copy agent root"/);
+  assert.equal((html.match(/class="copy"/g) ?? []).length, 3, "every path needs its own copy button");
+});
+
+test("an external agent root is distinguished from a managed one", async () => {
+  // Not cosmetic: "managed" means Pi Central will create and write it; "external" means it will not,
+  // and a user who assumes the wrong one is surprised either way.
+  const managed = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {} }));
+  assert.match(managed, /managed by Pi Central/);
+
+  const external = renderToString(
+    createElement(Settings, { install: installFacts({ agentRootManaged: false }), ready: true, onClose() {} }),
+  );
+  assert.match(external, /external/);
+  assert.ok(!/managed by Pi Central/.test(external), "an external root must not claim to be managed");
+});
+
+test("a PROTOCOL MISMATCH is stated, because that was the confusing failure", async () => {
+  // The whole point of showing the protocol version: the failure that motivated Increment 6 arrived
+  // as `unknown kind 'listFiles'` from a connection that had agreed on `hello`. Both numbers and the
+  // word MISMATCH make that class self-diagnosing instead.
+  const html = renderToString(
+    createElement(Settings, { install: installFacts({ protocol: 4242 }), ready: true, onClose() {} }),
+  );
+  assert.match(html, /MISMATCH/);
+  assert.match(html, /4242/);
+});
+
+test("a MATCHING protocol is stated as matching, and does not cry wolf", async () => {
+  const { PROTOCOL_VERSION } = await server.ssrLoadModule("/src/../../protocol/src/index.ts");
+  const html = renderToString(
+    createElement(Settings, { install: installFacts({ protocol: PROTOCOL_VERSION }), ready: true, onClose() {} }),
+  );
+  assert.ok(!/MISMATCH/.test(html), `a matching protocol must not report a mismatch: ${html}`);
+  assert.match(html, /matches this UI/);
+});
+
+test("Settings contains NO preference control, only a statement about updates", async () => {
+  // The rule this slice is built around: a control that looks functional and is not is worse than
+  // its absence. The update toggle belongs here, and must not appear until #55 makes it work — so
+  // this asserts the absence, which is what would silently rot as someone "helpfully" adds it.
+  const html = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {} }));
+  assert.ok(!/<input/i.test(html), `no input may appear in Settings yet: ${html}`);
+  assert.ok(!/type="checkbox"/i.test(html), "no checkbox may appear in Settings yet");
+  assert.ok(!/role="switch"/i.test(html), "no switch may appear in Settings yet");
+  // But the question "why can I not turn this on?" is answered, rather than left to the reader.
+  assert.match(html, /does not check for updates/i);
+  assert.match(html, /off unless you\s+turn it on|off unless you turn it on/i);
+});
+
+test("Settings is a labelled dialog that can be left with the keyboard", async () => {
+  // Opened from the topbar and dismissed with Esc; without `aria-modal` and a labelled heading it is
+  // a div that happens to look like a dialog.
+  const html = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {} }));
+  assert.match(html, /role="dialog"/);
+  assert.match(html, /aria-modal="true"/);
+  assert.match(html, /aria-labelledby="settings-title"/);
+  assert.match(html, /id="settings-title"/);
+  assert.match(html, />Close</);
+});
+
+test("an ABSENT fact is not copyable, because a placeholder is not a value", async () => {
+  // Found by looking at a screenshot of this surface while every test was green. The first version
+  // passed `install?.sessionsRoot ?? "not reported"` and rendered a copy button beside it — so the
+  // button put the literal string `not reported` on the clipboard. Offering to copy a placeholder is
+  // worse than offering nothing, which is why `Fact` now takes `string | undefined` and derives the
+  // placeholder itself: the bug is unrepresentable rather than merely fixed.
+  const html = renderToString(createElement(Settings, { install: undefined, ready: true, onClose() {} }));
+  assert.ok(!/class="copy"/.test(html), `no copy button may appear without a value: ${html}`);
+  assert.ok(!/Copy sessions|Copy workspaces|Copy agent root/.test(html), "no copy label either");
+  // And the placeholder must not be dressed as a machine string — it is prose about an absence.
+  assert.ok(!/settings-mono/.test(html), "a missing value must not be styled as a path");
+});
+
+test("present facts ARE copyable, so the fix did not remove the feature", async () => {
+  // The falsifier for the test above: asserting only "no copy button when absent" would pass just as
+  // well if copy buttons had been deleted outright.
+  const html = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {} }));
+  assert.equal((html.match(/class="copy"/g) ?? []).length, 3);
+});
+
+test("absent facts are explained ONCE, and the reason is distinguished from 'not yet'", async () => {
+  // Two different problems: the orchestrator has not answered yet, versus this orchestrator does not
+  // send these facts at all (it is older). Only the second is actionable, and conflating them is how
+  // the version skew in issue #8 stayed confusing. The explanation appears once rather than once per
+  // row — six repetitions of one fact buries the part that matters.
+  const waiting = renderToString(createElement(Settings, { install: undefined, ready: false, onClose() {} }));
+  assert.match(waiting, /Waiting for the orchestrator/);
+  assert.ok(!/older than this UI/.test(waiting), "must not claim staleness before a snapshot arrived");
+
+  const stale = renderToString(createElement(Settings, { install: undefined, ready: true, onClose() {} }));
+  assert.match(stale, /older than this UI/);
+  assert.match(stale, /Restart it/);
+  assert.equal((stale.match(/older than this UI/g) ?? []).length, 1, "stated once, not per row");
+
+  // With facts present there is nothing to explain.
+  const fine = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {} }));
+  assert.ok(!/older than this UI|Waiting for the orchestrator/.test(fine));
 });

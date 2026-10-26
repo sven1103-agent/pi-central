@@ -113,6 +113,12 @@ npm run ui:dev              # terminal 2 — Vite, on http://localhost:5173
 | `Enter` | Send, or queue while a run is in progress |
 | `Esc` | Answer an open dialog → close a popover → stop the run. Never clears your draft |
 
+**Settings** (top of the window) shows which build is running, which protocol it speaks, and where
+Pi Central keeps sessions, workspaces and the agent root — facts that were previously only in the
+terminal's startup output. It has no preference controls yet, deliberately: update checking
+([#55](https://github.com/sven1103-agent/pi-central/issues/55)) will add the first one, and it will be
+opt-in.
+
 ## What works, and what does not
 
 Stated plainly, because a dashboard that overstates itself is worse than one that does less.

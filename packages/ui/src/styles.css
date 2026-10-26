@@ -1522,3 +1522,59 @@ select.btn { font-family: var(--sans); }
     border-right: 1px solid var(--line);
   }
 }
+
+/* --- Settings: this installation (issue #58) -----------------------------------------------------
+
+   A modal, like the other surfaces opened from the topbar, because it is a detour rather than a
+   place you work. Wider than the confirm modal: it holds filesystem paths, and a path wrapped at
+   440px is a path nobody reads. */
+
+.settings { max-width: 620px; width: min(620px, calc(100vw - 32px)); }
+.settings section { margin-top: var(--sp-4); }
+.settings h4 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+/* Wider than the inspector's 96px label column: "Workspaces" and "Agent root" are the longest
+   labels here, and the value column carries the copy button. */
+.settings .kv { grid-template-columns: 110px 1fr; }
+.settings .kv dd { flex-wrap: wrap; }
+
+/* Paths and versions are machine strings, so they are shown in the mono face and are NOT truncated.
+   `break-all` rather than `break-word`: a filesystem path has no spaces to break at, and a long one
+   would otherwise overflow the panel. */
+.settings-mono {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  word-break: break-all;
+  user-select: text;
+}
+.settings-note { color: var(--dim); font-size: var(--fs-xs); font-style: italic; }
+/* The placeholder is prose about an absence, so it is dim and NOT mono — see Settings.tsx. */
+.settings-absent { color: var(--dim); font-size: var(--fs-xs); font-style: italic; }
+/* One explanation for a whole surface of absent facts, so it is set apart from the rows rather than
+   repeated inside them. A left rule in the warning hue, matching the file tree's refusal treatment:
+   this is a state the user should act on, not a caption. */
+.settings-absent-note {
+  margin: var(--sp-3) 0 0;
+  padding: 6px 0 6px 10px;
+  border-left: 3px solid var(--warn-text);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+.settings-absent-note code {
+  font-family: var(--mono);
+  color: var(--dim);
+}
+
+/* The update statement. Italic and dim like a note, but set apart because it is an ANSWER to
+   "why can I not turn this on?" rather than a caption on a value. */
+.settings-updates { margin: 0; line-height: 1.5; }
+.settings-updates strong { color: var(--text); font-style: normal; }
+
+.settings .dialog-actions { margin-top: var(--sp-5); }

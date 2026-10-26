@@ -34,6 +34,7 @@ import { ToolTrace } from "./components/ToolTrace.tsx";
 import { Composer, type QueueBehavior } from "./components/Composer.tsx";
 import { DialogDock, type DialogAnswer } from "./components/DialogDock.tsx";
 import { Inspector } from "./components/Inspector.tsx";
+import { Settings } from "./components/Settings.tsx";
 import { FilesPanel } from "./components/FilesPanel.tsx";
 import { Panel } from "./components/Panel.tsx";
 import {
@@ -63,6 +64,11 @@ export function App() {
   const [tab, setTab] = useState<Tab>("sessions");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [confirmStop, setConfirmStop] = useState<LiveSession | undefined>(undefined);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  // Focus RETURNS to the trigger on close. Without this, closing a surface opened from the keyboard
+  // drops focus to the document body, and the next Tab starts from the top of the page — so a
+  // keyboard user pays for having looked at the version.
+  const settingsTriggerRef = useRef<HTMLButtonElement>(null);
 
   // Drafts are per session and in memory, so switching focus never loses typing. Never cleared
   // by Esc: that keystroke belongs to the agent.
@@ -397,6 +403,18 @@ export function App() {
             </span>
             {connectionDetail && <span className="hint">· {connectionDetail}</span>}
           </span>
+          {/*
+            Labelled, not an icon. A gear glyph would be shorter and would make the version — the
+            reason this surface exists — undiscoverable to anyone who reads words rather than shapes.
+          */}
+          <button
+            type="button"
+            className="btn btn-quiet"
+            ref={settingsTriggerRef}
+            onClick={() => setSettingsOpen(true)}
+          >
+            Settings
+          </button>
         </div>
       </header>
 
@@ -552,6 +570,17 @@ export function App() {
           )}
         </Panel>
       </div>
+
+      {settingsOpen && (
+        <Settings
+          install={state.install}
+          ready={state.ready}
+          onClose={() => {
+            setSettingsOpen(false);
+            settingsTriggerRef.current?.focus();
+          }}
+        />
+      )}
 
       {sheetOpen && (
         <OpenDirectorySheet

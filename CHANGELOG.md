@@ -91,6 +91,45 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Added
 
+- **A Settings surface: which build is running, and where it keeps things** (issue #58). Three of
+  these facts were previously printed **only** to the terminal at startup — sessions root, default
+  workspace, agent root — so a user who closed that terminal could not answer *"where are my sessions
+  on disk?"* from the app. The version was reported nowhere at all, so *"is this the build with the
+  fix?"* was unanswerable from the running process, which is exactly the question releases make
+  routine.
+
+  It shows the **orchestrator's** version, read from the `package.json` it was shipped in and taken
+  from the snapshot — never a constant in the UI bundle, which can be a stale build. It also shows
+  the **wire protocol version** beside the one this UI speaks, because the failure that motivated
+  Increment 6 arrived as `unknown kind 'listFiles'` from a connection that had agreed on `hello`;
+  both numbers on screen make that class self-diagnosing. Where the orchestrator could not identify
+  its own installation, the surface says so rather than staying silent — the same reasoning as issue
+  #25, where "no warning appeared" is otherwise indistinguishable from "the warning is broken".
+
+  **It deliberately contains no preference control.** The update-detection toggle belongs on this
+  surface but does not appear until #55 makes it work: a control that looks functional and is not is
+  worse than its absence. What is there instead is a sentence answering *"why can I not turn this
+  on?"* — and a test asserts the absence of any `input`, `checkbox` or `switch`, so the gap cannot be
+  closed silently by someone helpfully adding one.
+
+  **A defect found by looking at a screenshot of this surface while every test was green.** The first
+  version passed `install?.sessionsRoot ?? "not reported"` into the row and rendered a copy button
+  beside it — so the button put the literal string `not reported` on the clipboard. A placeholder is
+  not a value, so `Fact` now takes `string | undefined` and derives the placeholder itself, which
+  makes the bug **unrepresentable** rather than merely fixed, and a test asserts no copy button exists
+  without a value (with a companion test asserting present values *are* copyable, so deleting the
+  feature could not pass). The absence is also explained **once** instead of in all six rows, and the
+  message distinguishes "the orchestrator has not answered yet" from "this orchestrator is older than
+  this UI" — only the second is actionable, and conflating them is how the version skew in issue #8
+  stayed confusing.
+
+  Every fact is allowed to be **absent**, and renders as "not reported" rather than a blank or a
+  zero — the case an orchestrator older than the field produces, which is why the protocol could add
+  it as an optional snapshot field without a version bump (a receiver that does not know it ignores
+  it). A snapshot that omits the facts **clears** them rather than merging, because a snapshot is
+  authoritative: retaining a previous orchestrator's version would be a stale answer to the one
+  question this surface exists to answer.
+
 - **Pi Central is now a package, not only a checkout** (issue #52, ADR-0011). `npm run build:package`
   produces the artifact and `npm pack` shows exactly what ships:
 

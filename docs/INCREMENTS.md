@@ -110,7 +110,8 @@ loading TypeScript off disk. That is why the product has been able to improve qu
 also why there is no artifact, no way to say which version is running, and a manual `git pull` in the
 loop when the tool is used to build the tool.
 
-Slices: the distributable artifact (issue #52, **done**); the release workflow — one version source,
+Slices: the distributable artifact (issue #52, **done**); a Settings surface showing the running
+build and where it keeps things (#58, **done**); the release workflow — one version source,
 a tag, a GitHub Release, a provenance-attested publish (#53); prerequisite checks for `pi` and
 `safehouse` (#54); update detection that is off unless enabled (#55); and applying an update — one
 explicit action, integrity-verified, refusing while sessions run (#56). The trust model is
