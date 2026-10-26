@@ -998,6 +998,39 @@ select.btn { font-family: var(--sans); }
   max-height: 34vh;
   overflow-y: auto;
 }
+/*
+ * QUARANTINE FRAME for the tool output panel (DESIGN §5.2, issue #43).
+ *
+ * Tool output is what the agent read from the world, so it is attacker-influenced data rather than
+ * the assistant's own words. The transcript's one-time legend promises this frame; before this
+ * rule the hatch was applied only to `thinking` blocks, so the surface the legend is about rendered
+ * plain and the UI asserted a provenance guarantee it did not provide.
+ *
+ * The hatch is written INTO this rule rather than composed with `.quarantine`, because both would
+ * set `background` and `.trace-detail` is declared later — source order would have silently won and
+ * the frame would have been invisible. The hatch geometry matches `.quarantine`'s so the two read as
+ * the same signal; the gutter is 3px here because the panel is full-width, where 6px would read as
+ * a border rather than as a gutter.
+ *
+ * The `Tool output` header is the load-bearing signal, not the texture: in `forced-colors` the hatch
+ * can disappear, so the words carry the provenance on their own (§5.2).
+ */
+.trace-detail.is-quarantined {
+  border-left: 3px solid var(--quarantine);
+  background:
+    repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 6px,
+      rgba(88, 96, 105, 0.12) 6px,
+      rgba(88, 96, 105, 0.12) 12px
+    ),
+    var(--bg);
+}
+/* The header sits on the recessed panel so the frame's body reads as one quarantined block, and the
+   label takes the quarantine colour — the same pairing the transcript's thinking frames use. */
+.trace-detail.is-quarantined .trace-detail-head { background: var(--panel-2); }
+.trace-detail.is-quarantined .trace-detail-head .label { color: var(--quarantine); }
 .trace-detail-head {
   display: flex;
   align-items: center;

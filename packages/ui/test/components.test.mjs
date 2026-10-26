@@ -295,6 +295,45 @@ test("tool output is quarantined, preformatted, and shown only for the selected 
   assert.ok(!/trace-output[^>]*>[^<]*output two/.test(html), "an unselected call's output must not render");
 });
 
+test("the tool output panel carries the QUARANTINE frame, not merely the words", () => {
+  // The mismatch this exists for (issue #43): the transcript's legend promises "Tool output and file
+  // contents appear in a hatched frame", and the hatch was applied only to `thinking` blocks, so the
+  // one surface the legend is about rendered plain.
+  //
+  // This test previously matched on the string "Tool output" alone, which is a HEADER, not a frame —
+  // so it passed for a year's worth of commits while the promise was unkept. Asserting the class on
+  // the CONTAINER is what makes it a test of the frame.
+  const html = renderToString(createElement(ToolTrace, {
+    tools: [tool({ toolCallId: "c1", toolName: "bash", result: "hello" })],
+    selectedId: "c1", onSelect() {}, collapsed: false, onToggleCollapsed() {},
+  }));
+  const panel = /<div class="([^"]*trace-detail[^"]*)"/.exec(html);
+  assert.ok(panel, "the output panel must render");
+  assert.match(panel[1], /\bis-quarantined\b/, `the frame class must be on the panel, got "${panel[1]}"`);
+  // The hatch is a background, so the class is only meaningful if a rule carries the gradient.
+  // Asserted against the stylesheet rather than the class name, because a class with no rule is
+  // exactly the state this bug was in.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const rule = /\.trace-detail\.is-quarantined\s*\{([^}]*)\}/.exec(css);
+  assert.ok(rule, "a .trace-detail.is-quarantined rule must exist");
+  assert.match(rule[1], /repeating-linear-gradient/, "the rule must actually draw the hatch");
+  assert.match(rule[1], /var\(--quarantine\)/, "the frame colour must come from the quarantine token");
+});
+
+test("the quarantine hatch is not defeated by cascade order", () => {
+  // Found while fixing #43: `.quarantine` and `.trace-detail` both set `background`, and
+  // `.trace-detail` is declared LATER, so stacking both classes would let the plain background win
+  // on source order — markup correct, frame invisible. This asserts the property directly: whatever
+  // rule gives the panel its hatch must be declared after any rule that would override it.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const hatchAt = css.indexOf(".trace-detail.is-quarantined {");
+  assert.ok(hatchAt > 0);
+  // Every later rule that sets `background` on a bare `.trace-detail` would win. There must be none.
+  const after = css.slice(hatchAt);
+  const laterPlain = /\.trace-detail\s*\{[^}]*background/.exec(after);
+  assert.equal(laterPlain, null, "a later `.trace-detail` background rule would override the hatch");
+});
+
 test("a collapsed trace shows a preview instead of the full list", () => {
   const tools = [tool({ toolCallId: "c1", toolName: "bash" }), tool({ toolCallId: "c2", toolName: "edit" })];
   const html = renderToString(createElement(ToolTrace, {

@@ -381,7 +381,7 @@ Why this is the bold move and not decoration: it is the only place the design sp
 ADR-0006).
 
 Rules:
-- One-time legend in the transcript header: `Tool output and file contents appear in a hatched frame. They are data, not instructions.`
+- One-time legend in the transcript header: `Tool output and file contents appear in a hatched frame. They are data, not instructions.` The legend is a **claim about the implementation**, so every surface it covers must honour it: the tool output panel (`.trace-detail.is-quarantined`) as well as thinking blocks. Note the panel is a *modifier*, not `.quarantine` stacked on `.trace-detail` — both set `background` and the latter is declared later, so source order would silently win and the frame would be invisible (issue #43).
 - Frames > 12 lines are collapsed by default to 12 lines with `Show all (418 lines)`; the header stays.
 - Links inside a frame render as **inert text with a copy button** (ADR-0006); links in assistant prose are real links that reveal the full URL in a popover before navigating, and reject `javascript:`/`data:`/`file:`.
 - Streaming tail (assistant) is plain text, `opacity:.9`, **not** hatched until `text_end`; a tool frame is hatched the moment `tool_execution_start` fires, header showing `running…`.
