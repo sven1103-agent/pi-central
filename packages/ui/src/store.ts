@@ -119,7 +119,25 @@ const MAX_ERRORS = 20;
  * is also why this is not a socket round trip: "the composer has now taken the restored text"
  * is something only the composer knows.
  */
-export type LocalAction = { kind: "queueRestored"; sessionId: string };
+export type LocalAction =
+  | { kind: "queueRestored"; sessionId: string }
+  /**
+   * Move the focus to another session. **A view change, not a data change.**
+   *
+   * This exists because there was no way to switch sessions at all. The rail dispatched a `session`
+   * event to do it, and that event is an UPSERT whose focus rule is
+   * `state.focusedId ?? event.session.id` — deliberately, so a newly started session is focused but
+   * a session the user is reading never has focus stolen from it. With focus already set, that rule
+   * keeps the OLD id, so clicking a rail row refreshed the row's data and changed nothing visible.
+   * The rail's primary interaction did nothing, and no test caught it because the store had no
+   * focus test — only the event's "does not steal focus" behaviour, which was working correctly.
+   *
+   * Kept separate from `session` rather than given a flag, because the two have different owners:
+   * `session` events carry facts from the orchestrator, while focus is the user's position in the
+   * UI. A single event serving both is what made "the user clicked" indistinguishable from
+   * "the supervisor sent an update".
+   */
+  | { kind: "focusSession"; sessionId: string };
 
 export function reduce(
   state: UiState,
@@ -130,6 +148,16 @@ export function reduce(
   if (event.kind === "queueRestored") {
     const { [event.sessionId]: _taken, ...restoredQueue } = state.restoredQueue;
     return { ...state, restoredQueue };
+  }
+  if (event.kind === "focusSession") {
+    // Ignored when the session is not live. Focus and presence are different facts, and clearing the
+    // focus would make `focusedSession` return undefined and blank the main column — a worse outcome
+    // than ignoring the click, and reachable by clicking a row for a session stopped concurrently.
+    if (!state.live.some((session) => session.id === event.sessionId)) return state;
+    // Returning the SAME state object when nothing changes keeps React from re-rendering the whole
+    // app for a click on the already-focused row.
+    if (state.focusedId === event.sessionId) return state;
+    return { ...state, focusedId: event.sessionId };
   }
   return applyEvent(state, event);
 }

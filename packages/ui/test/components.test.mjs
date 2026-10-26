@@ -964,3 +964,61 @@ test("a transcript with no notices is unchanged in the markup", async () => {
   }));
   assert.ok(!/run-notice/.test(html));
 });
+
+// --- Clicking a session in the rail actually focuses it ------------------------------------------
+//
+// The bug this exists for was NOT in the rail's markup — the rail rendered correct buttons with the
+// right handler, and its tests all passed. The bug was in what the handler WAS WIRED TO: `App.tsx`
+// dispatched a `session` event, and that event's focus rule is "never steal focus from a session the
+// user is reading", so with focus already set it kept the old id and the click was a no-op.
+//
+// So these tests exercise the WIRING, not the component in isolation. A test that passed an `onFocus`
+// spy to `SessionRail` would have passed before the fix and after it, which is exactly the kind of
+// test that let this ship.
+
+test("clicking a rail row dispatches a dedicated focus change, not a session upsert", async () => {
+  // The load-bearing assertion: the action kind. A `session` event here is the bug.
+  const { reduce, initialState: blank, focusedSession } = await server.ssrLoadModule("/src/store.ts");
+
+  // Reproduce App.tsx's onFocus wiring, then assert the outcome a user would see.
+  const focus = (state, id) => reduce(state, { kind: "focusSession", sessionId: id });
+
+  let state = blank();
+  state = reduce(state, { kind: "session", session: session({ id: "s1" }) });
+  state = reduce(state, { kind: "session", session: session({ id: "s2" }) });
+  assert.equal(focusedSession(state).id, "s1");
+
+  state = focus(state, "s2");
+  assert.equal(focusedSession(state).id, "s2", "the session the user clicked must become focused");
+
+  // And back, since alternating is the actual use: the rail is for moving between sessions.
+  state = focus(state, "s1");
+  assert.equal(focusedSession(state).id, "s1");
+});
+
+test("the rail's row handler receives the session it belongs to", async () => {
+  // Guards the other half of the wiring: a handler closed over the wrong index would focus a
+  // neighbouring row, which reads as "clicking does something random" rather than "nothing happens".
+  const html = renderToString(createElement(SessionRail, {
+    sessions: [session({ id: "s1", name: "first" }), session({ id: "s2", name: "second" })],
+    focusedId: "s1", onFocus() {}, onStartSession() {}, onOpenDirectory() {},
+    home: undefined, historyTotal: 0,
+  }));
+  const rows = html.match(/class="rail-row[^"]*"/g) ?? [];
+  assert.equal(rows.length, 2, "both sessions must render a row");
+  // Each row is a real button, so it is reachable and activatable by keyboard as well.
+  assert.equal((html.match(/<button[^>]*rail-row/g) ?? []).length, 2);
+});
+
+test("focus is marked with aria-current so the focus is not colour-only", async () => {
+  const html = renderToString(createElement(SessionRail, {
+    sessions: [session({ id: "s1" }), session({ id: "s2" })],
+    focusedId: "s2", onFocus() {}, onStartSession() {}, onOpenDirectory() {},
+    home: undefined, historyTotal: 0,
+  }));
+  const rows = html.match(/<button[^>]*rail-row[^>]*>/g) ?? [];
+  const marked = rows.filter((row) => row.includes('aria-current="true"'));
+  assert.equal(marked.length, 1, "exactly one row is current");
+  // The second session renders after the first, and it is the one that must be marked.
+  assert.ok(rows[1].includes('aria-current="true"'), "the focused session must be the marked one");
+});

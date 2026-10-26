@@ -199,9 +199,13 @@ export function App() {
           sessions={state.live}
           focusedId={state.focusedId}
           onFocus={(id) => {
-            // Focus is local: switching sessions is a focus change between live processes, not
-            // a restart (C2). Nothing is sent to the orchestrator.
-            dispatch({ kind: "session", session: state.live.find((s) => s.id === id) ?? state.live[0]! });
+            // Focus is local: switching sessions is a focus change between live processes, not a
+            // restart (C2). Nothing is sent to the orchestrator.
+            //
+            // A DEDICATED action, not a `session` event. Dispatching the session's own data to
+            // switch to it was the bug: that event's focus rule is "never steal focus from a session
+            // the user is reading", so it always kept the current one and the rail did nothing.
+            dispatch({ kind: "focusSession", sessionId: id });
             setTab("sessions");
           }}
           onStartSession={onStartSession}
