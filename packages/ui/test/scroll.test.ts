@@ -8,7 +8,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { decideOnSessionChange, hasScrollableContent } from "../src/scroll.ts";
+import {
+  decideOnSessionChange,
+  hasScrollableContent,
+  isFollowing,
+  isMeasured,
+  readerDistanceFromTail,
+  type ScrollSample,
+} from "../src/scroll.ts";
 
 test("a session never opened opens at the END, following", () => {
   // The newest content is what a reader arriving wants, and a live agent may have produced a great
@@ -80,4 +87,104 @@ test("a restore waits until there is something to scroll", () => {
   const pane = readFileSync(new URL("../src/components/Transcript.tsx", import.meta.url), "utf8");
   assert.match(pane, /pendingRestore/, "the pane must hold the offset");
   assert.match(pane, /hasScrollableContent\(container\.scrollHeight, container\.clientHeight\)/);
+});
+
+// --- Growth is not the reader scrolling (the #86 bug) ----------------------------------------------
+
+const at = (scrollTop: number, scrollHeight: number, clientHeight = 600): ScrollSample => ({
+  scrollTop,
+  scrollHeight,
+  clientHeight,
+});
+
+test("output arriving while the reader sits at the bottom does NOT un-follow them", () => {
+  // The reported bug, in one assertion. A scroll event arrives AFTER the browser painted whatever
+  // arrived meanwhile, so the distance it measures includes growth the reader never asked for. The
+  // pane then stopped following the moment output outran the scroll.
+  const before = at(400, 1000); // distance 0: at the bottom
+  const afterGrowth = at(400, 1400); // same position, 400px of new output
+  assert.equal(readerDistanceFromTail(before, afterGrowth), 0, "growth alone is discounted");
+  assert.equal(isFollowing(before, afterGrowth, 80), true, "…so the reader is still following");
+});
+
+test("the reader scrolling UP still un-follows them", () => {
+  const before = at(400, 1000);
+  const scrolledUp = at(300, 1000); // distance 100, no growth
+  assert.equal(readerDistanceFromTail(before, scrolledUp), 100);
+  assert.equal(isFollowing(before, scrolledUp, 80), false, "moving away from the tail is taking control");
+});
+
+test("growth and a scroll up together are separated correctly", () => {
+  // The case that defeats the naive rule in BOTH directions, so it is worth pinning: 500px arrived
+  // AND the reader moved 100px up. Their own distance is 100, not 600.
+  const before = at(400, 1000);
+  const both = at(300, 1500); // distance 600, growth 500
+  assert.equal(readerDistanceFromTail(before, both), 100, "only the reader's own movement counts");
+  assert.equal(isFollowing(before, both, 80), false);
+
+  // …and the mirror: growth larger than the reader's movement is still the reader's movement.
+  const tinyScrollHugeGrowth = at(380, 2000); // distance 1020, growth 1000
+  assert.equal(readerDistanceFromTail(before, tinyScrollHugeGrowth), 20, "20px of their own");
+  assert.equal(isFollowing(before, tinyScrollHugeGrowth, 80), true, "under the tolerance: still following");
+});
+
+test("a shrinking container does not invent a negative discount", () => {
+  // A collapsed trace or a session switch can make the content SHORTER. Clamped at zero, or the
+  // discount would subtract from a distance that has no growth in it.
+  const before = at(400, 2000);
+  const shrunk = at(400, 1000); // distance 0 after shrinking to the bottom
+  assert.equal(readerDistanceFromTail(before, shrunk), 0);
+});
+
+test("the follow scrolls instantly, and only the deliberate jump animates", () => {
+  // `scroll-behavior: smooth` on the container made every programmatic scroll animate. An animated
+  // catch-up cannot catch a moving bottom, and its intermediate positions look exactly like the
+  // reader scrolling up — so the follow un-pinned itself. Asserted on both files because the rule
+  // spans them: the container must not smooth-scroll by default, and the jump must ask for it.
+  const css = stripComments(readFileSync(new URL("../src/styles.css", import.meta.url), "utf8"));
+  const transcript = /\.transcript\s*\{([^}]*)\}/.exec(css);
+  assert.ok(transcript, ".transcript must have a rule");
+  assert.ok(
+    !/scroll-behavior:\s*smooth/.test(transcript[1]!),
+    "the transcript must not smooth-scroll by default: every automatic scroll here is a catch-up",
+  );
+
+  const pane = readFileSync(new URL("../src/components/Transcript.tsx", import.meta.url), "utf8");
+  assert.match(pane, /behavior: "smooth"/, "the deliberate jump still animates, explicitly");
+  assert.match(pane, /isFollowing\(previous, current, FOLLOW_THRESHOLD_PX\)/, "the follow uses the growth-aware rule");
+});
+
+/**
+ * CSS with its comments removed.
+ *
+ * Assertions about a rule's DECLARATIONS must not be satisfied — or broken — by the prose beside
+ * them. This bit three times in this repository: a guard matched `scroll-behavior: smooth` in the
+ * comment explaining its removal, another matched `key={focused?.id}` in a comment mentioning the
+ * attribute, and a release-workflow check matched its own documentation. Comments are not code.
+ */
+function stripComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+test("an unmeasured sample must never become the previous one", () => {
+  // The bug this pins, found by breaking three DOM tests: jsdom (and a hidden or not-yet-laid-out
+  // pane) reports zeros for every metric. Recorded as "previous", `0` to `2000px` reads as two
+  // thousand pixels of GROWTH — which cancels the reader's entire distance from the bottom and pins
+  // them to a transcript they had scrolled away from. In a browser it would look like the
+  // "Jump to latest" button never appearing.
+  assert.equal(isMeasured({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 }), false, "jsdom");
+  assert.equal(isMeasured({ scrollTop: 0, scrollHeight: 2000, clientHeight: 0 }), false, "hidden pane");
+  assert.equal(
+    isMeasured({ scrollTop: 0, scrollHeight: Number.NaN, clientHeight: 500 }),
+    false,
+    "not a number",
+  );
+  assert.equal(isMeasured({ scrollTop: 1500, scrollHeight: 2000, clientHeight: 500 }), true);
+
+  // And the damage it would do, so the guard is not merely descriptive: a first real sample after an
+  // unmeasured one discounts the whole distance.
+  const unmeasured = { scrollTop: 0, scrollHeight: 0, clientHeight: 0 };
+  const real = { scrollTop: 0, scrollHeight: 2000, clientHeight: 500 }; // 1500px from the bottom
+  assert.equal(readerDistanceFromTail(unmeasured, real), -500, "growth swamps the distance");
+  assert.equal(isFollowing(unmeasured, real, 80), true, "…and the reader looks like they are following");
 });
