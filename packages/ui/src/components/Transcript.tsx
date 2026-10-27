@@ -432,7 +432,10 @@ function Turn({ message }: { message: TranscriptMessage }) {
   if (!hasProse(message)) return null;
 
   return (
-    <article className="turn measure">
+    // The ROLE is a class, so the two kinds of turn can be told apart by looking (issue #88). Before
+    // this the only difference was the text of the label below — two small dim words — which does not
+    // survive a glance down a long column.
+    <article className={`turn measure turn-${message.role}`}>
       <div className="role">
         <span>{label}</span>
         {message.streaming && (

@@ -509,6 +509,37 @@ button { font: inherit; color: inherit; }
 .measure { max-width: 72ch; }
 
 .turn { margin-bottom: var(--sp-4); }
+
+/*
+ * A first-person turn is a LANDMARK (issue #88).
+ *
+ * The reader's own prompts are where they steered the task, and they are what the eye scans for when
+ * navigating a long transcript. Rendered identically to the assistant's prose, the only difference
+ * was the text of a 10px dim label — which does not survive a glance.
+ *
+ * TWO signals, and neither is load-bearing alone:
+ *
+ *   - the tint does the at-a-glance work;
+ *   - the LABEL is strengthened in weight and case, because `forced-colors` drops backgrounds. This
+ *     is the same rule the quarantine frame follows: the header carries the meaning in words, so the
+ *     texture is never the only signal.
+ *
+ * `--panel-2` is RAISED relative to `--bg`, where the quarantine frame is recessed on `--panel` —
+ * the two must not read as the same thing. Deliberately no left rule and no full border: the
+ * left-rule vocabulary already belongs to `.run-notice` and `.trace-row.recent`, and a framed block
+ * would read as quarantined tool output rather than as the reader's own words.
+ */
+.turn-user {
+  background: var(--panel-2);
+  border-radius: var(--r-2);
+  padding: var(--sp-3);
+}
+.turn-user .role {
+  color: var(--text);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
 .role {
   font-size: var(--fs-2xs);
   color: var(--dim);
