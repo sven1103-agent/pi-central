@@ -309,8 +309,24 @@ session should be refused outright is #49's question and is deliberately not dec
       because TypeScript cannot be loaded from `node_modules`
       (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`). Bundled rather than `tsc`-emitted, so 39 `.ts`
       import specifiers did not have to be rewritten. Issue #52, [ADR-0011](decisions/0011-distribution-and-update.md).
-- [ ] The release workflow: one version source, a signed tag, a GitHub Release, a provenance-attested
-      publish. Issue #53.
+- [x] The release workflow: one version source, a GitHub Release, a provenance-attested publish.
+      Issue #53. `scripts/check-version.mjs` makes the version a single declaration — four manifests
+      plus the lockfile agree, no prose states the current version, no README states any version, and
+      the newest CHANGELOG heading matches — and a tag runs `.github/workflows/release.yml`, which
+      re-verifies, refuses a tag that disagrees with the manifest, publishes with `--provenance` over
+      **OIDC with no stored token**, and builds the Release body from the CHANGELOG. Every pull
+      request dry-runs the publish so the tarball is reviewed before a release rather than during
+      one. Process and rollback: [RELEASING.md](RELEASING.md).
+
+      Still `verified/manual`, and named rather than implied: no tag has been pushed and nothing has
+      been published, so the workflow itself has never run. The first release is where it is proven.
+
+      Two gaps, stated rather than glossed. The issue's title says "a signed tag", and the workflow
+      does **not** verify the tag's signature: the runner has no signer key configured, and giving it
+      one would mean a secret, which this workflow exists to avoid. The integrity that matters is the
+      artifact's, and that comes from the npm provenance attestation, which binds the tarball to the
+      commit and the run. Second, `npm ci` and the publish path are exercised on Linux only; the
+      packaged app is macOS-relevant (C10) and is not installed from the tarball by any test.
 - [ ] Update detection, off unless enabled — the product's first outbound egress, and it carries
       nothing but the package name. Issue #55.
 - [ ] Applying an update: one explicit action, integrity-verified, refusing while sessions run.

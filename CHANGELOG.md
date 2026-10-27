@@ -9,6 +9,68 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+<!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
+
+## [0.2.0] — 2026-10-26
+
+The first published release. `0.1.0` was never tagged or published, so it stays the recorded name of
+Increment 1 and nothing below is rewritten; this section is what Increment 1's `## [Unreleased]` had
+accumulated. Versioning is `npm version <x.y.z> --workspaces --include-workspace-root`, so the root
+manifest and the three private workspace manifests cannot disagree.
+
+### Added
+
+- **A release workflow, and one version instead of six claims about it** (issue #53). The shipped
+  version was asserted in six places with no mechanism between them — `package.json`, `README.md`
+  ("Status: v0.1.0"), a `CHANGELOG.md` heading, and three private workspace manifests — and the
+  failure mode was the worst kind: every one of them reads as authoritative, so a disagreement
+  produces *confident* documentation rather than an error. `0.1.0` had in fact already been claimed
+  twice, once as the package version and once as the name of Increment 1.
+
+  `scripts/check-version.mjs` now runs as part of `npm run verify`, so every pull request and every
+  commit to `main` is held to four rules: the four manifests agree; **no prose states the current
+  version** (older versions are history, and allowed); **no README states any version at all**,
+  including a third party's, because "verified against Pi 1.4.0" is wrong the moment Pi ships; and the
+  newest `## [x.y.z]` heading matches the manifest.
+
+  The decisions are pure functions in `scripts/version-policy.mjs` with 28 unit tests, because a
+  guard that has quietly become permissive reads exactly like a guard that works. Four bugs were
+  caught by those tests rather than by luck, and each is a lesson about writing a checker:
+
+  - `\Z` is not a JavaScript escape, so it matched a literal "Z" and the *last* CHANGELOG section
+    never parsed.
+  - The first version-literal lookahead banned any trailing dot, which rejected "shipped 0.2.0." — a
+    sentence ending, the commonest prose form there is.
+  - Banning only a dot-followed-by-digit then let `10.20.30.40` match as `10.20.3`, because the
+    engine simply gave the trailing digit back.
+  - The lockfile check read `package-lock.json`'s `packages` map as if every entry were ours. It
+    maps every installed package, so it demanded that `ws`, `react` and some three hundred others
+    all equal our version. Same "too broad" mistake as the regex, one layer down.
+
+  `package-lock.json` is covered because it records the version a fourth time and `npm ci` compares
+  it with the manifests: a version bumped without regenerating the lock breaks the build on the
+  *next* machine, not the author's, whose `node_modules` is already installed.
+
+- **Publishing is a tag, and it carries a provenance attestation** (issue #53).
+  `.github/workflows/release.yml` triggers on a version tag, re-runs every gate on the tagged commit,
+  **refuses when the tag and the manifest disagree**, builds, publishes with `--provenance`, and
+  creates the GitHub Release whose body is the CHANGELOG section for that version — derived from the
+  file by `scripts/release-notes.mjs`, so the release page cannot become a second, worse changelog.
+
+  Authentication is **OIDC, with no stored token**: the workflow declares `id-token: write` and
+  references no GitHub secret at all, and a test fails if one is reintroduced. A stored publish token
+  is a credential that must be rotated, can be exfiltrated by a compromised dependency, and outlives
+  whoever created it. That test scans the workflow as **text**, deliberately — for "is there a secret
+  here", broader is correct, and it caught its own documentation twice while being written.
+
+  `npm publish --dry-run` now runs on **every pull request**, so the tarball's file list is reviewed
+  before a release rather than at the moment of one, when a stray file can only be deprecated and
+  never removed. Release mode (`--release`) additionally refuses to release while `## [Unreleased]`
+  holds entries, which is what stops a release shipping undocumented changes.
+
+  [docs/RELEASING.md](docs/RELEASING.md) records the process and the rollback — `npm deprecate` plus
+  a patch release, because `npm unpublish` breaks everyone who already resolved the version.
+
 ### Security
 
 - **A session could read the user's `~/.ssh`, and the key denies missed every key that was not

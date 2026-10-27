@@ -9,7 +9,9 @@ keeping every session inside its own **Agent Safehouse** sandbox.
 The name is the design brief: a central station is where independent lines arrive, are dispatched,
 and are kept apart from one another. Pi Central does the same for agent sessions.
 
-**Status: v0.1.0 — works end to end, verified.** Not yet published; there is no released artifact.
+**Status: works end to end, verified, and published.** The version is deliberately not written down
+here: `pi-central --version` reports the version of the package it was actually shipped in, and a
+number restated in prose is a number that drifts. See [docs/RELEASING.md](docs/RELEASING.md).
 
 ## The problem
 
@@ -143,14 +145,19 @@ sized to land in one pull request and to be verifiable on its own.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — the long view, including what is deliberately out of scope
 
 ```bash
-npm test           # unit + component tests, all packages
-npm run typecheck  # two configs: Node libs and DOM libs cannot share one
-npm run check:docs # every reference in every Markdown file resolves
-npm run ui:build   # production build of the UI
+npm test            # unit + component tests, all packages
+npm run typecheck   # two configs: Node libs and DOM libs cannot share one
+npm run check:docs  # every reference in every Markdown file resolves
+npm run check:version # one version, declared once
+npm run ui:build    # production build of the UI
 ```
 
 The `check:docs` step exists because this repository is docs-driven, and a reference to a deleted
-file still *looks* authoritative. It has caught real rot more than once.
+file still *looks* authoritative. It has caught real rot more than once. `check:version` exists for
+the same reason one level up: the version was previously claimed in three places — `package.json`,
+`README.md`, and a `CHANGELOG.md` heading — and three claims are three chances to disagree.
+
+Releases are described in [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Documentation
 
@@ -165,6 +172,7 @@ file still *looks* authoritative. It has caught real rot more than once.
 | [docs/AGENT-SETUP.md](docs/AGENT-SETUP.md) | Creating the agent identity a session runs as: SSH key, gitconfig, signing, `gh` |
 | [docs/INCREMENTS.md](docs/INCREMENTS.md) | Increments, slices, and how work is sequenced |
 | [docs/DOGFOODING.md](docs/DOGFOODING.md) | Using Pi Central to develop Pi Central, and what breaks if you run it from the checkout you edit |
+| [docs/RELEASING.md](docs/RELEASING.md) | Cutting a release: the version source, the tag, provenance, and how to roll back |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Phases, verification status, and out-of-scope items |
 | [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) | Unresolved decisions |
 | [docs/decisions/](docs/decisions/) | Architecture decision records |

@@ -137,10 +137,10 @@ deliberately unsandboxed so it can spawn sandboxed sessions at all (C1).
   TypeScript cannot be loaded from `node_modules`
   (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`). Issue #52.
 
-Still open, and deliberately not guessed here: **the first published version number.**
-`package.json` is `0.1.0` and `CHANGELOG.md` already records a `## [0.1.0] — first iteration` for
-Increment 1, while nothing has ever been tagged or published. Issue #53 proposes `0.2.0` (nothing
-is rewritten) over relabelling the historical section.
+- **The first published version number — resolved (2026-10-26).** The first release does not reuse
+  `0.1.0`, which stays the recorded name of Increment 1 (nothing historical is rewritten). The
+  number itself lives in `package.json` and `CHANGELOG.md` and is deliberately not repeated in
+  prose — issue #53 added `scripts/check-version.mjs`, which fails the build if it reappears.
 
 One consequence worth naming: the package has a **single runtime dependency** (`ws`, external
 because it is CommonJS). Everything else is bundled, which keeps the surface of the component that

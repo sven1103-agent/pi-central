@@ -1,0 +1,94 @@
+# Release Pi Central (issue #53).
+#
+# A release is a single, reviewable act: a tag triggers this, every gate the repository has runs
+# first, and only then is the same artifact that a pull request dry-ran published with a provenance
+# attestation. Nothing here is a long-lived credential.
+#
+# ## Publishing uses OIDC, not a stored token
+#
+# `id-token: write` below lets the runner mint a short-lived OIDC token, which npm exchanges for a
+# publish credential under a **trusted publisher** configured on the package's npm page (repository
+# + workflow + environment). No GitHub Actions secret is referenced anywhere in this workflow, and
+# `scripts/release-workflow.test.mjs` fails if one is reintroduced: a stored publish token is a
+# credential that must be rotated, can be exfiltrated by a compromised dependency, and outlives
+# whoever created it.
+#
+# That test scans this file as TEXT, so the words it forbids cannot appear here even in a comment —
+# which is why this paragraph describes the rule instead of naming what it bans.
+#
+# `--provenance` attaches a signed attestation linking the tarball to this commit and this workflow
+# run, which is the difference between "the maintainer says this is the code" and "this can be
+# verified".
+#
+# ## Why the version is not passed in
+#
+# The tag must equal `package.json`'s version, and the workflow REFUSES rather than correcting when
+# they disagree. A release that helpfully publishes the manifest's version under a different tag is
+# how a tag and an artifact start disagreeing about what shipped.
+name: release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+permissions:
+  contents: write # required to create the GitHub Release
+  id-token: write # OIDC: exchanged for a short-lived publish credential
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      # Trusted publishing needs npm >= 11.5.1, and the runner's bundled npm is older. Pinned to no
+      # particular version deliberately — the feature is the requirement, not a version number, and
+      # a pin here would be a second place to bump for no stated benefit.
+      - name: Use a recent npm (trusted publishing needs >= 11.5.1)
+        run: npm install --global npm@latest
+
+      - name: Install
+        run: npm ci
+
+      # Every gate a pull request ran, run again on the tagged commit. A tag is a claim that this
+      # exact tree is good; re-running is what makes the claim true rather than assumed.
+      - name: Verify
+        run: npm run verify
+
+      # `--release` adds the rule that `## [Unreleased]` is empty: development is allowed to carry
+      # unreleased entries, a TAG is not.
+      - name: Release checks
+        run: node scripts/check-version.mjs --release
+
+      - name: The tag and the manifest must agree
+        run: |
+          manifest="v$(node -p "require('./package.json').version")"
+          if [ "$manifest" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match package.json (${manifest}). Refusing to publish: a tag that disagrees with the artifact is how the two start lying about what shipped."
+            exit 1
+          fi
+
+      - name: Build the artifact
+        run: npm run build:package
+
+      - name: Publish with provenance
+        run: npm publish --provenance --access public
+
+      # `gh` rather than a third-party release action: one fewer supply-chain dependency on the path
+      # that has write access to the repository's releases, and `gh` is already on the runner.
+      - name: Create the GitHub Release from the CHANGELOG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/release-notes.mjs > release-notes.md
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md \
+            --verify-tag

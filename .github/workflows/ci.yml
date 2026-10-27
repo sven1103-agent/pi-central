@@ -55,6 +55,34 @@ jobs:
       - name: UI production build
         run: npm run ui:build
 
+  # The artifact, inspected on every pull request rather than at the moment of a release (#53).
+  #
+  # `npm publish --dry-run` builds the tarball and prints every file that WOULD ship, so a stray
+  # file (a fixture, a transcript, an editor backup) is caught in review instead of after it is on
+  # the registry — where it cannot be un-published, only deprecated. It also fails on a `private`
+  # manifest or a broken `files` list, which is exactly the class of mistake that is invisible until
+  # a release is attempted.
+  #
+  # It does NOT prove the artifact RUNS. That is #52's `verified/manual` step, and a green dry-run
+  # must not be read as more than "the right files are in the box".
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install
+        run: npm ci
+
+      - name: Build the artifact
+        run: npm run build:package
+
+      - name: Dry-run the publish, so the tarball is reviewed on the PR
+        run: npm publish --dry-run
+
   # Kept separate so a documentation-only failure is visibly a documentation-only failure.
   docs-links:
     runs-on: ubuntu-latest
