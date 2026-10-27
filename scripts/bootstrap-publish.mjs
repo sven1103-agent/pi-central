@@ -22,10 +22,18 @@
  *      attestation, and the first release would be permanently the one artifact nobody can verify.
  *      The rule lives in `version-policy.mjs#bootstrapRefusal` so it is unit-tested; a check that
  *      only exists as prose in a document is not a check.
- *   2. **It cannot publish to `latest`.** The tag is hard-coded to `next` below, so there is no
- *      branch in which an un-attested artifact becomes what `npm install pi-central` resolves to.
- *      That is deliberately structural rather than validated: a rule that cannot be expressed beats
- *      one that has to be remembered.
+ *   2. **It asks for `next` — and that is NOT a guarantee about `latest`.** The tag is hard-coded
+ *      below, and the publish request carries only that tag. **Measured 2026-10-27** against a local
+ *      registry stub, which received `"dist-tags":{"next":"…"}` and nothing else; a second probe
+ *      showed the client does not send `latest` even when one already exists to preserve.
+ *
+ *      This block previously called the hard-coded tag a *structural* guarantee that the throwaway
+ *      could never become the install target. **It was false**: on the first real publish the
+ *      registry set `latest` to it, and a plain `npm install` resolved to an artifact with no
+ *      attestation until the real release landed (issue #66). The client never asks for `latest`,
+ *      so the registry is free to set it and no flag here can stop it. A guarantee the client cannot
+ *      express is not a guarantee, so this script CHECKS the tags afterwards and says what to do —
+ *      see `latestPointerProblem`.
  *
  * `--provenance` is not attempted, because it is impossible here: the attestation is built from the
  * CI provider's OIDC identity, so no local invocation can produce one however it is spelled.
@@ -44,7 +52,7 @@ import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { bootstrapRefusal } from "./version-policy.mjs";
+import { bootstrapRefusal, latestPointerProblem } from "./version-policy.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DRY_RUN = process.argv.includes("--dry-run");
@@ -66,6 +74,21 @@ function run(command, args) {
     shell: process.platform === "win32",
   });
   if (result.status !== 0) fail(`\`${command} ${args.join(" ")}\` exited ${String(result.status)}`);
+}
+
+/**
+ * Run a command and capture its output.
+ *
+ * Separate from `run`, which inherits stdio because it is a gate whose output a human should watch.
+ * This one is for a value the script has to read and judge.
+ */
+function capture(command, args) {
+  const result = spawnSync(command, args, {
+    cwd: ROOT,
+    encoding: "utf8",
+    shell: process.platform === "win32",
+  });
+  return { status: result.status, stdout: (result.stdout ?? "").trim() };
 }
 
 const { version } = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
@@ -106,6 +129,36 @@ if (DRY_RUN) {
   process.exit(0);
 }
 
+// --- What actually happened to `latest` -----------------------------------------------------------
+//
+// Checked, not assumed. The registry may set `latest` to this throwaway whatever tag we ask for, and
+// a claim that it cannot is what stopped anyone looking before (issue #66). This runs after the one
+// irreversible step there is, so it must never turn an offline `npm view` into a scary non-answer:
+// unreadable output means "unknown", and says so.
+const view = capture("npm", ["view", "pi-central", "dist-tags", "--json"]);
+let distTags;
+try {
+  distTags = JSON.parse(view.stdout);
+} catch {
+  distTags = undefined;
+}
+
+if (view.status !== 0 || distTags === undefined) {
+  console.log(
+    [
+      "",
+      "bootstrap-publish: could not read the dist-tags, so whether `latest` points at this throwaway",
+      "is UNKNOWN. Check before announcing anything:",
+      "",
+      "  npm view pi-central dist-tags",
+      "",
+    ].join("\n"),
+  );
+} else {
+  const problem = latestPointerProblem(distTags, version);
+  if (problem !== undefined) console.log(`\n${problem}\n`);
+}
+
 console.log(
   [
     "",
@@ -129,7 +182,10 @@ console.log(
     "  npm version <x.y.z> --no-git-tag-version --workspaces --include-workspace-root",
     "  git commit -am 'release: <x.y.z>' && git tag v<x.y.z> && git push origin v<x.y.z>",
     "",
-    "The bootstrap version stays on `next` and never becomes `latest`: the workflow's release does.",
+    "Whether `latest` moved is not something this script can decide — it is the registry's call, and",
+    "the check above reports what it actually did. Confirm it after the real release:",
+    "",
+    "  npm view pi-central dist-tags",
     "",
   ].join("\n"),
 );

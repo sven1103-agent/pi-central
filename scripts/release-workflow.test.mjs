@@ -29,6 +29,7 @@ const WORKFLOWS = join(ROOT, ".github", "workflows");
 
 const release = readFileSync(join(WORKFLOWS, "release.yml"), "utf8");
 const ci = readFileSync(join(WORKFLOWS, "ci.yml"), "utf8");
+const releasing = readFileSync(join(ROOT, "docs", "RELEASING.md"), "utf8");
 const everyWorkflow = readdirSync(WORKFLOWS)
   .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
   .map((name) => ({ name, text: readFileSync(join(WORKFLOWS, name), "utf8") }));
@@ -208,15 +209,20 @@ test("the CHANGELOG documents the version being released, and not with an empty 
 
 const bootstrap = readFileSync(join(ROOT, "scripts", "bootstrap-publish.mjs"), "utf8");
 
-test("the bootstrap publish can never target `latest`", () => {
-  // Structural, not validated: the tag is a constant, so there is no branch in which an un-attested
-  // first artifact becomes what `npm install pi-central` resolves to. Asserted on the constant rather
-  // than by grepping for the word "latest", which appears legitimately in the script's own output
-  // telling the reader that the bootstrap must NOT become it.
+test("the bootstrap publish ASKS for `next`, and never for `latest`", () => {
+  // What the constant governs: the REQUEST. It does not govern the outcome — **measured** on
+  // 2026-10-27, the client sends only the requested tag (`"dist-tags":{"next":"…"}`, with no
+  // `latest` even when one already existed), so the registry is free to set `latest` and did
+  // (issue #66).
+  //
+  // This test was titled "can never target `latest`" and justified as *"structural, not
+  // validated"*. The structure was real; the guarantee was not, and stating it is what stopped
+  // anyone checking. So it now pins the request, and the OUTCOME is covered by
+  // `latestPointerProblem` and the check the script runs after publishing.
   assert.match(
     bootstrap,
     /const TAG = "next";/,
-    "the bootstrap tag must be `next`; `latest` would put an un-attested artifact in front of every install",
+    "the bootstrap must ASK for `next`; `latest` would put an un-attested artifact in front of every install",
   );
 });
 
@@ -232,4 +238,51 @@ test("the bootstrap publish is not part of any workflow, because it cannot be", 
   // workflow that publishes an un-attested artifact on a schedule.
   const offenders = everyWorkflow.filter((w) => w.text.includes("bootstrap-publish")).map((w) => w.name);
   assert.deepEqual(offenders, [], `these workflows call the manual bootstrap: ${offenders.join(", ")}`);
+});
+
+// --- The dist-tags are checked, and the false guarantee is not re-asserted (issue #66) ------------
+
+test("the post-approval checklist verifies dist-tags, so a release's tags are never unknown", () => {
+  // #66 in one line: `latest` was moved by the REGISTRY, not by us, and nobody noticed because no
+  // step looked. The publish request provably cannot control it (the client sends only the requested
+  // tag), so a check is the only defence there is. Asserted in BOTH places on purpose — the notice is
+  // what the operator reads at the moment, and RELEASING.md is what survives the run.
+  assert.match(release, /npm view pi-central dist-tags/, "the workflow notice must tell the approver to check the tags");
+  assert.match(releasing, /npm view pi-central dist-tags/, "RELEASING.md must make it a numbered step");
+});
+
+test("nothing re-asserts the guarantee that the bootstrap cannot reach `latest`", () => {
+  // The three sentences that carried the claim, pinned so a future edit cannot quietly restore one
+  // VERBATIM.
+  //
+  // This is a phrasing guard, not a semantic one — stated rather than implied, because a check that
+  // reads as stronger than it is is the exact defect this issue is about. A re-assertion worded
+  // differently ("could never become…") would slip through. The accommodating half of the trade is
+  // that a correction quoting the old claim has to paraphrase it, which is why the corrections here
+  // do: repeating a false guarantee, even to refute it, is how a skimmer reads the guarantee.
+  for (const [path, text] of [
+    ["scripts/bootstrap-publish.mjs", bootstrap],
+    ["docs/RELEASING.md", releasing],
+    ["CHANGELOG.md", readFileSync(join(ROOT, "CHANGELOG.md"), "utf8")],
+  ]) {
+    assert.ok(!text.includes("cannot publish to `latest`"), `${path} re-asserts the false guarantee`);
+    assert.ok(!text.includes("never becomes `latest`"), `${path} re-asserts the false guarantee`);
+    assert.ok(
+      !text.includes("can never become what `npm install"),
+      `${path} re-asserts the false guarantee`,
+    );
+  }
+});
+
+test("the bootstrap checks the tags instead of assuming them", () => {
+  // The correction only counts if it RUNS. Asserted on the call, not the name: an earlier version
+  // matched `/latestPointerProblem/`, which the import statement alone satisfies — so deleting the
+  // call left the check green. Found by falsifying it, which is the only reason the distinction was
+  // noticed; a guard on a symbol is not a guard on its use.
+  assert.match(
+    bootstrap,
+    /latestPointerProblem\(distTags, version\)/,
+    "the script must evaluate the tags it read, not merely import the function",
+  );
+  assert.match(bootstrap, /"view", "pi-central", "dist-tags"/, "…by reading them from the registry");
 });

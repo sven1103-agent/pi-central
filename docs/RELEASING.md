@@ -96,10 +96,16 @@ Four things about this that are deliberate rather than incidental:
 - **The notes are prepared before the publish, not after.** `release.yml` writes `release-notes.md`
   while the failure is still free: a version with no CHANGELOG section stops the run *before* the
   irreversible step, instead of leaving an artifact on the registry with no Release and a red build.
-- **The bootstrap version is never `latest`.** `scripts/bootstrap-publish.mjs` hard-codes `--tag next`,
-  so there is no branch in which an un-attested artifact becomes what `npm install pi-central`
-  resolves to. Structural beats validated: a rule that cannot be expressed beats one that has to be
-  remembered.
+- **The bootstrap version will not become `latest` *because we asked* — which is not the same as it
+  not happening.** `scripts/bootstrap-publish.mjs` hard-codes `--tag next`, and the publish request
+  carries only that tag: **measured 2026-10-27** against a local registry stub, which received
+  `"dist-tags":{"next":"…"}` and nothing else, and did not include `latest` even on a second probe
+  where one already existed to preserve. So the client never *asks* for `latest`, which means the
+  **registry** decides — and the registry once set `latest` to the throwaway, so `npm install
+  pi-central` resolved to an artifact with no attestation until the real release landed. This
+  document previously called the hard-coded tag a *structural* guarantee. It was not one, and the
+  claim is what stopped anyone checking (issue #66). The script now verifies the dist-tags after
+  publishing and prints the correction; what survives is *check, do not assume*.
 - **The bootstrap has no provenance attestation, and cannot have one.** The attestation is built from
   the CI provider's OIDC identity, so no local invocation produces one however it is spelled. That is
   exactly why the *real* release must not be the manual one.
@@ -143,6 +149,16 @@ This step is **`verified/manual`**: no part of it runs in CI, because no part of
 
 8. **Publish the draft GitHub Release**, which already carries the notes. If the stage was rejected,
    **delete the draft** instead; it claims a version that does not exist.
+
+9. **Verify the dist-tags.** This is the last step, and it is a step rather than a recollection:
+
+   ```bash
+   npm view pi-central dist-tags
+   ```
+
+   `latest` must be the version just released. A release whose tags were never checked is a release
+   whose tags are unknown — and the registry has moved `latest` on its own once already (issue #66),
+   so this is the check that would have caught it in seconds instead of by accident.
 
 Nothing here is published from a laptop. The one exception in the whole process is the bootstrap
 above, which exists precisely because it cannot go through CI — and which is a throwaway pre-release

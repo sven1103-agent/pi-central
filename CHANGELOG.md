@@ -9,6 +9,30 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+### Fixed
+
+- **A release design note claimed a guarantee the registry does not provide, and that claim is what
+  stopped anyone checking that it held** (issue #66). Three places — `bootstrap-publish.mjs`,
+  `docs/RELEASING.md` and this file — said the bootstrap's hard-coded `--tag next` was a *structural*
+  guarantee that the un-attested throwaway could never become what `npm install pi-central` resolves
+  to. It is not one: on the first real publish the registry set `latest` to the throwaway, and a
+  plain install received an artifact with **no provenance attestation** until the real release landed
+  minutes later. The same failure shape as #46's false `~/.ssh` rationale — a stated guarantee is
+  what makes a check look unnecessary.
+
+  **The mechanism was measured, not inferred.** Pointing `npm publish --tag next` at a local HTTP
+  stub and reading the request body shows the client sends `"dist-tags":{"next":"…"}` and nothing
+  else — and, on a second probe where the stub reported an existing `latest`, still no `latest`. So
+  the client never *asks* for it, which means the **registry** decides and no flag can prevent it.
+  Which registry rule fires on a first publish is not determinable from this machine and is recorded
+  as open rather than guessed at.
+
+  Since it cannot be prevented it is checked: `latestPointerProblem` is a tested pure function, the
+  bootstrap now reads the dist-tags back after publishing and prints the `npm deprecate` correction
+  if `latest` is the throwaway, and verifying `npm view pi-central dist-tags` is now **step 9** of the
+  release checklist and part of the workflow's approval notice. A test pins that step and forbids the
+  false guarantee from being re-asserted — including in the test whose own *name* carried it.
+
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.2.0] — 2026-10-26
@@ -83,7 +107,12 @@ manifest and the three private workspace manifests cannot disagree.
   release would be permanently the one artifact nobody can verify. `scripts/bootstrap-publish.mjs`
   refuses a final version (the rule is a tested pure function, not prose in a document), refuses
   build metadata on its own because npm orders `x.y.z+build` as the release itself, and hard-codes
-  `--tag next` so an un-attested artifact can never become what `npm install pi-central` resolves to.
+  `--tag next` so the un-attested artifact is never *requested* as `latest`.
+
+  That last clause originally claimed the throwaway could never become the install target. It was
+  **false** — the registry set `latest` to the pre-release on the first publish anyway — and it is
+  corrected in place rather than deleted, because a sentence that reads as a guarantee is exactly
+  what stopped anyone checking (issue #66).
 
   A pre-release is **documented by its base release** (issue #63), so `0.2.0-rc.1` needs no
   `## [0.2.0-rc.1]` heading: it is a candidate for `0.2.0`, and `## [0.2.0]` is where those notes live, with a preamble

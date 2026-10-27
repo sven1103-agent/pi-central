@@ -184,6 +184,53 @@ export function bootstrapRefusal(version) {
 }
 
 /**
+ * Whether an un-attested bootstrap version has become what `npm install` resolves to.
+ *
+ * Returns a complaint, or `undefined` when `latest` is not the bootstrap version.
+ *
+ * ## Why this is a check and not a guarantee
+ *
+ * `bootstrap-publish.mjs` publishes with `--tag next`, and the script, `CHANGELOG.md` AND
+ * `docs/RELEASING.md` all called that a *structural* guarantee that the throwaway could never become
+ * `latest`. It is not. The failure shape is #46's: a stated guarantee is what stops anyone looking,
+ * so a false one is worse than none.
+ *
+ * **Measured 2026-10-27** by pointing `npm publish --tag next` at a local HTTP stub and reading the
+ * request body the client produced:
+ *
+ * ```
+ * "dist-tags":{"next":"0.0.1"}
+ * ```
+ *
+ * That is the whole of it — no `latest`. A second probe, where the stub reported an existing
+ * `latest`, produced `"dist-tags":{"next":"0.0.2"}`: the client does not send `latest` even when
+ * one exists to preserve. So the client never asks for `latest`, which means any `latest` that
+ * appears was created by the **registry**, and no flag in the script can prevent it.
+ *
+ * Which registry rule fires on a first publish is *not* determinable from this machine, and is
+ * deliberately not guessed at here. What is measurable settled the part that decides the design:
+ * we cannot fix this client-side, so we check it and warn.
+ *
+ * @param {Record<string, string>} distTags - as `npm view pi-central dist-tags --json` returns them
+ * @param {string} bootstrapVersion
+ * @returns {string | undefined}
+ */
+export function latestPointerProblem(distTags, bootstrapVersion) {
+  if (distTags === null || typeof distTags !== "object") return undefined;
+  if (distTags.latest !== bootstrapVersion) return undefined;
+  return [
+    `the registry has set \`latest\` to ${bootstrapVersion}, the throwaway pre-release.`,
+    `It carries NO provenance attestation, so a plain \`npm install pi-central\` receives an`,
+    `artifact nobody can verify. The publish request never asked for this — see the note above — so`,
+    `it cannot be prevented, only corrected and said out loud:`,
+    ``,
+    `  npm deprecate pi-central@${bootstrapVersion} "Throwaway pre-release without a provenance attestation; use the next stable release."`,
+    ``,
+    `Then confirm it moved:  npm view pi-central dist-tags`,
+  ].join("\n");
+}
+
+/**
  * The releases a CHANGELOG records, newest first, with the body of each section.
  *
  * Only `## [x.y.z]` headings count. `## [Unreleased]` is not a release — treating it as one would
