@@ -64,14 +64,14 @@ export function Inspector({
           <dt>Workspace</dt>
           <dd>
             <span>{shortenPath(session.cwd, 40, home)}</span>
-            <CopyButton text={session.cwd} label="Path" />
+            <CopyButton text={session.cwd} label="path" />
           </dd>
           {session.sessionFile && (
             <>
               <dt>Session file</dt>
               <dd>
                 <span>{shortenPath(session.sessionFile, 40, home)}</span>
-                <CopyButton text={session.sessionFile} label="Path" />
+                <CopyButton text={session.sessionFile} label="path" />
               </dd>
             </>
           )}
@@ -86,7 +86,7 @@ export function Inspector({
             {session.sessionId ? (
               <>
                 <span>{session.sessionId}</span>
-                <CopyButton text={session.sessionId} label="Session id" />
+                <CopyButton text={session.sessionId} label="session id" />
               </>
             ) : (
               <span title="Pi has not reported its session id yet">—</span>
@@ -96,7 +96,7 @@ export function Inspector({
           <dt>Handle</dt>
           <dd>
             <span>{session.id}</span>
-            <CopyButton text={session.id} label="Handle" />
+            <CopyButton text={session.id} label="handle" />
           </dd>
         </dl>
       </section>
@@ -106,7 +106,7 @@ export function Inspector({
         <h3>Command</h3>
         <pre className="cmd">{session.command}</pre>
         <div style={{ marginTop: 6 }}>
-          <CopyButton text={session.command} label="Command" />
+          <CopyButton text={session.command} label="command" />
         </div>
       </section>
 

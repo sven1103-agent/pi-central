@@ -76,6 +76,19 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- **The copy-path button said `Copy copy path changelog.md`** (issue #72). Two faults in one line:
+
+  - the **caller** passed `Copy path ${path}` while the button prefixed its own `Copy`, so the verb
+    appeared twice;
+  - the button **lower-cased the label for display**, so a case-sensitive path was *shown* as
+    `changelog.md` while `CHANGELOG.md` was what actually got copied.
+
+  The second is the one that matters: the visible text is what a reader checks against, and it was
+  misrepresenting the value. **Paths are case-sensitive**, so a label that can be a path must not be
+  transformed — the button now renders its label verbatim, and each caller passes the words it wants
+  shown. `FilePane` passes `` `path ${path}` ``, which reads `Copy path CHANGELOG.md`: the verb once,
+  and the case intact.
+
 - **The `auto-follow` chip was invisible, and #98 had misdiagnosed it** (issue #100). The chip looked
   identical after #98 merged — because #98 treated it as a *colour* problem when it was a *chrome*
   problem, and its fix made things worse.
