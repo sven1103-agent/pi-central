@@ -1063,7 +1063,19 @@ select.btn { font-family: var(--sans); }
   border-radius: var(--r-pill);
   padding: 1px 8px;
   font-weight: 500;
-  color: var(--dim);
+  /*
+   * `--text`, NOT `--dim`, and the numbers decide it (issue #98).
+   *
+   * This project's bar is documented three lines up in this file: two text levels, both >= 6:1 on
+   * `--bg`. `--dim` meets it there at 6.15:1 — but the chip does not sit on `--bg`. It sits on
+   * `--panel`, where `--dim` measures **5.62:1**, and on `--panel-2` under a hover it is **5.17:1**.
+   * So the *inactive* state was the dimmest thing on the bar while the active one sat at 11.25:1,
+   * which is backwards: a control has to be legible to be operated.
+   *
+   * `--text` on `--panel` is **14.64:1**. The inactive state stays visually quieter than the active
+   * one because the ACTIVE one is accent-tinted, not because the inactive one is faint.
+   */
+  color: var(--text);
 }
 .toggle-chip[aria-pressed="true"] {
   color: var(--accent-text);
