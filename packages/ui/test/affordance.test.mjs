@@ -16,7 +16,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+const css = stripComments(readFileSync(new URL("../src/styles.css", import.meta.url), "utf8"));
+/**
+ * CSS with its comments removed: an assertion about a rule's DECLARATIONS must not be satisfied — or
+ * broken — by the prose beside them. A guard in this repository once matched `scroll-behavior: smooth`
+ * inside the comment explaining why it had been removed.
+ */
+function stripComments(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
 const modelPicker = readFileSync(new URL("../src/components/ModelPicker.tsx", import.meta.url), "utf8");
 
 /** The declarations of the first rule whose selector matches, or `undefined`. */

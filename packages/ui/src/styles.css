@@ -492,7 +492,17 @@ button { font: inherit; color: inherit; }
   overflow-y: auto;
   padding: var(--sp-4) 18px var(--sp-5);
   min-height: 0;
-  scroll-behavior: smooth;
+  /*
+   * NO `scroll-behavior: smooth`, and that is a correctness fix rather than a taste one (issue #86).
+   *
+   * Every programmatic scroll in this container is "catch up with the tail", and an ANIMATED catch-up
+   * cannot catch a stream: it re-targets a bottom that has already moved. Worse, the animation emits a
+   * run of intermediate positions, and an intermediate position is indistinguishable from the reader
+   * scrolling up — so the follow un-pinned ITSELF a few frames in, and the pane stopped following the
+   * moment output outran it. That is the reported symptom, reproduced by measurement.
+   *
+   * The deliberate jump still animates, because it asks for it explicitly: see `jumpToLatest`.
+   */
 }
 
 /* Prose is capped so it stays readable on a wide display; tool output may use full width. */
@@ -939,7 +949,6 @@ select.btn { font-family: var(--sans); }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
-  .transcript { scroll-behavior: auto; }
   /* The run bar keeps its colour and loses its animation: motion is never the only signal. */
   .run-bar { transition: none; }
 }

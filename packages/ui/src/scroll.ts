@@ -65,3 +65,71 @@ export function decideOnSessionChange(previous: SessionScroll | undefined): Scro
 export function hasScrollableContent(scrollHeight: number, clientHeight: number): boolean {
   return scrollHeight > clientHeight;
 }
+
+/** One measurement of a scrolled container. */
+export interface ScrollSample {
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+}
+
+/**
+ * How far the reader is from the bottom, with **content growth discounted**.
+ *
+ * ## Why the discount is the whole point
+ *
+ * Following a stream means scrolling the container to the bottom over and over while output arrives.
+ * The naive rule — "if the distance from the bottom exceeds a threshold, the reader has scrolled
+ * away" — cannot tell the two apart, because **both** change that distance:
+ *
+ *   - the reader scrolling up, and
+ *   - the agent appending output.
+ *
+ * So the naive rule un-follows the reader every time output outruns the scroll, which is exactly the
+ * reported symptom: *"it jumps to the latest output after submitting a prompt, but then does not
+ * follow"*. The measurement is taken in a scroll event, which arrives **after** the browser has
+ * painted whatever arrived in the meantime — so the distance it sees includes growth the reader never
+ * asked for.
+ *
+ * Subtracting the growth since the previous sample leaves the part of the distance the READER is
+ * responsible for. Growth alone discounts to zero; a genuine scroll up survives.
+ *
+ * Growth is clamped at zero so a shrinking container (a collapsed trace, a session switch) does not
+ * invent a negative discount.
+ */
+export function readerDistanceFromTail(previous: ScrollSample, current: ScrollSample): number {
+  const grew = Math.max(0, current.scrollHeight - previous.scrollHeight);
+  const distance = current.scrollHeight - current.scrollTop - current.clientHeight;
+  return distance - grew;
+}
+
+/**
+ * Is the reader still following the tail?
+ *
+ * The threshold is `FOLLOW_THRESHOLD_PX`'s job in the component; this is the rule without the
+ * number, so the two can be tested apart.
+ */
+export function isFollowing(previous: ScrollSample, current: ScrollSample, threshold: number): boolean {
+  return readerDistanceFromTail(previous, current) < threshold;
+}
+
+/**
+ * Is this a real measurement?
+ *
+ * jsdom reports `0` for every scroll metric, and so does a pane that has not been laid out or is
+ * hidden. Such a sample must never become the "previous" one, because the discount is a subtraction:
+ * `0` to `2000px` of content reads as two thousand pixels of GROWTH, which cancels out the reader's
+ * entire distance from the bottom and pins them to a transcript they had scrolled away from.
+ *
+ * That is not hypothetical — it broke three DOM tests the moment the discount was introduced, and it
+ * would have looked, in a browser, like the "Jump to latest" button never appearing.
+ */
+export function isMeasured(sample: ScrollSample): boolean {
+  return (
+    Number.isFinite(sample.scrollTop) &&
+    Number.isFinite(sample.scrollHeight) &&
+    Number.isFinite(sample.clientHeight) &&
+    sample.scrollHeight > 0 &&
+    sample.clientHeight > 0
+  );
+}

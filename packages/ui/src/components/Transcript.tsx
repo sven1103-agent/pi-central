@@ -21,7 +21,14 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import type { Transcript as TranscriptModel } from "../transcript.ts";
 import { assistantText, hasProse, planTranscript, toolRunSummary, type ToolExecution, type TranscriptMessage } from "../transcript.ts";
 import { MessageBody } from "./MessageBody.tsx";
-import { decideOnSessionChange, hasScrollableContent, type SessionScroll } from "../scroll.ts";
+import {
+  decideOnSessionChange,
+  hasScrollableContent,
+  isFollowing,
+  isMeasured,
+  type ScrollSample,
+  type SessionScroll,
+} from "../scroll.ts";
 import { RunNotices } from "./RunNotices.tsx";
 
 /**
@@ -141,6 +148,8 @@ export function TranscriptView({
    */
   const memoryRef = useRef(onScrollMemory);
   memoryRef.current = onScrollMemory;
+  /** The previous measurement, so growth can be told apart from the reader scrolling. */
+  const sample = useRef<ScrollSample | undefined>(undefined);
 
   // Follow the tail only while the reader is already at the bottom. Auto-scrolling someone who
   // has scrolled up to read is the most common failure of a streaming transcript.
@@ -148,12 +157,28 @@ export function TranscriptView({
     const container = containerRef.current;
     if (!container) return;
     const onScroll = () => {
+      const current: ScrollSample = {
+        scrollTop: container.scrollTop,
+        scrollHeight: container.scrollHeight,
+        clientHeight: container.clientHeight,
+      };
+      const previous = sample.current;
+      // Only a real measurement may become the previous one: an unmeasured sample reads as enormous
+      // growth and would cancel the reader's whole distance from the bottom (see `isMeasured`).
+      if (isMeasured(current)) sample.current = current;
+      // Growth since the last sample is discounted, because a scroll event arrives AFTER the browser
+      // painted whatever arrived meanwhile. Without the discount, output outrunning the scroll looks
+      // exactly like the reader scrolling away — which is the bug: the pane stopped following the
+      // moment the stream got ahead of it.
+      const following =
+        previous !== undefined && isMeasured(previous)
+          ? isFollowing(previous, current, FOLLOW_THRESHOLD_PX)
+          : isAtBottom(container);
       // One measurement, two consumers, so the control and the follow behaviour cannot disagree
       // about whether the reader is at the bottom.
-      const atBottom = isAtBottom(container);
-      pinnedRef.current = atBottom;
-      setPinned(atBottom);
-      memoryRef.current?.({ scrollTop: container.scrollTop, pinned: atBottom });
+      pinnedRef.current = following;
+      setPinned(following);
+      memoryRef.current?.({ scrollTop: current.scrollTop, pinned: following });
     };
     container.addEventListener("scroll", onScroll, { passive: true });
     // Measured once on mount as well: a restored page or a re-render after resize can already be
@@ -232,6 +257,8 @@ export function TranscriptView({
   }, [followToken]);
 
   useEffect(() => {
+    // Instant, never animated: this is a catch-up, and an animated one cannot catch a moving bottom.
+    // `scroll-behavior` is `auto` on the container for the same reason (see styles.css).
     if (pinnedRef.current) endRef.current?.scrollIntoView({ block: "end" });
   });
 
@@ -250,8 +277,9 @@ export function TranscriptView({
     const end = endRef.current;
     if (!end) return;
     // `"end"` rather than `"nearest"`: the target is the bottom, and `"nearest"` would do nothing
-    // when the element is already partly visible.
-    if (typeof end.scrollIntoView === "function") end.scrollIntoView({ block: "end" });
+    // when the element is already partly visible. `behavior: "smooth"` is asked for HERE, explicitly,
+    // because this one IS a deliberate jump — the container no longer smooth-scrolls by default.
+    if (typeof end.scrollIntoView === "function") end.scrollIntoView({ block: "end", behavior: "smooth" });
     // Belt and braces for the case that matters most — a browser where `scrollIntoView` is a
     // no-op in this container (for example if the pane is a scroll port but the target is not
     // reached). Assigning the scroll offset directly is what the reader asked for, and it is

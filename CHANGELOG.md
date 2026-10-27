@@ -33,6 +33,35 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- **The transcript stopped following the moment output outran the scroll** (issue #86, follow-up to
+  #90). Reported from a real window: *"the position jumps down to the latest output after submitting a
+  prompt, but then the transcript pane is not following the new output. Only clicking Jump to latest
+  works."* Two causes, and both had to go.
+
+  **1. `.transcript { scroll-behavior: smooth }`.** Every programmatic scroll in that container was a
+  catch-up with the tail — and an *animated* catch-up cannot catch a moving bottom, because it
+  re-targets a bottom that has already moved. Worse, the animation emitted a run of intermediate
+  positions, and an intermediate position is **indistinguishable from the reader scrolling up**: the
+  follow un-pinned itself a few frames in. The container no longer smooth-scrolls; the deliberate
+  *Jump to latest* asks for its animation explicitly, which is the one scroll here that should have
+  one.
+
+  **2. The distance rule could not tell growth from a scroll.** "If the distance from the bottom
+  exceeds the threshold, the reader has scrolled away" is false while output is arriving, because
+  **both** change that distance. A scroll event arrives *after* the browser has painted whatever came
+  in meanwhile, so the distance it measures includes growth the reader never asked for. The rule now
+  subtracts the growth since the previous sample, which leaves the part of the distance the reader is
+  actually responsible for — growth alone discounts to zero, a genuine scroll up survives.
+
+  **3. And an unmeasured sample must never become the "previous" one.** jsdom reports `0` for every
+  scroll metric, and so does a pane that is hidden or not yet laid out. Recorded as "previous", `0`
+  to `2000px` reads as two thousand pixels of *growth*, which cancels the reader's entire distance and
+  pins them to a transcript they had scrolled away from. This one was found by breaking three existing
+  DOM tests, and in a browser it would have looked like *Jump to latest* never appearing.
+
+  Four falsifications: the discount removed (the naive rule — the actual bug); growth unclamped; smooth
+  scrolling restored on the container; and unmeasured samples recorded again.
+
 - **The transcript's reading position is kept per session, and sending a prompt re-arms following**
   (issues #80, #86). Two reports, one defect: `pinned` — "am I following the tail?" — was a single
   component-level value and the scroll offset was not recorded at all. So
