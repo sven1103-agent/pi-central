@@ -635,10 +635,16 @@ button { font: inherit; color: inherit; }
 .quarantine-body.collapsed { display: none; }
 .quarantine-body.error { color: var(--danger-text); }
 
+.legend > span:first-child { flex: 1; }
 .legend {
   font-size: var(--fs-xs);
   color: var(--dim);
   padding: 6px 18px;
+  /* A row, because the auto-follow toggle lives at its right end: both are transcript-level chrome,
+     and this bar is otherwise empty on the right. */
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
   border-bottom: 1px solid var(--line);
   background: var(--panel);
 }
@@ -1044,14 +1050,14 @@ select.btn { font-family: var(--sans); }
  * State is carried by the WORDS (`markers on` / `markers off`) as well as the tint, so nothing here
  * depends on colour alone.
  */
-.trace-toggle[aria-pressed] {
+.toggle-chip {
   border: 1px solid var(--line);
   border-radius: var(--r-pill);
   padding: 1px 8px;
   font-weight: 500;
   color: var(--dim);
 }
-.trace-toggle[aria-pressed="true"] {
+.toggle-chip[aria-pressed="true"] {
   color: var(--accent-text);
   background: var(--accent-tint);
   border-color: transparent;

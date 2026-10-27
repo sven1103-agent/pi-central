@@ -122,7 +122,7 @@ export function ToolTrace({
             sits with it rather than somewhere unrelated. */}
         <button
           type="button"
-          className="trace-toggle"
+          className="trace-toggle toggle-chip"
           style={{ marginLeft: collapsed ? "auto" : undefined }}
           onClick={onToggleMarkers}
           aria-pressed={showMarkers}
