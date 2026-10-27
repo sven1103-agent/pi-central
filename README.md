@@ -41,6 +41,18 @@ explanation rather than failing confusingly later.
 
 ## Design in one picture
 
+![The Pi Central dashboard. On the left, a session rail lists two sessions with their state and
+cost. In the middle, a transcript shows the reader's own prompt in a tinted block labelled YOU,
+followed by the agent's reasoning, two tool runs, and a live "responding" indicator. Below the
+transcript, a tool trace lists the last three commands with their durations. The right-hand panel is
+collapsed.](docs/images/dashboard.png)
+
+*A session mid-run. The rail carries the fleet, the transcript carries the conversation, and the tool
+trace carries what the agent actually ran. The right-hand panel — session facts, or a file browser —
+is **collapsed by default**; `Show panel` in the top bar opens it.*
+
+The layers behind that window:
+
 ```
 ┌──────────────────────────────┐
 │  Pi Central UI (localhost)   │  session rail · transcript · approvals · tool trace

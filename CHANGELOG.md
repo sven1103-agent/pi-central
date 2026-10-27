@@ -298,6 +298,20 @@ manifest and the three private workspace manifests cannot disagree.
 
 ### Added
 
+- **A screenshot of the real dashboard in the README** (issue #7), with alt text that describes what
+  is visible rather than naming the file: the session rail, the transcript, the tinted first-person
+  turn, the tool trace with its durations, and the collapsed right-hand panel.
+
+  Captured from a real window mid-run, which is the only way to show the states that matter — a live
+  `responding` indicator, tool durations, fleet counts. A mockup would have to invent them, and the
+  point of this product is that its claims are checkable.
+
+  `CONTRIBUTING.md` now carries the **capture recipe**: run a session that is mid-run, leave the panel
+  collapsed (the default), capture at roughly 1300×1050, and — the part worth writing down — **check
+  the image for things that are not the product** before committing it. The tool trace prints the
+  commands that ran, and those can carry absolute paths or repository names that have no business
+  being published.
+
 - **A release workflow, and one version instead of six claims about it** (issue #53). The shipped
   version was asserted in six places with no mechanism between them — `package.json`, `README.md`
   ("Status: v0.1.0"), a `CHANGELOG.md` heading, and three private workspace manifests — and the

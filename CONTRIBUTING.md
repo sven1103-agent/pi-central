@@ -114,3 +114,33 @@ spike: verify per-session profile independence
 Nothing about isolation should be asserted without a test. The Phase 0 harness in
 [docs/SANDBOX.md](docs/SANDBOX.md#verification-harness) is the reference: two sessions,
 two cwds, cross-access must fail.
+
+## Screenshots in the README
+
+The dashboard image in `README.md` is a real window, and it is worth keeping that way — a mockup
+cannot show the tool trace's durations, a live `responding` state, or the fleet counts.
+
+**How to capture one**
+
+1. Run a session that is **mid-run** (`working`, ideally with a couple of tool calls behind it). A
+   finished session shows none of the live states, and an empty one shows nothing at all.
+2. Leave the right-hand panel **collapsed**, which is the default. It is the more representative
+   state, and it gives the transcript the width the screenshot is about.
+3. Capture the window at roughly **1300×1050**. Wider and the text stops being legible once GitHub
+   scales it down.
+4. Save as `docs/images/dashboard.png` — that path is referenced from the README, and `check:docs`
+   fails if it stops resolving.
+
+**Before committing, check the image for things that are not the product**
+
+- **Paths.** Pi Central shortens `$HOME` to `~` in the rail and the header, so a normal window is
+  usually fine — but the tool trace prints the *commands* that ran, and those can contain absolute
+  paths, hostnames, or repository names that are nobody's business.
+- **Session names.** `New session` names are yours. If a screenshot is captured while working on
+  something private, rename the session first.
+- **Anything else on screen.** The orchestrator binds loopback, so a capture is a capture of your
+  machine.
+
+The alt text in the README describes what is *visible* — the rail, the transcript, the tinted
+first-person turn, the trace, the collapsed panel. If the layout changes, the alt text is part of the
+change: it is the image's content for anyone who cannot see it.
