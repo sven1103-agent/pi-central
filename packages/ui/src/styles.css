@@ -1072,12 +1072,40 @@ select.btn { font-family: var(--sans); }
 }
 .trace-hint { margin-left: auto; }
 
-/* Fixed height: the trace never grows with the number of calls. */
+/*
+ * Fixed height: the trace never grows with the number of calls.
+ *
+ * ## This is a scroller INSIDE a scroller, and it is now marked as one (issue #73)
+ *
+ * The transcript column has two scroll regions: the transcript, and this. A reviewer could not tell
+ * them apart — *"the inner thumb is easy to mistake for the outer one"* — and that confusion is the
+ * real defect, because neither the hierarchy nor the wheel behaviour is wrong: the pane is bounded on
+ * purpose, and wheel chaining from a finished inner list to the outer one is what a browser already
+ * does.
+ *
+ * Removing the bound was the other option, and it was rejected: without it the list grows with the
+ * number of calls and pushes the composer off screen, and windowing the rows instead would put calls
+ * out of reach of the traversal keys. So the nesting stays and the region is made unmistakable:
+ *
+ *   1. its own scrollbar — wider, and tinted with `--line-strong` rather than the platform default,
+ *      so the two thumbs in this column cannot be confused;
+ *   2. a recessed `--bg` viewport, so the bounded area reads as a surface of its own rather than as
+ *      more of the page.
+ *
+ * The words were already there (`latest 5 shown · the rest below for debugging · ↑↓ to traverse`);
+ * this adds the thing a glance can use.
+ */
 .trace-list {
   max-height: 108px;
   overflow-y: auto;
   padding: 2px 0;
+  background: var(--bg);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
 }
+.trace-list::-webkit-scrollbar { width: 9px; }
+.trace-list::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 5px; }
+.trace-list::-webkit-scrollbar-track { background: transparent; }
 
 .trace-row {
   display: flex;
@@ -1113,12 +1141,20 @@ select.btn { font-family: var(--sans); }
 }
 .trace-row .t-time { flex-shrink: 0; color: var(--dim); }
 
+/* The second inner scroller, given the same treatment for the same reason. Its bound is kept: without
+   one, a long tool result would expand the trace and squeeze the transcript, which is the thing the
+   transcript column exists to avoid. */
 .trace-detail {
   border-top: 1px solid var(--line);
   background: var(--bg);
   max-height: 34vh;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
 }
+.trace-detail::-webkit-scrollbar { width: 9px; }
+.trace-detail::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 5px; }
+.trace-detail::-webkit-scrollbar-track { background: transparent; }
 /*
  * QUARANTINE FRAME for the tool output panel (DESIGN §5.2, issue #43).
  *
