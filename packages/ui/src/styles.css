@@ -13,6 +13,18 @@
  */
 
 :root {
+  /*
+   * `color-scheme: dark`, and this is not cosmetic (issue #100).
+   *
+   * It tells the platform that this page is dark, which decides the appearance of everything the
+   * theme does NOT draw: the default face of a `<button>`, scrollbars, and form controls. Without it
+   * they render LIGHT on a dark page.
+   *
+   * That is not hypothetical. The `auto-follow` chip declares no background of its own, so it
+   * rendered as the platform's light button face with near-white text on it — invisible, and made
+   * *worse* by a fix that brightened the text without looking at what the text sat on.
+   */
+  color-scheme: dark;
   /* surfaces */
   --bg: #0e1116;
   --panel: #161b22;
@@ -723,6 +735,16 @@ button { font: inherit; color: inherit; }
   color: #05131f;
   border: none;
   border-radius: var(--r-2);
+  /*
+   * The font, explicitly (issue #100). A `<button>` inherits NEITHER family nor size from its parent —
+   * the UA sets its own — so this rule's `font-weight` alone left the most-clicked control in the app
+   * rendering in the platform's typeface, at the platform's size, next to text that is not.
+   *
+   * Found by the audit rather than by looking: it is the same omission as the toggle chip, in a place
+   * nobody had thought to check.
+   */
+  font-family: inherit;
+  font-size: var(--fs-sm);
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
@@ -930,6 +952,10 @@ select.btn { font-family: var(--sans); }
   display: block;
   width: 100%;
   text-align: left;
+  /* A `<button>` inherits neither font family nor size (issue #100); without these the row's own
+     `.h1`/`.h2` sizes are set against the platform's typeface. */
+  font-family: inherit;
+  font-size: var(--fs-sm);
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--r-2);
@@ -1059,6 +1085,20 @@ select.btn { font-family: var(--sans); }
  * depends on colour alone.
  */
 .toggle-chip {
+  /*
+   * SELF-SUFFICIENT, because it is the SHARED class (issue #100).
+   *
+   * It was extracted in #94 from `.trace-toggle[aria-pressed]` and took the decoration but not the
+   * reset — so the markers toggle kept working (it also carries `.trace-toggle`, which supplies
+   * `background: none`) while the auto-follow toggle, which carries this class ALONE, inherited the
+   * platform's button face: light, on a dark page.
+   *
+   * A control that does not declare its own appearance does not have a surface; it has whatever the
+   * platform gives it. Every declaration below is one the element would otherwise take from the UA.
+   */
+  background: none;
+  font: inherit;
+  cursor: pointer;
   border: 1px solid var(--line);
   border-radius: var(--r-pill);
   padding: 1px 8px;

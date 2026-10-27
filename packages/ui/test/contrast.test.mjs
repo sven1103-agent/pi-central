@@ -19,9 +19,25 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 
-const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+/**
+ * Comments removed before any rule is matched.
+ *
+ * Not tidiness — this is the FIFTH time in this repository that a text-scanning assertion has been
+ * satisfied by its own documentation: a release-workflow check matched its own docs, a scroll guard
+ * matched `key={focused?.id}` in a comment, a CSS guard matched `scroll-behavior: smooth` inside the
+ * comment explaining its removal, a component guard matched `auto-follow on` in its docstring, and
+ * the `color-scheme` assertion below matched the comment that documents it — so removing the
+ * declaration left the test green.
+ *
+ * Comments are not code. Strip them before matching, always.
+ */
+function stripComments(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+const css = stripComments(readFileSync(new URL("../src/styles.css", import.meta.url), "utf8"));
 
 /** Every `--name: #rrggbb` in `:root`. */
 function tokens() {
@@ -54,6 +70,47 @@ test("the documented bar for this project's text levels actually holds", () => {
   assert.ok(T["bg"] && T["dim"] && T["text"], "the tokens must be readable");
   assert.ok(contrast(T["dim"], T["bg"]) >= 6, `--dim on --bg is ${contrast(T["dim"], T["bg"]).toFixed(2)}:1`);
   assert.ok(contrast(T["text"], T["bg"]) >= 6, `--text on --bg is ${contrast(T["text"], T["bg"]).toFixed(2)}:1`);
+});
+
+test("every control declares its own appearance, so it cannot inherit the platform's", () => {
+  // The audit, and it is an audit because the failure was an OMISSION (issue #100). Per-class
+  // assertions cannot catch "nobody wrote this declaration", and that is exactly what happened:
+  // `.toggle-chip` declared neither a background nor a font, so the auto-follow toggle rendered as
+  // the platform's LIGHT button face with near-white text on it.
+  //
+  // Only classes used ALONE are held to this. A class that always composes with another (`btn
+  // btn-danger`) legitimately takes part of its appearance from its partner; a class used by itself
+  // has nobody else to take it from.
+  const components = readdirSync(new URL("../src/components", import.meta.url))
+    .filter((name) => name.endsWith(".tsx"))
+    .map((name) => readFileSync(new URL(`../src/components/${name}`, import.meta.url), "utf8"));
+
+  const alone = new Set();
+  for (const source of components) {
+    for (const [, value] of source.matchAll(/<button[^>]*className="([^"{}]+)"/gs)) {
+      const classes = value.trim().split(/\s+/);
+      if (classes.length === 1) alone.add(classes[0]);
+    }
+  }
+  assert.ok(alone.size > 0, "the scan must find at least one single-class button");
+
+  const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => [m[1].trim(), m[2]]);
+
+  for (const cls of alone) {
+    const body = rules.find(([selector]) => selector === `.${cls}`)?.[1];
+    assert.ok(body, `.${cls} is used alone on a <button> and must have a base rule of its own`);
+    assert.match(body, /(?<!-)background(-color)?\s*:/, `.${cls} must declare a background, or it inherits the platform's`);
+    assert.match(body, /(?<!-)font(-family|-size)?\s*:/, `.${cls} must declare a font, or it inherits the platform's`);
+  }
+});
+
+test("the page tells the platform it is dark", () => {
+  // `color-scheme` decides everything the theme does not draw: default button faces, scrollbars, form
+  // controls. Without it they render LIGHT on a dark page — which is how a chip with no background of
+  // its own became invisible.
+  const root = /^:root\s*\{([\s\S]*?)\n\}/m.exec(css)?.[1];
+  assert.ok(root, ":root must exist");
+  assert.match(root, /color-scheme:\s*dark/, "the platform must be told, or its chrome is light");
 });
 
 test("a control's label is readable where the control actually sits", () => {

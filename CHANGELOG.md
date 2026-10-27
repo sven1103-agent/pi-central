@@ -76,6 +76,31 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- **The `auto-follow` chip was invisible, and #98 had misdiagnosed it** (issue #100). The chip looked
+  identical after #98 merged — because #98 treated it as a *colour* problem when it was a *chrome*
+  problem, and its fix made things worse.
+
+  `.toggle-chip` declared **no `background` and no `font`**, and **`color-scheme: dark` was not declared
+  anywhere**. So the element was a `<button>` rendering with the platform's default button face —
+  which is **light** — and `--dim` on a light face was unreadable while `--text` on a light face was
+  worse. The `markers` toggle escaped only by accident: it also carries `.trace-toggle`, which supplies
+  `background: none`. The auto-follow toggle carries `toggle-chip` **alone**.
+
+  Two fixes. **`color-scheme: dark`** on `:root`, which is the root cause and reaches everything the
+  theme does not draw — default button faces, scrollbars, form controls. And **`.toggle-chip` is now
+  self-sufficient**: `background: none`, `font: inherit`, `cursor: pointer`. It is the shared class, so
+  it cannot rely on a sibling for its reset.
+
+  **Why the guard missed it, which matters more than the fix.** `contrast.test.mjs` measured `--dim`
+  and `--text` against `--panel` — **a surface the chip never sits on**. That is the same error #98 was
+  fixing (measuring on `--bg` when the chip is on `--panel`), one level up: a test asserting a ratio
+  for a hypothetical background, passing while the real one is the platform's.
+
+  The guard is now an **audit**, because the failure was an *omission*: for every class used **alone**
+  on a `<button>`, the base rule must declare both a background and a font. It found two more
+  immediately — **`.btn-send`**, the most-clicked control in the app, had been rendering in the
+  platform's typeface at the platform's size, and **`.history-row`** likewise.
+
 - **The model picker painted over the `Thinking` label** (issue #96). A window showed `hinking` where
   `Thinking` should be, with no layout error anywhere and every test green.
 
