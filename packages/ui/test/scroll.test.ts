@@ -14,6 +14,7 @@ import {
   isFollowing,
   isMeasured,
   readerDistanceFromTail,
+  shouldFollow,
   type ScrollSample,
 } from "../src/scroll.ts";
 
@@ -48,12 +49,12 @@ test("the scroll memory is NOT kept inside the transcript pane", () => {
   // `SessionView` carries `key={focused?.id}` in `App.tsx`, so it — and `TranscriptView` inside it —
   // REMOUNTS on every session switch. A store held there is destroyed at exactly the moment it is
   // needed. So the memory lives in `App` and is handed in, and this test pins both halves of that.
-  const pane = readFileSync(new URL("../src/components/Transcript.tsx", import.meta.url), "utf8");
+  const pane = source("../src/components/Transcript.tsx");
   // `\bnew Map\b`, not `new Map<`: a bare `new Map()` is valid TypeScript, and the narrower pattern
   // let exactly that form through when this guard was falsified.
   assert.ok(!/\bnew Map\b/.test(pane), "the pane must not own the per-session store; App does");
 
-  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const app = source("../src/App.tsx");
   assert.match(app, /scrollMemory = useRef\(new Map/, "App owns the memory");
   // Anchored to a line that IS the attribute. The unanchored form matched a COMMENT in `App.tsx`
   // that merely mentions the key — the guard passed while the key was deleted. Same trap as a
@@ -67,10 +68,10 @@ test("the scroll memory is NOT kept inside the transcript pane", () => {
 
 test("sending a prompt re-arms following, so the reply cannot arrive off-screen", () => {
   // #86's reported symptom, in one assertion: `followToken` changes on send, and the pane watches it.
-  const pane = readFileSync(new URL("../src/components/Transcript.tsx", import.meta.url), "utf8");
+  const pane = source("../src/components/Transcript.tsx");
   assert.match(pane, /rearmToken/, "the pane must track the send token");
   assert.match(pane, /\[followToken\]/, "…and react to it");
-  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const app = source("../src/App.tsx");
   assert.match(app, /setFollowToken\(\(n\) => n \+ 1\)/, "App must raise the token on send");
 });
 
@@ -84,7 +85,7 @@ test("a restore waits until there is something to scroll", () => {
   assert.equal(hasScrollableContent(801, 600), true, "…now there is");
 
   // And the pane must actually hold it rather than applying it on mount.
-  const pane = readFileSync(new URL("../src/components/Transcript.tsx", import.meta.url), "utf8");
+  const pane = source("../src/components/Transcript.tsx");
   assert.match(pane, /pendingRestore/, "the pane must hold the offset");
   assert.match(pane, /hasScrollableContent\(container\.scrollHeight, container\.clientHeight\)/);
 });
@@ -149,10 +150,15 @@ test("the follow scrolls instantly, and only the deliberate jump animates", () =
     "the transcript must not smooth-scroll by default: every automatic scroll here is a catch-up",
   );
 
-  const pane = readFileSync(new URL("../src/components/Transcript.tsx", import.meta.url), "utf8");
+  const pane = source("../src/components/Transcript.tsx");
   assert.match(pane, /behavior: "smooth"/, "the deliberate jump still animates, explicitly");
   assert.match(pane, /isFollowing\(previous, current, FOLLOW_THRESHOLD_PX\)/, "the follow uses the growth-aware rule");
 });
+
+/** Read a source file with its comments removed. */
+function source(path: string): string {
+  return stripComments(readFileSync(new URL(path, import.meta.url), "utf8"));
+}
 
 /**
  * CSS with its comments removed.
@@ -187,4 +193,30 @@ test("an unmeasured sample must never become the previous one", () => {
   const real = { scrollTop: 0, scrollHeight: 2000, clientHeight: 500 }; // 1500px from the bottom
   assert.equal(readerDistanceFromTail(unmeasured, real), -500, "growth swamps the distance");
   assert.equal(isFollowing(unmeasured, real, 80), true, "…and the reader looks like they are following");
+});
+
+// --- The reader's own setting (issue #86) ----------------------------------------------------------
+
+test("auto-follow off means the transcript never moves on its own", () => {
+  // The reader's request: someone investigating at their own pace should not have to keep proving it
+  // by scrolling. Off has to beat "pinned", or the pane would still yank them to the bottom every
+  // time they happened to be at the end.
+  assert.equal(shouldFollow(true, true), true, "following, at the bottom");
+  assert.equal(shouldFollow(false, true), false, "…but the reader said no");
+  assert.equal(shouldFollow(true, false), false, "pinned false: they scrolled away");
+  assert.equal(shouldFollow(false, false), false);
+});
+
+test("the toggle is a real control, and its label carries the state", () => {
+  // Same visual language as `markers on` beside it in the trace, and the state is in the WORDS as
+  // well as `aria-pressed`, so nothing depends on the tint alone.
+  const toggle = source("../src/components/FollowToggle.tsx");
+  assert.match(toggle, /aria-pressed=\{following\}/, "assistive tech must hear the state");
+  assert.match(toggle, /auto-follow on/, "…and so must a reader");
+  assert.match(toggle, /auto-follow off/);
+  assert.match(toggle, /className="toggle-chip"/, "the shared chip affordance");
+
+  // It must reach the pane, or the setting is decoration.
+  const pane = source("../src/components/Transcript.tsx");
+  assert.match(pane, /shouldFollow\(autoFollow, pinnedRef\.current\)/, "the follow must consult it");
 });
