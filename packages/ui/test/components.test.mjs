@@ -1683,3 +1683,46 @@ test("wrapped mode wraps, keeps indentation, and breaks long tokens", () => {
   assert.match(text[1], /min-width:\s*0/, "a flex item will not shrink below its content without this");
   assert.match(text[1], /flex:\s*1/, "…and must claim the remaining width");
 });
+
+// --- `Jump to latest` must not cover a line of text (issue #71) -----------------------------------
+
+test("the jump control floats in reserved space, so it cannot cover a line of text", () => {
+  // The defect: the control is positioned against the bottom of the VIEWPORT, so mid-list it sat on
+  // whatever line happened to be there — "…the escaped quote in m[ ↓ Jump to latest ]check." The fix
+  // is that `.transcript-wrap` reserves a strip, so the scrollport ends ABOVE the control.
+  //
+  // Asserted on the stylesheet because the markup cannot express it, and because the tempting fix —
+  // `padding-bottom` INSIDE the scroller — would pass a naive check while leaving the defect in
+  // place: padding at the end of the content scrolls away with it, so it protects only the last line.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const wrap = /\.transcript-wrap\s*\{([^}]*)\}/.exec(css);
+  assert.ok(wrap, ".transcript-wrap must have a rule");
+  assert.match(wrap[1], /padding-bottom:\s*var\(--jump-strip\)/,
+    "the wrap must RESERVE the strip, not the scroller's own padding");
+
+  const strip = /--jump-strip:\s*(\d+)px/.exec(css);
+  assert.ok(strip, "--jump-strip must be defined");
+  const height = Number(strip[1]);
+
+  const pill = /\.jump-latest\s*\{([^}]*)\}/.exec(css);
+  assert.ok(pill, ".jump-latest must have a rule");
+  assert.match(pill[1], /position:\s*absolute/, "the control floats over the strip");
+  const bottom = /bottom:\s*(\d+)px/.exec(pill[1]);
+  assert.ok(bottom, "the control must be offset from the bottom");
+  assert.ok(
+    Number(bottom[1]) < height,
+    `the control's ${bottom[1]}px offset must sit inside the ${height}px strip, or it hangs below it`,
+  );
+});
+
+test("the scroller is the only scrolling element in the transcript column", () => {
+  // The reservation above is only sound if the scroller does not also pad itself at the end — that
+  // would be the "protects only the last line" mistake, and it would double the gap.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const scroller = /\.transcript\s*\{([^}]*)\}/.exec(css);
+  assert.ok(scroller, ".transcript must have a rule");
+  assert.ok(
+    !/padding-bottom/.test(scroller[1]),
+    ".transcript must not reserve space itself; the wrap does that",
+  );
+});

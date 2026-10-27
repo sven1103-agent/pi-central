@@ -171,6 +171,10 @@ export function TranscriptView({
     // deliberate: an absolutely-positioned button inside a scrolling container scrolls away with
     // the content, which is exactly when it is needed. `.transcript-wrap` is the positioned
     // ancestor instead, so the button stays put while the conversation moves.
+    //
+    // The wrap also reserves the strip the button floats in (issue #71) — see the CSS. Being a
+    // sibling is what makes that possible, and the reservation is what stops the button covering a
+    // line of text at any scroll position.
     <div className="transcript-wrap">
       <div
         className="transcript"
