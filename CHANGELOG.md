@@ -57,6 +57,23 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- **Your own prompts are distinguishable from the agent's prose at a glance** (issue #88). Reported as
+  *"own prompts can't be easily distinguished from the assistant ones"* — and the cause was exact:
+  `Turn` built the **same element for every role**, so the only difference between a prompt you wrote
+  and a page of the agent's output was the text of a 10px dim label (`You` / `Assistant`). That does
+  not survive a glance down a long transcript, which matters because your own prompts are where you
+  steered the task and are what the eye scans for when navigating.
+
+  A first-person turn is now a landmark: a raised `--panel-2` tint, and a **strengthened label** in
+  weight and case. Two signals, neither load-bearing alone — `forced-colors` drops the tint, so the
+  words have to carry the meaning, the same rule the quarantine frame already follows.
+
+  Three collisions were avoided deliberately, and each has a test: no left rule (that vocabulary
+  belongs to `.run-notice` and `.trace-row.recent`), no full border (a framed block would read as
+  **quarantined tool output**, not as the reader's own words), and the raised tint is asserted
+  different from the quarantine frame's **recessed** `--panel` — the same signal with the opposite
+  meaning would be the worst outcome available.
+
 - **The transcript stopped following the moment output outran the scroll** (issue #86, follow-up to
   #90). Reported from a real window: *"the position jumps down to the latest output after submitting a
   prompt, but then the transcript pane is not following the new output. Only clicking Jump to latest
