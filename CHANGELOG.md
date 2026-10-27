@@ -97,6 +97,30 @@ They are kept because each one is the reason a constraint or an invariant test e
   The guard is general rather than specific: the test asserts the wrapper is **at least as wide as the
   control inside it**, because nothing warns about a child drawn on top of its neighbour.
 
+- **The `auto-follow` / `markers` toggle was unreadable in its inactive state** (issue #98). Measured
+  rather than judged, because the project documents its own bar three lines above the rule that broke
+  it: *"text — two levels, both >= 6:1 on `--bg`"*.
+
+  | | contrast |
+  |---|---|
+  | `--dim` on `--bg` — the stated bar | 6.15:1 |
+  | `--dim` on `--panel` — where the chip actually sits | **5.62:1** |
+  | `--dim` on `--panel-2` — where a hover puts it | **5.17:1** |
+  | the ACTIVE state (`--accent-text` on the tint) | 11.25:1 |
+
+  The dimmest text on the bar belonged to the control you have to read in order to operate it, while
+  the active state was comfortably legible. The chip's label now uses `--text` (**14.64:1** on
+  `--panel`). The inactive state still reads as quieter than the active one, because the active one is
+  accent-tinted — not because the inactive one is faint.
+
+  This was never specific to the reported control: `markers off` shares the class, so it had the same
+  problem and is fixed in the same place.
+
+  The guard is a **measurement**: `packages/ui/test/contrast.test.mjs` parses the tokens out of
+  `styles.css` and computes WCAG contrast, so the claim in that comment is now falsifiable and a
+  hard-coded ratio cannot rot. It also records *why* `--dim` was wrong here, so a future
+  "simplification" back to it fails with the number rather than with a comment to re-read.
+
 - **Your own prompts are distinguishable from the agent's prose at a glance** (issue #88). Reported as
   *"own prompts can't be easily distinguished from the assistant ones"* — and the cause was exact:
   `Turn` built the **same element for every role**, so the only difference between a prompt you wrote
