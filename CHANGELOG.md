@@ -9,6 +9,15 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+<!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
+
+## [0.3.0] — 2026-10-27
+
+Increment 2 — *Drive a session from the UI* — plus the release machinery it ships behind. The
+dashboard stops being a viewer and starts being a place to work: the right-hand panel gets out of the
+way by default, the transcript remembers where you were reading, and the reader's own turns are
+findable in a long conversation.
+
 ### Changed
 
 - **The trace's nested scroll regions are marked as such** (issue #73). The transcript column has two
