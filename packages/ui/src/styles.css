@@ -157,20 +157,36 @@ button { font: inherit; color: inherit; }
 }
 
 /*
+ * The panel is hidden, so its track goes with it (issue #75).
+ *
+ * A second class rather than `--panel-width: 0`: the track definition belongs to the grid, and the
+ * panel's remembered width must survive being hidden — writing 0 would make re-opening a 0px panel
+ * that `clampPanelWidth` would then have to rescue. The `gap: 1px` also stops producing a stray
+ * divider, because with two tracks there is only one gap.
+ */
+.panes.is-collapsed { grid-template-columns: 288px 1fr; }
+
+/*
  * There is deliberately no narrow-viewport rule for the panel any more.
  *
  * It used to be `display: none` below 1440px. That was defensible while the panel held only reference
  * material, but it now hosts the file browser, and a pane you cannot reach at all is worse than a
  * narrow one. The first replacement attempt overlaid the panel on the transcript as a fixed sheet —
  * which covered the transcript with no way to dismiss it, a worse bug than the one it fixed, because
- * the panel is not modal and nothing said how to close it. A toggle is the right answer and needs a
- * control in the topbar; until that exists, the panel stays a grid column at every width and the
- * resizer is how you make room. The `1024–1439` sheet behaviour in DESIGN.md is deferred, not
- * silently dropped.
+ * the panel is not modal and nothing said how to close it.
+ *
+ * **The toggle now exists** (issue #75): `PanelToggle` in the topbar, and the panel is collapsed by
+ * default (`.panes.is-collapsed`). That is a better answer than the 1440px rule ever was, because it
+ * is the user's choice at every width instead of a guess by window size — and it is why the
+ * `1024–1439` sheet behaviour in DESIGN.md is no longer needed rather than merely deferred: a
+ * collapsed panel is not a sheet, and it can be opened whenever there is room for it.
  */
 
 @media (max-width: 1023px) {
-  .panes { grid-template-columns: 1fr; }
+  /* Both selectors, because `.panes.is-collapsed` out-specifies a bare `.panes` and would otherwise
+     win inside this query — leaving a 288px empty track where the hidden rail used to be. */
+  .panes,
+  .panes.is-collapsed { grid-template-columns: 1fr; }
   .rail { display: none; }
   .rail.open { display: flex; }
 }

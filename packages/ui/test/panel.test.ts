@@ -91,7 +91,7 @@ test("a non-finite width falls back to the default instead of collapsing the pan
 });
 
 test("preferences round-trip through their serialized form", () => {
-  const prefs = { width: 512, mode: "files" as const, userSized: true };
+  const prefs = { width: 512, mode: "files" as const, userSized: true, collapsed: false };
   assert.deepEqual(parsePanelPrefs(serializePanelPrefs(prefs)), prefs);
 });
 
@@ -130,4 +130,43 @@ test("the split breakpoint in the stylesheet matches the one in the code", () =>
 
 test("the stored key is namespaced, so it cannot collide with another app on this origin", () => {
   assert.match(PANEL_PREFS_KEY, /^pi-central\./);
+});
+
+// --- The panel is collapsed by default (issue #75) --------------------------------------------------
+
+test("a fresh preference set is COLLAPSED", () => {
+  // The default experience: the transcript is the primary surface, and the panel is a
+  // special-purpose view. Asserted on the default itself, because this is the decision the issue
+  // makes and a `false` here would silently restore the old behaviour.
+  assert.equal(defaultPanelPrefs().collapsed, true);
+  assert.equal(parsePanelPrefs(null).collapsed, true);
+  assert.equal(parsePanelPrefs("").collapsed, true);
+});
+
+test("a stored value with no `collapsed` field is collapsed, not expanded", () => {
+  // The upgrade path, and the case that decides whether the default actually changes for anyone who
+  // used an earlier build. Absent must mean the NEW default: an `=== true` test here would open the
+  // panel for every existing user, which is the opposite of the issue.
+  const legacy = JSON.stringify({ width: 400, mode: "files", userSized: true });
+  const parsed = parsePanelPrefs(legacy);
+  assert.equal(parsed.collapsed, true);
+  // …and the rest of the stored preferences still survive, so re-opening restores the geometry.
+  assert.equal(parsed.width, 400);
+  assert.equal(parsed.mode, "files");
+  assert.equal(parsed.userSized, true);
+});
+
+test("only an explicit `false` opens the panel", () => {
+  // So that an unrecognised value — a string, a number, an object from a future shape — degrades to
+  // the default rather than being read as permission to expand.
+  assert.equal(parsePanelPrefs(JSON.stringify({ collapsed: false })).collapsed, false);
+  assert.equal(parsePanelPrefs(JSON.stringify({ collapsed: true })).collapsed, true);
+  assert.equal(parsePanelPrefs(JSON.stringify({ collapsed: "false" })).collapsed, true);
+  assert.equal(parsePanelPrefs(JSON.stringify({ collapsed: 0 })).collapsed, true);
+  assert.equal(parsePanelPrefs(JSON.stringify({ collapsed: null })).collapsed, true);
+});
+
+test("the collapsed flag round-trips, so the toggle is remembered", () => {
+  const open = { width: 360, mode: "session" as const, userSized: false, collapsed: false };
+  assert.deepEqual(parsePanelPrefs(serializePanelPrefs(open)), open);
 });
