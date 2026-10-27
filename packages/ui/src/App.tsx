@@ -753,7 +753,9 @@ function SessionView({
       <div className="session-header">
         <div className="title">
           <h2>
-            {displayName(session)}
+            {/* In its own element so it can truncate: a bare text node cannot carry
+                `text-overflow`, and without it the name pushes the controls out of the header. */}
+            <span className="session-name">{displayName(session)}</span>
             {session.scratch && <span className="chip chip-scratch">scratch</span>}
             <span className={`chip chip-${session.state}`}>{stateLabel(session)}</span>
           </h2>

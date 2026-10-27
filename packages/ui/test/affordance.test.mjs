@@ -106,3 +106,43 @@ test("the metric strip separates its facts instead of running them together", ()
   assert.match(metrics, /gap:\s*0\b/, "spacing comes from the separator, not from both");
   assert.match(separator, /margin:\s*0 10px/, "…evenly, on both sides");
 });
+
+test("the picker wrapper is at least as wide as the control inside it", () => {
+  // The defect a screenshot caught, with every test green (issue #92): `.picker-field` was capped at
+  // 22ch while `.picker-select` was raised to 30ch, so the select OVERFLOWED its wrapper and painted
+  // over the label of the picker beside it — `hinking` where `Thinking` should be.
+  //
+  // A child wider than its wrapper is not a rounding error; it is a child drawn on top of its
+  // neighbour, and no layout warning is emitted anywhere.
+  const field = /\.picker-field\s*\{([^}]*)\}/.exec(css);
+  assert.ok(field, ".picker-field must have a rule");
+  const select = /\.picker-select\s*\{([^}]*)\}/.exec(css);
+  assert.ok(select, ".picker-select must have a rule");
+
+  const cap = (body, what) => {
+    const found = /max-width:\s*(\d+)ch/.exec(body);
+    assert.ok(found, `${what} must cap its width in ch`);
+    return Number(found[1]);
+  };
+  const wrapper = cap(field[1], ".picker-field");
+  const control = cap(select[1], ".picker-select");
+  assert.ok(
+    wrapper >= control,
+    `the wrapper (${wrapper}ch) must not be narrower than the control inside it (${control}ch), or the control paints over its neighbour`,
+  );
+  assert.match(field[1], /flex-shrink:\s*0/, "a shrinking control clips its own label");
+});
+
+test("the session name yields before the controls do", () => {
+  // The other half: with the wrapper fixed, the row still has to give somewhere on a narrow window,
+  // and it must not be the controls. The full name is in the rail, the title attribute and the
+  // inspector; a clipped control label has nowhere else to be read.
+  const name = /\.session-name\s*\{([^}]*)\}/.exec(css);
+  assert.ok(name, ".session-name must have a rule");
+  assert.match(name[1], /text-overflow:\s*ellipsis/, "the name truncates");
+  assert.match(name[1], /min-width:\s*0/, "…and a flex item needs this to be allowed to");
+
+  const title = /\.session-header \.title\s*\{([^}]*)\}/.exec(css);
+  assert.ok(title, ".session-header .title must have a rule");
+  assert.match(title[1], /overflow:\s*hidden/, "the title is the part that gives");
+});

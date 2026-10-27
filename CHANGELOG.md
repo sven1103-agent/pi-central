@@ -76,6 +76,27 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- **The model picker painted over the `Thinking` label** (issue #96). A window showed `hinking` where
+  `Thinking` should be, with no layout error anywhere and every test green.
+
+  A regression from #74, and a precise one: that change raised the model label's character cap and
+  `.picker-select`'s `max-width` from 22ch to 30ch — and **only those two**. `.picker-field`, the
+  wrapper around the select, stayed at `22ch`. An inline-flex child wider than its wrapper does not
+  push it open; it **overflows and paints over whatever is beside it**, so the select drew its extra
+  eight characters on top of its neighbour's label.
+
+  The two numbers were a documented pairing with a test asserting they agree — which is exactly why
+  the miss was invisible: the *pair* agreed, and the third number nobody thought of did not.
+
+  `.picker-field` now caps at the same 30ch and takes `flex-shrink: 0` (a shrinking control clips its
+  own label), and the **session name yields instead**: it is wrapped so it can carry `text-overflow`,
+  and the title column takes `overflow: hidden`. On a narrow window something has to give, and a
+  clipped control label has nowhere else to be read while a truncated session name has three other
+  homes.
+
+  The guard is general rather than specific: the test asserts the wrapper is **at least as wide as the
+  control inside it**, because nothing warns about a child drawn on top of its neighbour.
+
 - **Your own prompts are distinguishable from the agent's prose at a glance** (issue #88). Reported as
   *"own prompts can't be easily distinguished from the assistant ones"* — and the cause was exact:
   `Turn` built the **same element for every role**, so the only difference between a prompt you wrote
