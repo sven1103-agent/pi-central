@@ -443,7 +443,9 @@ button { font: inherit; color: inherit; }
 
 .metrics {
   display: flex;
-  gap: var(--sp-4);
+  /* The separator below does the spacing, so the gap is off. Two sources of space would give an
+     uneven rhythm around each middot. */
+  gap: 0;
   padding: 6px 18px;
   font-family: var(--mono);
   font-size: var(--fs-xs);
@@ -453,6 +455,20 @@ button { font: inherit; color: inherit; }
   align-items: center;
 }
 .metrics .warn { color: var(--warn-text); }
+
+/*
+ * Separators, because four facts in one dim weight read as one run-on sentence (issue #74):
+ * `ctx 29% 313.7M tok $30.17 644 msgs`. A middot is quieter than a pipe and does not compete with
+ * the values it separates.
+ *
+ * Done with a pseudo-element rather than in the markup so the separator is presentation: it should
+ * not appear when the strip is read aloud, and it should not be copied with the numbers.
+ */
+.metrics > span + span::before {
+  content: "·";
+  color: var(--line-strong);
+  margin: 0 10px;
+}
 
 /* The run bar: 2px rule whose width is elapsed progress. Motion is never the only signal. */
 .run-bar { height: 2px; background: var(--accent); transition: width 0.3s linear; }
@@ -972,6 +988,34 @@ select.btn { font-family: var(--sans); }
   border-radius: var(--r-1);
 }
 .trace-toggle:hover { background: var(--panel-2); }
+
+/*
+ * A TOGGLE needs an affordance at rest, and this one had none (issue #74).
+ *
+ * `markers on` is a real button — `onClick` plus `aria-pressed` — but it rendered as plain bold text
+ * with the panel background only on hover. So it read as a status readout, and a control that only
+ * reveals itself on hover is the one thing this design forbids (§5.1: no hover-only information).
+ *
+ * `[aria-pressed]` is the selector because the attribute that makes it a toggle to assistive tech is
+ * also what distinguishes it here from the collapse toggle beside it, which carries a glyph (`▾ Tool
+ * trace`) and so already reads as a control. Styling the class would have made both look boxed and
+ * turned the header into a toolbar.
+ *
+ * State is carried by the WORDS (`markers on` / `markers off`) as well as the tint, so nothing here
+ * depends on colour alone.
+ */
+.trace-toggle[aria-pressed] {
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 1px 8px;
+  font-weight: 500;
+  color: var(--dim);
+}
+.trace-toggle[aria-pressed="true"] {
+  color: var(--accent-text);
+  background: var(--accent-tint);
+  border-color: transparent;
+}
 .trace-count { color: var(--dim); }
 .trace-running { color: var(--ok-text); display: inline-flex; align-items: center; gap: 5px; }
 .trace-preview {
@@ -1160,7 +1204,7 @@ select.btn { font-family: var(--sans); }
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 3px 6px;
-  max-width: 22ch;
+  max-width: 30ch;
 }
 .picker-select:focus-visible { outline: none; box-shadow: var(--focus); border-color: var(--accent); }
 .picker-select:disabled { opacity: 0.55; cursor: not-allowed; }

@@ -33,6 +33,28 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- **An affordance and legibility sweep from looking at a screenshot** (issue #74). Three things, none
+  of which any test could have caught, all found by eye while the suite was green.
+
+  - **`markers on` is a real button with no affordance.** It has `onClick` and `aria-pressed`, but it
+    rendered as plain bold text with the panel background only on hover — so it read as a status
+    readout, and a control that reveals itself only on hover is the one thing this design forbids.
+    It is a bordered chip now, with the tint marking the on-state. Styled on `[aria-pressed]` rather
+    than on the class, because the collapse toggle beside it carries a glyph (`▾ Tool trace`) and
+    already reads as a control; boxing both would turn the header into a toolbar. State is carried by
+    the words as well as the colour, so nothing depends on the tint alone.
+  - **The model label was elided while empty space sat beside it** (`openrouter/d_4.1-f…`). The cap
+    was 22 characters, chosen to fit a *rail row*; the picker lives in the header, which has room.
+    Raised to 30, with the character cap and the CSS `max-width` still asserted equal — a mismatch is
+    what produces a trailing CSS cut instead of the middle elision `truncateMiddle` chose (issue #42).
+  - **The metric strip ran four facts together** in one dim weight: `ctx 29% 313.7M tok $30.17 644
+    msgs` reads as a sentence rather than as four numbers to scan. Middot separators, added as a
+    pseudo-element so they are presentation — not read aloud and not copied with the numbers.
+
+  The assertions went into a new file rather than appending to `components.test.mjs`, which is ~1,700
+  lines and was the collision point in four consecutive rebases; two of those cut a test in half and
+  left a syntax error pointing at the far end of the file.
+
 - **The file viewer no longer forces long lines into a horizontal scrollbar** (issue #73). It used
   `white-space: pre` with the reasoning that *"this is a code surface, and wrapping makes line numbers
   lie"* — right about code, wrong about the common case, because the panel hosts whatever the reader
