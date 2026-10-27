@@ -36,6 +36,70 @@ npm install --package-lock-only --ignore-scripts
 `--package-lock-only` rewrites the lockfile without touching `node_modules`, and
 `--ignore-scripts` keeps an install step from running in what is meant to be a metadata edit.
 
+## The first release is different, and it is the only manual one
+
+`release.yml` publishes over OIDC, which needs a **trusted publisher** — and a trusted publisher is
+configured *from an existing package's settings page*. `npm help trust` says so directly:
+
+```
+Prerequisites
+  • Package must exist: The package you're configuring must already exist on the npm registry.
+  • 2FA enabled on account
+```
+
+So the workflow **cannot** perform the first publish: there is no package on which to configure the
+trust. This is a genuine bootstrap, not an oversight in the workflow, and it is worth doing correctly
+because **npm never allows republishing a version**. A final version published by hand could never be
+published again, so it could never carry a provenance attestation — the first release would be
+permanently the one artifact nobody can verify.
+
+Hence: the bootstrap is a **pre-release**, published under the `next` tag, and the real release
+follows through the workflow with provenance. Do this once, on a throwaway branch that is never
+merged:
+
+```bash
+# 1. A pre-release version. `scripts/bootstrap-publish.mjs` refuses a final one and says why.
+npm version <x.y.z>-rc.1 --no-git-tag-version --workspaces --include-workspace-root
+
+# 2. Document the throwaway, because check-version requires a section for the declared version.
+$EDITOR CHANGELOG.md      # add `## [<x.y.z>-rc.1] — <date>` above the real release section
+
+# 3. Authenticate. 2FA is required at the account level.
+npm login
+
+# 4. Rehearse, then publish. Verify, build and `--tag next` are inside the script.
+node scripts/bootstrap-publish.mjs --dry-run
+node scripts/bootstrap-publish.mjs
+
+# 5. Configure the trust, so every later release uses OIDC. Real flags are from
+#    `npm trust github --help` on your npm (needs npm >= 11.15).
+npm trust github pi-central --file release.yml --repo sven1103-agent/pi-central --allow-publish
+npm trust list pi-central          # confirm
+npm view pi-central versions --json
+```
+
+Then throw the branch away, restore the real version, and release it normally — the steps below:
+
+```bash
+git switch main && git branch -D <bootstrap-branch>
+npm version <x.y.z> --no-git-tag-version --workspaces --include-workspace-root
+git commit -am 'release: <x.y.z>' && git tag v<x.y.z> && git push origin v<x.y.z>
+```
+
+Three things about this that are deliberate rather than incidental:
+
+- **The bootstrap version is never `latest`.** `scripts/bootstrap-publish.mjs` hard-codes `--tag next`,
+  so there is no branch in which an un-attested artifact becomes what `npm install pi-central`
+  resolves to. Structural beats validated: a rule that cannot be expressed beats one that has to be
+  remembered.
+- **The bootstrap has no provenance attestation, and cannot have one.** The attestation is built from
+  the CI provider's OIDC identity, so no local invocation produces one however it is spelled. That is
+  exactly why the *real* release must not be the manual one.
+- **`<x.y.z>-rc.1` is not a released version.** It stays on the `next` dist-tag. The workflow's
+  release sets `latest`.
+
+This step is **`verified/manual`**: no part of it runs in CI, because no part of it can.
+
 ## Cutting a release
 
 1. **Promote the changelog.** Move everything under `## [Unreleased]` into a new
@@ -57,8 +121,9 @@ npm install --package-lock-only --ignore-scripts
    the tag and the manifest disagree, builds the artifact, publishes it, and creates the GitHub
    Release.
 
-Nothing is published from a laptop. A local `npm publish` would produce an artifact with no
-attestation and no CI record of where it came from.
+Nothing here is published from a laptop. The one exception in the whole process is the bootstrap
+above, which exists precisely because it cannot go through CI — and which is a throwaway pre-release
+under `next`, never a version anyone is meant to install.
 
 ## What the release workflow refuses to do
 
@@ -78,12 +143,10 @@ runner mints a short-lived OIDC token, and npm exchanges it for a publish creden
 to be rotated, can be exfiltrated by a compromised dependency, and outlives whoever created it;
 `scripts/release-workflow.test.mjs` fails if one is reintroduced.
 
-**One-time setup, by a maintainer, before the first release:**
-
-1. Claim the package name on npm, or create it with the first publish.
-2. On the package's settings page, add a **trusted publisher**: GitHub Actions, repository
-   `sven1103-agent/pi-central`, workflow `release.yml`.
-3. Leave any publish token out of the repository's secrets. There is deliberately nothing to add.
+**The trusted publisher is configured once, after the bootstrap publish above** — either from the
+package's settings page on npm (GitHub Actions, repository `sven1103-agent/pi-central`, workflow
+`release.yml`), or from the terminal with `npm trust`. Leave any publish token out of the
+repository's secrets; there is deliberately nothing to add.
 
 The workflow installs a current npm because trusted publishing needs **npm ≥ 11.5.1** and the runner's
 bundled version is older.

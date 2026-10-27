@@ -124,6 +124,54 @@ function basename(path) {
 }
 
 /**
+ * Why a version may NOT be published by hand as the first release, or `undefined` if it may.
+ *
+ * ## The constraint this encodes
+ *
+ * A trusted publisher is configured **from an existing package's settings page** — `npm help trust`
+ * lists "Package must exist: The package you're configuring must already exist on the npm registry"
+ * as a prerequisite. So the tag-driven workflow, which publishes over OIDC, cannot perform the FIRST
+ * publish: there is no package on which to configure the trust. The first publish has to be manual,
+ * and it is the only one that ever will be.
+ *
+ * ## The two irreversible mistakes
+ *
+ *   1. **A final version.** npm never allows republishing a version. A hand-published `0.2.0` can
+ *      therefore never be published again, so it can never carry a provenance attestation — the
+ *      first release would be permanently the one artifact nobody can verify. A pre-release is the
+ *      throwaway that claims the name at no cost.
+ *   2. **The `latest` tag.** An un-attested artifact must not become what `npm install pi-central`
+ *      resolves to.
+ *
+ * Mistake 1 is checked here. Mistake 2 is structural: the caller passes `--tag next`, so there is no
+ * branch in which `latest` could be set. That is the right way round — a rule that cannot be
+ * expressed is better than one that must be remembered.
+ *
+ * `--provenance` is not checked because it is impossible off CI: the attestation is built from the
+ * CI provider's OIDC identity, so no local invocation can produce one however it is spelled.
+ *
+ * @param {string} version
+ * @returns {string | undefined} the refusal, or `undefined` when the version may be bootstrapped
+ */
+export function bootstrapRefusal(version) {
+  if (typeof version !== "string" || version.length === 0) {
+    return "there is no version to publish";
+  }
+  // A pre-release is `x.y.z-<something>`. Build metadata alone (`x.y.z+build`) is NOT enough: npm
+  // orders it as the release itself, so it would occupy the final version number and the mistake
+  // this function exists to prevent would go through.
+  if (!/^\d+\.\d+\.\d+-[0-9A-Za-z.-]+$/.test(version)) {
+    return (
+      `${version} is not a pre-release. The first publish must be a pre-release such as ` +
+      `\`0.2.0-rc.1\`, because npm never allows republishing a version — a final version published ` +
+      `by hand could never be published again, so it would never carry a provenance attestation. ` +
+      `Bump with: npm version <x.y.z>-rc.1 --no-git-tag-version --workspaces --include-workspace-root`
+    );
+  }
+  return undefined;
+}
+
+/**
  * The releases a CHANGELOG records, newest first, with the body of each section.
  *
  * Only `## [x.y.z]` headings count. `## [Unreleased]` is not a release — treating it as one would
