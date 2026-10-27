@@ -422,7 +422,14 @@ button { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--line);
   background: var(--panel);
 }
-.session-header .title { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.session-header .title {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1;
+  /* The name yields to the controls. A clipped CONTROL label (`hinking`) is a defect; a truncated
+     session name is not — the full name is in the rail, in the title attribute, and in the
+     inspector. */
+  overflow: hidden;
+}
+.session-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .session-header h2 {
   margin: 0;
   font-size: var(--fs-md);
@@ -430,6 +437,7 @@ button { font: inherit; color: inherit; }
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+  min-width: 0;
 }
 .session-header .where {
   font-family: var(--mono);
@@ -1310,7 +1318,23 @@ select.btn { font-family: var(--sans); }
  * opening. The label is `aria-hidden` in the markup, so the full name is announced once by the select
  * rather than a shortened one twice.
  */
-.picker-field { position: relative; display: inline-flex; align-items: center; max-width: 22ch; }
+/*
+ * The wrapper must be at least as wide as the control inside it (issue #92).
+ *
+ * It was `22ch` while `.picker-select` was raised to `30ch`, and the select then OVERFLOWED its
+ * wrapper and painted over the label of the picker beside it — a screenshot showed `hinking` where
+ * `Thinking` should be, with no layout error anywhere and every test green.
+ *
+ * `flex-shrink: 0` for the same reason: a control that shrinks starts clipping its own label, and a
+ * clipped control label is worse than a truncated session name, which is also in the rail.
+ */
+.picker-field {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  max-width: 30ch;
+}
 .picker-display {
   position: absolute;
   left: 1px;
