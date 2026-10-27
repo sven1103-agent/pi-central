@@ -11,6 +11,25 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Changed
 
+- **The trace's nested scroll regions are marked as such** (issue #73). The transcript column has two
+  scroll regions — the transcript and the trace list — and a reviewer could not tell them apart:
+  *"the inner thumb is easy to mistake for the outer one"*.
+
+  Two ways out, and the one NOT taken matters as much as the one that was:
+
+  - **Remove the nesting** — rejected. The trace's bounded height is a stated design choice (*"the
+    trace never grows with the number of calls"*), so without a bound the list pushes the composer off
+    screen; and windowing the rows instead would put calls out of reach of the `↑↓` traversal that
+    exists for exactly that purpose.
+  - **Keep it and mark it** — taken. The inner scrollers now carry **their own scrollbar** (wider, and
+    tinted `--line-strong` rather than the platform default), and the trace list sits on a **recessed
+    `--bg` viewport** so the bounded area reads as a surface of its own rather than as more of the page.
+
+  Worth stating plainly: neither the hierarchy nor the wheel behaviour was ever wrong — a browser
+  chains the wheel from a finished inner scroller to the outer one. What was missing was a signal a
+  glance could use. The words were already there (*"latest 5 shown · the rest below for debugging ·
+  ↑↓ to traverse"*) and were not enough.
+
 - **The right panel is collapsed by default, and the user decides** (issue #75). It had gone from
   `display: none` below 1440px to permanently visible, which was an over-correction: on a normal
   window it took roughly as much room as the transcript, to show material nobody reads while working.
