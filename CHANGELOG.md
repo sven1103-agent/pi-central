@@ -111,9 +111,44 @@ manifest and the three private workspace manifests cannot disagree.
   than no test**, because the failure points at the code rather than at itself. It now calls
   `releaseNotesRefusal` and asserts only its own business: that the documenting section is not blank.
 
-### Security
+### Added
 
-- **A session could read the user's `~/.ssh`, and the key denies missed every key that was not
+- **A release is staged, and a maintainer approves it** (issue #65). `release.yml` used to run a
+  direct publish, so the artifact went from the runner to the registry with nothing in between —
+  provenance proves *where* a version came from, never that a **person agreed to it**. Anything able
+  to influence the workflow could ship a version every user installs.
+
+  The important half is **not** the command. A trusted publisher can be limited to **stage-only**, in
+  which case the registry **rejects a direct publish** from that workflow. A workflow that merely
+  chose to stage would be decoration, because a compromised one would publish directly instead — so
+  staging is enforced at the registry and the workflow cooperates with it. The same setting group has
+  *Allow npm dist-tag* **off**, so CI cannot move `latest` on its own and the approver confirms the
+  tag. Approval needs **2FA** and is possible only after npm's malware scan completes.
+
+  That change forced a second one: the workflow used to create the GitHub Release *before* anything
+  could object, and a staged version is not installable. A live Release would have announced a version
+  nobody could install, and a rejected stage would have left it behind. It now creates a **draft**
+  carrying the notes, which is published after approval — or deleted, if the stage is rejected.
+
+  The run also says what to do next, because it ends in a state only a human can finish: the approval
+  command, that 2FA is required, and that scanning can block it. An operator should not have to read
+  the workflow to complete a release.
+
+  A test asserts the **absence** of a direct publish. That is the one check here that is deliberately
+  about our own restraint cooperating with a registry rule rather than about behaviour — and it is an
+  absence check because `npm stage publish` does not contain the substring it forbids, which is
+  asserted so the guard cannot pass by accidental overlap.
+
+  Two things about the setting are documented precisely, because getting them wrong would mean
+  relying on a control that is not there. Stage-only binds the **trusted publisher**, so it constrains
+  publishes that authenticate as this workflow; a maintainer's token is a different identity and needs
+  traditional token access restricted as well. And `npm stage publish` requires **no 2FA** whatever the
+  token type, so CI stays non-interactive and the second factor moves to approval — where the decision
+  actually is. `docs/RELEASING.md` also now explains `0.0.0-stage`: it is npm's
+  *"Temporary package placeholder for staged publishing"*, ~332 bytes and publicly available by
+  design, so a maintainer seeing it does not tidy away a documented mechanism.
+
+### Security, and the key denies missed every key that was not
   named `id_*`** (issue #46). Reported by the user asking a live session whether it could read
   `.ssh` — and it listed it. Two independent faults, and the second is the interesting one:
 

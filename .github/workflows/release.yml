@@ -1,20 +1,30 @@
 # Release Pi Central (issue #53).
 #
 # A release is a single, reviewable act: a tag triggers this, every gate the repository has runs
-# first, and only then is the same artifact that a pull request dry-ran published with a provenance
-# attestation. Nothing here is a long-lived credential.
+# first, the artifact is STAGED with a provenance attestation, and a maintainer approves it with 2FA.
+# Nothing here is a long-lived credential, and nothing here can publish on its own.
 #
-# ## Publishing uses OIDC, not a stored token
+# ## Two mechanisms, and the registry-side one is the actual control
 #
-# `id-token: write` below lets the runner mint a short-lived OIDC token, which npm exchanges for a
-# publish credential under a **trusted publisher** configured on the package's npm page (repository
-# + workflow + environment). No GitHub Actions secret is referenced anywhere in this workflow, and
-# `scripts/release-workflow.test.mjs` fails if one is reintroduced: a stored publish token is a
-# credential that must be rotated, can be exfiltrated by a compromised dependency, and outlives
-# whoever created it.
+# **OIDC, not a stored token.** `id-token: write` below lets the runner mint a short-lived OIDC token,
+# which npm exchanges for a stage credential under a **trusted publisher** configured on the
+# package's npm page. No GitHub Actions secret is referenced anywhere in this workflow, and
+# `scripts/release-workflow.test.mjs` fails if one is reintroduced: a stored token is a credential
+# that must be rotated, can be exfiltrated by a compromised dependency, and outlives whoever created
+# it.
 #
-# That test scans this file as TEXT, so the words it forbids cannot appear here even in a comment —
-# which is why this paragraph describes the rule instead of naming what it bans.
+# **Stage-only, which is the part that cannot be worked around from here.** The trusted publisher is
+# configured so that a direct publish from this workflow is REJECTED by the registry. A workflow that
+# merely chose to stage would be decoration: anything able to influence this workflow could publish
+# directly instead. Staging is therefore enforced at the registry, and this file is
+# the half that cooperates with it rather than the half that provides it. The same applies to
+# `latest`: the publisher's *Allow npm dist-tag* permission is off, so CI cannot move it.
+#
+# `scripts/release-workflow.test.mjs` scans this file as TEXT — for the banned credential AND for a
+# direct publish — so those strings cannot appear here even inside a comment. That is why these
+# paragraphs describe the rules instead of quoting them, and it is a real cost of a text guard rather
+# than a quirk: the checks are broader than the thing they forbid, on purpose, because for "is a
+# credential in this file" broader is the correct answer.
 #
 # `--provenance` attaches a signed attestation linking the tarball to this commit and this workflow
 # run, which is the difference between "the maintainer says this is the code" and "this can be
@@ -78,23 +88,47 @@ jobs:
       - name: Build the artifact
         run: npm run build:package
 
-      # BEFORE the publish, deliberately. This step fails when the version has no CHANGELOG section,
-      # and a publish cannot be undone — generating the notes afterwards would mean a version on the
-      # registry with no Release and a red build, failing AFTER the irreversible act rather than
-      # before it. Nothing about the notes depends on the publish having happened.
+      # BEFORE the stage, deliberately. This step fails when the version has no CHANGELOG section,
+      # and a staged version is not free to discard — generating the notes afterwards would mean a
+      # version in the queue with no notes. Nothing about the notes depends on the stage having
+      # happened.
       - name: Prepare the release notes from the CHANGELOG
         run: node scripts/release-notes.mjs > release-notes.md
 
-      - name: Publish with provenance
-        run: npm publish --provenance --access public
+      # STAGE, never publish. This command cannot go live on its own: the trusted publisher is
+      # configured stage-only, so a direct publish from this workflow is REJECTED by the registry. That rejection is the control — a command we merely avoided using would be
+      # decoration, because anything able to influence this workflow could call it instead.
+      #
+      # Approval is a human with 2FA, and it can be refused until npm's malware scan finishes. So a
+      # release is never the result of a single automated run, and no credential in this repository
+      # can ship a version on its own.
+      - name: Stage the release with provenance
+        run: npm stage publish --provenance --access public
+
+      - name: Say what happens next
+        run: |
+          echo "::notice::Staged, NOT published. Approve it with 2FA to release it:"
+          echo "  npm stage list"
+          echo "  npm stage view <stage-id>"
+          echo "  npm stage approve <stage-id>    # prompts for 2FA"
+          echo "  npm stage reject <stage-id>     # to discard it instead"
+          echo "Approval can fail until npm's malware scan completes."
+          echo "The GitHub Release below is a DRAFT: publish it only after approving."
+          npm stage list || true
 
       # `gh` rather than a third-party release action: one fewer supply-chain dependency on the path
       # that has write access to the repository's releases, and `gh` is already on the runner.
-      - name: Create the GitHub Release from the CHANGELOG
+      #
+      # DRAFT, because the version is not installable yet. A Release is a claim that a version
+      # exists for people to use, so creating a live one for a staged version would announce
+      # something nobody can install — and if the stage is then REJECTED, the Release would have to
+      # be withdrawn. The draft carries the notes, so the approver has the material in one place.
+      - name: Create a DRAFT GitHub Release from the CHANGELOG
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
             --notes-file release-notes.md \
+            --draft \
             --verify-tag

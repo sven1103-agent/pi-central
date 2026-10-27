@@ -78,18 +78,57 @@ test("the release notes are generated BEFORE the publish, not after", () => {
   // re-published with a red build and no Release. Asserted by position rather than by presence,
   // because both steps exist either way — only their order decides which failure you get.
   const notes = release.indexOf("release-notes.mjs");
-  const publish = release.indexOf("npm publish");
+  const stage = release.indexOf("npm stage publish");
   assert.ok(notes >= 0, "the workflow must generate release notes");
-  assert.ok(publish >= 0, "the workflow must publish");
+  assert.ok(stage >= 0, "the workflow must stage the release");
   assert.ok(
-    notes < publish,
-    "release-notes.mjs must run before npm publish, so a missing CHANGELOG section fails while the " +
+    notes < stage,
+    "release-notes.mjs must run before the stage, so a missing CHANGELOG section fails while the " +
       "failure is still free",
   );
 });
 
+test("the workflow STAGES and never publishes directly", () => {
+  // The security property, and it is deliberately an ABSENCE check.
+  //
+  // Staging is only a control because the registry rejects a direct publish from this workflow: the
+  // trusted publisher is configured stage-only. A workflow that merely chose not to call
+  // `npm publish` would be decoration — anything able to influence this workflow could call it
+  // instead. So the assertion is that the command does not appear at all, which is the state that
+  // cooperates with the registry-side rule rather than depending on our own restraint.
+  //
+  // `npm stage publish` does not contain the substring `npm publish`, so this cannot pass by
+  // accident. Asserted explicitly rather than assumed, because a guard built on a substring that
+  // happens to overlap is a guard that silently stops working.
+  assert.ok(
+    !release.includes("npm publish"),
+    "release.yml must not contain a direct `npm publish`; stage-only publishing means the registry " +
+      "would reject it anyway, and its absence is what makes that true here too",
+  );
+  assert.match(release, /npm stage publish/, "release.yml must stage");
+});
+
+test("the GitHub Release is a DRAFT, because a staged version is not installable yet", () => {
+  // A Release is a claim that a version exists for people to use. Creating a live one for a staged
+  // version would announce something nobody can install — and if the stage is then REJECTED, the
+  // Release would have to be withdrawn. `--draft` is what keeps the notes in one place without
+  // making that false claim.
+  assert.match(release, /gh release create/, "the workflow must create the Release with gh");
+  assert.match(release, /--draft/, "the Release must be created as a draft, not published");
+});
+
+test("the run tells the maintainer how to approve, rather than assuming they know", () => {
+  // The workflow ends in a state only a human can finish. An operator should not have to read the
+  // workflow to find out what that is, and the two things they cannot guess — that 2FA is required
+  // and that approval can be blocked by a malware scan — are exactly what the run must say.
+  assert.match(release, /npm stage approve/, "the run must name the approval command");
+  assert.match(release, /npm stage reject/, "…and how to discard it");
+  assert.match(release, /2FA/i, "…and that approval requires 2FA");
+  assert.match(release, /malware scan/i, "…and that scanning can block approval");
+});
+
 test("publishing attaches a provenance attestation", () => {
-  assert.match(release, /npm publish --provenance/, "the publish must carry --provenance");
+  assert.match(release, /npm stage publish --provenance/, "the stage must carry --provenance");
 });
 
 test("the release runs only on a version tag", () => {
