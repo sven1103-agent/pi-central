@@ -16,6 +16,7 @@ import {
   initialFilesState,
   reduceFiles,
   showsHidden,
+  showsWrapped,
   splitFileKey,
 } from "./files.ts";
 import {
@@ -595,6 +596,8 @@ export function App() {
               onExpand={expandDirectory}
               onCollapse={(path) => dispatchFiles({ kind: "setExpanded", sessionId: focused.id, path, expanded: false })}
               onToggleHidden={toggleHidden}
+              wrapped={showsWrapped(files, focused.id)}
+              onToggleWrap={() => dispatchFiles({ kind: "toggleWrap", sessionId: focused.id })}
               onOpenFile={openFile}
               onCloseFile={() => dispatchFiles({ kind: "closeFile", sessionId: focused.id })}
             />

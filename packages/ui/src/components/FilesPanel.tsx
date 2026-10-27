@@ -37,6 +37,8 @@ export function FilesPanel({
   onExpand,
   onCollapse,
   onToggleHidden,
+  wrapped,
+  onToggleWrap,
   onOpenFile,
   onCloseFile,
 }: {
@@ -46,6 +48,9 @@ export function FilesPanel({
   onExpand: (path: string) => void;
   onCollapse: (path: string) => void;
   onToggleHidden: () => void;
+  /** Whether the document wraps long lines, and the control for it (issue #73). */
+  wrapped: boolean;
+  onToggleWrap: () => void;
   onOpenFile: (path: string) => void;
   onCloseFile: () => void;
 }) {
@@ -86,7 +91,13 @@ export function FilesPanel({
         </div>
         {open && (
           <div className="files-doc">
-            <FilePane path={open.path} state={open.state} onClose={onCloseFile} />
+            <FilePane
+              path={open.path}
+              state={open.state}
+              wrapped={wrapped}
+              onToggleWrap={onToggleWrap}
+              onClose={onCloseFile}
+            />
           </div>
         )}
       </div>

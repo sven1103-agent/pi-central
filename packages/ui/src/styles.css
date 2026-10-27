@@ -1404,7 +1404,23 @@ select.btn { font-family: var(--sans); }
   flex: none; width: 32px; text-align: right;
   color: var(--dim); opacity: 0.6; user-select: none;
 }
-.filepane-line-text { white-space: pre; }
+/* `flex: 1; min-width: 0` is load-bearing for wrapping: a flex item defaults to `min-width: auto`,
+   so without it the text box refuses to shrink below its content and `pre-wrap` never gets a chance
+   to wrap. The one line that needs wrapping most would be the one that does not. */
+.filepane-line-text { white-space: pre; flex: 1; min-width: 0; }
+
+/*
+ * Wrapping is the reader's choice, and the default is ON (issue #73) — see `showsWrapped`.
+ *
+ * `pre-wrap` rather than `pre-line`: leading indentation is CONTENT in a source file, and collapsing
+ * it would misrepresent the file. `anywhere` so a long unbroken token — a URL, a minified line, a
+ * base64 blob — wraps instead of overflowing, because those are exactly the lines the default exists
+ * to make readable.
+ */
+.filepane-lines.is-wrapped .filepane-line-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
 /* --- The panel: a region with modes, and a draggable edge (issue #8, reworked) ------------------
 

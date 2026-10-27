@@ -23,6 +23,7 @@ import {
   openFileFor,
   reduceFiles,
   showsHidden,
+  showsWrapped,
   splitFileKey,
 } from "../src/files.ts";
 
@@ -322,4 +323,28 @@ test("childPath joins without ever producing a leading slash", () => {
   for (const parent of ["", "src", "a/b"]) {
     assert.ok(!childPath(parent, "n").startsWith("/"), `childPath(${parent}) must be relative`);
   }
+});
+
+// --- Line wrapping (issue #73) ---------------------------------------------------------------------
+
+test("long lines are wrapped until the reader says otherwise", () => {
+  // The default is the whole point: it is what changes the reported experience. `!== false` rather
+  // than `=== true`, so an untouched session is wrapped.
+  assert.equal(showsWrapped(initialFilesState(), "s1"), true);
+  assert.equal(showsWrapped(reduceFiles(initialFilesState(), { kind: "toggleWrap", sessionId: "s1" }), "s1"), false);
+});
+
+test("the wrap toggle flips both ways, and is per session", () => {
+  let state = reduceFiles(initialFilesState(), { kind: "toggleWrap", sessionId: "s1" });
+  assert.equal(showsWrapped(state, "s1"), false);
+  state = reduceFiles(state, { kind: "toggleWrap", sessionId: "s1" });
+  assert.equal(showsWrapped(state, "s1"), true, "a second press restores the default");
+  // Turning wrapping off in one project must not turn it off in another.
+  assert.equal(showsWrapped(state, "s2"), true);
+});
+
+test("forgetting a session drops its wrap preference with its tree", () => {
+  let state = reduceFiles(initialFilesState(), { kind: "toggleWrap", sessionId: "s1" });
+  state = reduceFiles(state, { kind: "forgetSession", sessionId: "s1" });
+  assert.equal(showsWrapped(state, "s1"), true);
 });
