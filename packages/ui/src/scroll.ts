@@ -133,3 +133,19 @@ export function isMeasured(sample: ScrollSample): boolean {
     sample.clientHeight > 0
   );
 }
+
+/**
+ * Should the transcript scroll itself to the tail on this render?
+ *
+ * Two conditions, and both are needed:
+ *
+ *   - `autoFollow` — the reader's own setting (#86). Someone who reads at their own pace should not
+ *     have to keep proving it by scrolling; a reader who never wants to be moved turns it off and the
+ *     transcript never moves on its own again. The explicit *Jump to latest* still works, because
+ *     that is them asking.
+ *   - `pinned` — they are already at the bottom (#80/#86). Auto-scrolling a reader who has scrolled up
+ *     to read something is the most common failure of a streaming transcript.
+ */
+export function shouldFollow(autoFollow: boolean, pinned: boolean): boolean {
+  return autoFollow && pinned;
+}

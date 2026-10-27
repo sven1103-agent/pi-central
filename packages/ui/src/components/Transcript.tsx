@@ -26,6 +26,7 @@ import {
   hasScrollableContent,
   isFollowing,
   isMeasured,
+  shouldFollow,
   type ScrollSample,
   type SessionScroll,
 } from "../scroll.ts";
@@ -71,6 +72,7 @@ export function TranscriptView({
   busy,
   sessionLabel,
   followToken = 0,
+  autoFollow = true,
   expectedCount = 0,
   loading = false,
   onOpenTool,
@@ -98,6 +100,13 @@ export function TranscriptView({
    * un-pinned for ever, so the answer arrived off-screen — the reported symptom.
    */
   followToken?: number;
+  /**
+   * Whether the transcript scrolls itself to new output (#86).
+   *
+   * False means it never moves on its own, whatever the scroll position. The explicit *Jump to
+   * latest* still works: that is the reader asking.
+   */
+  autoFollow?: boolean;
   /**
    * How many messages Pi says the session has.
    *
@@ -259,7 +268,7 @@ export function TranscriptView({
   useEffect(() => {
     // Instant, never animated: this is a catch-up, and an animated one cannot catch a moving bottom.
     // `scroll-behavior` is `auto` on the container for the same reason (see styles.css).
-    if (pinnedRef.current) endRef.current?.scrollIntoView({ block: "end" });
+    if (shouldFollow(autoFollow, pinnedRef.current)) endRef.current?.scrollIntoView({ block: "end" });
   });
 
   /**

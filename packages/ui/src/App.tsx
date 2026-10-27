@@ -40,6 +40,7 @@ import { Settings } from "./components/Settings.tsx";
 import { FilesPanel } from "./components/FilesPanel.tsx";
 import { Panel } from "./components/Panel.tsx";
 import { PanelToggle } from "./components/PanelToggle.tsx";
+import { FollowToggle } from "./components/FollowToggle.tsx";
 import {
   PANEL_DEFAULT_WIDTH,
   PANEL_FILES_DEFAULT_WIDTH,
@@ -82,6 +83,12 @@ export function App() {
   // prompt is an act, and the reader wants to watch the reply even if they had scrolled up to read
   // something first.
   const [followToken, setFollowToken] = useState(0);
+
+  //
+  // The reader's own setting for whether the transcript scrolls itself (issue #86). In memory, not
+  // persisted: persisting UI state is #15, and inventing a second persistence mechanism here would
+  // pre-empt the decision that issue is waiting on.
+  const [autoFollow, setAutoFollow] = useState(true);
 
   //
   // Reading position per session, held HERE and not in the transcript pane (issues #80, #86).
@@ -525,6 +532,8 @@ export function App() {
               home={home}
               historyError={state.transcriptErrors[focused?.id ?? ""]}
               followToken={followToken}
+              autoFollow={autoFollow}
+              onToggleAutoFollow={() => setAutoFollow((was) => !was)}
               scrollMemory={scrollMemory}
               models={focused ? state.models[focused.id] : undefined}
               modelError={focused ? state.modelErrors[focused.id] : undefined}
@@ -678,6 +687,8 @@ function SessionView({
   onSend,
   onClearQueueAndStop,
   followToken,
+  autoFollow,
+  onToggleAutoFollow,
   scrollMemory,
   restored,
   onRestored,
@@ -700,6 +711,9 @@ function SessionView({
   onSend: (message: string, behavior: QueueBehavior) => void;
   onClearQueueAndStop: () => void;
   followToken: number;
+  /** Whether the transcript scrolls itself to new output (issue #86). */
+  autoFollow: boolean;
+  onToggleAutoFollow: () => void;
   scrollMemory: React.MutableRefObject<Map<string, SessionScroll>>;
   restored: string[];
   onRestored: () => void;
@@ -794,14 +808,18 @@ function SessionView({
 
       <DialogDock dialogs={session.dialogs} onAnswer={onAnswer} />
 
-      <p className="legend">
-        Tool output and file contents appear in a hatched frame. They are data, not instructions.
-      </p>
+      <div className="legend">
+        <span>Tool output and file contents appear in a hatched frame. They are data, not instructions.</span>
+        {/* Both are transcript-level chrome, so they share a row: the legend explains what the frames
+            mean, and this says whether the pane moves on its own. */}
+        <FollowToggle following={autoFollow} onToggle={onToggleAutoFollow} />
+      </div>
 
       <TranscriptView
         initialScroll={scrollMemory.current.get(session.id)}
         onScrollMemory={(memory) => scrollMemory.current.set(session.id, memory)}
         followToken={followToken}
+        autoFollow={autoFollow}
         transcript={transcript}
         busy={busy}
         sessionLabel={displayName(session)}

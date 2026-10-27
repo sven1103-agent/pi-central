@@ -11,6 +11,30 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Changed
 
+- **The transcript can be told never to scroll itself** (issue #86). The reader's own request:
+  *"user wants to automatically follow the transcript; user is investigating and reading outputs in
+  their own pace, enforcing auto-follow would not enable them to do so."*
+
+  The existing model — follow while at the bottom, stop when you scroll away, resume when you return —
+  already serves both, but it makes the reader **prove** their intent over and over: every glance
+  further up silently turns following off until they scroll back down, so someone reading at their own
+  pace cannot leave the pane at all. The toggle is not a second mechanism; it is a way to say *once*
+  what the scroll position says every time.
+
+  `auto-follow on` / `auto-follow off` sits at the right end of the legend bar, in the same chip
+  language as `markers on` beside it, with the state in the words as well as `aria-pressed`. Off means
+  the pane never moves on its own — and *Jump to latest* still works, which is the difference between
+  "do not move me" and "do not let me move".
+
+  In memory, not persisted: persisting UI state is #15, and inventing a second persistence mechanism
+  here would pre-empt the decision that issue is waiting on.
+
+  The chip affordance is now one class, `.toggle-chip`, shared by this toggle and the markers toggle —
+  rather than two copies of the same five declarations.
+
+  Four falsifications: `autoFollow` ignored; the pane not consulting it; the state removed from the
+  label; and `aria-pressed` dropped.
+
 - **The right panel is collapsed by default, and the user decides** (issue #75). It had gone from
   `display: none` below 1440px to permanently visible, which was an over-correction: on a normal
   window it took roughly as much room as the transcript, to show material nobody reads while working.

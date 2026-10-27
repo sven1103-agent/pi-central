@@ -26,7 +26,7 @@ function stripComments(text) {
   return text.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
-const modelPicker = readFileSync(new URL("../src/components/ModelPicker.tsx", import.meta.url), "utf8");
+const modelPicker = stripComments(readFileSync(new URL("../src/components/ModelPicker.tsx", import.meta.url), "utf8"));
 
 /** The declarations of the first rule whose selector matches, or `undefined`. */
 function rule(selector) {
@@ -45,8 +45,8 @@ test("the markers toggle has an affordance at rest, unlike the collapse toggle b
   // Asserted on `[aria-pressed]` rather than on the class, deliberately: styling `.trace-toggle`
   // would box the collapse toggle too (`▾ Tool trace`, which already reads as a control because it
   // carries a glyph) and turn the trace header into a toolbar.
-  const toggle = rule('.trace-toggle[aria-pressed]');
-  assert.ok(toggle, "the pressed-state toggle must have its own rule");
+  const toggle = rule(".toggle-chip");
+  assert.ok(toggle, "the toggle chip must have its own rule");
   assert.match(toggle, /border:\s*1px solid/, "a border is what makes it read as a control");
   assert.match(toggle, /border-radius:\s*var\(--r-pill\)/, "…and a rounded one reads as a chip, not a field");
 
@@ -56,7 +56,7 @@ test("the markers toggle has an affordance at rest, unlike the collapse toggle b
   assert.ok(!/border:\s*1px/.test(collapse), "the collapse toggle must stay unboxed");
 
   // And the on-state must be visible without relying on colour alone — the words carry it.
-  const on = rule('.trace-toggle[aria-pressed="true"]');
+  const on = rule('.toggle-chip[aria-pressed="true"]');
   assert.ok(on, "the on-state must be styled");
   assert.match(on, /background:\s*var\(--accent-tint\)/);
 });
