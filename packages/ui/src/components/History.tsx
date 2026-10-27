@@ -164,7 +164,7 @@ function ResumeRefusal({
           <button type="button" className="btn" onClick={onDismiss}>
             Close
           </button>
-          <CopyButton text={session.cwd} label="Path" />
+          <CopyButton text={session.cwd} label="path" />
         </div>
       </div>
     </div>

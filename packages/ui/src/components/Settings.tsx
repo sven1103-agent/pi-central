@@ -70,7 +70,7 @@ function Fact({
         <span className={missing ? "settings-absent" : monospace ? "settings-mono" : undefined}>
           {missing ? "not reported" : value}
         </span>
-        {copyable && !missing && <CopyButton text={value} label={label} />}
+        {copyable && !missing && <CopyButton text={value} label={label.toLowerCase()} />}
         {note !== undefined && <span className="settings-note">{note}</span>}
       </dd>
     </>

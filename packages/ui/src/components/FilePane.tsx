@@ -55,7 +55,7 @@ export function FilePane({
         )}
         {/* The relative path, ready to paste into the prompt. Labelled so a screen reader hears
             which path is being copied, since the tree may hold several. */}
-        <CopyButton text={path} label={`Copy path ${path}`} />
+        <CopyButton text={path} label={`path ${path}`} />
         {/*
           The wrap toggle (issue #73). Labelled by the ACTION, not the state: a control that reads
           "Wrapped" is taken for a status and clicked twice by anyone who believes it.
