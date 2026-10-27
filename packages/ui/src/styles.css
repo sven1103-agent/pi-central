@@ -1239,14 +1239,32 @@ select.btn { font-family: var(--sans); }
 /* --- Jump to latest (issue #6) ------------------------------------------------------------------ */
 
 /* The positioned ancestor for the control. The scroller itself must not be the containing block,
-   or an absolutely-positioned button scrolls away with the content. */
-.transcript-wrap { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+   or an absolutely-positioned button scrolls away with the content.
+
+   It also RESERVES the strip the control floats in, and that detail is the whole fix (issue #71).
+   The control is positioned against the bottom of the VIEWPORT, so while the reader is mid-list it
+   sits over whatever line happens to be there — and with an opaque background it produced a sentence
+   with a hole in it: "…the escaped quote in m[ ↓ Jump to latest ]check."
+
+   Reserving space INSIDE the scroller would not have fixed that: padding at the end of the content
+   protects only the LAST line, because the padding scrolls with the content while the control does
+   not. Mid-list the control would still land on text. So the scrollport itself stops `--jump-strip`
+   short of the column's bottom and the control lives in the strip that is left, where it can overlap
+   nothing but its own reserved space at any scroll position.
+
+   The cost is a `--jump-strip`-tall band below the transcript even while the control is hidden. A
+   small permanent gap is the price of never covering a line; stated here rather than discovered
+   later. */
+.transcript-wrap {
+  position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0;
+  --jump-strip: 40px;
+  padding-bottom: var(--jump-strip);
+}
 
 /* Shown only while the reader is scrolled away from the bottom, where it has a job to do. The
-   position is bottom-CENTRE rather than a corner so it does not cover the scrollbar, and it sits
-   clear of the tool trace below. */
+   position is bottom-CENTRE rather than a corner so it does not cover the scrollbar. */
 .jump-latest {
-  position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px;
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 4px;
   display: inline-flex; align-items: center; gap: 6px;
   padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line);
   background: var(--bg-raised, var(--bg)); color: inherit; font: inherit; cursor: pointer;
