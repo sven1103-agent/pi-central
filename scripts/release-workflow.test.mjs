@@ -22,7 +22,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { changelogReleases } from "./version-policy.mjs";
+import { baseVersion, changelogReleases, releaseNotesRefusal } from "./version-policy.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const WORKFLOWS = join(ROOT, ".github", "workflows");
@@ -72,6 +72,22 @@ test("the release workflow can create a GitHub Release", () => {
   assert.match(release, /^\s*contents:\s*write\b/m, "release.yml must declare `contents: write`");
 });
 
+test("the release notes are generated BEFORE the publish, not after", () => {
+  // Ordering is the safety property. Generating the notes afterwards would mean a version with no
+  // CHANGELOG section reaches the registry and *then* fails, leaving an artifact that cannot be
+  // re-published with a red build and no Release. Asserted by position rather than by presence,
+  // because both steps exist either way — only their order decides which failure you get.
+  const notes = release.indexOf("release-notes.mjs");
+  const publish = release.indexOf("npm publish");
+  assert.ok(notes >= 0, "the workflow must generate release notes");
+  assert.ok(publish >= 0, "the workflow must publish");
+  assert.ok(
+    notes < publish,
+    "release-notes.mjs must run before npm publish, so a missing CHANGELOG section fails while the " +
+      "failure is still free",
+  );
+});
+
 test("publishing attaches a provenance attestation", () => {
   assert.match(release, /npm publish --provenance/, "the publish must carry --provenance");
 });
@@ -112,14 +128,41 @@ test("CI runs on pull requests and on main, not on tags", () => {
 
 // --- The notes and the changelog are one text -----------------------------------------------------
 
-test("the CHANGELOG section the release would publish is non-empty", () => {
-  // `release-notes.mjs` exits non-zero on a missing or empty section; this asserts the same fact at
-  // commit time, so a version bumped without notes fails in CI rather than during a release.
+test("the CHANGELOG documents the version being released, and not with an empty section", () => {
+  // **The rule is not re-implemented here, and that is the whole lesson of this test.**
+  //
+  // It used to find the section with an exact `version === declared` match — a second copy of a rule
+  // that also lives in `release-notes.mjs`. It passed for a final version and broke the instant a
+  // pre-release appeared: with `0.2.0-rc.1`, the correct behaviour is to document it by its BASE
+  // release, `release-notes.mjs` did exactly that, and this test failed for the right change. A test
+  // that disagrees with the code it tests is worse than no test, because the failure points at the
+  // code instead of at itself.
+  //
+  // So it calls the shared rule, and only asserts the part that is genuinely this test's business:
+  // that whatever DOES document the version is not blank. `release-notes.mjs` exits non-zero on an
+  // empty body; this catches the same thing at commit time rather than during a release.
   const changelog = readFileSync(join(ROOT, "CHANGELOG.md"), "utf8");
   const declared = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version;
-  const release_ = changelogReleases(changelog).find((entry) => entry.version === declared);
-  assert.ok(release_, `CHANGELOG.md has no section for ${declared}`);
-  assert.ok(release_.body.trim().length > 0, `the CHANGELOG section for ${declared} is empty`);
+  const releases = changelogReleases(changelog);
+
+  assert.equal(
+    releaseNotesRefusal(
+      releases.map((release) => release.version),
+      declared,
+    ),
+    undefined,
+    `the CHANGELOG does not document ${declared}`,
+  );
+
+  // The section that documents it — itself, or its base when it is a pre-release.
+  const documenting =
+    releases.find((release) => release.version === declared) ??
+    releases.find((release) => release.version === baseVersion(declared));
+  assert.ok(documenting, `no section documents ${declared}`);
+  assert.ok(
+    documenting.body.trim().length > 0,
+    `the CHANGELOG section for ${documenting.version} is empty`,
+  );
 });
 
 // --- The bootstrap publish (issue #61) ------------------------------------------------------------

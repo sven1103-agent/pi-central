@@ -85,11 +85,31 @@ manifest and the three private workspace manifests cannot disagree.
   build metadata on its own because npm orders `x.y.z+build` as the release itself, and hard-codes
   `--tag next` so an un-attested artifact can never become what `npm install pi-central` resolves to.
 
+  A pre-release is **documented by its base release** (issue #63), so `0.2.0-rc.1` needs no
+  `## [0.2.0-rc.1]` heading: it is a candidate for `0.2.0`, and `## [0.2.0]` is where those notes live, with a preamble
+  on the Release page saying which version they describe. The alternative — hand-editing the changelog
+  to document something it will never mention again — is friction that gets a documented process
+  abandoned. The rule is a tested pure function (`releaseNotesRefusal`, `baseVersion`), because prose
+  in a document is not a check.
+
+  The release notes are also now generated **before** the publish rather than after. Both steps
+  existed either way; only the order decides which failure you get, and generating them last meant a
+  version with no CHANGELOG section reached the registry and *then* failed — an artifact that can
+  never be re-published, with no Release and a red build. A test asserts the order by position.
+
   The documented sequence was rehearsed verbatim rather than recalled: the `npm version … -rc.1`
   bump updates all four manifests *and* the lockfile, and the dry run published
   `+ pi-central@0.2.0-rc.1 … with tag next and public access`. `--provenance` is impossible off CI —
   the attestation is built from the CI provider's OIDC identity — which is precisely why the *real*
   release must not be the manual one.
+
+  A defect in issue #53's own test was found by this rehearsal and fixed (issue #63):
+  `release-workflow.test.mjs`
+  re-implemented the notes lookup as an exact `version === declared` match instead of calling the
+  shared rule, so it passed for a final version and broke the instant a pre-release appeared — while
+  `release-notes.mjs` was behaving correctly. **A test that disagrees with the code it tests is worse
+  than no test**, because the failure points at the code rather than at itself. It now calls
+  `releaseNotesRefusal` and asserts only its own business: that the documenting section is not blank.
 
 ### Security
 
