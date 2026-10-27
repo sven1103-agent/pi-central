@@ -17,10 +17,11 @@
  *    utterances per turn.
  * 2. **`aria-busy` while streaming**, so assistive tech does not read a half-written subtree.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Transcript as TranscriptModel } from "../transcript.ts";
 import { assistantText, hasProse, planTranscript, toolRunSummary, type ToolExecution, type TranscriptMessage } from "../transcript.ts";
 import { MessageBody } from "./MessageBody.tsx";
+import { decideOnSessionChange, hasScrollableContent, type SessionScroll } from "../scroll.ts";
 import { RunNotices } from "./RunNotices.tsx";
 
 /**
@@ -57,18 +58,39 @@ export function isAtBottom(
 }
 
 export function TranscriptView({
+  initialScroll,
+  onScrollMemory,
   transcript,
   busy,
   sessionLabel,
+  followToken = 0,
   expectedCount = 0,
   loading = false,
   onOpenTool,
   showMarkers = true,
   historyError,
 }: {
+  /**
+   * Where this session's transcript was left, if it has been read before (#80).
+   *
+   * Owned by `App`, NOT by this component, and that is forced by the shell: `SessionView` carries
+   * `key={focused?.id}`, so it — and this pane inside it — **remounts on every session switch**. A
+   * store kept here would be destroyed at exactly the moment it is needed. So the memory lives above
+   * the remount boundary and is handed in.
+   */
+  initialScroll?: SessionScroll | undefined;
+  /** Report the position back, so the owner can remember it for this session. */
+  onScrollMemory?: (state: SessionScroll) => void;
   transcript: TranscriptModel;
   busy: boolean;
   sessionLabel: string;
+  /**
+   * Changes when the reader sends a prompt, which re-arms following (#86).
+   *
+   * Sending is an act: you want to watch the reply. Without this, any earlier scroll left the reader
+   * un-pinned for ever, so the answer arrived off-screen — the reported symptom.
+   */
+  followToken?: number;
   /**
    * How many messages Pi says the session has.
    *
@@ -111,6 +133,15 @@ export function TranscriptView({
    */
   const [pinned, setPinned] = useState(true);
 
+  /**
+   * The memory callback, readable from the scroll handler.
+   *
+   * The listener is attached once on mount (it must not re-subscribe on every scroll), so it would
+   * otherwise capture the first render's closure.
+   */
+  const memoryRef = useRef(onScrollMemory);
+  memoryRef.current = onScrollMemory;
+
   // Follow the tail only while the reader is already at the bottom. Auto-scrolling someone who
   // has scrolled up to read is the most common failure of a streaming transcript.
   useEffect(() => {
@@ -122,6 +153,7 @@ export function TranscriptView({
       const atBottom = isAtBottom(container);
       pinnedRef.current = atBottom;
       setPinned(atBottom);
+      memoryRef.current?.({ scrollTop: container.scrollTop, pinned: atBottom });
     };
     container.addEventListener("scroll", onScroll, { passive: true });
     // Measured once on mount as well: a restored page or a re-render after resize can already be
@@ -130,6 +162,74 @@ export function TranscriptView({
     onScroll();
     return () => container.removeEventListener("scroll", onScroll);
   }, []);
+
+  /**
+   * Put the transcript back where this session was left, or open it at the end.
+   *
+   * A LAYOUT effect on purpose: it has to run before the follow effect below, which fires on every
+   * render. Otherwise a restored position would be immediately overridden by a scroll to the end,
+   * and the restore would be invisible — which is exactly the behaviour #80 reported.
+   *
+   * A session never opened has nothing to restore, and opens following the tail: an agent may have
+   * produced a great deal since the last look (see `decideOnSessionChange`).
+   */
+  const pendingRestore = useRef<SessionScroll | undefined>(undefined);
+
+  useLayoutEffect(() => {
+    const decision = decideOnSessionChange(initialScroll);
+    if (decision.kind === "follow-end") {
+      pinnedRef.current = true;
+      setPinned(true);
+      return;
+    }
+    pinnedRef.current = decision.pinned;
+    setPinned(decision.pinned);
+    // HELD, not applied: the pane mounts before its history has been fetched, so the container is
+    // empty for the first frames and an offset set now would be clamped to 0 — landing the reader at
+    // the top, which is the bug this exists to fix. Applied by the effect below, once there is
+    // something to scroll.
+    pendingRestore.current = { scrollTop: decision.scrollTop, pinned: decision.pinned };
+    // Mount-only: this pane is remounted per session by the shell's `key`, so a mount IS a session
+    // switch, and `initialScroll` belongs to exactly one session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * Apply a held restore as soon as the content can take it.
+   *
+   * A layout effect with no dependencies, so it runs on every render *before* the follow effect
+   * below — the order matters, because a restore applied after the follow would be overridden by a
+   * scroll to the end.
+   */
+  useLayoutEffect(() => {
+    const pending = pendingRestore.current;
+    if (!pending) return;
+    const container = containerRef.current;
+    if (!container) return;
+    if (!hasScrollableContent(container.scrollHeight, container.clientHeight)) return;
+    container.scrollTop = pending.scrollTop;
+    pendingRestore.current = undefined;
+  });
+
+  /**
+   * Sending a prompt re-arms following (#86).
+   *
+   * The reported symptom was that a reply arrived off-screen after a prompt, because an earlier
+   * scroll had un-pinned the reader and nothing ever re-pinned them. Following is re-enabled BEFORE
+   * the scroll for the same reason `jumpToLatest` does it: the scroll event fires a handler that
+   * would otherwise immediately un-follow the reader again.
+   *
+   * The first run is skipped — the token starts at 0 and is only meaningful once it changes.
+   */
+  const rearmToken = useRef(followToken);
+  useEffect(() => {
+    if (rearmToken.current === followToken) return;
+    rearmToken.current = followToken;
+    pinnedRef.current = true;
+    setPinned(true);
+    const container = containerRef.current;
+    if (container) container.scrollTop = container.scrollHeight;
+  }, [followToken]);
 
   useEffect(() => {
     if (pinnedRef.current) endRef.current?.scrollIntoView({ block: "end" });
