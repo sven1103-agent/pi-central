@@ -321,7 +321,15 @@ session should be refused outright is #49's question and is deliberately not dec
       Still `verified/manual`, and named rather than implied: no tag has been pushed and nothing has
       been published, so the workflow itself has never run. The first release is where it is proven.
 
-      Two gaps, stated rather than glossed. The issue's title says "a signed tag", and the workflow
+- [x] The **first** publish is a manual bootstrap (issue #61), because npm only configures a trusted
+      publisher on a package that already exists (`npm help trust`: "Package must exist"). So the
+      workflow cannot be the first publisher, and the one manual publish must be a **pre-release**:
+      npm never allows republishing a version, so a hand-published final version could never carry a
+      provenance attestation. `scripts/bootstrap-publish.mjs` refuses a final version and hard-codes
+      `--tag next`, so an un-attested artifact cannot become `latest`. `verified/manual` — no part of
+      it runs in CI, because no part of it can.
+
+      Two gaps in the release workflow itself, stated rather than glossed. The issue's title says "a signed tag", and the workflow
       does **not** verify the tag's signature: the runner has no signer key configured, and giving it
       one would mean a secret, which this workflow exists to avoid. The integrity that matters is the
       artifact's, and that comes from the npm provenance attestation, which binds the tarball to the

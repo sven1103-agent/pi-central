@@ -18,6 +18,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  bootstrapRefusal,
   changelogReleases,
   currentVersionClaims,
   isChangelog,
@@ -295,4 +296,39 @@ test("a malformed lockfile is skipped, so npm's own parse error is not masked", 
 
 test("a lockfile with no packages map does not throw", () => {
   assert.deepEqual(lockfileDisagreements(JSON.stringify({ version: "0.2.0" }), "0.2.0"), []);
+});
+
+// --- The bootstrap publish (issue #61) --------------------------------------------------------------
+
+test("a FINAL version may not be published by hand as the first release", () => {
+  // The mistake this exists to prevent, and it is irreversible: npm never allows republishing a
+  // version, so a hand-published 0.2.0 could never be published again and could never carry a
+  // provenance attestation. The first release would be permanently the one unverifiable artifact.
+  const refusal = bootstrapRefusal("0.2.0");
+  assert.ok(refusal, "a final version must be refused");
+  assert.match(refusal, /pre-release/);
+  assert.match(refusal, /republishing a version/, "the reason must be the irreversibility");
+});
+
+test("a pre-release version may be published by hand", () => {
+  // The throwaway that claims the package name at no cost, which is the whole point.
+  assert.equal(bootstrapRefusal("0.2.0-rc.1"), undefined);
+  assert.equal(bootstrapRefusal("0.2.0-next.1"), undefined);
+  assert.equal(bootstrapRefusal("1.0.0-beta"), undefined);
+  assert.equal(bootstrapRefusal("0.2.0-alpha.1.2"), undefined);
+});
+
+test("BUILD metadata alone is not a pre-release, because npm treats it as the release", () => {
+  // `0.2.0+build` sorts as 0.2.0 itself, so it would occupy the final version number and the mistake
+  // would go through a check that only looked for a `-`.
+  assert.ok(bootstrapRefusal("0.2.0+build"), "build metadata must not count as a pre-release");
+});
+
+test("a malformed or empty version is refused rather than assumed safe", () => {
+  // Fail closed: the caller cannot be trusted to hand this a sensible string, and "allowed" here
+  // means "publish irreversibly".
+  assert.ok(bootstrapRefusal(""));
+  assert.ok(bootstrapRefusal("0.2.0-"));
+  assert.ok(bootstrapRefusal("rc.1"));
+  assert.ok(bootstrapRefusal("v0.2.0-rc.1"), "a leading v is not a version npm will accept");
 });

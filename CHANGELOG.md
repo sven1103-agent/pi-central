@@ -71,6 +71,26 @@ manifest and the three private workspace manifests cannot disagree.
   [docs/RELEASING.md](docs/RELEASING.md) records the process and the rollback — `npm deprecate` plus
   a patch release, because `npm unpublish` breaks everyone who already resolved the version.
 
+- **The first publish is a manual bootstrap, and it is guarded** (issue #61). The workflow above
+  publishes over OIDC, which needs a trusted publisher — and npm only configures one **on a package
+  that already exists** (`npm help trust`: *"Package must exist: The package you're configuring must
+  already exist on the npm registry"*). So the workflow cannot perform the first publish, and the
+  documentation previously glossed that as "claim the package name", which is circular.
+
+  The bootstrap must be a **pre-release**, and that is a correctness requirement rather than a
+  preference: npm never allows republishing a version, so a final version published by hand could
+  never be published again and could therefore **never carry a provenance attestation** — the first
+  release would be permanently the one artifact nobody can verify. `scripts/bootstrap-publish.mjs`
+  refuses a final version (the rule is a tested pure function, not prose in a document), refuses
+  build metadata on its own because npm orders `x.y.z+build` as the release itself, and hard-codes
+  `--tag next` so an un-attested artifact can never become what `npm install pi-central` resolves to.
+
+  The documented sequence was rehearsed verbatim rather than recalled: the `npm version … -rc.1`
+  bump updates all four manifests *and* the lockfile, and the dry run published
+  `+ pi-central@0.2.0-rc.1 … with tag next and public access`. `--provenance` is impossible off CI —
+  the attestation is built from the CI provider's OIDC identity — which is precisely why the *real*
+  release must not be the manual one.
+
 ### Security
 
 - **A session could read the user's `~/.ssh`, and the key denies missed every key that was not

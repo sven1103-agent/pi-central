@@ -1,5 +1,5 @@
 /**
- * The release path's non-negotiables (issue #53).
+ * The release path's non-negotiables (issues #53, #61).
  *
  * These are properties of YAML files, and they are asserted over the TEXT rather than through a YAML
  * parser. That is a deliberate trade, not laziness:
@@ -120,4 +120,34 @@ test("the CHANGELOG section the release would publish is non-empty", () => {
   const release_ = changelogReleases(changelog).find((entry) => entry.version === declared);
   assert.ok(release_, `CHANGELOG.md has no section for ${declared}`);
   assert.ok(release_.body.trim().length > 0, `the CHANGELOG section for ${declared} is empty`);
+});
+
+// --- The bootstrap publish (issue #61) ------------------------------------------------------------
+
+const bootstrap = readFileSync(join(ROOT, "scripts", "bootstrap-publish.mjs"), "utf8");
+
+test("the bootstrap publish can never target `latest`", () => {
+  // Structural, not validated: the tag is a constant, so there is no branch in which an un-attested
+  // first artifact becomes what `npm install pi-central` resolves to. Asserted on the constant rather
+  // than by grepping for the word "latest", which appears legitimately in the script's own output
+  // telling the reader that the bootstrap must NOT become it.
+  assert.match(
+    bootstrap,
+    /const TAG = "next";/,
+    "the bootstrap tag must be `next`; `latest` would put an un-attested artifact in front of every install",
+  );
+});
+
+test("the bootstrap publish is gated by the tested refusal, not by prose", () => {
+  // If this import disappears, the script would publish whatever version it is handed — which is the
+  // irreversible mistake (npm never allows republishing a version).
+  assert.match(bootstrap, /import \{[^}]*bootstrapRefusal[^}]*\} from "\.\/version-policy\.mjs"/);
+  assert.match(bootstrap, /bootstrapRefusal\(version\)/);
+});
+
+test("the bootstrap publish is not part of any workflow, because it cannot be", () => {
+  // It needs an interactive `npm login` and it must run once. A workflow that called it would be a
+  // workflow that publishes an un-attested artifact on a schedule.
+  const offenders = everyWorkflow.filter((w) => w.text.includes("bootstrap-publish")).map((w) => w.name);
+  assert.deepEqual(offenders, [], `these workflows call the manual bootstrap: ${offenders.join(", ")}`);
 });
