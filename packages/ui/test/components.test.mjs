@@ -1075,15 +1075,22 @@ test("the closed model control shows a MIDDLE-elided name, not a trailing cut", 
   // of a model name carry identity — the provider says where it runs, the tail distinguishes variants
   // — so a trailing cut throws away the part a reader scans for.
   const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  const model = "litellm/deepseek-v4-flash-vision-exp";
   const html = renderToString(createElement(ModelPicker, {
-    session: session({ model: "deepseek-V4.1-Flash", provider: "litellm" }),
+    session: session({ model, provider: "litellm" }),
     models: undefined, error: undefined, onRequest() {}, onSelect() {},
   }));
   const shown = /class="picker-display[^"]*"[^>]*>([^<]*)</.exec(html)?.[1];
-  assert.equal(shown, "litellm/deep…4.1-Flash");
+  // Asserted as PROPERTIES, not as a literal: the cap moved once already (#74) and a hard-coded
+  // string made a change of width look like a change of behaviour. What the test is about is that an
+  // elision keeps both ends.
+  const cap = Number(/const LABEL_MAX = (\d+);/.exec(
+    readFileSync(new URL("../src/components/ModelPicker.tsx", import.meta.url), "utf8"))[1]);
+  assert.ok(shown.startsWith("litellm/"), `the provider must survive (it says where it runs), got ${JSON.stringify(shown)}`);
+  assert.ok(shown.endsWith(model.slice(-12)), `the variant tail must survive, got ${JSON.stringify(shown)}`);
   assert.ok(!shown.endsWith("-"), "a trailing cut is the bug: it loses the identifying tail");
   assert.ok(shown.includes("…"), "an elision must be marked as one");
-  assert.ok(shown.length <= 22, "the label must actually fit the control's width");
+  assert.ok(shown.length <= cap, `the label must fit the control (${cap}ch), got ${shown.length}`);
 });
 
 test("the full model name is always available, so an elision is never the only answer", async () => {
@@ -1114,7 +1121,10 @@ test("the OPTIONS are never truncated, because that is where the choice is made"
   // renders the selected option's text when closed, so a shortened closed label and full list entries
   // cannot both come from option text. If this ever regresses, picking a model becomes guesswork.
   const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
-  const long = "DeepSeek V4 Flash Vision Exp";
+  // Long enough to be elided at the CURRENT cap: at 22 characters the shorter name below was elided
+  // for the wrong reason, and at 30 it would not be elided at all, leaving the second half of this
+  // test asserting nothing.
+  const long = "DeepSeek V4 Flash Vision Experimental";
   const html = renderToString(createElement(ModelPicker, {
     session: session({ model: "deepseek-v4-flash-vision-exp", provider: "litellm" }),
     models: [{ provider: "litellm", id: "deepseek-v4-flash-vision-exp", name: long }],
@@ -1127,7 +1137,7 @@ test("the OPTIONS are never truncated, because that is where the choice is made"
   // The overlay must shorten the FRIENDLY name, not the raw id. Asserting only that it differs from
   // the long name is too weak: shortening the raw id also differs, while showing a different string
   // from the option the user is actually on. The tail is what proves which one it read.
-  assert.ok(shown.endsWith("sion Exp"), `the overlay must elide the option's name, got ${JSON.stringify(shown)}`);
+  assert.ok(shown.endsWith("Experimental"), `the overlay must elide the option's name, got ${JSON.stringify(shown)}`);
 });
 
 test("the label shortens with the shared helper, so surfaces cannot drift", async () => {

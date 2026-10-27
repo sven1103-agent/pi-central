@@ -30,12 +30,17 @@ import { isCurrentModel, modelChangeTiming, modelsByProvider } from "../store.ts
 /**
  * How many characters the closed control shows before the middle is elided.
  *
- * Matches `.picker-select`'s `max-width: 22ch`, so the shortened label is what fits rather than a
+ * Matches `.picker-select`'s `max-width: 30ch`, so the shortened label is what fits rather than a
  * second guess at the width. Kept here rather than only in CSS because the shortening decision needs
  * the number, and having CSS clip a *pre-shortened* string is the difference between a well-chosen
  * elision and a trailing cut (issue #42).
+ *
+ * **Raised from 22 to 30** (issue #74). The reviewer's note was that the label was being elided —
+ * `openrouter/d_4.1-f…` — while empty space sat beside it in the header. The model is what the cost
+ * attribution is about, so losing the variant is expensive; the cap only has to fit the *header*,
+ * not a rail row. The two numbers still move together, and a test asserts they agree.
  */
-const LABEL_MAX = 22;
+const LABEL_MAX = 30;
 
 export interface ModelPickerProps {
   session: LiveSession;
