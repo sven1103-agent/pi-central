@@ -75,7 +75,9 @@ Spacing rhythm: 4px base. Rail padding 12/16, rows 8px apart, group gaps 16px, c
 
 Responsive: `≥1440` three panes; `1024–1439` three panes too, with the panel narrower (it is resizable, so the user makes room); `<1024` the rail becomes a left drawer (⌘\, `aria-expanded`). Phase 2 floor is 1024px.
 
-**The panel is never hidden.** It used to be `display: none` below 1440px, which was defensible while it held only reference material. It now hosts the file browser, and a pane you cannot reach at all is worse than a narrow one. The `1024–1439` sheet in the previous revision of this line was **not implemented**: a fixed overlay covered the transcript with no way to dismiss it, which is a worse bug than the one it fixed. A sheet needs a topbar toggle to accompany it; that is deferred rather than silently dropped.
+**The panel is collapsed by default, and the user decides** (issue #75). It used to be `display: none` below 1440px, which was defensible while it held only reference material; then it hosted the file browser and became permanently visible instead, which was an over-correction — on a normal window it took roughly as much room as the transcript, to show material nobody reads while working. So it is hidden by `PanelToggle` in the topbar, on by the user, at every width. `Show panel` / `Hide panel` states the action, and `aria-expanded` states the fact.
+
+The `1024–1439` sheet in an earlier revision was **not implemented**: a fixed overlay covered the transcript with no way to dismiss it, which is a worse bug than the one it fixed. That is now **superseded rather than deferred** — a collapsed panel is not a sheet, and it can be opened whenever there is room, so window width no longer has to guess. The panel's width and mode survive being hidden, so re-opening returns it to where the user left it.
 
 **Why not mobile.** The orchestrator binds `127.0.0.1` (STACK operational rule 2, C5), so no phone can reach it. A phone layout would be dead code that still costs accessibility surface. Stated once here, not designed.
 

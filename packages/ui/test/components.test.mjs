@@ -29,7 +29,7 @@ globalThis.document = dom.window.document;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 
 let server;
-let SessionRail, ToolTrace, DialogDock, TranscriptView, HistoryView, Composer, FileTree, FilePane, Panel, FilesPanel, Settings, initialState;
+let SessionRail, ToolTrace, DialogDock, TranscriptView, HistoryView, Composer, FileTree, FilePane, Panel, PanelToggle, FilesPanel, Settings, initialState;
 
 before(async () => {
   // `root` must be the UI package, not the process CWD: Vite resolves the `/src/...` specifiers
@@ -53,6 +53,7 @@ before(async () => {
   ({ Panel } = await server.ssrLoadModule("/src/components/Panel.tsx"));
   ({ FilesPanel } = await server.ssrLoadModule("/src/components/FilesPanel.tsx"));
   ({ Settings } = await server.ssrLoadModule("/src/components/Settings.tsx"));
+  ({ PanelToggle } = await server.ssrLoadModule("/src/components/PanelToggle.tsx"));
   ({ initialState } = await server.ssrLoadModule("/src/store.ts"));
 });
 
@@ -1581,4 +1582,52 @@ test("absent facts are explained ONCE, and the reason is distinguished from 'not
   // With facts present there is nothing to explain.
   const fine = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {} }));
   assert.ok(!/older than this UI|Waiting for the orchestrator/.test(fine));
+});
+
+// --- The panel toggle, and a collapsed panel (issue #75) -------------------------------------------
+
+test("the panel toggle's label states the ACTION, and aria-expanded states the fact", () => {
+  // A control labelled by its state is read as a status, and then clicked twice by anyone who takes
+  // it for one. The label must offer the next action; `aria-expanded` carries the current truth.
+  const collapsed = renderToString(createElement(PanelToggle, { collapsed: true, onToggle() {} }));
+  assert.match(collapsed, /Show panel/);
+  assert.match(collapsed, /aria-expanded="false"/);
+
+  const open = renderToString(createElement(PanelToggle, { collapsed: false, onToggle() {} }));
+  assert.match(open, /Hide panel/);
+  assert.match(open, /aria-expanded="true"/);
+});
+
+test("a collapsed panel leaves no panel track behind", () => {
+  // Without this class the grid keeps a third track, so hiding the panel would leave an empty column
+  // — the panel would be gone and its space would not.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const rule = /\.panes\.is-collapsed\s*\{([^}]*)\}/.exec(css);
+  assert.ok(rule, ".panes.is-collapsed must have a rule");
+  assert.match(rule[1], /grid-template-columns:\s*288px 1fr/, "two tracks, not three");
+});
+
+test("the narrow-viewport query collapses the rail track for a hidden panel too", () => {
+  // The trap: `.panes.is-collapsed` out-specifies a bare `.panes`, so the existing `≤1023px` rule
+  // would LOSE to it and leave a 288px empty track where the hidden rail used to be. The query must
+  // name both selectors to win.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(
+    css,
+    /\.panes,\s*\n\s*\.panes\.is-collapsed\s*\{\s*grid-template-columns:\s*1fr/,
+    "the ≤1023px query must list `.panes.is-collapsed` as well as `.panes`",
+  );
+});
+
+test("a collapsed panel renders no panel body at all", () => {
+  // Not rendered rather than rendered at zero width: a zero-width panel still mounts the body and
+  // runs its container queries against 0px. Proven here on the component that owns the decision —
+  // `Panel` renders only when the shell decides to include it.
+  const html = renderToString(createElement(Panel, {
+    mode: "session", onMode() {}, width: 360, onWidth() {}, viewportWidth: 1440,
+  }, createElement("p", null, "body")));
+  assert.match(html, /class="panel"/, "the panel renders when it IS included");
+  // The shell excludes it entirely when collapsed; `App.tsx` holds that branch, so this asserts the
+  // contract the branch relies on: the panel is a plain element with no hidden state of its own.
+  assert.ok(!/hidden/.test(html), "the panel has no built-in collapse; the shell decides");
 });

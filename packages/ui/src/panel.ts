@@ -116,6 +116,20 @@ export interface PanelPrefs {
   width: number;
   mode: PanelMode;
   /**
+   * Is the panel hidden?
+   *
+   * **Collapsed is the default** (issue #75). The panel is a special-purpose view — session audit
+   * facts, or a file browser — not something to look at while working, and on a normal window it took
+   * roughly as much room as the transcript. The transcript is the primary surface; keeping the panel
+   * open for the whole session spends the widest column in the window on material nobody is reading.
+   *
+   * The width and mode are still remembered while collapsed, so re-opening returns the panel to where
+   * the user left it rather than to a fresh default.
+   *
+   * Deliberately `... !== false` when parsing: the field is absent for anyone who has used an earlier
+   * build, and absent must mean the new default rather than "false". */
+  collapsed: boolean;
+  /**
    * Has the user chosen this width, or is it still the default?
    *
    * This is the flag that stops the panel auto-widening for `Files` *after* the user has placed it.
@@ -127,7 +141,7 @@ export interface PanelPrefs {
 export const PANEL_PREFS_KEY = "pi-central.panel";
 
 export function defaultPanelPrefs(): PanelPrefs {
-  return { width: PANEL_DEFAULT_WIDTH, mode: "session", userSized: false };
+  return { width: PANEL_DEFAULT_WIDTH, mode: "session", userSized: false, collapsed: true };
 }
 
 /**
@@ -152,7 +166,14 @@ export function parsePanelPrefs(raw: string | null): PanelPrefs {
   const record = parsed as Record<string, unknown>;
   const mode: PanelMode = record["mode"] === "files" ? "files" : "session";
   const width = typeof record["width"] === "number" ? record["width"] : fallback.width;
-  return { width, mode, userSized: record["userSized"] === true };
+  return {
+    width,
+    mode,
+    userSized: record["userSized"] === true,
+    // Only an explicit `false` opens the panel. A missing field (an older stored value) and any
+    // unrecognised value both mean the default, which is collapsed.
+    collapsed: record["collapsed"] !== false,
+  };
 }
 
 /** Serialize for `localStorage`. Kept beside `parsePanelPrefs` so the two cannot drift. */

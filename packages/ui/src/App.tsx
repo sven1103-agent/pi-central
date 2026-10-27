@@ -37,6 +37,7 @@ import { Inspector } from "./components/Inspector.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { FilesPanel } from "./components/FilesPanel.tsx";
 import { Panel } from "./components/Panel.tsx";
+import { PanelToggle } from "./components/PanelToggle.tsx";
 import {
   PANEL_DEFAULT_WIDTH,
   PANEL_FILES_DEFAULT_WIDTH,
@@ -101,6 +102,25 @@ export function App() {
 
   const setPanelWidth = useCallback((width: number, userSized: boolean) => {
     setPanel((current) => ({ ...current, width, userSized }));
+  }, []);
+
+  /**
+   * Show or hide the panel, and remember which.
+   *
+   * The width and mode are left alone on purpose: re-opening returns the panel to where the user left
+   * it, rather than to a fresh default that would also undo a deliberate drag.
+   */
+  const togglePanelCollapsed = useCallback(() => {
+    setPanel((current) => {
+      const next = { ...current, collapsed: !current.collapsed };
+      try {
+        localStorage.setItem(PANEL_PREFS_KEY, serializePanelPrefs(next));
+      } catch {
+        // Storage disabled or full: the panel simply does not remember itself. Not worth failing a
+        // render over, and the toggle still works for this session.
+      }
+      return next;
+    });
   }, []);
 
   const persistPanel = useCallback(() => {
@@ -407,6 +427,11 @@ export function App() {
             Labelled, not an icon. A gear glyph would be shorter and would make the version — the
             reason this surface exists — undiscoverable to anyone who reads words rather than shapes.
           */}
+          {/*
+            Next to Settings because both are chrome, and before it because the panel is the thing a
+            user reaches for mid-session. Its label states the action — see `PanelToggle`.
+          */}
+          <PanelToggle collapsed={panel.collapsed} onToggle={togglePanelCollapsed} />
           <button
             type="button"
             className="btn btn-quiet"
@@ -441,7 +466,10 @@ export function App() {
         />
       )}
 
-      <div className="panes" style={{ "--panel-width": `${panel.width}px` } as React.CSSProperties}>
+      <div
+        className={panel.collapsed ? "panes is-collapsed" : "panes"}
+        style={{ "--panel-width": `${panel.width}px` } as React.CSSProperties}
+      >
         <SessionRail
           sessions={state.live}
           focusedId={state.focusedId}
@@ -537,6 +565,13 @@ export function App() {
           </main>
         )}
 
+        {/*
+          Not rendered while collapsed (issue #75), rather than rendered at zero width. A zero-width
+          panel still mounts `Inspector`/`FilesPanel`, still runs their container queries against
+          0px, and still fetches nothing useful — and two of those have already caused a defect here.
+          Its geometry and mode live in `panel`, so re-opening restores them.
+        */}
+        {!panel.collapsed && (
         <Panel
           mode={panel.mode}
           onMode={setPanelMode}
@@ -569,6 +604,7 @@ export function App() {
             <p className="panel-empty">Select a session to browse its working directory.</p>
           )}
         </Panel>
+        )}
       </div>
 
       {settingsOpen && (

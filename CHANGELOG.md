@@ -9,6 +9,28 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+### Changed
+
+- **The right panel is collapsed by default, and the user decides** (issue #75). It had gone from
+  `display: none` below 1440px to permanently visible, which was an over-correction: on a normal
+  window it took roughly as much room as the transcript, to show material nobody reads while working.
+  Session facts and the file browser are special-purpose views, not something to keep in front of you.
+
+  `PanelToggle` now sits in the topbar — where `styles.css` already said the control belonged, when
+  the panel became permanent — and its label states the **action** (`Show panel` / `Hide panel`) while
+  `aria-expanded` carries the state, because a label that reads as a status gets clicked twice. The
+  panel's width and mode survive being hidden, so re-opening returns it where the user left it.
+
+  The stored `collapsed` field is read as `!== false`, so an absent value — anyone who used an earlier
+  build — means the new default rather than "expanded"; an `=== true` test would have opened the panel
+  for every existing user.
+
+  The panel is not rendered while collapsed rather than rendered at zero width, and
+  `.panes.is-collapsed` removes its grid track so hiding the panel does not leave an empty column. The
+  `≤1023px` query had to be taught to name `.panes.is-collapsed` too: that selector out-specifies a
+  bare `.panes` and would otherwise have won inside the query, leaving a 288px empty track where the
+  hidden rail used to be.
+
 ### Fixed
 
 - **A release design note claimed a guarantee the registry does not provide, and that claim is what
