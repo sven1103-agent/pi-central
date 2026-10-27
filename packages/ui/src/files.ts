@@ -55,10 +55,17 @@ export interface FilesState {
   openFile: Record<string, string | undefined>;
   /** Whether dotfiles are shown, per session. A view preference, not a server fact. */
   showHidden: Record<string, boolean>;
+  /**
+   * Whether long lines wrap, per session (issue #73).
+   *
+   * A view preference like `showHidden`, and per session for the same reason: what you read in one
+   * project is not what you read in another. Absent means WRAPPED — see `showsWrapped`.
+   */
+  wrapLines: Record<string, boolean>;
 }
 
 export function initialFilesState(): FilesState {
-  return { directories: {}, files: {}, expanded: {}, openFile: {}, showHidden: {} };
+  return { directories: {}, files: {}, expanded: {}, openFile: {}, showHidden: {}, wrapLines: {} };
 }
 
 /**
@@ -97,6 +104,27 @@ export function isExpanded(state: FilesState, sessionId: string, path: string): 
 /** Is this session showing dotfiles? */
 export function showsHidden(state: FilesState, sessionId: string): boolean {
   return state.showHidden[sessionId] === true;
+}
+
+/**
+ * Are long lines wrapped in this session's file viewer?
+ *
+ * **Wrapped by default**, and that reverses a documented decision, so the reasoning is recorded.
+ * The viewer used to force `white-space: pre` on the grounds that "this is a code surface, and
+ * wrapping turns one logical line into three visual ones, which makes line numbers lie".
+ *
+ * That was right about code and wrong about the common case: the panel hosts whatever the reader
+ * opens, and the document they open most often is prose — a `CHANGELOG.md`, a `README.md`, a log.
+ * For those there are no logical lines to preserve, and forced horizontal scrolling put the only
+ * scrollbar at the bottom of a full-height panel, hundreds of pixels from the line being read, where
+ * it reads as the end of the content rather than as a way to see the rest of it.
+ *
+ * So the default is the reading-friendly one and the code case is served by the toggle, which is the
+ * same trade the dotfile toggle makes. `!== false` rather than `=== true` because absent must mean
+ * the default, and the default here is on.
+ */
+export function showsWrapped(state: FilesState, sessionId: string): boolean {
+  return state.wrapLines[sessionId] !== false;
 }
 
 /**
@@ -162,6 +190,8 @@ export type FilesAction =
   | { kind: "openFile"; sessionId: string; path: string }
   | { kind: "closeFile"; sessionId: string }
   | { kind: "toggleHidden"; sessionId: string }
+  /** Turn line wrapping on or off for this session's file viewer. */
+  | { kind: "toggleWrap"; sessionId: string }
   /**
    * A session is gone: drop its tree.
    *
@@ -260,18 +290,27 @@ export function reduceFiles(state: FilesState, action: FilesAction): FilesState 
         showHidden: { ...state.showHidden, [action.sessionId]: state.showHidden[action.sessionId] !== true },
       };
 
+    case "toggleWrap":
+      // Absent means wrapped, so the flip is "was it explicitly turned off?".
+      return {
+        ...state,
+        wrapLines: { ...state.wrapLines, [action.sessionId]: state.wrapLines[action.sessionId] === false },
+      };
+
     case "forgetSession": {
       const prefix = `${action.sessionId}\0`;
       const drop = <T>(record: Record<string, T>): Record<string, T> =>
         Object.fromEntries(Object.entries(record).filter(([key]) => !key.startsWith(prefix)));
       const { [action.sessionId]: _open, ...openFile } = state.openFile;
       const { [action.sessionId]: _hidden, ...showHidden } = state.showHidden;
+      const { [action.sessionId]: _wrapped, ...wrapLines } = state.wrapLines;
       return {
         directories: drop(state.directories),
         files: drop(state.files),
         expanded: drop(state.expanded),
         openFile,
         showHidden,
+        wrapLines,
       };
     }
   }

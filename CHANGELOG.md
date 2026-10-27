@@ -33,6 +33,20 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- **The file viewer no longer forces long lines into a horizontal scrollbar** (issue #73). It used
+  `white-space: pre` with the reasoning that *"this is a code surface, and wrapping makes line numbers
+  lie"* — right about code, wrong about the common case, because the panel hosts whatever the reader
+  opens and what they open most often is prose. A `CHANGELOG.md` has no logical lines to preserve, and
+  the forced scrollbar sat at the bottom of a full-height panel, hundreds of pixels from the line being
+  read, where it reads as the *end* of the content rather than as a way to see the rest of it.
+
+  Wrapping is now the reader's choice and **on by default**, with a `Wrap lines` / `No wrap` toggle in
+  the file header whose label states the action. `pre-wrap` rather than `pre-line`, because leading
+  indentation is content in a source file. Three details are load-bearing and each has a test:
+  `overflow-wrap: anywhere`, so a URL or a minified line — the lines that need wrapping most — wraps
+  instead of overflowing; and `flex: 1; min-width: 0`, without which a flex item refuses to shrink
+  below its content and nothing wraps at all.
+
 - **A release design note claimed a guarantee the registry does not provide, and that claim is what
   stopped anyone checking that it held** (issue #66). Three places — `bootstrap-publish.mjs`,
   `docs/RELEASING.md` and this file — said the bootstrap's hard-coded `--tag next` was a *structural*

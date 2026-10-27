@@ -1232,7 +1232,7 @@ test("a too-large refusal names both sizes, because the reader has to judge", as
   const html = renderToString(createElement(FilePane, {
     path: "big.log",
     state: { status: "error", reason: "too-large", message: '"big.log" is 4.2 MB, above the 256.0 KB limit and was not read' },
-    onClose() {},
+    wrapped: true, onToggleWrap() {}, onClose() {},
   }));
   assert.match(html, /Too large to read/);
   assert.match(html, /4\.2 MB/);
@@ -1273,7 +1273,7 @@ test("file contents are rendered as text, never as markup", async () => {
   const html = renderToString(createElement(FilePane, {
     path: "x.txt",
     state: { status: "loaded", text: payload, bytes: payload.length },
-    onClose() {},
+    wrapped: true, onToggleWrap() {}, onClose() {},
   }));
   assert.ok(!/<img/i.test(html) && !/<script>alert/i.test(html), `markup must be escaped, got: ${html}`);
   assert.match(html, /&lt;img/);
@@ -1630,4 +1630,56 @@ test("a collapsed panel renders no panel body at all", () => {
   // The shell excludes it entirely when collapsed; `App.tsx` holds that branch, so this asserts the
   // contract the branch relies on: the panel is a plain element with no hidden state of its own.
   assert.ok(!/hidden/.test(html), "the panel has no built-in collapse; the shell decides");
+});
+
+// --- Wrapping is a choice, and the default is wrapped (issue #73) ----------------------------------
+
+test("the file viewer wraps long lines by default", async () => {
+  // The defect: `white-space: pre` inside a scrolling panel forced prose into a horizontal scrollbar
+  // at the bottom of a full-height panel, hundreds of pixels from the line being read — where it
+  // reads as the end of the content. Wrapping is now the default, and the toggle is the code case.
+  const state = await filesState();
+  const html = renderToString(createElement(FilePane, {
+    path: "CHANGELOG.md",
+    state: { status: "loaded", text: "a very long line that would otherwise scroll sideways\n", bytes: 52 },
+    wrapped: true, onToggleWrap() {}, onClose() {},
+  }));
+  assert.match(html, /class="filepane-lines is-wrapped"/, "the wrapped class drives the CSS");
+});
+
+test("the wrap toggle's label states the ACTION, and aria-pressed states the fact", async () => {
+  // Same rule as the panel and dotfile toggles: a control labelled by its state is read as a status
+  // and clicked twice by anyone who takes it for one.
+  const state = await filesState();
+  const render = (wrapped) => renderToString(createElement(FilePane, {
+    path: "a.ts",
+    state: { status: "loaded", text: "const x = 1;\n", bytes: 13 },
+    wrapped, onToggleWrap() {}, onClose() {},
+  }));
+
+  const on = render(true);
+  assert.match(on, /No wrap/, "wrapped on offers to stop wrapping");
+  assert.match(on, /aria-pressed="true"/);
+
+  const off = render(false);
+  assert.match(off, /Wrap lines/, "wrapped off offers to wrap");
+  assert.match(off, /aria-pressed="false"/);
+  assert.ok(!/is-wrapped/.test(off), "no-wrap mode must not carry the wrapping class");
+});
+
+test("wrapped mode wraps, keeps indentation, and breaks long tokens", () => {
+  // Asserted on the stylesheet because the markup cannot express it. `pre-wrap` not `pre-line`:
+  // leading indentation is content in a source file. `anywhere` because the lines that need wrapping
+  // most are the ones with no spaces in them.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const rule = /\.filepane-lines\.is-wrapped \.filepane-line-text\s*\{([^}]*)\}/.exec(css);
+  assert.ok(rule, "the wrapped rule must exist");
+  assert.match(rule[1], /white-space:\s*pre-wrap/, "pre-wrap preserves indentation while wrapping");
+  assert.match(rule[1], /overflow-wrap:\s*anywhere/, "a long unbroken token must still wrap");
+
+  // And the flex item must be allowed to shrink, or `min-width: auto` wins and nothing wraps.
+  const text = /\.filepane-line-text\s*\{([^}]*)\}/.exec(css);
+  assert.ok(text, ".filepane-line-text must have a rule");
+  assert.match(text[1], /min-width:\s*0/, "a flex item will not shrink below its content without this");
+  assert.match(text[1], /flex:\s*1/, "…and must claim the remaining width");
 });
