@@ -18,6 +18,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  baseVersion,
   bootstrapRefusal,
   changelogReleases,
   currentVersionClaims,
@@ -26,6 +27,7 @@ import {
   lockfileDisagreements,
   manifestDisagreements,
   readmeVersionClaims,
+  releaseNotesRefusal,
   unreleasedBody,
   unreleasedEntries,
   versionsIn,
@@ -331,4 +333,41 @@ test("a malformed or empty version is refused rather than assumed safe", () => {
   assert.ok(bootstrapRefusal("0.2.0-"));
   assert.ok(bootstrapRefusal("rc.1"));
   assert.ok(bootstrapRefusal("v0.2.0-rc.1"), "a leading v is not a version npm will accept");
+});
+
+// --- What documents a pre-release (issue #61) -------------------------------------------------------
+
+test("a version's base is itself, and a pre-release's base is the release it targets", () => {
+  assert.equal(baseVersion("0.2.0"), "0.2.0");
+  assert.equal(baseVersion("0.2.0-rc.1"), "0.2.0");
+  assert.equal(baseVersion("0.2.0-next.1.2"), "0.2.0");
+  // Build metadata has no dash, so it is its own base — npm orders it as the release itself.
+  assert.equal(baseVersion("0.2.0+build"), "0.2.0+build");
+});
+
+test("a matching newest release satisfies the notes rule", () => {
+  assert.equal(releaseNotesRefusal(["0.2.0", "0.1.0"], "0.2.0"), undefined);
+});
+
+test("a PRE-RELEASE is documented by its base release, so no throwaway section is needed", () => {
+  // The friction this removes: without it, publishing `0.2.0-rc.1` required hand-adding a
+  // `## [0.2.0-rc.1]` heading to a CHANGELOG that will never mention the version again.
+  assert.equal(releaseNotesRefusal(["0.2.0", "0.1.0"], "0.2.0-rc.1"), undefined);
+});
+
+test("a pre-release whose BASE is not the newest release is still refused", () => {
+  // The relaxation is narrow on purpose: an RC of an undocumented release has no notes to point at.
+  const refusal = releaseNotesRefusal(["0.1.0"], "0.2.0-rc.1");
+  assert.ok(refusal);
+  assert.match(refusal, /newest CHANGELOG release is 0\.1\.0/);
+});
+
+test("a FINAL version is not satisfied by some other release's section", () => {
+  // The relaxation must not weaken the rule it relaxes: `0.2.0` is documented only by `## [0.2.0]`.
+  assert.ok(releaseNotesRefusal(["0.1.0"], "0.2.0"));
+  assert.ok(releaseNotesRefusal(["0.3.0"], "0.2.0"));
+});
+
+test("an empty release list is refused by the notes rule", () => {
+  assert.ok(releaseNotesRefusal([], "0.2.0"));
 });

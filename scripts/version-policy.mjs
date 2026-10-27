@@ -124,6 +124,18 @@ function basename(path) {
 }
 
 /**
+ * The release a version belongs to: `0.2.0-rc.1` -> `0.2.0`. A final version is its own base.
+ *
+ * Used to decide what documents a pre-release. An RC is a candidate for a release, not a release of
+ * its own, so it is documented by that release's notes — which is why the bootstrap does not have to
+ * insert a throwaway `## [0.2.0-rc.1]` section into a CHANGELOG that will never mention it again.
+ */
+export function baseVersion(version) {
+  const [base] = String(version).split("-");
+  return base ?? String(version);
+}
+
+/**
  * Why a version may NOT be published by hand as the first release, or `undefined` if it may.
  *
  * ## The constraint this encodes
@@ -192,6 +204,30 @@ export function changelogReleases(text) {
     releases.push({ version: match[1].trim(), body: match[3] ?? "" });
   }
   return releases;
+}
+
+/**
+ * Whether the newest CHANGELOG release documents this version, as a refusal or `undefined`.
+ *
+ * A pre-release is accepted when its BASE release is the newest section: `0.2.0-rc.1` is a candidate
+ * for `0.2.0`, and `## [0.2.0]` is where its notes live. Requiring a throwaway `## [0.2.0-rc.1]`
+ * heading instead would mean hand-editing the changelog to publish something the changelog will
+ * never mention again — friction that gets a documented process abandoned, and it would also leave
+ * the release workflow's notes step failing AFTER a publish had already happened.
+ *
+ * @param {string[]} releaseVersions newest first
+ * @param {string} declared
+ * @returns {string | undefined}
+ */
+export function releaseNotesRefusal(releaseVersions, declared) {
+  if (releaseVersions.length === 0) {
+    return "CHANGELOG.md has no `## [x.y.z]` section, so the release has no notes";
+  }
+  const newest = releaseVersions[0];
+  if (newest === declared) return undefined;
+  const base = baseVersion(declared);
+  if (base !== declared && newest === base) return undefined;
+  return `package.json is ${declared} but the newest CHANGELOG release is ${newest}`;
 }
 
 /**

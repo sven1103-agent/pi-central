@@ -58,20 +58,18 @@ follows through the workflow with provenance. Do this once, on a throwaway branc
 merged:
 
 ```bash
-# 1. A pre-release version. `scripts/bootstrap-publish.mjs` refuses a final one and says why.
+# 1. A pre-release version. `scripts/bootstrap-publish.mjs` refuses a final one and says why, and
+#    `npm version` updates all four manifests AND the lockfile, so they cannot drift.
 npm version <x.y.z>-rc.1 --no-git-tag-version --workspaces --include-workspace-root
 
-# 2. Document the throwaway, because check-version requires a section for the declared version.
-$EDITOR CHANGELOG.md      # add `## [<x.y.z>-rc.1] — <date>` above the real release section
-
-# 3. Authenticate. 2FA is required at the account level.
+# 2. Authenticate. 2FA is required at the account level.
 npm login
 
-# 4. Rehearse, then publish. Verify, build and `--tag next` are inside the script.
+# 3. Rehearse, then publish. Verify, build and `--tag next` are inside the script.
 node scripts/bootstrap-publish.mjs --dry-run
 node scripts/bootstrap-publish.mjs
 
-# 5. Configure the trust, so every later release uses OIDC. Real flags are from
+# 4. Configure the trust, so every later release uses OIDC. Real flags are from
 #    `npm trust github --help` on your npm (needs npm >= 11.15).
 npm trust github pi-central --file release.yml --repo sven1103-agent/pi-central --allow-publish
 npm trust list pi-central          # confirm
@@ -86,8 +84,18 @@ npm version <x.y.z> --no-git-tag-version --workspaces --include-workspace-root
 git commit -am 'release: <x.y.z>' && git tag v<x.y.z> && git push origin v<x.y.z>
 ```
 
-Three things about this that are deliberate rather than incidental:
+Four things about this that are deliberate rather than incidental:
 
+- **No throwaway CHANGELOG section.** A pre-release is documented by its BASE release:
+  `<x.y.z>-rc.1` is a candidate for `<x.y.z>`, so `## [<x.y.z>]` is where its notes live, and
+  `release-notes.mjs` says so in a preamble on the GitHub Release. Requiring a `## [<x.y.z>-rc.1]`
+  heading would mean hand-editing the changelog to publish something it will never mention again —
+  friction in exchange for nothing. The rule is a tested pure function (`releaseNotesRefusal`), not a
+  sentence in this document. (Placeholders, not a real number, because this file must not state the
+  current version — see the rule below.)
+- **The notes are prepared before the publish, not after.** `release.yml` writes `release-notes.md`
+  while the failure is still free: a version with no CHANGELOG section stops the run *before* the
+  irreversible step, instead of leaving an artifact on the registry with no Release and a red build.
 - **The bootstrap version is never `latest`.** `scripts/bootstrap-publish.mjs` hard-codes `--tag next`,
   so there is no branch in which an un-attested artifact becomes what `npm install pi-central`
   resolves to. Structural beats validated: a rule that cannot be expressed beats one that has to be

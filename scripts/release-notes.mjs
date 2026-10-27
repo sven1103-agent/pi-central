@@ -13,14 +13,32 @@
  */
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { changelogReleases } from "./version-policy.mjs";
+import { baseVersion, changelogReleases } from "./version-policy.mjs";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const declared = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version;
 const wanted = process.argv[2] ?? declared;
 
 const releases = changelogReleases(readFileSync(join(ROOT, "CHANGELOG.md"), "utf8"));
-const found = releases.find((release) => release.version === wanted);
+
+// A pre-release is documented by its BASE release: `0.2.0-rc.1` is a candidate for `0.2.0`, so
+// `## [0.2.0]` is where its notes live, and the preamble below says so on the Release page.
+//
+// Requiring a throwaway `## [0.2.0-rc.1]` section instead would mean hand-editing the changelog to
+// publish something it will never mention again — friction that gets a documented process abandoned,
+// in exchange for nothing.
+//
+// (The workflow also generates these notes BEFORE it publishes, so a missing section fails before the
+// irreversible act. That is defence in depth and NOT the reason for this fallback: what documents a
+// pre-release is a question about meaning, not about step ordering.)
+const base = baseVersion(wanted);
+const found =
+  releases.find((release) => release.version === wanted) ??
+  (base !== wanted ? releases.find((release) => release.version === base) : undefined);
+const preamble =
+  found && found.version !== wanted
+    ? `Pre-release of ${found.version}. The notes below are for ${found.version}.\n\n`
+    : "";
 
 if (!found) {
   console.error(
@@ -36,4 +54,4 @@ if (body.length === 0) {
   process.exit(1);
 }
 
-process.stdout.write(`${body}\n`);
+process.stdout.write(`${preamble}${body}\n`);

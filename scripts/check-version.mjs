@@ -58,6 +58,7 @@ import {
   currentVersionClaims,
   lockfileDisagreements,
   manifestDisagreements,
+  releaseNotesRefusal,
   readmeVersionClaims,
   unreleasedBody,
   unreleasedEntries,
@@ -163,15 +164,19 @@ if (readmeClaims.length > 0) {
 
 const changelogText = readFileSync(join(ROOT, "CHANGELOG.md"), "utf8");
 const releases = changelogReleases(changelogText);
-if (releases.length === 0) {
-  fail(["CHANGELOG.md has no `## [x.y.z]` section, so the release has no notes"]);
-}
-if (releases[0].version !== declared) {
+const notesRefusal = releaseNotesRefusal(
+  releases.map((release) => release.version),
+  declared,
+);
+if (notesRefusal !== undefined) {
   fail([
-    `package.json is ${declared} but the newest CHANGELOG release is ${releases[0].version}`,
+    notesRefusal,
     "",
     "A release without notes is a release nobody can read. Promote `## [Unreleased]` into",
     `\`## [${declared}] — <date>\` as part of the same change that bumps the version.`,
+    "",
+    "A pre-release is the exception, and is documented by its BASE release: `0.2.0-rc.1` is a",
+    "candidate for `0.2.0`, so `## [0.2.0]` is where its notes live.",
   ]);
 }
 

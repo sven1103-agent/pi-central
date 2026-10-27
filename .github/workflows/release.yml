@@ -78,6 +78,13 @@ jobs:
       - name: Build the artifact
         run: npm run build:package
 
+      # BEFORE the publish, deliberately. This step fails when the version has no CHANGELOG section,
+      # and a publish cannot be undone — generating the notes afterwards would mean a version on the
+      # registry with no Release and a red build, failing AFTER the irreversible act rather than
+      # before it. Nothing about the notes depends on the publish having happened.
+      - name: Prepare the release notes from the CHANGELOG
+        run: node scripts/release-notes.mjs > release-notes.md
+
       - name: Publish with provenance
         run: npm publish --provenance --access public
 
@@ -87,7 +94,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          node scripts/release-notes.mjs > release-notes.md
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
             --notes-file release-notes.md \
