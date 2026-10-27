@@ -33,6 +33,31 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- **The transcript's reading position is kept per session, and sending a prompt re-arms following**
+  (issues #80, #86). Two reports, one defect: `pinned` — "am I following the tail?" — was a single
+  component-level value and the scroll offset was not recorded at all. So
+
+  - **reading position leaked between sessions** (#80): scrolling up in one left the next one
+    un-pinned, so its content appeared wherever the old offset clamped;
+  - **and nothing re-armed it on send** (#86): after any scroll, following stayed off — including
+    right after you submit a prompt, which is precisely when you expect the reply to scroll in.
+
+  Both are now one change. `{ scrollTop, pinned }` is remembered per session, and the reply to a
+  prompt always scrolls into view. A session never opened before opens at the **end**, following: the
+  newest content is what a reader arriving wants, and an agent may have produced a great deal since
+  the last look.
+
+  Three details are load-bearing and each was found by getting it wrong first:
+
+  - **The memory lives in `App`, not in the transcript pane.** `SessionView` carries
+    `key={focused?.id}`, so it — and the pane inside it — **remounts on every session switch**. A
+    store kept in the pane is destroyed at exactly the moment it is needed.
+  - **The restore is HELD until there is something to scroll.** The pane mounts the moment a session
+    is focused, but its history is *fetched*, so for the first frames the container is empty and an
+    offset set then is clamped to `0` — landing the reader at the top, which is the bug itself.
+  - **Following is re-enabled before the scroll**, or the scroll event it causes immediately
+    un-follows the reader again.
+
 - **The file viewer no longer forces long lines into a horizontal scrollbar** (issue #73). It used
   `white-space: pre` with the reasoning that *"this is a code surface, and wrapping makes line numbers
   lie"* — right about code, wrong about the common case, because the panel hosts whatever the reader

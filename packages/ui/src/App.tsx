@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { Control, HistoricalSession, LiveSession, ModelOption } from "@pi-central/protocol";
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
+import type { SessionScroll } from "./scroll.ts";
 import {
   directoryAt,
   initialFilesState,
@@ -75,6 +76,19 @@ export function App() {
   // Drafts are per session and in memory, so switching focus never loses typing. Never cleared
   // by Esc: that keystroke belongs to the agent.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+
+  //
+  // Incremented on every send. `TranscriptView` watches it to re-arm auto-follow (#86): sending a
+  // prompt is an act, and the reader wants to watch the reply even if they had scrolled up to read
+  // something first.
+  const [followToken, setFollowToken] = useState(0);
+
+  //
+  // Reading position per session, held HERE and not in the transcript pane (issues #80, #86).
+  // `SessionView` carries `key={focused?.id}`, so it remounts on every session switch — a store
+  // inside it would be destroyed at the moment it is needed. A ref, so remembering a scroll never
+  // re-renders the app.
+  const scrollMemory = useRef(new Map<string, SessionScroll>());
 
   // The right panel's geometry and mode, restored from the last visit (issue #8; #15 generalises
   // this to drafts and focus). Read through the initialiser so a corrupt value cannot throw during
@@ -510,6 +524,8 @@ export function App() {
               transcript={transcript}
               home={home}
               historyError={state.transcriptErrors[focused?.id ?? ""]}
+              followToken={followToken}
+              scrollMemory={scrollMemory}
               models={focused ? state.models[focused.id] : undefined}
               modelError={focused ? state.modelErrors[focused.id] : undefined}
               onAnswer={onAnswer}
@@ -541,6 +557,9 @@ export function App() {
                     ? { kind: "prompt", sessionId: focused.id, message, behavior }
                     : { kind: "prompt", sessionId: focused.id, message },
                 );
+                // After the control, not inside building it: the transcript re-arms following so the
+                // reply scrolls into view whatever the reader had scrolled to before (#86).
+                setFollowToken((n) => n + 1);
               }}
               onClearQueueAndStop={() => {
                 // One control, because it is one gesture: Pi clears and returns the queued texts,
@@ -658,6 +677,8 @@ function SessionView({
   onSelectThinkingLevel,
   onSend,
   onClearQueueAndStop,
+  followToken,
+  scrollMemory,
   restored,
   onRestored,
   state,
@@ -678,6 +699,8 @@ function SessionView({
   onSelectThinkingLevel: (level: string) => void;
   onSend: (message: string, behavior: QueueBehavior) => void;
   onClearQueueAndStop: () => void;
+  followToken: number;
+  scrollMemory: React.MutableRefObject<Map<string, SessionScroll>>;
   restored: string[];
   onRestored: () => void;
   state: UiState;
@@ -776,6 +799,9 @@ function SessionView({
       </p>
 
       <TranscriptView
+        initialScroll={scrollMemory.current.get(session.id)}
+        onScrollMemory={(memory) => scrollMemory.current.set(session.id, memory)}
+        followToken={followToken}
         transcript={transcript}
         busy={busy}
         sessionLabel={displayName(session)}
