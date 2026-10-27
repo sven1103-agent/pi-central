@@ -126,8 +126,23 @@ This step is **`verified/manual`**: no part of it runs in CI, because no part of
    ```
 
 6. **Watch `.github/workflows/release.yml`.** It re-runs every gate on the tagged commit, refuses if
-   the tag and the manifest disagree, builds the artifact, publishes it, and creates the GitHub
-   Release.
+   the tag and the manifest disagree, builds the artifact, **stages** it with a provenance
+   attestation, and creates a **draft** GitHub Release.
+
+7. **Approve the staged version.** This is the step that makes a release a human decision:
+
+   ```bash
+   npm stage list                    # the staged versions, with their ids
+   npm stage view <stage-id>         # what is in it, and its dist-tag
+   npm stage approve <stage-id>      # promotes it to the registry — prompts for 2FA
+   npm stage reject <stage-id>       # discard it instead
+   ```
+
+   The same actions are available from the package's *Staged Packages* tab on npm. **Approval can
+   fail until npm's malware scan completes** — staged packages are not approvable before it does.
+
+8. **Publish the draft GitHub Release**, which already carries the notes. If the stage was rejected,
+   **delete the draft** instead; it claims a version that does not exist.
 
 Nothing here is published from a laptop. The one exception in the whole process is the bootstrap
 above, which exists precisely because it cannot go through CI — and which is a throwaway pre-release
@@ -142,27 +157,81 @@ under `next`, never a version anyone is meant to install.
   release shipping undocumented changes.
 - **Publish a version with no CHANGELOG section.** `scripts/release-notes.mjs` exits non-zero rather
   than attaching an empty body — a release with blank notes goes unnoticed.
+- **Publish at all.** It stages. Going live requires a maintainer with 2FA, and the registry rejects a
+  direct publish from this workflow whether or not it tried.
 
-## Publishing uses OIDC, not a stored token
+## Publishing uses OIDC, not a stored token — and staging, enforced by the registry
 
-The workflow declares `id-token: write` and references **no GitHub Actions secret at all**. The
-runner mints a short-lived OIDC token, and npm exchanges it for a publish credential under a
-**trusted publisher** configured on the package's npm page. A stored token is a credential that has
-to be rotated, can be exfiltrated by a compromised dependency, and outlives whoever created it;
-`scripts/release-workflow.test.mjs` fails if one is reintroduced.
+Two mechanisms, and the second is the one that actually constrains anything.
 
-**The trusted publisher is configured once, after the bootstrap publish above** — either from the
-package's settings page on npm (GitHub Actions, repository `sven1103-agent/pi-central`, workflow
-`release.yml`), or from the terminal with `npm trust`. Leave any publish token out of the
-repository's secrets; there is deliberately nothing to add.
+**OIDC, not a stored token.** The workflow declares `id-token: write` and references **no GitHub
+Actions secret at all**. The runner mints a short-lived OIDC token, and npm exchanges it for a stage
+credential under a **trusted publisher** configured on the package's npm page. A stored token is a
+credential that has to be rotated, can be exfiltrated by a compromised dependency, and outlives
+whoever created it; `scripts/release-workflow.test.mjs` fails if one is reintroduced.
 
-The workflow installs a current npm because trusted publishing needs **npm ≥ 11.5.1** and the runner's
-bundled version is older.
+**Stage-only, which is the control.** Staging is *not* a property of the workflow. A workflow that
+merely chose to stage would be decoration, because anything able to influence it could publish
+directly instead. What makes it real is a setting on the trusted-publisher configuration: with
+**stage-only** on, the registry **rejects a direct publish** from this workflow and accepts only a
+staged one. So the workflow cooperates with a rule the registry enforces, rather than relying on its
+own restraint.
+
+**Configure it once, after the bootstrap publish above** — from the package's settings page on npm
+(GitHub Actions, repository `sven1103-agent/pi-central`, workflow `release.yml`), or from the terminal
+with `npm trust`:
+
+| Setting | Value | Why |
+|---|---|---|
+| Direct publishing | **off** | This is what makes staging a control rather than a convention |
+| Allow npm dist-tag | **off** | CI cannot move `latest`, `next` or `beta` on its own; the approver confirms the tag |
+| Stage-only | **on** | A direct publish from the workflow is rejected outright |
+
+Restricting **traditional token access** as well covers the other direction: stage-only binds the
+*trusted publisher*, so it constrains publishes that authenticate as this workflow. A maintainer's
+token is a different identity, and it can still publish directly unless token access is restricted
+too. Be precise about which of the two you are relying on — the CI threat is the one that motivated
+this, and stage-only is the setting that addresses it.
+
+Staging needs **no 2FA** ("`npm stage publish` never requires a 2FA prompt, regardless of token
+type"), so nothing about CI becomes interactive. The second factor moves to *approval*, which is
+where the decision is.
+
+Leave any publish token out of the repository's secrets; there is deliberately nothing to add.
+
+### `0.0.0-stage` is not a stray version
+
+The first time a version is staged, npm publishes a placeholder:
+
+```
+$ npm view pi-central@0.0.0-stage description
+Temporary package placeholder for staged publishing
+```
+
+It is ~332 bytes, publicly available, and **managed by the registry** — npm's docs say the placeholder
+is public while the staged version and its contents are not. So seeing `0.0.0-stage` in
+`npm view pi-central versions` is expected once staging has been used, and it is not something to
+"clean up" or deprecate.
+
+Its presence is also a useful signal: it means a staged publish has happened on this package at some
+point, so **check the queue for anything left over** (`npm stage list`). A staged version nobody
+approves is a release nobody is tracking.
+
+The workflow installs a current npm because both trusted publishing and staging need a recent CLI —
+staging specifically **npm ≥ 11.15.0 on Node ≥ 22.14.0**, and the package must already exist on the
+registry (which the bootstrap above is for).
+
+### Why the GitHub Release is a draft
+
+A Release is a claim that a version exists for people to use. A staged version is not installable, so
+creating a live Release at that point would announce something nobody can install — and if the stage
+is then rejected, the Release would have to be withdrawn. The draft holds the notes so the approver
+has the material in one place, and publishing it is a deliberate act after approval.
 
 ## Provenance, and checking it
 
-`npm publish --provenance` attaches a signed attestation tying the tarball to the commit and workflow
-run that produced it. To check an installed version:
+`npm stage publish --provenance` attaches a signed attestation tying the tarball to the commit and
+workflow run that produced it, and the attestation survives approval. To check an installed version:
 
 ```bash
 npm audit signatures
