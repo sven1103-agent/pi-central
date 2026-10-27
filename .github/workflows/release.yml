@@ -114,6 +114,8 @@ jobs:
           echo "  npm stage reject <stage-id>     # to discard it instead"
           echo "Approval can fail until npm's malware scan completes."
           echo "The GitHub Release below is a DRAFT: publish it only after approving."
+          echo "AFTER approving, verify the dist-tags — the registry has moved 'latest' on its own before (issue #66):"
+          echo "  npm view pi-central dist-tags    # 'latest' must be the version just released"
           npm stage list || true
 
       # `gh` rather than a third-party release action: one fewer supply-chain dependency on the path

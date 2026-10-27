@@ -24,6 +24,7 @@ import {
   currentVersionClaims,
   isChangelog,
   isReadme,
+  latestPointerProblem,
   lockfileDisagreements,
   manifestDisagreements,
   readmeVersionClaims,
@@ -370,4 +371,34 @@ test("a FINAL version is not satisfied by some other release's section", () => {
 
 test("an empty release list is refused by the notes rule", () => {
   assert.ok(releaseNotesRefusal([], "0.2.0"));
+});
+
+// --- `latest` after a bootstrap publish -------------------------------------------------------------
+
+test("an un-attested bootstrap version on `latest` is a complaint with the fix in it", () => {
+  // The real event, 2026-10-27: the registry set `latest` to the throwaway pre-release, so a plain
+  // `npm install pi-central` got an artifact with no provenance attestation. The message has to
+  // carry the correction, because the operator reading it is mid-release.
+  const problem = latestPointerProblem({ latest: "0.2.0-rc.1", next: "0.2.0-rc.1" }, "0.2.0-rc.1");
+  assert.ok(problem, "an un-attested `latest` must be reported");
+  assert.match(problem, /npm deprecate pi-central@0\.2\.0-rc\.1/);
+  assert.match(problem, /no provenance attestation/i);
+  // It must say the thing that was previously believed impossible.
+  assert.match(problem, /cannot be prevented/);
+});
+
+test("`latest` pointing anywhere else is not a complaint", () => {
+  // The healthy case, and the one the release workflow produces: `latest` is the attested release.
+  assert.equal(latestPointerProblem({ latest: "0.2.0", next: "0.2.0-rc.1" }, "0.2.0-rc.1"), undefined);
+  // `next` alone, with no `latest` at all, is also fine — nothing installable is un-attested.
+  assert.equal(latestPointerProblem({ next: "0.2.0-rc.1" }, "0.2.0-rc.1"), undefined);
+});
+
+test("an unreadable dist-tag response is not treated as a failure", () => {
+  // The check runs after an irreversible publish, so it must never turn an offline `npm view` into a
+  // scary non-answer. Absent input means "nothing to judge", not "something is wrong".
+  assert.equal(latestPointerProblem(undefined, "0.2.0-rc.1"), undefined);
+  assert.equal(latestPointerProblem(null, "0.2.0-rc.1"), undefined);
+  assert.equal(latestPointerProblem({}, "0.2.0-rc.1"), undefined);
+  assert.equal(latestPointerProblem({ latest: null }, "0.2.0-rc.1"), undefined);
 });
