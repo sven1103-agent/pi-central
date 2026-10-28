@@ -801,7 +801,11 @@ test("a readFile control returns the text and its byte count", async () => {
     client.send({ kind: "readFile", sessionId: "s1", path: "a.txt" });
     const event = await client.next("file");
     assert.deepEqual(
-      { path: event.kind === "file" && event.path, text: event.kind === "file" && event.text, bytes: event.kind === "file" && event.bytes },
+      {
+        path: event.kind === "file" && event.path,
+        text: event.kind === "file" && event.content.kind === "text" && event.content.text,
+        bytes: event.kind === "file" && event.bytes,
+      },
       { path: "a.txt", text: "hello", bytes: 5 },
     );
     assert.deepEqual(supervisor.calls.at(-1), { method: "readFile", args: ["s1", "a.txt"] });

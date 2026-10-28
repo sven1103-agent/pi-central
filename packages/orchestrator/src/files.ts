@@ -53,6 +53,19 @@ export { formatBytes };
 export const MAX_FILE_BYTES = 256 * 1024;
 
 /**
+ * The largest IMAGE Pi Central will show, in bytes (issue #106).
+ *
+ * 8 MB, because a photograph is routinely 2–4 MB and it is a **single `<img>`** however large it is —
+ * the per-line DOM cost that motivated the text cap is simply not present. Still bounded: the bytes are
+ * read into memory and handed to the browser as a blob, and an unbounded read is a way to make the
+ * orchestrator fall over on a file the user did not mean to open.
+ *
+ * Per-kind rather than one global number, because the two caps exist for different reasons and a
+ * single value would have to be wrong for one of them.
+ */
+export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
+/**
  * How much of a file to inspect when deciding whether it is binary.
  *
  * A NUL byte in the first 8 KB is git's own heuristic and is what makes this cheap: it needs one
@@ -130,6 +143,8 @@ export interface DirListing {
 }
 
 export interface FileContent {
+  /** `text` — see `ImageContent` for the other arm. */
+  kind: "text";
   path: string;
   text: string;
   /** Bytes read. Equal to the file's size, because an oversized file is refused, not clipped. */
@@ -465,6 +480,177 @@ export function readFileText(root: string, relative: string): Result<FileContent
     };
   }
 
-  return { ok: true, value: { path: relPath, text, bytes: buffer.byteLength } };
+  return { ok: true, value: { kind: "text", path: relPath, text, bytes: buffer.byteLength } };
 }
 
+
+/**
+ * The image format of a byte buffer, decided from its MAGIC NUMBERS (issue #106).
+ *
+ * ## Why the bytes decide, and not the extension
+ *
+ * A `.png` containing HTML is the whole reason. If the type came from the filename, this would serve
+ * HTML as an image with an image's content type — and a browser that disagrees about the type will
+ * happily render it as a document. The bytes are the only evidence that cannot be forged by renaming
+ * a file.
+ *
+ * ## SVG is deliberately NOT here
+ *
+ * An SVG is a **text** document that happens to be an image, so it has no magic number — and treating
+ * "starts with `<`" as an SVG signature would accept any XML or HTML document as one. It is handled on
+ * the text path instead, where a real parse can decide, and where `readFileText`'s UTF-8 gate already
+ * applies. Returning `undefined` for anything not recognised is what makes a mislabelled file a
+ * refusal rather than a guess.
+ *
+ * `image/svg+xml` is never produced by this function. See `svgRootOf`.
+ */
+export function imageTypeOf(buffer: Buffer): string | undefined {
+  const starts = (...signature: number[]): boolean => signature.every((byte, index) => buffer[index] === byte);
+
+  if (starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return "image/png";
+  if (starts(0xff, 0xd8, 0xff)) return "image/jpeg";
+  if (starts(0x47, 0x49, 0x46, 0x38)) return "image/gif";
+  // RIFF....WEBP — a container, so the tag at offset 8 is part of the signature.
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString("latin1") === "RIFF" &&
+    buffer.subarray(8, 12).toString("latin1") === "WEBP"
+  ) {
+    return "image/webp";
+  }
+  return undefined;
+}
+
+/**
+ * Is this text an SVG document?
+ *
+ * ## Why this is a parse-ish check and not a prefix match
+ *
+ * An SVG is delivered to the UI as a **blob URL in an `<img>`**, which cannot execute script and
+ * cannot load a subresource. That is the safety property, and it holds for any SVG. What this check
+ * has to do is narrower: decide whether a file should be shown as an image at all, so that an HTML
+ * document is not.
+ *
+ * So it requires **both** a root `<svg>` element and the SVG namespace, after skipping the XML
+ * prolog, comments and a doctype. A prefix test on `<` would accept `<!doctype html>`; requiring the
+ * namespace is what distinguishes an SVG from another XML dialect that happens to have an `<svg>`
+ * element.
+ *
+ * Deliberately lenient about what follows the root tag: this decides *display*, and the browser's SVG
+ * parser decides validity. A file that fails to parse renders as a broken image, which is honest.
+ */
+export function svgRootOf(text: string): boolean {
+  // Strip the prolog: an XML declaration, the doctype, and comments — in any order, repeatedly.
+  let rest = text.slice(0, SVG_HEAD_BYTES);
+  for (;;) {
+    const next = rest.replace(/^\s+|^<\?xml[^>]*\?>|^<!--[\s\S]*?-->|^<!DOCTYPE[^>[]*(?:\[[\s\S]*?\])?\s*>/gi, "");
+    if (next === rest) break;
+    rest = next;
+  }
+  // The root element must be `<svg`, and the document must declare the SVG namespace somewhere in
+  // the head — the namespace is what makes it an SVG rather than an element that happens to be named
+  // that.
+  if (!/^<svg[\s>]/i.test(rest)) return false;
+  return /xmlns\s*=\s*["']http:\/\/www\.w3\.org\/2000\/svg["']/i.test(rest);
+}
+
+/** How much of a text file is inspected for the SVG root. Generous, because prologs and comments vary. */
+const SVG_HEAD_BYTES = 8 * 1024;
+
+/**
+ * Read a file for DISPLAY, choosing the representation from its bytes (issue #106).
+ *
+ * Three outcomes, and the caller must handle all of them:
+ *
+ *   - `text` — the existing path, unchanged, with its own cap and its own refusals;
+ *   - `image` — bytes plus a type decided from magic numbers, for a blob URL;
+ *   - a refusal, with the reason and the size named.
+ *
+ * ## Why images go through their own function
+ *
+ * `readFileText` is right to refuse a PNG: it produces a `string`, and a PNG has none. Rather than
+ * loosening that — which would put binary bytes through a UTF-8 decoder for every file — this reads
+ * the bytes first, asks what they are, and only then decides. The text path is reached by falling
+ * back to it, so its behaviour and its tests are untouched.
+ */
+export function readFileForDisplay(
+  root: string,
+  relative: string,
+): Result<FileContent | ImageContent> {
+  const resolvedPath = resolveWithin(root, relative);
+  if (!resolvedPath.ok) return resolvedPath;
+  const { path, relPath } = resolvedPath.value;
+
+  let stats;
+  try {
+    stats = lstatSync(path);
+  } catch (error) {
+    return { ok: false, error: fromErrno(error, "cannot open", relPath) };
+  }
+  if (stats.isDirectory()) {
+    return { ok: false, error: { reason: "is-directory", message: `"${relPath}" is a directory` } };
+  }
+
+  // The larger cap, because a binary image may legitimately be one. A file over BOTH caps is refused
+  // here rather than after a pointless read of megabytes.
+  if (stats.size > MAX_IMAGE_BYTES) {
+    return {
+      ok: false,
+      error: {
+        reason: "too-large",
+        message:
+          `"${relPath}" is ${formatBytes(stats.size)}, above the ${formatBytes(MAX_IMAGE_BYTES)} limit ` +
+          `for displaying a file here, so it was not read`,
+      },
+    };
+  }
+
+  let buffer: Buffer;
+  try {
+    buffer = readFileSync(path);
+  } catch (error) {
+    return { ok: false, error: fromErrno(error, "cannot read", relPath) };
+  }
+
+  const imageType = imageTypeOf(buffer);
+  if (imageType !== undefined) {
+    return {
+      ok: true,
+      value: { kind: "image", path: relPath, type: imageType, bytes: buffer.byteLength, data: buffer },
+    };
+  }
+
+  // Not a recognised image by its bytes. Fall back to the text path, which re-reads the file — an
+  // extra `readFileSync` on a file already known to be under 8 MB, in exchange for keeping one
+  // well-tested text path rather than two.
+  const asText = readFileText(root, relative);
+  if (!asText.ok) return asText;
+
+  // An SVG has no magic number, so it is recognised here, on the decoded text. It is returned as text
+  // PLUS an image type: the UI builds a blob from the same bytes and shows it in an `<img>`, so the
+  // text is only used to decide. `svgRootOf` documents why that decision is not a prefix match.
+  if (svgRootOf(asText.value.text)) {
+    return {
+      ok: true,
+      value: { kind: "image", path: relPath, type: "image/svg+xml", bytes: stats.size, data: buffer },
+    };
+  }
+
+  return asText;
+}
+
+/** A file shown as an image: bytes and a type the ORCHESTRATOR decided, never the browser. */
+export interface ImageContent {
+  kind: "image";
+  path: string;
+  /** One of `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `image/svg+xml`. */
+  type: string;
+  bytes: number;
+  /**
+   * The raw bytes, for a blob URL in the UI.
+   *
+   * Sent as raw binary over the protocol rather than base64: the transport is a WebSocket, which
+   * carries binary frames, and base64 would inflate every image by a third for no gain.
+   */
+  data: Buffer;
+}

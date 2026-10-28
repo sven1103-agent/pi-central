@@ -431,8 +431,11 @@ export class Transport {
             sessionId: control.sessionId,
             // As sent, for the same reason as `files`: one key for the client's bookkeeping.
             path: control.path,
-            text: result.value.text,
             bytes: result.value.bytes,
+            content:
+              result.value.kind === "image"
+                ? { kind: "image", type: result.value.type, base64: result.value.data.toString("base64") }
+                : { kind: "text", text: result.value.text },
           });
         } else {
           this.#broadcastFileError(control.sessionId, control.path, "read", result.error);

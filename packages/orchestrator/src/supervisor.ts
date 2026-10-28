@@ -32,9 +32,11 @@ import { assessAgentCapabilities } from "./capabilities.ts";
 import { renderPolicyFragment } from "./fragment.ts";
 import {
   listDirectory,
+  readFileForDisplay,
   readFileText,
   type DirListing,
   type FileContent,
+  type ImageContent,
   type Result,
 } from "./files.ts";
 import { resolveInstallationRoot } from "./installation-root.ts";
@@ -683,7 +685,7 @@ export class Supervisor extends EventEmitter {
   }
 
   /** Read one text file from a session's working directory, confined the same way. */
-  readFile(id: string, path: string): Result<FileContent> {
+  readFile(id: string, path: string): Result<FileContent | ImageContent> {
     const session = this.#sessions.get(id);
     if (!session) {
       return {
@@ -691,7 +693,7 @@ export class Supervisor extends EventEmitter {
         error: { reason: "not-found", message: `no session ${id}, so there is no working directory to read from` },
       };
     }
-    return readFileText(session.cwd, path);
+    return readFileForDisplay(session.cwd, path);
   }
 
   /**

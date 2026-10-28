@@ -25,6 +25,7 @@ import { formatBytes } from "../format.ts";
 import { fileAt } from "../files.ts";
 import { CopyButton } from "./CopyButton.tsx";
 import { FileErrorNote } from "./FileErrorNote.tsx";
+import { ImageViewer } from "./ImageViewer.tsx";
 
 export function FilePane({
   path,
@@ -40,7 +41,8 @@ export function FilePane({
   onToggleWrap: () => void;
   onClose: () => void;
 }) {
-  const lines = state.status === "loaded" ? state.text.split("\n") : [];
+  const text = state.status === "loaded" && state.content.kind === "text" ? state.content.text : undefined;
+  const lines = text === undefined ? [] : text.split("\n");
 
   return (
     <div className="filepane">
@@ -50,7 +52,11 @@ export function FilePane({
         </span>
         {state.status === "loaded" && (
           <span className="filepane-meta">
-            {lines.length} line{lines.length === 1 ? "" : "s"} · {formatBytes(state.bytes)}
+            {/* Line counts are a fact about TEXT. An image has no lines, so the viewer shows its type
+                instead — the size is on both, because that is true of both. */}
+            {state.content.kind === "text"
+              ? `${lines.length} line${lines.length === 1 ? "" : "s"} · ${formatBytes(state.bytes)}`
+              : formatBytes(state.bytes)}
           </span>
         )}
         {/* The relative path, ready to paste into the prompt. Labelled so a screen reader hears
@@ -63,7 +69,9 @@ export function FilePane({
           It is in the header rather than a menu because it answers the one thing a reader of a wide
           document wants, and the header is where the document's own controls already live.
         */}
-        {state.status === "loaded" && (
+        {/* Wrapping is a property of text; offering it on an image would be a control that cannot
+            do anything, which this design treats as a lie about the state. */}
+        {state.status === "loaded" && state.content.kind === "text" && (
           <button
             type="button"
             className="btn btn-quiet"
@@ -104,6 +112,14 @@ export function FilePane({
             A wrapped continuation keeps its number on the first visual line, which is what keeps the
             numbering useful rather than a lie.
           */}
+          {state.content.kind === "image" ? (
+            <ImageViewer
+              path={path}
+              type={state.content.type}
+              base64={state.content.base64}
+              bytes={state.bytes}
+            />
+          ) : (
           <ol className={wrapped ? "filepane-lines is-wrapped" : "filepane-lines"}>
             {lines.map((line, index) => (
               <li key={index}>
@@ -115,6 +131,7 @@ export function FilePane({
               </li>
             ))}
           </ol>
+          )}
         </>
       )}
     </div>

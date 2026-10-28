@@ -60,7 +60,7 @@ test("the file viewer names WHICH path, without saying Copy twice", () => {
   // the button supplies the verb, so the caller must not supply it too.
   const html = renderToString(createElement(FilePane, {
     path: "CHANGELOG.md",
-    state: { status: "loaded", text: "x\n", bytes: 2 },
+    state: { status: "loaded", content: { kind: "text", text: "x\n" }, bytes: 2 },
     wrapped: true,
     onToggleWrap() {},
     onClose() {},
