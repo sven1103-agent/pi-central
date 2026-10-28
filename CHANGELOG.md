@@ -85,6 +85,32 @@ findable in a long conversation.
 
 ### Fixed
 
+- **Every image failed to display, because `<img>` was rendered before it had a source** (issue #108).
+  Reported from a real window: *"Could not display — The bytes of img_5.png are a image/png header, but
+  the browser could not decode the image"* — while the file was a perfectly valid PNG that `sips` and
+  the orchestrator both decoded.
+
+  The orchestrator half was correct: the bytes round-trip through base64 intact and re-detect as
+  `image/png`. The bug was in the viewer. `url` is `undefined` on the first render, and
+  **`<img src={undefined}>` renders an `<img>` with no `src` — which a browser fires `error` for.** The
+  handler set `broken` on the very first frame, so the component showed its failure note and never
+  displayed the real image once the effect produced the blob URL a moment later. It failed permanently,
+  for every image.
+
+  Nothing renders until the URL exists now. There is nothing to show on the first frame, and an `<img>`
+  with no source is not a thing that can be "displayed".
+
+  **The message was wrong too**, and wrong twice: it read *"are a image/png header"* (ungrammatical) and
+  implied the whole file was a valid header. What is actually known is narrower — the leading bytes were
+  recognised and the decode failed — so it now says that, and names the likely cause.
+
+  **Why the tests missed it, which is the useful part.** `renderToStaticMarkup` runs no effects, so the
+  component's first frame looks identical either way; and jsdom cannot fire the `error` a browser fires
+  for a missing `src`. The image tests now **mount** (jsdom + `act`), and the first-frame assertion is
+  structural — the component must return nothing without a URL — because that is a guard clause rather
+  than a rendered artefact. Falsifying it the first time **did not fail**, which is how the weak version
+  was found.
+
 - **A binary file refusal now names the file's size** (issue #9). The refusal already said *why*
   (`NUL bytes` / `not valid UTF-8`) and already had the number — `lstat` is consulted for the size cap
   before the read — so withholding it was a choice rather than a limitation, and a reader cannot judge
