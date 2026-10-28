@@ -53,7 +53,13 @@ import { findOwnPackage } from "./package-meta.ts";
  * (`packages/orchestrator/test/static-ui.test.ts`). Change one without the other and CI fails.
  */
 export const UI_CSP =
-  "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+  // `blob:` is REQUIRED and is not covered by `'self'` (issue #111).
+  //
+  // A blob URL has an opaque origin, so `img-src 'self'` does not match it — the file viewer builds
+  // its images from a Blob and would have every one of them blocked, with the `<img>` firing `error`
+  // and the UI reporting "could not decode". That is a false accusation about a valid file, and it is
+  // what shipped: the comment said a blob URL "counts as 'self'", which stopped anyone checking.
+  "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; " +
   "font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 /** Content types for the file kinds a Vite build emits. Anything else is refused, not guessed. */
