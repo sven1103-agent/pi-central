@@ -85,6 +85,14 @@ findable in a long conversation.
 
 ### Fixed
 
+- **A binary file refusal now names the file's size** (issue #9). The refusal already said *why*
+  (`NUL bytes` / `not valid UTF-8`) and already had the number — `lstat` is consulted for the size cap
+  before the read — so withholding it was a choice rather than a limitation, and a reader cannot judge
+  what they are looking at without it.
+
+  Both detection paths are covered, because they have separate messages and a test on one would let
+  the other regress.
+
 - **The copy-path button said `Copy copy path changelog.md`** (issue #72). Two faults in one line:
 
   - the **caller** passed `Copy path ${path}` while the button prefixed its own `Copy`, so the verb
