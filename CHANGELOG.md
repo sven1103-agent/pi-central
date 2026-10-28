@@ -85,6 +85,30 @@ findable in a long conversation.
 
 ### Fixed
 
+- **Every image was blocked by our own CSP, and a comment said it could not be** (issue #111). Reported
+  as *"could not decode this image"* about a perfectly valid PNG — and the file was innocent all along.
+
+  The viewer shows images through a **blob URL**, and a blob URL has an **opaque origin**, so
+  `img-src 'self'` does **not** match it. The browser blocked the load and the `<img>` fired `error`,
+  which the component rendered as a decode failure.
+
+  What made this hard to see is that two things were asserted and both were false:
+
+  - the CSP was believed to cover it, because a comment said *"a blob URL counts as `'self'`"*. It does
+    not. Same shape as the `latest` dist-tag guarantee (#66): a statement of fact in a comment is what
+    stops anyone checking, so a false one is worse than none.
+  - a previous fix (#108) made the component wait for the blob URL before rendering, which was correct
+    and necessary — and made the failure *look* like a decode problem rather than a policy problem.
+
+  `img-src` now allows `blob:` in **both** the header and the `<meta>` tag, which the existing agreement
+  test required to move together.
+
+  Two hypotheses were tested and disproved before this one, and that is worth recording: the bytes
+  round-trip byte-identically through base64 (`sips`, the chunk structure, and an `atob` simulation all
+  agreed), and React 19's StrictMode double-invoke does **not** strand the rendered URL — measured by
+  mounting the real component under `StrictMode` and checking that the rendered `src` is not among the
+  revoked ones.
+
 - **Every image failed to display, because `<img>` was rendered before it had a source** (issue #108).
   Reported from a real window: *"Could not display — The bytes of img_5.png are a image/png header, but
   the browser could not decode the image"* — while the file was a perfectly valid PNG that `sips` and
