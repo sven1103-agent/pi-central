@@ -322,7 +322,23 @@ export type Event =
    *
    * Text, and **untrusted**: it is displayed inert, never rendered as markup (ADR-0006).
    */
-  | { kind: "file"; sessionId: string; path: string; text: string; bytes: number }
+  /**
+   * A file's contents, as either text or an image (issue #106).
+   *
+   * A discriminated union rather than optional fields, so a client that only knows about `text` fails
+   * to compile rather than rendering an empty pane for an image.
+   *
+   * An image carries **base64** data and a type the ORCHESTRATOR decided from the bytes. Base64 rather
+   * than a binary frame: this envelope is JSON, and the alternative is a second message shape for the
+   * same request. The 33% inflation is bounded by the 8 MB image cap.
+   */
+  | {
+      kind: "file";
+      sessionId: string;
+      path: string;
+      bytes: number;
+      content: { kind: "text"; text: string } | { kind: "image"; type: string; base64: string };
+    }
   /**
    * A file request was refused.
    *
@@ -391,8 +407,13 @@ export type FileErrorReason =
  * directions — so the surface and the version cannot move independently.
  *
  * 1 → 2: `listFiles`, `readFile`, `files`, `file`, `fileError` (issue #8).
+ * 2 → 3: the `file` event's payload became a discriminated union of text and image, so a v2
+ *        client would read `text` off a message that no longer has it (issue #106). A FIELD
+ *        change is exactly what the kind fingerprint cannot see — this one was caught by a
+ *        type error at the one call site that read `text`, which is the backstop the
+ *        fingerprint documents.
  */
-export const PROTOCOL_VERSION = 2 as const;
+export const PROTOCOL_VERSION = 3 as const;
 
 export interface Hello {
   kind: "hello";

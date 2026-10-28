@@ -61,9 +61,38 @@ function unionBody(name: string): string {
   return envelopes.slice(start, end < 0 ? envelopes.length : end);
 }
 
-/** Every `kind: "…"` literal in a union, sorted. Sorted because ORDER is not the contract. */
+/**
+ * Every `kind: "…"` literal at the TOP of a union arm, sorted. Sorted because ORDER is not the
+ * contract.
+ *
+ * Anchored to a line that begins an arm (`| {` or `{`), because a union's arms may declare **nested**
+ * discriminated payloads — `file` carries `content: { kind: "text" } | { kind: "image" }` (issue #106)
+ * — and a bare scan would read those inner tags as top-level event kinds. Found exactly that way: the
+ * fingerprint reported two new kinds called `text` and `image`, which are payload discriminants rather
+ * than wire kinds.
+ */
 function kindsOf(name: string): string[] {
-  return [...unionBody(name).matchAll(/kind:\s*"([^"]+)"/g)].map((match) => match[1]!).sort();
+  const body = unionBody(name);
+  // Split on ARM BOUNDARIES (a leading `|` at the union's own indentation), then take the FIRST
+  // `kind:` in each arm. That is robust to arms written inline (`| { kind: "list" }`) and to arms
+  // written across lines, and it cannot pick up a NESTED discriminant — `file` carries
+  // `content: { kind: "text" } | { kind: "image" }` (issue #106), whose tags are payload shapes, not
+  // wire kinds.
+  //
+  // Two earlier attempts failed and both were caught: a bare scan reported `text`/`image` as new
+  // kinds, and a line-anchored pattern found ZERO arms because most are inline. So there is an
+  // assertion below that the arms found account for every `kind:` literal outside nested braces.
+  const arms = body
+    .split(/^\s{2}\|/m)
+    .slice(1)
+    .map((chunk) => /kind:\s*"([^"]+)"/.exec(chunk)?.[1])
+    .filter((kind): kind is string => kind !== undefined);
+
+  assert.ok(
+    arms.length > 0 && arms.length === new Set(arms).size,
+    `the union parser found ${arms.length} arms (${new Set(arms).size} distinct) — it may be misreading the union`,
+  );
+  return arms.sort();
 }
 
 /** The message a developer needs, including the fixture to paste. */

@@ -1642,6 +1642,30 @@ select.btn { font-family: var(--sans); }
   overflow-wrap: anywhere;
 }
 
+/* --- An image in the file viewer (issue #106) ---------------------------------------------------
+
+   Two rules, both about not lying about the image:
+
+   1. `object-fit: contain` with a `max-height`, so a 4000px photograph is scaled down to be VIEWED
+      rather than cropped to fit. Cropping would show part of the image and call it the image.
+   2. A checkerboard behind it, because a PNG with transparency composited onto the dark page reads
+      as a picture with black holes in it. The board is the conventional signal for "transparent",
+      and it costs one gradient. */
+.imagepane { display: flex; flex-direction: column; gap: var(--sp-2); min-height: 0; }
+.imagepane-img {
+  max-width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
+  border-radius: var(--r-2);
+  background-color: var(--panel-2);
+  background-image:
+    linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%),
+    linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+.imagepane-meta { margin: 0; font-family: var(--mono); font-size: var(--fs-xs); color: var(--dim); }
+
 /* --- The panel: a region with modes, and a draggable edge (issue #8, reworked) ------------------
 
    This was the inspector: a fixed 320px column. A real window showed why that fails once it hosts a

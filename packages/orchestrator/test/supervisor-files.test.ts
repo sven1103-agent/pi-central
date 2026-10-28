@@ -114,7 +114,8 @@ test("reading through the supervisor is confined too, and a symlink escape is re
 
     const ok = supervisor.readFile(sessionId, "inside.txt");
     assert.equal(ok.ok, true);
-    assert.equal(ok.ok === true && ok.value.text, "safe\n");
+    assert.equal(ok.ok === true && ok.value.kind, "text", "a .txt is text, not an image");
+    assert.equal(ok.ok === true && ok.value.kind === "text" && ok.value.text, "safe\n");
 
     // The symlink is followed by `realpath`, and the resolved target is outside the cwd.
     const linked = supervisor.readFile(sessionId, "link.txt");

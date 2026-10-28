@@ -41,7 +41,17 @@ export type DirectoryState =
 export type FileState =
   | { status: "unloaded" }
   | { status: "loading" }
-  | { status: "loaded"; text: string; bytes: number }
+  /**
+   * Loaded. **Text or an image** (issue #106).
+   *
+   * A discriminated union rather than a nullable `text`, so a component that only handles text fails
+   * to compile instead of rendering an empty pane for an image.
+   *
+   * The image arm carries `base64` and the orchestrator's `type`, and the blob URL is created by the
+   * component that displays it — a URL is a resource with a lifetime, and state is not the place to
+   * own one (it would leak on every re-render, and never be revoked on unmount).
+   */
+  | { status: "loaded"; content: { kind: "text"; text: string } | { kind: "image"; type: string; base64: string }; bytes: number }
   | { status: "error"; reason: FileErrorReason; code?: string | undefined; message: string };
 
 export interface FilesState {
@@ -182,7 +192,13 @@ export type FilesAction =
   /** A LISTING was refused. Distinct from `filesLoaded` with no entries — see `DirectoryState`. */
   | { kind: "filesFailed"; sessionId: string; path: string; reason: FileErrorReason; code?: string | undefined; message: string }
   | { kind: "fileLoading"; sessionId: string; path: string }
-  | { kind: "fileLoaded"; sessionId: string; path: string; text: string; bytes: number }
+  | {
+      kind: "fileLoaded";
+      sessionId: string;
+      path: string;
+      bytes: number;
+      content: { kind: "text"; text: string } | { kind: "image"; type: string; base64: string };
+    }
   | { kind: "fileFailed"; sessionId: string; path: string; reason: FileErrorReason; code?: string | undefined; message: string }
   /** Toggle a directory open/closed. Collapsing keeps the cached listing, so reopening is instant. */
   | { kind: "toggleExpanded"; sessionId: string; path: string }
@@ -250,7 +266,7 @@ export function reduceFiles(state: FilesState, action: FilesAction): FilesState 
           ...state.files,
           [fileKey(action.sessionId, action.path)]: {
             status: "loaded",
-            text: action.text,
+            content: action.content,
             bytes: action.bytes,
           },
         },

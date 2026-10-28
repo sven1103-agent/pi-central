@@ -208,7 +208,13 @@ export function App() {
             });
             break;
           case "file":
-            dispatchFiles({ kind: "fileLoaded", sessionId: event.sessionId, path: event.path, text: event.text, bytes: event.bytes });
+            dispatchFiles({
+              kind: "fileLoaded",
+              sessionId: event.sessionId,
+              path: event.path,
+              bytes: event.bytes,
+              content: event.content,
+            });
             break;
           case "fileError":
             // `request` says which question failed, so this routes to the right cache instead of

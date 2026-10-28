@@ -1282,7 +1282,7 @@ test("file contents are rendered as text, never as markup", async () => {
   const payload = '<img src=x onerror="alert(1)"><script>alert(2)</script>';
   const html = renderToString(createElement(FilePane, {
     path: "x.txt",
-    state: { status: "loaded", text: payload, bytes: payload.length },
+    state: { status: "loaded", content: { kind: "text", text: payload }, bytes: payload.length },
     wrapped: true, onToggleWrap() {}, onClose() {},
   }));
   assert.ok(!/<img/i.test(html) && !/<script>alert/i.test(html), `markup must be escaped, got: ${html}`);
@@ -1651,7 +1651,7 @@ test("the file viewer wraps long lines by default", async () => {
   const state = await filesState();
   const html = renderToString(createElement(FilePane, {
     path: "CHANGELOG.md",
-    state: { status: "loaded", text: "a very long line that would otherwise scroll sideways\n", bytes: 52 },
+    state: { status: "loaded", content: { kind: "text", text: "a very long line that would otherwise scroll sideways\n" }, bytes: 52 },
     wrapped: true, onToggleWrap() {}, onClose() {},
   }));
   assert.match(html, /class="filepane-lines is-wrapped"/, "the wrapped class drives the CSS");
@@ -1663,7 +1663,7 @@ test("the wrap toggle's label states the ACTION, and aria-pressed states the fac
   const state = await filesState();
   const render = (wrapped) => renderToString(createElement(FilePane, {
     path: "a.ts",
-    state: { status: "loaded", text: "const x = 1;\n", bytes: 13 },
+    state: { status: "loaded", content: { kind: "text", text: "const x = 1;\n" }, bytes: 13 },
     wrapped, onToggleWrap() {}, onClose() {},
   }));
 

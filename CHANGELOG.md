@@ -315,6 +315,32 @@ manifest and the three private workspace manifests cannot disagree.
 
 ### Added
 
+- **Images open in the file browser: PNG, JPEG, GIF, WebP and SVG** (issue #106). The tree listed
+  `image.png` with its size and could not open it, because `readFileText` decodes with a strict UTF-8
+  decoder and refuses everything else — images were refused because the only read path that existed
+  produced a *string*, not because they were unsafe.
+
+  Nothing about the isolation model changed: per ADR-0007 file reads run at the user's UID with no
+  sandbox, and the same `resolveWithin` containment (segments, `realpath`, containment again) guards the
+  byte path as guards the text one.
+
+  Four decisions worth naming:
+
+  - **The type comes from MAGIC NUMBERS, not the extension.** A `.png` containing HTML is the whole
+    reason: with the type taken from the filename it would be served as an image, and a browser that
+    disagrees about the type renders it as a document. A mislabelled file falls back to the text path
+    and displays as text, which is what its bytes are.
+  - **SVG is recognised on the TEXT path**, because it has no magic number. Requiring *both* a `<svg>`
+    root and the SVG namespace is what stops a bare `<` prefix test from accepting an HTML document.
+  - **The cap is per-kind.** 256 KB for text, because text costs one DOM node *per line*; 8 MB for
+    images, because an image is one `<img>` however large it is. A single global number would have had
+    to be wrong for one of them.
+  - **Rendered as `<img src={blobUrl}>`, never inline.** That keeps ADR-0006's single
+    `dangerouslySetInnerHTML` at one, and it means the SVG safety property is the browser's — an image
+    document cannot run script or load a `file://` subresource — rather than a promise about our own
+    parser. The blob URL is created in an effect and **revoked on cleanup**; held in state it would be
+    recreated every render and never released.
+
 - **A screenshot of the real dashboard in the README** (issue #7), with alt text that describes what
   is visible rather than naming the file: the session rail, the transcript, the tinted first-person
   turn, the tool trace with its durations, and the collapsed right-hand panel.

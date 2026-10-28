@@ -19,12 +19,16 @@ import { join } from "node:path";
 import {
   BINARY_SNIFF_BYTES,
   MAX_FILE_BYTES,
+  MAX_IMAGE_BYTES,
   containsPath,
   formatBytes,
   isHidden,
   listDirectory,
   normalizeRelative,
+  readFileForDisplay,
+  imageTypeOf,
   readFileText,
+  svgRootOf,
   resolveWithin,
 } from "../src/files.ts";
 
@@ -487,4 +491,131 @@ test("the same holds for a file refused by the UTF-8 decode", () => {
   assert.equal(result.error.reason, "binary");
   assert.match(result.error.message, /4 B/, `the size must be named, got: ${result.error.message}`);
   assert.match(result.error.message, /UTF-8/);
+});
+
+// --- Images (issue #106) ---------------------------------------------------------------------------
+
+test("image types are decided from MAGIC NUMBERS, not from the extension", () => {
+  // The whole reason: a `.png` containing HTML. If the type came from the filename this would be
+  // served as an image with an image's content type, and a browser that disagrees will render it as a
+  // document. The bytes are the only evidence a rename cannot forge.
+  const cases: [string, number[], string | undefined][] = [
+    ["png", [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], "image/png"],
+    ["jpeg", [0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10], "image/jpeg"],
+    ["gif", [0x47, 0x49, 0x46, 0x38, 0x39, 0x61], "image/gif"],
+    ["webp", [...Buffer.from("RIFF"), 0x24, 0, 0, 0, ...Buffer.from("WEBP")], "image/webp"],
+    ["html called .png", [...Buffer.from("<!doctype html><html>hi</html>")], undefined],
+    ["plain text called .png", [...Buffer.from("hello\n")], undefined],
+    ["empty", [], undefined],
+  ];
+  for (const [name, bytes, expected] of cases) {
+    assert.equal(imageTypeOf(Buffer.from(bytes)), expected, name);
+  }
+});
+
+test("a mislabelled file is refused as binary, not rendered as an image", () => {
+  // End to end through the real read path: the file is named `.png` and contains HTML. It must NOT come
+  // back with an image type, and it must not be silently rendered either.
+  const root = makeRoot("mislabelled");
+  writeFileSync(join(root, "logo.png"), "<!doctype html><html><body>not an image</body></html>");
+  const result = readFileForDisplay(root, "logo.png");
+  assert.equal(result.ok, true, "it is readable — as TEXT, which is what its bytes are");
+  if (!result.ok) return;
+  assert.equal(result.value.kind, "text", "an HTML file must never be typed as an image");
+});
+
+test("a real PNG comes back as an image, with the orchestrator's type and the raw bytes", () => {
+  const root = makeRoot("real-png");
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+  writeFileSync(join(root, "pixel.png"), bytes);
+
+  const result = readFileForDisplay(root, "pixel.png");
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.value.kind, "image");
+  if (result.value.kind !== "image") return;
+  assert.equal(result.value.type, "image/png");
+  assert.equal(result.value.bytes, bytes.length);
+  assert.deepEqual([...result.value.data], [...bytes], "the exact bytes, for the blob");
+});
+
+test("an SVG is recognised on the TEXT path, because it has no magic number", () => {
+  const root = makeRoot("svg");
+  writeFileSync(
+    join(root, "logo.svg"),
+    `<?xml version="1.0" encoding="UTF-8"?>\n<!-- a comment -->\n<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect/></svg>`,
+  );
+  const result = readFileForDisplay(root, "logo.svg");
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.value.kind, "image");
+  assert.equal(result.value.kind === "image" && result.value.type, "image/svg+xml");
+});
+
+test("an HTML document is not an SVG, however much it looks like markup", () => {
+  // A prefix test on `<` would accept this. Requiring the SVG namespace is what distinguishes them.
+  assert.equal(svgRootOf("<!doctype html><html><body><svg/></body></html>"), false);
+  assert.equal(svgRootOf("<svg><rect/></svg>"), false, "no namespace");
+  assert.equal(svgRootOf('<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>'), true);
+  // A prolog, comments and a doctype are all skippable, in any order.
+  assert.equal(svgRootOf('<?xml version="1.0"?><!DOCTYPE svg><!-- c --><svg xmlns="http://www.w3.org/2000/svg"/>'), true);
+});
+
+test("the image cap is the IMAGE cap, not the text one — a 1 MB photo opens", () => {
+  // The cap is per-kind: 8 MB for images because one `<img>` costs one node, 256 KB for text because
+  // text costs one node PER LINE. A single global number would have had to be wrong for one of them.
+  //
+  // This test uses a file BETWEEN the two caps, and that is the whole point: my first version used
+  // `MAX_IMAGE_BYTES + 1`, which exceeds BOTH caps, so swapping the image cap for the text cap left it
+  // green. A falsification that does not fail is worth nothing — and it caught a test asserting a
+  // refusal without asserting WHICH limit produced it.
+  const root = makeRoot("image-cap-between");
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(1024 * 1024)]);
+  writeFileSync(join(root, "photo.png"), png);
+
+  const result = readFileForDisplay(root, "photo.png");
+  assert.equal(result.ok, true, "1 MB is over the TEXT cap and well under the IMAGE cap");
+  if (!result.ok) return;
+  assert.equal(result.value.kind, "image");
+});
+
+test("an image over ITS cap is refused, naming that cap", () => {
+  const root = makeRoot("image-cap-over");
+  writeFileSync(join(root, "huge.png"), Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(MAX_IMAGE_BYTES)]));
+  const result = readFileForDisplay(root, "huge.png");
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.error.reason, "too-large");
+  assert.match(result.error.message, /8\.0 MB/, "the IMAGE limit, named");
+});
+
+test("an unsupported binary still refuses, and says how big it is", () => {
+  // A PDF has no image signature, so it falls through to the text path and is refused as binary —
+  // which is issue #9's behaviour and must not change.
+  const root = makeRoot("pdf");
+  writeFileSync(join(root, "doc.pdf"), Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0x01, 0x02]));
+  const result = readFileForDisplay(root, "doc.pdf");
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.error.reason, "binary");
+  assert.match(result.error.message, /7 B/);
+});
+
+test("containment applies to images exactly as it does to text", () => {
+  // The same `resolveWithin` guards the byte path, which is what makes serving bytes safe. A test that
+  // only covered the text path would leave the new one unsupervised.
+  const base = mkdtempSync(join(tmpdir(), "pi-central-img-base-"));
+  const root = join(base, "work");
+  mkdirSync(root);
+  writeFileSync(join(base, "outside.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  symlinkSync(join(base, "outside.png"), join(root, "escape.png"));
+  try {
+    for (const attempt of ["../outside.png", "escape.png"]) {
+      const result = readFileForDisplay(root, attempt);
+      assert.equal(result.ok, false, attempt);
+      if (!result.ok) assert.equal(result.error.reason, "escapes-cwd", attempt);
+    }
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });

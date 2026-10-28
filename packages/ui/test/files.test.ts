@@ -228,14 +228,14 @@ test("the open file's path and contents are produced together", () => {
     kind: "fileLoaded",
     sessionId: "s1",
     path: "a.txt",
-    text: "AAA",
     bytes: 3,
+    content: { kind: "text", text: "AAA" },
   });
   state = reduceFiles(state, { kind: "openFile", sessionId: "s1", path: "a.txt" });
 
   const open = openFileFor(state, "s1");
   assert.equal(open?.path, "a.txt");
-  assert.equal(open?.state.status === "loaded" && open.state.text, "AAA");
+  assert.equal(open?.state.status === "loaded" && open.state.content.kind === "text" && open.state.content.text, "AAA");
 });
 
 test("nothing open means no pane state, rather than an empty path", () => {
