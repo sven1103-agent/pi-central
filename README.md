@@ -1,13 +1,13 @@
-# Pi Central
+<p align="center">
+  <img src="assets/pi-central-logo-full-dark-mode.svg" alt="Pi Central" width="420" />
+</p>
 
-> The central station where Pi sessions come together and are orchestrated.
+**Pi Central** (/paɪ ˈsɛntrəl/) is a local dashboard for running, watching, and switching between
+multiple [Pi](https://pi.dev) coding-agent sessions that live in **different working directories**,
+while keeping every session inside its own **Agent Safehouse** sandbox.
 
-Pi Central is a local dashboard for running, watching, and switching between multiple
-[Pi](https://pi.dev) coding-agent sessions that live in **different working directories**, while
-keeping every session inside its own **Agent Safehouse** sandbox.
-
-The name is the design brief: a central station is where independent lines arrive, are dispatched,
-and are kept apart from one another. Pi Central does the same for agent sessions.
+The central station is the design brief: independent lines arrive, are dispatched, and are kept apart
+from one another. Pi Central does the same for agent sessions.
 
 **Status: works end to end, verified, and published.** The version is deliberately not written down
 here: `pi-central --version` reports the version of the package it was actually shipped in, and a

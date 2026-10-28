@@ -8,6 +8,19 @@
       content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     />
     <title>Pi Central</title>
+    <!--
+      An SVG icon first, because it is one file that stays sharp at every size, with a PNG fallback for
+      anything that cannot use it. `sizes="any"` tells the browser the SVG is scalable rather than
+      claiming a pixel size it does not have.
+
+      Both live in `src/assets/` so Vite fingerprints and emits them with the rest of the build — which
+      also means the orchestrator serves them with the right content type (`static-ui.ts` has `.svg` and
+      `.png`), rather than the app shipping a favicon the server would call `application/octet-stream`.
+    -->
+    <link rel="icon" type="image/svg+xml" href="/src/assets/logo-icon.svg" sizes="any" />
+    <link rel="icon" type="image/png" href="/src/assets/logo-icon.png" />
+    <link rel="apple-touch-icon" href="/src/assets/logo-icon.png" />
+    <meta name="theme-color" content="#3fa383" />
   </head>
   <body>
     <div id="root"></div>

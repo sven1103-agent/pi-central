@@ -47,6 +47,14 @@
    * --accent-text 8.1:1.
    */
   --accent: #4c9aff;
+  /*
+   * The BRAND green (issue #115), separate from `--ok` on purpose.
+   *
+   * `--ok` means *success* — a passing state, a settled run. Reusing it for the logo would make the
+   * brand read as a status, and every future green in the UI ambiguous between "this is Pi Central" and
+   * "this went well". One token, one meaning.
+   */
+  --brand: #3fa383;
   --accent-text: #a5d6ff;
   --accent-tint: rgba(76, 154, 255, 0.15);
   --ok: #3fb950;
@@ -219,6 +227,17 @@ button { font: inherit; color: inherit; }
   font-weight: 600;
   letter-spacing: -0.01em;
   margin: 0;
+  /* The mark and the word are one lockup, so they are one flex row with a fixed gap. */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wordmark-mark {
+  /* 22px: matched to the cap height of the word beside it, so the mark reads as part of the name rather
+     than as an icon that happens to be adjacent. */
+  width: 22px;
+  height: 22px;
+  flex: none;
 }
 
 .tabs { display: flex; gap: 2px; }

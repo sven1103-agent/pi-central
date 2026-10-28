@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="162.75069mm"
+   height="27.417528mm"
+   viewBox="0 0 162.75069 27.417528"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.4.3 (0d15f750, 2025-12-25)"
+   sodipodi:docname="pi-central-logo-full-bright-mode.svg"
+   inkscape:export-filename="pi-central-logo-full-bright-mode.webp"
+   inkscape:export-xdpi="96"
+   inkscape:export-ydpi="96"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#eeeeee"
+     borderopacity="1"
+     inkscape:showpageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#505050"
+     inkscape:document-units="mm"
+     inkscape:zoom="1.1905643"
+     inkscape:cx="323.37607"
+     inkscape:cy="97.01282"
+     inkscape:window-width="1920"
+     inkscape:window-height="1142"
+     inkscape:window-x="0"
+     inkscape:window-y="30"
+     inkscape:window-maximized="0"
+     inkscape:current-layer="layer1"
+     inkscape:export-bgcolor="#ffffffff" />
+  <defs
+     id="defs1">
+    <inkscape:path-effect
+       effect="bspline"
+       id="path-effect38"
+       is_visible="true"
+       lpeversion="1.3"
+       weight="33.333333"
+       steps="2"
+       helper_size="0"
+       apply_no_weight="true"
+       apply_with_weight="true"
+       only_selected="false"
+       uniform="false" />
+    <inkscape:path-effect
+       effect="bspline"
+       id="path-effect37"
+       is_visible="true"
+       lpeversion="1.3"
+       weight="33.333333"
+       steps="2"
+       helper_size="0"
+       apply_no_weight="true"
+       apply_with_weight="true"
+       only_selected="false"
+       uniform="false" />
+  </defs>
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1"
+     transform="translate(-25.653968,-66.727691)">
+    <path
+       style="font-weight:600;font-size:22.5778px;line-height:2;font-family:Roboto;-inkscape-font-specification:'Roboto Semi-Bold';letter-spacing:5.58006px;fill:#191919;stroke-width:3.337;stroke-linejoin:round;paint-order:stroke fill markers"
+       d="m 67.688877,83.322769 h 3.031687 q -0.121268,1.60955 -0.89297,2.855298 -0.771702,1.234723 -2.149742,1.94028 -1.378039,0.705556 -3.340368,0.705556 -1.510331,0 -2.723006,-0.529167 -1.20165,-0.540192 -2.061547,-1.53238 -0.848873,-1.003213 -1.30087,-2.403302 -0.451997,-1.411112 -0.451997,-3.163978 v -1.2237 q 0,-1.752866 0.463022,-3.163979 0.463021,-1.411112 1.322918,-2.403301 0.870921,-1.003212 2.083596,-1.543404 1.223699,-0.540191 2.73403,-0.540191 1.962329,0 3.31832,0.727604 1.355991,0.716581 2.105644,1.973353 0.749654,1.256772 0.903994,2.888371 h -3.031687 q -0.08819,-1.014237 -0.440973,-1.719793 -0.341754,-0.705557 -1.036286,-1.069359 -0.683507,-0.374827 -1.819012,-0.374827 -0.881945,0 -1.554428,0.33073 -0.661459,0.330729 -1.102432,0.992188 -0.440973,0.650435 -0.661459,1.631599 -0.220486,0.97014 -0.220486,2.248961 v 1.245748 q 0,1.223699 0.198437,2.193839 0.198438,0.970139 0.617362,1.642623 0.418924,0.672483 1.080383,1.025261 0.661459,0.352778 1.576477,0.352778 1.113456,0 1.807988,-0.352778 0.705557,-0.352778 1.069359,-1.036286 0.374827,-0.683507 0.474046,-1.697744 z m 21.587369,2.899395 v 2.381252 H 80.743425 V 86.222164 Z M 81.669467,72.552011 V 88.603416 H 78.63778 V 72.552011 Z m 6.493323,6.625615 v 2.32613 h -7.419365 v -2.32613 z m 1.080383,-6.625615 v 2.392277 h -8.499748 v -2.392277 z m 20.606207,0 v 16.051405 h -3.04272 L 99.982612,77.468857 V 88.603416 H 96.950925 V 72.552011 h 3.031687 l 6.846098,11.145584 V 72.552011 Z m 15.22633,0 v 16.051405 h -3.02066 V 72.552011 Z m 4.98299,0 v 2.392277 h -12.93152 v -2.392277 z m 7.58649,0 h 5.83186 q 1.83004,0 3.14193,0.551216 1.3119,0.551216 2.01745,1.631599 0.70556,1.080383 0.70556,2.65686 0,1.245748 -0.44097,2.160766 -0.44098,0.915019 -1.24575,1.53238 -0.79375,0.617362 -1.87414,0.97014 l -0.94809,0.48507 h -5.14835 l -0.022,-2.392277 h 3.84748 q 0.93707,0 1.55443,-0.330729 0.61737,-0.33073 0.92605,-0.915018 0.3197,-0.584289 0.3197,-1.333943 0,-0.804775 -0.30868,-1.389064 -0.30868,-0.595313 -0.93707,-0.915018 -0.62838,-0.319705 -1.5875,-0.319705 h -2.80017 v 13.659128 h -3.03169 z m 9.06199,16.051405 -3.7152,-7.187854 3.20808,-0.01102 3.75929,7.044538 v 0.15434 z m 17.24379,-13.615031 -4.57509,13.615031 h -3.20808 l 5.99723,-16.051405 h 2.05052 z m 3.82543,13.615031 -4.59714,-13.615031 -0.2756,-2.436374 h 2.06154 l 6.03031,16.051405 z m -0.20946,-5.964155 v 2.392277 h -8.60999 v -2.392277 z m 20.83772,3.582903 v 2.381252 h -8.0698 v -2.381252 z m -7.15479,-13.670153 v 16.051405 h -3.03168 V 72.552011 Z"
+       id="text44"
+       aria-label="CENTRAL" />
+    <path
+       id="path52"
+       style="fill:#3fa383;stroke-width:3.02717;stroke-linejoin:round;paint-order:stroke fill markers"
+       d="M 53.071496,80.436455 A 13.708764,13.708764 0 0 1 39.362732,94.145219 13.708764,13.708764 0 0 1 25.653968,80.436455 13.708764,13.708764 0 0 1 39.362732,66.727691 13.708764,13.708764 0 0 1 53.071496,80.436455 Z" />
+    <path
+       style="font-weight:600;font-size:30.375px;line-height:2;font-family:Roboto;-inkscape-font-specification:'Roboto, Semi-Bold';letter-spacing:7.50712px;fill:#ffffff;stroke-width:4.48942;stroke-linejoin:round;paint-order:stroke fill markers"
+       d="m 48.046608,72.559311 v 2.951477 H 30.530556 v -2.951477 z m -10.975342,0 V 88.60704 H 33.140907 V 72.559311 Z m 4.523621,0 h 3.930359 l -0.01483,11.286804 q 0,0.726746 0.19281,1.112366 0.207642,0.370788 0.57843,0.519104 0.38562,0.133484 0.934388,0.133484 0.38562,0 0.711914,-0.04449 0.326294,-0.04449 0.548767,-0.08899 l 0.01483,2.936645 q -0.504272,0.148316 -1.112365,0.252137 -0.608094,0.118652 -1.379334,0.118652 -1.320007,0 -2.313721,-0.459778 -0.993713,-0.459778 -1.54248,-1.468323 -0.548767,-1.023376 -0.548767,-2.684509 z"
+       id="text52"
+       aria-label="π" />
+  </g>
+</svg>

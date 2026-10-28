@@ -365,6 +365,29 @@ manifest and the three private workspace manifests cannot disagree.
 
 ### Added
 
+- **The product has an identity: a favicon, a mark in the topbar, and a banner in the README**
+  (issue #115). Until now the header rendered the words `Pi Central` as plain text and a browser tab
+  showed a blank document icon.
+
+  The marks go through `packages/ui/src/assets/`, so Vite fingerprints and emits them with the rest of
+  the build — which also means the orchestrator serves them with the right content type, rather than a
+  favicon arriving as `application/octet-stream`. The favicon is declared in both forms that matter (an
+  SVG for browsers that take one, a PNG fallback, plus `apple-touch-icon`) with a matching
+  `theme-color`.
+
+  **The topbar uses the same file the favicon links to**, so the tab and the header cannot show
+  different marks after a redesign.
+
+  The brand green is **`--brand: #3fa383`**, its own token and deliberately not `--ok`: `--ok` means
+  *success*, so reusing it would make the logo read as a status and every future green ambiguous between
+  "this is Pi Central" and "this went well".
+
+  The Inkscape metadata is stripped from the served SVGs — dead weight in a shipped asset, and the part
+  that is not the drawing. A test now asserts the artwork carries **nothing executable and nothing
+  external**: no `<script>`, no `on*` handler, no `foreignObject`, and no `href` that is not a local
+  fragment. These are clean today; the point is that they stay clean when the artwork is next updated by
+  whoever drew it, in whatever tool.
+
 - **Images open in the file browser: PNG, JPEG, GIF, WebP and SVG** (issue #106). The tree listed
   `image.png` with its size and could not open it, because `readFileText` decodes with a strict UTF-8
   decoder and refuses everything else — images were refused because the only read path that existed
