@@ -455,3 +455,36 @@ test("formatBytes uses binary units a reader can judge", () => {
   assert.equal(formatBytes(MAX_FILE_BYTES), "256.0 KB");
   assert.equal(formatBytes(5 * 1024 * 1024), "5.0 MB");
 });
+
+// --- #9's acceptance criteria, pinned --------------------------------------------------------------
+
+test("a binary refusal names the file's SIZE, not just its name", () => {
+  // Issue #9: "A binary file is reported as binary with its size and type, and is not attempted."
+  // The size is knowable — `lstat` is consulted for the cap before the read — so withholding it
+  // would be a choice rather than a limitation, and the reader cannot judge what they are looking at
+  // without it.
+  const root = makeRoot("binary-size");
+  const payload = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05]);
+  writeFileSync(join(root, "image.png"), payload);
+
+  const result = readFileText(root, "image.png");
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.error.reason, "binary");
+  assert.match(result.error.message, /10 B/, `the size must be named, got: ${result.error.message}`);
+  assert.match(result.error.message, /NUL/, "…and WHY it was refused");
+});
+
+test("the same holds for a file refused by the UTF-8 decode", () => {
+  // The second detection path. It has its own message, so it needs its own assertion — a test that
+  // only covered the NUL branch would let the other regress.
+  const root = makeRoot("binary-size-utf8");
+  writeFileSync(join(root, "latin1.txt"), Buffer.from([0xff, 0xfe, 0x41, 0x42]));
+
+  const result = readFileText(root, "latin1.txt");
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.error.reason, "binary");
+  assert.match(result.error.message, /4 B/, `the size must be named, got: ${result.error.message}`);
+  assert.match(result.error.message, /UTF-8/);
+});

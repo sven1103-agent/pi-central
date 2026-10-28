@@ -436,11 +436,16 @@ export function readFileText(root: string, relative: string): Result<FileContent
 
   const sniff = buffer.subarray(0, BINARY_SNIFF_BYTES);
   if (sniff.includes(0)) {
+    // The SIZE is named, because a refusal has to say enough for the reader to know what they are
+    // looking at (issue #9: "reported as binary with its size"). We know it exactly — `lstat` was
+    // consulted for the cap above — so withholding it would be a choice, not a limitation.
     return {
       ok: false,
       error: {
         reason: "binary",
-        message: `"${relPath}" is a binary file (it contains NUL bytes), so it was not rendered as text`,
+        message:
+          `"${relPath}" is a binary file of ${formatBytes(stats.size)} (it contains NUL bytes), ` +
+          `so it was not rendered as text`,
       },
     };
   }
@@ -455,7 +460,7 @@ export function readFileText(root: string, relative: string): Result<FileContent
       ok: false,
       error: {
         reason: "binary",
-        message: `"${relPath}" is not valid UTF-8, so it was not rendered as text`,
+        message: `"${relPath}" is ${formatBytes(stats.size)} and not valid UTF-8, so it was not rendered as text`,
       },
     };
   }
