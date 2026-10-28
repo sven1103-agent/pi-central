@@ -1,5 +1,10 @@
 # Pi Central
 
+
+<p align="center">
+  <img src="assets/pi-central-logo-full-dark-mode.svg" alt="Pi Central — a pi mark on a green circle, followed by the product name" width="420" />
+</p>
+
 > The central station where Pi sessions come together and are orchestrated.
 
 Pi Central is a local dashboard for running, watching, and switching between multiple

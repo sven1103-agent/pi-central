@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { Control, HistoricalSession, LiveSession, ModelOption } from "@pi-central/protocol";
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
+import logoIcon from "./assets/logo-icon.svg";
 import type { SessionScroll } from "./scroll.ts";
 import {
   directoryAt,
@@ -406,7 +407,15 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <h1 className="wordmark">Pi Central</h1>
+        <h1 className="wordmark">
+          {/*
+            One artefact, two uses: this is the same file the favicon links to, so the tab and the topbar
+            cannot show different marks. `alt=""` because the word beside it already says "Pi Central" —
+            an alt here would make a screen reader hear the product name twice.
+          */}
+          <img className="wordmark-mark" src={logoIcon} alt="" aria-hidden="true" />
+          Pi Central
+        </h1>
         <div className="tabs" role="tablist" aria-label="View">
           <button
             type="button"
