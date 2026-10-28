@@ -59,15 +59,34 @@ export function ImageViewer({
     return () => URL.revokeObjectURL(next);
   }, [blob]);
 
+  /**
+   * Nothing is rendered until the blob URL exists — and the reason is a bug this shipped with.
+   *
+   * `url` is `undefined` on the first render, and `<img src={undefined}>` renders an `<img>` with NO
+   * `src`. A browser fires **`error`** for that, which set `broken` on the very first frame — so the
+   * component switched to the failure note and never showed the real image once the effect produced
+   * the URL a moment later. It failed permanently, for every image, while the orchestrator's bytes
+   * were perfectly good.
+   *
+   * Returning nothing for one frame is the honest version: there is nothing to show yet, and an
+   * `<img>` with no source is not a thing that can be "displayed".
+   */
+  if (url === undefined) return null;
+
   if (broken) {
     // A file whose bytes are a valid image header but whose payload is truncated or corrupt. Said
     // plainly rather than left as a blank box, for the same reason every other refusal in this pane
     // is stated: an empty pane reads as "this file is empty", which is a different fact.
     return (
       <p className="filetree-note filetree-error" role="note">
-        <strong>Could not display</strong>
+        <strong>Could not display {path}</strong>
         <span className="filetree-error-detail">
-          The bytes of {path} are a {type} header, but the browser could not decode the image.
+          {/* Stated precisely, because the over-claiming version was wrong twice: it said "a
+              image/png" (ungrammatical) and implied the whole file was a valid header. What we know
+              is narrower — the orchestrator recognised the leading bytes, and the browser could not
+              decode the result, so the file is truncated or the payload is corrupt. */}
+          The browser could not decode this image. Its leading bytes are a valid {type} header, so the
+          file is most likely truncated or corrupt.
         </span>
       </p>
     );
