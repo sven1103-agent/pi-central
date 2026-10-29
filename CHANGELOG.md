@@ -34,6 +34,25 @@ fixed, and so is the class of defect behind them: the build now says which build
 
 ### Fixed
 
+- **The Settings dialog is two panes, and the Reading preview actually shows the setting** (issue #142).
+
+  Four sections in one column made a wall — a reader's own preferences, the build's identity, where the files
+  live, and a statement about updates all competing for one scroll. A left menu splits them into **Display**
+  and **About**, opening on Display because it is the only section a reader is likely to *change*.
+
+  **A reset**, because a preference you cannot get back from is a trap: a reader nudges a slider, dislikes it,
+  and has no way to know what "normal" was. Disabled at the defaults, so the control says whether there is
+  anything to undo rather than offering a no-op.
+
+  **The preview did not work, and the reason is a specificity bug.** It set `font-size: var(--reading-size)`
+  on `.reading-sample` and put the text in a `<p>` — but `.modal p` (0,1,1) beats `.reading-sample` (0,1,0)
+  whatever the source order, so the sample always rendered at 13px and never showed the choice. The size now
+  sits on a child selector that wins, and the sample is a `<span>`, so `.modal p` cannot reach it.
+
+  **The width preview is gone, deliberately.** Inside a 620px dialog it was a lie twice over: the dialog clamps
+  it, so 82ch and 100ch looked identical, and it was not the width you get. Size is what a preview can honestly
+  show; the reader sees the real width live in the transcript behind the dialog.
+
 - **A reader who was following came back to a stale position** (issue #141). Reported: *"i have auto-follow
   enabled, i am following, switch to another session, come back: the session's transcript view is pinned where i
   left it. That is annoying, especially when i come back because i see the session is in idle and the task is

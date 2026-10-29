@@ -94,10 +94,19 @@ function Fact({
   );
 }
 
+/** The panes, in order. Named here so the nav and the content cannot disagree. */
+const SECTIONS: { id: Section; label: string }[] = [
+  { id: "display", label: "Display" },
+  { id: "about", label: "About" },
+];
+
+type Section = "display" | "about";
+
 export function Settings({
   install,
   ready,
   onClose,
+  initialSection = "display",
 }: {
   install: InstallFacts | undefined;
   /**
@@ -110,8 +119,25 @@ export function Settings({
    */
   ready: boolean;
   onClose: () => void;
+  /**
+   * Which pane opens first.
+   *
+   * Always `display` in the app — it is the only section a reader is likely to *change*. The prop exists
+   * because the component tests render to static markup and run no handlers, so a tabbed dialog would be
+   * untestable without a way to open the other pane.
+   */
+  initialSection?: Section;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
+
+  /**
+   * Which pane is showing.
+   *
+   * Local, not persisted: which tab you last looked at is not a preference, and remembering it would
+   * mean a reader opening Settings to change the text size landed on About because that is where they
+   * were last month.
+   */
+  const [section, setSection] = useState<Section>(initialSection);
 
   useEffect(() => {
     // Focus moves INTO the surface, so the keyboard is not left on the page behind it — and `Esc` is
@@ -165,74 +191,103 @@ export function Settings({
           </p>
         )}
 
-        <ReadingPanel />
+        {/*
+          Two panes, because four sections in one column made a wall: the reader's own preferences, the
+          build's identity, where the files live, and a statement about updates all competed for one
+          scroll. A left menu gives each a name and puts the most-used first (issue #142).
 
-        <section>
-          <h4>This build</h4>
-          <dl className="kv">
-            <Fact label="Version" value={install?.version} />
-            {/*
-              The UI's own identity (issue #114). The row above is the PACKAGE version, which is the same
-              for every build of it — so it cannot tell you whether the bundle your tab is running matches
-              the `dist/` on disk. This can, and it is the answer to a question that otherwise needs a
-              `curl`, a grep and a comparison.
-            */}
-            <Fact
-              label="UI build"
-              value={buildLabel()}
-              note={
-                buildInfo().commit === "dev"
-                  ? "built outside a git checkout, so there is no commit to name"
-                  : undefined
-              }
-            />
-            <Fact
-              label="Protocol"
-              value={orchestratorProtocol === undefined ? undefined : `v${orchestratorProtocol}`}
-              note={
-                orchestratorProtocol === undefined
-                  ? undefined
-                  : skew
-                    ? `MISMATCH — this UI speaks v${PROTOCOL_VERSION}. One half is out of date; see docs/DOGFOODING.md.`
-                    : `matches this UI (v${PROTOCOL_VERSION})`
-              }
-            />
-          </dl>
-        </section>
+          `Display` is the default tab because it is the only section here that a reader is likely to
+          CHANGE; the others are things you look up once.
+        */}
+        <div className="settings-panes">
+          <nav className="settings-nav" aria-label="Settings sections">
+            {SECTIONS.map(({ id, label }) => (
+              <button
+                key={id}
+                type="button"
+                className={id === section ? "settings-nav-item is-active" : "settings-nav-item"}
+                aria-current={id === section ? "page" : undefined}
+                onClick={() => setSection(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
 
-        <section>
-          <h4>Where things live</h4>
-          <dl className="kv">
-            <Fact label="Sessions" value={install?.sessionsRoot} copyable monospace />
-            <Fact label="Workspaces" value={install?.workspaceRoot} copyable monospace />
-            <Fact
-              label="Agent root"
-              value={install?.agentRoot}
-              copyable
-              monospace
-              note={
-                install === undefined
-                  ? undefined
-                  : install.agentRootManaged
-                    ? "managed by Pi Central"
-                    : "external — not created or modified by Pi Central"
-              }
-            />
-          </dl>
-        </section>
+          <div className="settings-content">
+            {section === "display" ? (
+              <ReadingPanel />
+            ) : (
+              <>
+                <section>
+                  <h4>This build</h4>
+                  <dl className="kv">
+                    <Fact label="Version" value={install?.version} />
+                    {/*
+                      The UI's own identity (issue #114). The row above is the PACKAGE version, which is the
+                      same for every build of it — so it cannot tell you whether the bundle your tab is
+                      running matches the `dist/` on disk. This can.
+                    */}
+                    <Fact
+                      label="UI build"
+                      value={buildLabel()}
+                      note={
+                        buildInfo().commit === "dev"
+                          ? "built outside a git checkout, so there is no commit to name"
+                          : undefined
+                      }
+                    />
+                    <Fact
+                      label="Protocol"
+                      value={orchestratorProtocol === undefined ? undefined : `v${orchestratorProtocol}`}
+                      note={
+                        orchestratorProtocol === undefined
+                          ? undefined
+                          : skew
+                            ? `MISMATCH — this UI speaks v${PROTOCOL_VERSION}. One half is out of date; see docs/DOGFOODING.md.`
+                            : `matches this UI (v${PROTOCOL_VERSION})`
+                      }
+                    />
+                  </dl>
+                </section>
 
-        <section>
-          <h4>Updates</h4>
-          {/*
-            A statement, not a control. Update checking is not built (#55), and a disabled checkbox
-            would imply the feature exists and is merely switched off.
-          */}
-          <p className="settings-note settings-updates">
-            This build does not check for updates. When it does, checking will be <strong>off unless you
-            turn it on</strong>, will send nothing but the package name, and will never install anything
-            without asking.
-          </p>
-        </section>
+                <section>
+                  <h4>Where things live</h4>
+                  <dl className="kv">
+                    <Fact label="Sessions" value={install?.sessionsRoot} copyable monospace />
+                    <Fact label="Workspaces" value={install?.workspaceRoot} copyable monospace />
+                    <Fact
+                      label="Agent root"
+                      value={install?.agentRoot}
+                      copyable
+                      monospace
+                      note={
+                        install === undefined
+                          ? undefined
+                          : install.agentRootManaged
+                            ? "managed by Pi Central"
+                            : "external — not created or modified by Pi Central"
+                      }
+                    />
+                  </dl>
+                </section>
+
+                <section>
+                  <h4>Updates</h4>
+                  {/*
+                    A statement, not a control. Update checking is not built (#55), and a disabled checkbox
+                    would imply the feature exists and is merely switched off.
+                  */}
+                  <p className="settings-note settings-updates">
+                    This build does not check for updates. When it does, checking will be <strong>off unless
+                    you turn it on</strong>, will send nothing but the package name, and will never install
+                    anything without asking.
+                  </p>
+                </section>
+              </>
+            )}
+          </div>
+        </div>
 
         <div className="dialog-actions">
           <button type="button" className="btn" ref={closeRef} onClick={onClose}>
@@ -287,7 +342,23 @@ function ReadingPanel() {
 
   return (
     <section>
-      <h4>Reading</h4>
+      <div className="reading-head">
+        <h4>Reading</h4>
+        {/*
+          Reset, because a preference you cannot get back from is a trap: a reader nudges a slider, dislikes
+          it, and has no way to know what "normal" was. Disabled when already at the defaults, so the control
+          says whether there is anything to undo rather than offering a no-op (issue #142).
+        */}
+        <button
+          type="button"
+          className="btn btn-quiet"
+          onClick={() => setPrefs(defaultReadingPrefs())}
+          disabled={prefs.sizePx === defaultReadingPrefs().sizePx && prefs.measure === defaultReadingPrefs().measure}
+          title="Back to what this build ships with"
+        >
+          Reset to defaults
+        </button>
+      </div>
       <p className="settings-note" style={{ marginTop: 0 }}>
         Affects the transcript only. Raising the size widens the line too, because the measure is relative
         to the text.
@@ -339,13 +410,19 @@ function ReadingPanel() {
         <span />
       </label>
 
-      {/* The sample, at the reader's own numbers. `aria-hidden` because it is the same sentence as the
-          description above, and repeating it to a screen reader adds nothing. */}
+      {/*
+        The sample shows the SIZE, and deliberately not the width (issue #142).
+
+        A width preview inside a 440px dialog is a lie twice over: the dialog clamps it, so 82ch and 100ch
+        look identical, and it is not the width you will get — the transcript has its own column. The reader
+        sees the real width in the transcript behind this dialog, live, which is better than any preview.
+
+        `aria-hidden`: it is decorative, and a screen reader gains nothing from a pangram.
+      */}
       <div className="reading-sample" aria-hidden="true">
-        <p>
-          Prose at this setting. The quick brown fox jumps over the lazy dog, and then explains why it did
-          so at slightly more length than strictly necessary.
-        </p>
+        <span>
+          The quick brown fox jumps over the lazy dog.
+        </span>
       </div>
     </section>
   );

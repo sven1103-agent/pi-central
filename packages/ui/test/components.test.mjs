@@ -1476,7 +1476,7 @@ test("Settings shows the version the SNAPSHOT carried, never one it knows itself
   // The provenance assertion. Nothing in the UI bundle can know the orchestrator's version, so the
   // value must come from the event — and the fixture is deliberately unlike any real version, so a
   // hardcoded number in the component cannot pass this.
-  const html = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {} }));
+  const html = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {}, initialSection: "about" }));
   assert.match(html, /9\.9\.9-witness/);
   assert.ok(!/0\.\d+\.\d+/.test(html.replace(/4242/g, "")), `no real-looking version may appear: ${html}`);
 });
@@ -1485,13 +1485,13 @@ test("Settings says 'not reported' rather than showing a blank or a zero", async
   // The state an orchestrator older than this field produces, and the state before the first
   // snapshot. A blank where a version belongs reads as a bug in the surface; "not reported" is a
   // fact. This is the case that let the protocol add the field without a version bump.
-  const html = renderToString(createElement(Settings, { install: undefined, ready: true, onClose() {} }));
+  const html = renderToString(createElement(Settings, { install: undefined, ready: true, onClose() {}, initialSection: "about" }));
   assert.match(html, /not reported/);
   assert.ok(!/0\.0\.0|unknown version|v0\b/.test(html), `must not invent a version: ${html}`);
 });
 
 test("Settings shows where things live, copyable", async () => {
-  const html = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {} }));
+  const html = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {}, initialSection: "about" }));
   for (const path of ["/sessions-root-witness", "/workspace-root-witness", "/agent-root-witness"]) {
     assert.ok(html.includes(path), `the path ${path} must be shown`);
   }
@@ -1507,11 +1507,11 @@ test("Settings shows where things live, copyable", async () => {
 test("an external agent root is distinguished from a managed one", async () => {
   // Not cosmetic: "managed" means Pi Central will create and write it; "external" means it will not,
   // and a user who assumes the wrong one is surprised either way.
-  const managed = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {} }));
+  const managed = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {}, initialSection: "about" }));
   assert.match(managed, /managed by Pi Central/);
 
   const external = renderToString(
-    createElement(Settings, { install: installFacts({ agentRootManaged: false }), ready: true, onClose() {} }),
+    createElement(Settings, { install: installFacts({ agentRootManaged: false }), ready: true, onClose() {}, initialSection: "about" }),
   );
   assert.match(external, /external/);
   assert.ok(!/managed by Pi Central/.test(external), "an external root must not claim to be managed");
@@ -1522,7 +1522,7 @@ test("a PROTOCOL MISMATCH is stated, because that was the confusing failure", as
   // as `unknown kind 'listFiles'` from a connection that had agreed on `hello`. Both numbers and the
   // word MISMATCH make that class self-diagnosing instead.
   const html = renderToString(
-    createElement(Settings, { install: installFacts({ protocol: 4242 }), ready: true, onClose() {} }),
+    createElement(Settings, { install: installFacts({ protocol: 4242 }), ready: true, onClose() {}, initialSection: "about" }),
   );
   assert.match(html, /MISMATCH/);
   assert.match(html, /4242/);
@@ -1531,33 +1531,37 @@ test("a PROTOCOL MISMATCH is stated, because that was the confusing failure", as
 test("a MATCHING protocol is stated as matching, and does not cry wolf", async () => {
   const { PROTOCOL_VERSION } = await server.ssrLoadModule("/src/../../protocol/src/index.ts");
   const html = renderToString(
-    createElement(Settings, { install: installFacts({ protocol: PROTOCOL_VERSION }), ready: true, onClose() {} }),
+    createElement(Settings, { install: installFacts({ protocol: PROTOCOL_VERSION }), ready: true, onClose() {}, initialSection: "about" }),
   );
   assert.ok(!/MISMATCH/.test(html), `a matching protocol must not report a mismatch: ${html}`);
   assert.match(html, /matches this UI/);
 });
 
 test("Settings has no UPDATE control, only a statement about it", async () => {
-  // The rule this slice is built around: a control that looks functional and is not is worse than its
-  // absence. The update toggle belongs here, and must not appear until #55 makes it work.
+  // The rule: a control that looks functional and is not is worse than its absence. The update toggle
+  // belongs here, and must not appear until #55 makes it work.
   //
-  // NARROWED in #134: this used to assert that Settings contained no `<input>` AT ALL, which was a proxy
-  // for the rule rather than the rule itself. The Reading panel adds real, working sliders, and the proxy
-  // then failed on controls that are exactly the opposite of the problem. What must stay absent is the
-  // UPDATE control — so the assertion follows the rule: no update-shaped control, and the question "why
-  // can I not turn this on?" still answered in words.
-  const html = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {} }));
-  assert.ok(!/role="switch"/i.test(html), "no switch may appear in Settings yet");
-  assert.ok(
-    !/check for updates[^<]*<input/i.test(html) && !/<input[^>]*update/i.test(html),
-    `no control may be attached to updating: ${html}`,
+  // NARROWED twice. It first asserted there was no `<input>` at all in Settings — a *proxy* for the rule,
+  // which the Reading sliders are the exact opposite of. Then #142 split the dialog into panes, so the
+  // statement (About) and the sliders (Display) are no longer in one render. Both halves are asserted, each
+  // where it actually lives.
+  const about = renderToString(
+    createElement(Settings, { install: installFacts(), ready: true, onClose() {}, initialSection: "about" }),
   );
-  // The one input that IS legitimate here must be a preference that works, not a placeholder.
-  assert.match(html, /type="range"/, "the Reading sliders are real controls");
-  assert.match(html, /Reading/, "…in a section that names them");
-  // And the question "why can I not turn this on?" is answered, rather than left to the reader.
-  assert.match(html, /does not check for updates/i);
-  assert.match(html, /off unless you\s+turn it on|off unless you turn it on/i);
+  assert.ok(!/role="switch"/i.test(about), "no switch may appear in Settings yet");
+  assert.ok(
+    !/check for updates[^<]*<input/i.test(about) && !/<input[^>]*update/i.test(about),
+    `no control may be attached to updating: ${about}`,
+  );
+  assert.match(about, /does not check for updates/i);
+  assert.match(about, /off unless you\s+turn it on|off unless you turn it on/i);
+
+  const display = renderToString(
+    createElement(Settings, { install: installFacts(), ready: true, onClose() {}, initialSection: "display" }),
+  );
+  // The inputs that ARE legitimate are preferences that work, not placeholders.
+  assert.match(display, /type="range"/, "the Reading sliders are real controls");
+  assert.match(display, /Reading/, "…in a section that names them");
 });
 
 test("Settings is a labelled dialog that can be left with the keyboard", async () => {
@@ -1587,7 +1591,7 @@ test("an ABSENT fact is not copyable, because a placeholder is not a value", asy
 test("present facts ARE copyable, so the fix did not remove the feature", async () => {
   // The falsifier for the test above: asserting only "no copy button when absent" would pass just as
   // well if copy buttons had been deleted outright.
-  const html = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {} }));
+  const html = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {}, initialSection: "about" }));
   assert.equal((html.match(/class="copy"/g) ?? []).length, 3);
 });
 
@@ -1750,5 +1754,56 @@ test("the scroller is the only scrolling element in the transcript column", () =
   assert.ok(
     !/padding-bottom/.test(scroller[1]),
     ".transcript must not reserve space itself; the wrap does that",
+  );
+});
+
+// --- The Reading panel's reset, and a preview that can show the setting (issue #142) ----------------
+
+test("the Reading panel offers a reset, disabled when there is nothing to undo", async () => {
+  // A preference you cannot get back from is a trap: a reader nudges a slider, dislikes it, and has no way
+  // to know what "normal" was. Disabled at the defaults, so the control says whether there is anything to
+  // undo instead of offering a no-op.
+  const html = renderToString(
+    createElement(Settings, { install: installFacts(), ready: true, onClose() {}, initialSection: "display" }),
+  );
+  assert.match(html, /Reset to defaults/, "a reset must exist");
+  assert.match(
+    html,
+    /btn-quiet[^>]*disabled/,
+    "…and be disabled at the defaults, where there is nothing to reset",
+  );
+});
+
+test("the sample's SIZE is set on a selector that actually wins", async () => {
+  // The bug: the first version set `font-size` on `.reading-sample` and put the text in a `<p>`. `.modal p`
+  // — specificity 0,1,1 — beat `.reading-sample` (0,1,0) whatever the source order, so the preview always
+  // rendered at 13px and never showed the reader's choice. A preview that cannot show the thing being set
+  // is worse than no preview.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const sample = /\.reading-sample span\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(sample, /font-size:\s*var\(--reading-size\)/, "the size is on the element that wins");
+  // And it must NOT be a `<p>`, which is what `.modal p` was reaching.
+  const html = renderToString(
+    createElement(Settings, { install: installFacts(), ready: true, onClose() {}, initialSection: "display" }),
+  );
+  const block = /<div class="reading-sample"[^>]*>([\s\S]*?)<\/div>/.exec(html)?.[1] ?? "";
+  assert.ok(!/<p[ >]/.test(block), `the sample must not be a <p>, which .modal p resizes: ${block}`);
+});
+
+test("the sample does not pretend to preview the WIDTH", async () => {
+  // A width preview inside a dialog is a lie twice over: the dialog clamps it, so 82ch and 100ch look
+  // identical, and it is not the width you get. The reader sees the real width live in the transcript
+  // behind the dialog, which is better than any preview inside a 620px box.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const block = /\.reading-sample\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.ok(
+    !/max-width:\s*var\(--reading-measure\)/.test(block),
+    "the sample must not cap itself to the measure — the dialog clamps it anyway, so it proves nothing",
   );
 });
