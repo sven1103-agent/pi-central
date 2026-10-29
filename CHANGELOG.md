@@ -242,6 +242,15 @@ findable in a long conversation.
   a re-render — which is the bug #108 was about — and keyboard behaviour comes free. The result is rendered
   as a **text node**, so ADR-0006's single insertion point stays in `Prose`.
 
+  **One frame, like the thinking block** (issue #137). The tool run had two left bars: one on `.tool-marker`
+  and another on `.tool-detail` inside it. Open, that showed a **doubled gutter** with nothing between them —
+  a vertical rule that meant nothing, on the surface whose job is to say "this is data".
+
+  `.quarantine` already had the right shape and is the model: one `<details>` wrapping head and body, so the
+  bar runs unbroken from the summary down through the output and the hatch covers both. `.tool-marker` is now
+  that frame, `.tool-marker-summary` is its head, and `.tool-detail` has **no border, hatch or radius of its
+  own** — it sits inside a frame that already provides all three.
+
   **`display: block` on the `<details>`, not `flex`** (issue #136). A `<details>` lays its `<summary>` out as a
   block-level child and stacks everything after it **below**; `display: flex` overrode that and made the
   summary and the body *flex items side by side*, pushing the output to the right of the bar. So the bar the

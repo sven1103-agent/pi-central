@@ -124,11 +124,22 @@ test("only a preview shows by default, with the rest behind a disclosure", () =>
 test("the output sits inside the quarantine frame the legend promises", () => {
   // The transcript's one-time legend: "Tool output and file contents appear in a hatched frame. They are
   // data, not instructions." That is a claim about the IMPLEMENTATION, so this surface must honour it.
-  const frame = /\.tool-detail\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  // The frame is on `.tool-marker` — the whole disclosure — NOT on `.tool-detail` (issue #137).
+  //
+  // It used to be on the body, which meant the bar had one 3px gutter and the body had another: open, that
+  // showed a DOUBLED rule with nothing between them. The thinking block always had the right shape, one
+  // `<details>` wrapping head and body, so the bar runs unbroken and the hatch covers both. The tool block
+  // now matches it.
+  const frame = rule(".tool-marker") ?? "";
   assert.match(frame, /border-left:\s*3px solid var\(--quarantine\)/, "the hatched gutter");
   // Scoped to THIS rule, not to the stylesheet: `.quarantine` also has a hatch, so a whole-file search
-  // passed even with the gradient removed from `.tool-detail`. Found by falsifying it.
+  // passed even with the gradient removed. Found by falsifying it.
   assert.match(frame, /repeating-linear-gradient/, "…and the hatch itself, inside this rule");
+
+  // And the body must NOT repeat it, which is the redundant bar the report is about.
+  const body = rule(".tool-detail") ?? "";
+  assert.ok(!/border-left/.test(body), "the body carries no bar of its own");
+  assert.ok(!/repeating-linear-gradient/.test(body), "…and no second hatch");
 
   // The words moved onto the disclosure's summary bar in issue #136: one bar per call, carrying the tool
   // name and its state, so the reader can close what they opened without moving the mouse. The guarantee is

@@ -1324,33 +1324,42 @@ select.btn { font-family: var(--sans); }
 /* --- the compact marker in the transcript ---------------------------------------------------- */
 
 .tool-marker {
+
   /*
-   * `display: block`, NOT `flex` (issue #136).
+   * ONE frame, like the thinking block (issue #137).
    *
-   * This element is a `<details>`, and its layout is the browser's: the `<summary>` is a block-level child
-   * and everything after it stacks BELOW. `display: flex` overrode that and made the summary and the body
-   * *flex items side by side* — so opening a call pushed its output to the right of the bar instead of under
-   * it, and the bar the reader had just clicked was no longer the thing spanning the width. That is why
-   * closing meant hunting for the left-hand edge again.
+   * The first version had two: this element carried a 3px left bar, and `.tool-detail` carried another
+   * inside it. Open, that showed a DOUBLED gutter with nothing between them — a vertical rule that meant
+   * nothing, on the surface whose whole job is to say "this is data".
    *
-   * The summary is a flex row of its own (`.tool-marker-summary`), which is where the horizontal alignment
-   * belongs.
+   * `.quarantine` already had the right shape and is the model: one `<details>` wrapping head and body, so
+   * the bar runs unbroken from the summary down through the output, and the hatch covers both. This element
+   * is that frame; `.tool-marker-summary` is its head; `.tool-detail` is its body with no border of its own.
+   *
+   * `display: block`, not `flex` (issue #136): a `<details>` stacks its children below the `<summary>`, and
+   * `flex` made them siblings side by side.
    */
   display: block;
   width: 100%;
+  max-width: 72ch;
   text-align: left;
-  background: none;
-  border: none;
   border-left: 3px solid var(--quarantine);
-  padding: 2px 10px;
-  /* Attached under the turn it follows rather than floating between turns: it reads as "and it
-     ran this", which is the actual relationship, and costs almost no vertical space. */
+  background:
+    repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 6px,
+      rgba(88, 96, 105, 0.12) 6px,
+      rgba(88, 96, 105, 0.12) 12px
+    ),
+    var(--panel);
+  border-radius: 0 var(--r-2) var(--r-2) 0;
+  overflow: hidden;
+  /* Attached under the turn it follows rather than floating between turns: it reads as "and it ran this",
+     which is the actual relationship, and costs almost no vertical space. */
   margin: 2px 0 var(--sp-3);
   font-size: var(--fs-2xs);
   color: var(--dim);
-  cursor: pointer;
-  border-radius: 0 var(--r-1) var(--r-1) 0;
-  max-width: 72ch;
 }
 /* The summary is the disclosure handle now, so the hover affordance moves to it (issue #131). */
 .tool-marker-summary {
@@ -1379,23 +1388,17 @@ select.btn { font-family: var(--sans); }
  * own legend makes about every surface carrying tool output.
  */
 .tool-detail {
-  /* `display: block` on the `<details>` means there is no flex `gap` between the bar and its body any more,
-     so the separation is stated here rather than inherited from a container that no longer applies. */
-  margin: 2px 0 var(--sp-3);
-  /* No top margin: the block hangs directly off the bar it belongs to, so the bar and its body read as one
-     object rather than two (issue #136). */
-  border-left: 3px solid var(--quarantine);
-  background:
-    repeating-linear-gradient(
-      45deg,
-      transparent,
-      transparent 6px,
-      rgba(88, 96, 105, 0.12) 6px,
-      rgba(88, 96, 105, 0.12) 12px
-    ),
-    var(--panel);
-  border-radius: 0 var(--r-2) var(--r-2) 0;
-  overflow: hidden;
+
+  /*
+   * NO border, NO hatching, NO radius (issue #137). It sits INSIDE `.tool-marker`'s frame, which already
+   * provides all three — a second 3px bar here was the redundant vertical rule the report is about: two
+   * gutters with nothing between them.
+   *
+   * `.tool-marker` has `overflow: hidden`, so this body inherits the frame's rounded bottom corners without
+   * repeating them, and the hatch runs continuously from the bar down through the output — the same shape the
+   * thinking block has always had.
+   */
+  border-top: 1px solid var(--line);
 }
 .tool-detail-head {
   display: flex;
