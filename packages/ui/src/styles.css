@@ -888,7 +888,7 @@ select.btn { font-family: var(--sans); }
   border-radius: var(--r-3);
   box-shadow: var(--sh-2);
   padding: var(--sp-5);
-  max-width: 440px;
+  max-width: 620px;
 }
 .modal h3 { margin: 0 0 var(--sp-2); font-size: var(--fs-md); }
 .modal p { margin: 0; color: var(--dim); font-size: var(--fs-base); }
@@ -1853,17 +1853,60 @@ select.btn { font-family: var(--sans); }
 .reading-row input[type="range"] { width: 100%; accent-color: var(--accent); }
 .reading-row input[type="range"]:disabled { opacity: 0.4; }
 .reading-value { color: var(--text); text-align: right; }
+/*
+ * The sample, and the specificity bug that made it useless (issue #142).
+ *
+ * The first version set `font-size: var(--reading-size)` here and put the text in a `<p>`. `.modal p`
+ * — specificity 0,1,1 — beat `.reading-sample` (0,1,0) whatever the source order, so the sample always
+ * rendered at 13px and never showed the reader's choice. A preview that cannot show the thing being set is
+ * worse than no preview.
+ *
+ * So the size is set on the child, at a specificity that wins, and the sample no longer carries a width:
+ * a width preview inside a 440px dialog is clamped by the dialog and is not the width you get.
+ */
+.reading-sample span {
+  display: block;
+  font-size: var(--reading-size);
+  line-height: 1.55;
+  color: var(--text);
+}
 .reading-sample {
   margin-top: var(--sp-3);
   padding: var(--sp-2) var(--sp-3);
   border-left: 3px solid var(--line-strong);
   background: var(--bg);
   border-radius: 0 var(--r-2) var(--r-2) 0;
-  /* The reader's numbers, so the sample cannot disagree with the transcript. */
-  font-size: var(--reading-size);
-  max-width: var(--reading-measure);
 }
-.reading-sample p { margin: 0; line-height: 1.55; }
+.reading-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.reading-head h4 { margin: 0; }
+.reading-head .btn-quiet { font-size: var(--fs-xs); padding: 2px 6px; }
+.settings-panes {
+  display: grid;
+  grid-template-columns: 108px 1fr;
+  gap: var(--sp-4);
+  min-height: 0;
+}
+.settings-nav { display: flex; flex-direction: column; gap: 2px; }
+.settings-nav-item {
+  background: none;
+  border: 0;
+  border-radius: var(--r-1);
+  padding: 5px 8px;
+  text-align: left;
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  cursor: pointer;
+}
+.settings-nav-item:hover { background: var(--panel-2); color: var(--text); }
+.settings-nav-item.is-active { background: var(--panel-2); color: var(--text); font-weight: 600; }
+.settings-nav-item:focus-visible { outline: none; box-shadow: var(--focus); }
+.settings-content { min-width: 0; }
 
 /* --- The panel: a region with modes, and a draggable edge (issue #8, reworked) ------------------
 
