@@ -106,7 +106,46 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      "/ws": { target, ws: true, changeOrigin: false },
+      "/ws": {
+        target,
+        ws: true,
+        changeOrigin: false,
+        /**
+         * Handle the socket's own errors instead of letting Vite print a stack trace for each one
+         * (issue #114, follow-up).
+         *
+         * `read ECONNRESET` from the ws proxy is **routine**: it fires when the orchestrator restarts, a
+         * session ends, or the tab reloads. Vite logs it through its generic error path, so a normal event
+         * arrives as
+         *
+         *     [vite] ws proxy error:
+         *     Error: read ECONNRESET
+         *         at TCP.onStreamRead (node:internal/stream_base_commons:221:20)
+         *
+         * — a stack trace, which reads as a fault. Logging noise as failure trains you to ignore the
+         * prefix, which is exactly how `EADDRINUSE`-shaped messages stop being read. So the routine case is
+         * reported once, in one line, with no stack; anything else still gets Vite's own logging.
+         */
+        configure: (proxy) => {
+          /** One line per socket, so a reconnect loop cannot flood the terminal. */
+          const reported = new WeakSet<object>();
+
+          proxy.on("error", (error, _request, socket) => {
+            const code = (error as { code?: string }).code;
+            if (code === "ECONNRESET" || code === "EPIPE") {
+              // Per-socket dedupe: the same closed socket emits `error` more than once on some platforms.
+              if (socket !== undefined && !reported.has(socket)) {
+                reported.add(socket);
+                console.log(`[vite] ws proxy: connection closed (${code}) — normal on reload or restart`);
+              }
+              return;
+            }
+            // Not routine. Let it through as an error, because a proxy that fails for any other reason is
+            // worth a stack trace.
+            console.error(`[vite] ws proxy error: ${String((error as Error).message)}`);
+          });
+        },
+      },
     },
   },
   build: {

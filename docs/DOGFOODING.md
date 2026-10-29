@@ -42,6 +42,31 @@ unavailable precisely when you want it to supervise the repair.
 There is a fourth, quieter one: two writers on one checkout. Two sessions editing the same working
 tree lose each other's changes in ways neither can see.
 
+**5. Every one of those presents as "the fix did not work".** That is the expensive symptom, and the
+question it raises — *is the UI I am looking at the code I just built?* — has two answers, in two
+places. Neither is on the main surface, deliberately: a commit hash in the product's chrome is a dev
+artefact in a shipped UI, and released applications keep this in About for the same reason.
+
+| question | where to look |
+|---|---|
+| What is the tab **running**? | **Settings → This build**: the commit and build time of the UI in this tab. |
+| What is the orchestrator **serving**? | The startup log: `UI build: assets/index-<hash>.js (built …)`. |
+
+If those disagree with what you just built, the page is stale — hard-reload it, and if that does not
+change the stamp, the orchestrator is serving an old `dist/`.
+
+Three things are worth knowing about how to read that:
+
+- **The commit, not the version.** `pi-central --version` reports the *package* version, which is the
+  same for every build of it — which is exactly why it cannot answer this question. (The version number
+  is deliberately not written down here; see `docs/RELEASING.md` for why prose must not state it.)
+- **A rebuild does not update an open tab.** `index.html` is `no-cache` and hashed assets are
+  `immutable`, so the *server* is right, but a page that has already fetched its entry bundle keeps it
+  for the life of the tab. Hard-reload.
+- **Installed as a PWA** (issue #119), the same applies and more so: the service worker never caches
+  `index.html`, but a worker update lands on the next launch rather than mid-session, on purpose — see
+  the note in `public/sw.js` about `skipWaiting`.
+
 ## Pi Central now says so
 
 This used to be advice you had to have read. Pointing a session at the running checkout is now
