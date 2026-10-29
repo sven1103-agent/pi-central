@@ -1453,6 +1453,72 @@ select.btn { font-family: var(--sans); }
   cursor: pointer;
   border-radius: 0 var(--r-1) var(--r-1) 0;
 }
+/* The summary is the disclosure handle now, so the hover affordance moves to it (issue #131). */
+.tool-marker-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+  list-style: none;
+  /* The default triangle is replaced by `.m-open` below, which rotates with the disclosure — one
+     affordance that moves, rather than a triangle plus an arrow saying the same thing. */
+}
+.tool-marker-summary::-webkit-details-marker { display: none; }
+.tool-marker-summary:hover { background: var(--panel); color: var(--text); }
+.tool-marker .m-open { margin-left: auto; transition: transform 120ms ease; }
+@media (prefers-reduced-motion: reduce) { .tool-marker .m-open { transition: none; } }
+.tool-marker[open] .m-open { transform: rotate(180deg); }
+
+/*
+ * The inline output: the quarantine frame the legend promises (ADR-0006 / DESIGN §5.2), not a plain block.
+ * `is-quarantined` is the same modifier the trace panel uses, because the hatch is a claim the transcript's
+ * own legend makes about every surface carrying tool output.
+ */
+.tool-detail {
+  margin: var(--sp-2) 0 var(--sp-3);
+  border-left: 3px solid var(--quarantine);
+  background:
+    repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 6px,
+      rgba(88, 96, 105, 0.12) 6px,
+      rgba(88, 96, 105, 0.12) 12px
+    ),
+    var(--panel);
+  border-radius: 0 var(--r-2) var(--r-2) 0;
+  overflow: hidden;
+}
+.tool-detail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 4px 10px;
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  background: var(--panel-2);
+}
+.tool-detail-head .label { color: var(--quarantine); font-weight: 600; }
+.tool-detail-head .spacer { flex: 1; }
+.tool-detail-head .err { color: var(--danger-text); }
+.tool-detail-meta { font-family: var(--mono); font-size: var(--fs-2xs); }
+
+/* A CAP, because this is inline in the conversation. Without it a `read` of a 40 KB file pushes the next
+   turn off the screen — the defect this whole component exists to avoid. */
+.tool-detail-args,
+.tool-detail-output {
+  margin: 0;
+  padding: var(--sp-2) 10px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--fs-xs);
+}
+.tool-detail-args { color: var(--dim); border-bottom: 1px solid var(--line); }
+.tool-detail-output.error { color: var(--danger-text); }
+.tool-detail-rest > summary { padding: 4px 10px; font-size: var(--fs-2xs); color: var(--dim); cursor: pointer; }
+
 .tool-marker:hover { background: var(--panel); color: var(--text); }
 .tool-marker.has-error { border-left-color: var(--danger); }
 .tool-marker.running { border-left-color: var(--ok); }

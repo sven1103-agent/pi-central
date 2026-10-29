@@ -31,6 +31,7 @@ import {
   type SessionScroll,
 } from "../scroll.ts";
 import { RunNotices } from "./RunNotices.tsx";
+import { ToolDetail } from "./ToolDetail.tsx";
 
 /**
  * How close to the bottom still counts as "following the tail".
@@ -400,6 +401,24 @@ export function TranscriptView({
  * reading what it did. The names are enough to orient, and the click is there for when they are
  * not.
  */
+/**
+ * One run of tool work, inline in the transcript (issue #131).
+ *
+ * ## What changed, and why
+ *
+ * A marker used to be a button that opened the trace panel at the bottom of the window. Reported: *"I
+ * expected the tool output to open inline the transcript in this case."* The expectation is right — a
+ * marker is a bookmark in the conversation, so the answer belongs where the question was asked.
+ *
+ * So the marker is now a **`<details>`**: the summary line is unchanged (the count, the names, the state),
+ * and opening it reveals each call's arguments and a capped preview of its output, in place. The trace
+ * panel is still there and still reachable, because the header of this file records what happens when tool
+ * output grows without a bound: *"1138 frames below the conversation and the agent's actual output became
+ * unfindable."* `Open in trace` is the link for a result too long to read here.
+ *
+ * `<details>` rather than `useState`: the browser owns the open/closed state, so it survives a re-render —
+ * which is the bug #108 was about — and keyboard behaviour comes for free.
+ */
 function ToolMarker({
   tools,
   onOpenTool,
@@ -413,22 +432,37 @@ function ToolMarker({
   const running = tools.some((tool) => tool.running);
 
   return (
-    <button
-      type="button"
-      className={`tool-marker${summary.failed > 0 ? " has-error" : ""}${running ? " running" : ""}`}
-      onClick={() => onOpenTool?.(last.toolCallId)}
-      title="Open the tool trace at this point"
-    >
-      <span className="m-glyph" aria-hidden="true">
-        {running ? "●" : summary.failed > 0 ? "✕" : "⌁"}
-      </span>
-      <span className="m-count">
-        {summary.count} tool{summary.count === 1 ? "" : "s"}
-      </span>
-      <span className="m-names mono">{summary.names.join(" · ")}</span>
-      {summary.failed > 0 && <span className="m-failed">{summary.failed} failed</span>}
-      {running && <span className="m-running">running</span>}
-    </button>
+    <details className={`tool-marker${summary.failed > 0 ? " has-error" : ""}${running ? " running" : ""}`}>
+      <summary
+        className="tool-marker-summary"
+        // Said plainly, because the summary is a disclosure now rather than a jump.
+        title="Show this call's arguments and output here"
+      >
+        <span className="m-glyph" aria-hidden="true">
+          {running ? "●" : summary.failed > 0 ? "✕" : "⌁"}
+        </span>
+        <span className="m-count">
+          {summary.count} tool{summary.count === 1 ? "" : "s"}
+        </span>
+        <span className="m-names mono">{summary.names.join(" · ")}</span>
+        {summary.failed > 0 && <span className="m-failed">{summary.failed} failed</span>}
+        {running && <span className="m-running">running</span>}
+        {/* The expander marker is NOT `aria-hidden`: it is the only signal that this line opens. */}
+        <span className="m-open" aria-hidden="true">
+          ⌄
+        </span>
+      </summary>
+
+      {tools.map((tool) => (
+        <ToolDetail
+          // Opening the trace from inside a disclosure targets THIS call, which is what the reader
+          // means by "open in trace" — not whatever was last selected.
+          key={tool.toolCallId}
+          tool={tool}
+          onOpenInTrace={() => onOpenTool?.(tool.toolCallId)}
+        />
+      ))}
+    </details>
   );
 }
 
