@@ -19,7 +19,18 @@
     -->
     <link rel="icon" type="image/svg+xml" href="/src/assets/logo-icon.svg" sizes="any" />
     <link rel="icon" type="image/png" href="/src/assets/logo-icon.png" />
-    <link rel="apple-touch-icon" href="/src/assets/logo-icon.png" />
+    <!--
+      Safari's **Add to Dock** does not read the manifest's icons — it reads this link. So it has to be
+      here, at 180×180, at a STABLE path (issue #124).
+
+      Three faults in the previous version, and the symptom was exactly what they predict:
+        - it pointed at the 104×104 PNG, and Safari wants 180;
+        - it pointed into `src/assets/`, so the path was FINGERPRINTED — an icon URL is cached hard by
+          macOS and iOS, and a name that changes every build defeats that cache in the worst direction;
+        - and it was the only icon on a stable path that Safari could find, so when it rejected this one
+          there was nothing to fall back to but a screenshot of the page.
+    -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="theme-color" content="#3fa383" />
     <!--
       Installable to the dock as a standalone window (issue #119). Deliberately NOT an offline app: every

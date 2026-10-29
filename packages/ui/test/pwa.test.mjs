@@ -48,7 +48,9 @@ test("both icon sizes a manifest requires are present, and at the right size", (
   for (const icon of manifest.icons) {
     assert.ok(icon.type.startsWith("image/"), `${icon.src} needs a type, or the browser guesses`);
     // Stable paths, not fingerprinted ones: a manifest is copied verbatim and cannot resolve `/src/…`.
-    assert.match(icon.src, /^\/icon-\d+\.png$/, `${icon.src} must be a stable public path`);
+    // A stable public path — NOT /src/… and not a fingerprinted /assets/… path, because a manifest is
+    // copied verbatim and cannot resolve either.
+    assert.match(icon.src, /^\/[a-z0-9-]+\.png$/, `${icon.src} must be a stable public path`);
   }
 });
 
@@ -113,4 +115,41 @@ test("the worker registers only in a PRODUCTION build", () => {
   assert.match(main, /serviceWorker\.register\("\/sw\.js"\)/, "registers the built worker");
   // A browser that refuses one (private mode, insecure context) must still get a working app.
   assert.match(main, /\.catch\(/, "and a refusal is not fatal");
+});
+
+// --- Safari's Add to Dock (issue #124) ------------------------------------------------------------
+
+test("the apple-touch-icon is 180px at a STABLE path, because Safari ignores the manifest", () => {
+  // Reported: "I added it to dock via Safari, but it did not use the pi central icon." Safari's Add to Dock
+  // does not read manifest icons — it reads `apple-touch-icon`. Three faults produced the symptom:
+  //
+  //   - it pointed at a 104x104 PNG, and Safari wants 180;
+  //   - it pointed into `src/assets/`, so the path was FINGERPRINTED — and an icon URL is cached hard by
+  //     macOS, so a name that changes every build defeats that cache in the worst direction;
+  //   - there was no other icon on a stable path to fall back to.
+  const link = /<link rel="apple-touch-icon" href="([^"]+)"/.exec(html)?.[1];
+  assert.ok(link, "an apple-touch-icon link is required: Safari does not read the manifest");
+  assert.match(link, /^\/[a-z-]+\.png$/, `a stable public path, got ${link}`);
+  assert.ok(!link.includes("src/assets"), "not a fingerprinted path");
+  assert.ok(!/assets\//.test(link), "and not under assets/, which is immutable-cached");
+});
+
+test("the icon that link names is 180x180, not an upscaled 104", () => {
+  // Read the PNG's own header rather than trusting the filename: an icon that is the wrong size is either
+  // scaled (blurry) or ignored, and the failure is silent in both cases.
+  const icon = readFileSync(new URL("public/apple-touch-icon.png", root));
+  assert.equal(icon.subarray(1, 4).toString("latin1"), "PNG", "a real PNG");
+  // The IHDR chunk carries width and height as big-endian 32-bit at offsets 16 and 20.
+  const width = icon.readUInt32BE(16);
+  const height = icon.readUInt32BE(20);
+  assert.equal(width, 180, `Safari wants 180 wide, got ${width}`);
+  assert.equal(height, 180, `…and 180 tall, got ${height}`);
+});
+
+test("the manifest also declares the 180, so every browser shows the same artwork", () => {
+  // It costs nothing and means Safari 17+ (which does read the manifest) gets the same icon as the link.
+  const sizes = manifest.icons.map((icon) => icon.sizes);
+  assert.ok(sizes.includes("180x180"), "180 in the manifest too");
+  const entry = manifest.icons.find((icon) => icon.sizes === "180x180");
+  assert.equal(entry.src, "/apple-touch-icon.png", "the same file, not a second copy");
 });
