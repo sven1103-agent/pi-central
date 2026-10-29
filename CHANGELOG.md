@@ -11,6 +11,21 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
+## [0.4.1] — 2026-10-29
+
+A hotfix for one behaviour: **returning to a session you were following left you at the top of the
+transcript.** Three mechanisms had to be corrected, and they were found in sequence rather than at once:
+
+1. `decideOnSessionChange` restored a stale offset *and* the follow flag, so the offset won.
+2. The scroll listener wrote the session's position on **mount**, when the pane has content but no position
+   yet — overwriting the real offset with `scrollTop: 0`.
+3. That same mount measurement set `pinnedRef = false`, overriding the decision to follow **before the follow
+   effect ran**. This is the one the reporter confirmed fixes it.
+
+The first two are defensible on their own mechanism and may be defence-in-depth rather than load-bearing;
+the third is the one with a confirmed effect. Saying so is more useful than claiming all three were
+necessary.
+
 ## [0.4.0] — 2026-10-29
 
 Increment 2 closed, and the product became something you can install. The two bugs reported from a real
@@ -602,8 +617,6 @@ findable in a long conversation.
   if `latest` is the throwaway, and verifying `npm view pi-central dist-tags` is now **step 9** of the
   release checklist and part of the workflow's approval notice. A test pins that step and forbids the
   false guarantee from being re-asserted — including in the test whose own *name* carried it.
-
-<!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.2.0] — 2026-10-26
 
