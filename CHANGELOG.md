@@ -85,6 +85,24 @@ findable in a long conversation.
 
 ### Fixed
 
+- **Safari's Add to Dock used a screenshot instead of the logo** (issue #124). Reported from a real dock:
+  *"I added it to dock via Safari, but it did not use the pi central icon."*
+
+  Safari's Add to Dock **does not read the manifest's icons** — it reads `apple-touch-icon`. Three faults
+  produced exactly that symptom:
+
+  - it pointed at the **104×104** PNG, and Safari wants **180**;
+  - it pointed into `src/assets/`, so the path was **fingerprinted** — and an icon URL is cached hard by
+    macOS, so a name that changes every build defeats that cache in the worst direction;
+  - there was no other icon on a stable path for Safari to fall back to, so it used a screenshot of the page.
+
+  `apple-touch-icon.png` is now rendered from the logo's SVG at 180×180, served from a **stable public
+  path**, and declared in the manifest too — so Safari 17+ and every other browser show the same artwork
+  from one file.
+
+  The guard reads the PNG's own **IHDR header** rather than trusting the filename: an icon of the wrong size
+  is scaled (blurry) or ignored (silently), and neither failure says anything anywhere.
+
 - **Where to look when a fix appears not to work** (issue #114, follow-up). The build stamp existed and was
   correctly placed — in Settings, beside the package version, which is where every released application
   keeps it — but **nothing said so**, so it could not be found. That is a documentation gap and not a
