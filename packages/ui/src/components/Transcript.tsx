@@ -32,6 +32,7 @@ import {
 } from "../scroll.ts";
 import { RunNotices } from "./RunNotices.tsx";
 import { ToolDetail } from "./ToolDetail.tsx";
+import { formatBytes } from "../format.ts";
 
 /**
  * How close to the bottom still counts as "following the tail".
@@ -447,19 +448,59 @@ function ToolMarker({
         <span className="m-names mono">{summary.names.join(" · ")}</span>
         {summary.failed > 0 && <span className="m-failed">{summary.failed} failed</span>}
         {running && <span className="m-running">running</span>}
+        <span className="spacer" />
+        {/* What the second header used to carry, moved onto the one bar the reader is already on. */}
+        <span className="tool-detail-meta">{formatBytes(last.result.length)}</span>
+        <button
+          type="button"
+          className="copy"
+          title="Open this call in the tool trace"
+          /*
+           * `stopPropagation`, or clicking it would also toggle the disclosure — the click is a request
+           * for the full view, not for a closer look at the preview.
+           */
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onOpenTool?.(last.toolCallId);
+          }}
+        >
+          Open in trace
+        </button>
         {/* The expander marker is NOT `aria-hidden`: it is the only signal that this line opens. */}
         <span className="m-open" aria-hidden="true">
           ⌄
         </span>
       </summary>
 
-      {tools.map((tool) => (
+      {tools.map((tool, index) => (
         <ToolDetail
-          // Opening the trace from inside a disclosure targets THIS call, which is what the reader
-          // means by "open in trace" — not whatever was last selected.
           key={tool.toolCallId}
           tool={tool}
-          onOpenInTrace={() => onOpenTool?.(tool.toolCallId)}
+          /*
+           * ONE bar per call (issue #136).
+           *
+           * The first call needs none: the `<summary>` above is its bar, carrying the tool name, the
+           * state and the open/closed affordance. That is what lets the reader keep the mouse where they
+           * clicked and close again — a second header bar meant moving to it.
+           *
+           * A LATER call in the same run does need one, because it is not the summary and would
+           * otherwise be an unlabelled block. It names the call and repeats `Open in trace`.
+           */
+          header={
+            index === 0 ? undefined : (
+              <div className="tool-detail-head">
+                <span className="mono">{tool.toolName}</span>
+                {tool.isError && <span className="err">failed</span>}
+                {tool.running && <span className="m-running">running</span>}
+                <span className="spacer" />
+                <span className="tool-detail-meta">{formatBytes(tool.result.length)}</span>
+                <button type="button" className="copy" onClick={() => onOpenTool?.(tool.toolCallId)}>
+                  Open in trace
+                </button>
+              </div>
+            )
+          }
         />
       ))}
     </details>

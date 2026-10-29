@@ -242,6 +242,12 @@ findable in a long conversation.
   a re-render — which is the bug #108 was about — and keyboard behaviour comes free. The result is rendered
   as a **text node**, so ADR-0006's single insertion point stays in `Prose`.
 
+  **One bar per call** (issue #136). The first version put a second header bar *inside* the body, repeating
+  the tool name — so opening a call meant moving the mouse down to close it again. The disclosure's
+  `<summary>` is the bar now: it carries the tool name, the state, the size and `Open in trace`, which is
+  everything the second bar said. A **later** call in the same run still gets its own line, because it is
+  not the summary and would otherwise be unlabelled.
+
 - **The trace's nested scroll regions are marked as such** (issue #73). The transcript column has two
   scroll regions — the transcript and the trace list — and a reviewer could not tell them apart:
   *"the inner thumb is easy to mistake for the outer one"*.

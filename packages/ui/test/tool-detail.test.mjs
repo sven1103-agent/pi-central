@@ -83,13 +83,18 @@ test("the marker is a disclosure, not a jump to another panel", () => {
   const marker = source.slice(source.indexOf("function ToolMarker("), source.indexOf("function Turn("));
   assert.match(marker, /<details/, "the marker opens in place");
   assert.match(marker, /<summary/, "…with a summary as the handle");
-  assert.ok(!/onClick=/.test(marker), "no click handler that would move the reader elsewhere");
+  // The bar now carries an `Open in trace` link (issue #136), so an `onClick` is expected — but it must
+  // not also toggle the disclosure, or a request for the full view would just open the preview.
+  assert.match(marker, /stopPropagation\(\)/, "the trace link must not toggle the disclosure");
+  assert.ok(
+    !/onSelect|setOpenTool/.test(marker),
+    "and nothing on the bar changes a selection elsewhere — the disclosure is the primary action",
+  );
   assert.match(marker, /<ToolDetail/, "…and each call renders the detail component in place");
-  // `Open in trace` lives in `ToolDetail`, not in the marker — asserting it here was wrong, and the
-  // failure said so. The marker's job is to render the detail and hand it the escape hatch.
-  assert.match(marker, /onOpenInTrace=/, "…which is given the route back to the full trace");
-  const detail = stripComments(readFileSync(new URL("ToolDetail.tsx", components), "utf8"));
-  assert.match(detail, /Open in trace/, "the escape hatch exists for a result too long to read here");
+  // `Open in trace` moved ONTO the bar in issue #136, rather than sitting in a second header bar inside
+  // `ToolDetail`. That is the point of the change: one bar, so the reader can close what they opened
+  // without moving the mouse.
+  assert.match(marker, /Open in trace/, "the escape hatch is on the same bar as the disclosure");
 });
 
 test("a result is CAPPED, so it cannot bury the conversation", () => {
@@ -117,9 +122,18 @@ test("the output sits inside the quarantine frame the legend promises", () => {
   // passed even with the gradient removed from `.tool-detail`. Found by falsifying it.
   assert.match(frame, /repeating-linear-gradient/, "…and the hatch itself, inside this rule");
 
-  const detail = stripComments(readFileSync(new URL("ToolDetail.tsx", components), "utf8"));
-  assert.match(detail, /Tool output/, "the header says so in WORDS");
-  assert.match(detail, /className="label">Tool output/, "as a labelled header, not incidental text");
+  // The words moved onto the disclosure's summary bar in issue #136: one bar per call, carrying the tool
+  // name and its state, so the reader can close what they opened without moving the mouse. The guarantee is
+  // unchanged — the surface still says, in words, that this is tool output — only its position moved.
+  const marker = stripComments(readFileSync(new URL("Transcript.tsx", components), "utf8"));
+  const oneBar = marker.slice(marker.indexOf("function ToolMarker("), marker.indexOf("function Turn("));
+  assert.match(oneBar, /m-count/, "the bar names what it is (the tool count) in words");
+  assert.match(oneBar, /m-names mono/, "…and which tools, as text rather than texture");
+  const detailFile = stripComments(readFileSync(new URL("ToolDetail.tsx", components), "utf8"));
+  assert.ok(
+    !/tool-detail-head/.test(detailFile.slice(detailFile.indexOf("return ("))),
+    "ToolDetail renders no header bar of its own — the summary is the header",
+  );
 });
 
 test("the result is a text node, never markup", () => {

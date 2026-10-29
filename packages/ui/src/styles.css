@@ -1349,6 +1349,10 @@ select.btn { font-family: var(--sans); }
   gap: var(--sp-2);
   cursor: pointer;
   list-style: none;
+  /* The bar is the quarantine header now (issue #136), so it carries the label colour that says "this is
+     data, not the assistant" — the words are the signal under `forced-colors`, where the hatch is dropped. */
+  color: var(--quarantine);
+  font-weight: 600;
   /* The default triangle is replaced by `.m-open` below, which rotates with the disclosure — one
      affordance that moves, rather than a triangle plus an arrow saying the same thing. */
 }
@@ -1364,7 +1368,9 @@ select.btn { font-family: var(--sans); }
  * own legend makes about every surface carrying tool output.
  */
 .tool-detail {
-  margin: var(--sp-2) 0 var(--sp-3);
+  margin: 0 0 var(--sp-3);
+  /* No top margin: the block hangs directly off the bar it belongs to, so the bar and its body read as one
+     object rather than two (issue #136). */
   border-left: 3px solid var(--quarantine);
   background:
     repeating-linear-gradient(
@@ -1394,6 +1400,7 @@ select.btn { font-family: var(--sans); }
 
 /* A CAP, because this is inline in the conversation. Without it a `read` of a 40 KB file pushes the next
    turn off the screen — the defect this whole component exists to avoid. */
+.tool-detail > :first-child { margin-top: 0; }
 .tool-detail-args,
 .tool-detail-output {
   margin: 0;

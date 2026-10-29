@@ -31,8 +31,8 @@
  * The text is a **text node**, never markup: a tool result is attacker-influenced, and ADR-0006's single
  * `dangerouslySetInnerHTML` site stays in `Prose`.
  */
+import type { ReactNode } from "react";
 import type { ToolExecution } from "../transcript.ts";
-import { formatBytes } from "../format.ts";
 
 /** How much of a result to show before the reader asks for the rest. */
 const PREVIEW_LINES = 12;
@@ -48,34 +48,37 @@ function safeJson(value: unknown): string {
 
 export function ToolDetail({
   tool,
-  onOpenInTrace,
+  header,
 }: {
   tool: ToolExecution;
-  /** The escape hatch to the full trace, for a result too long to read here. */
-  onOpenInTrace: () => void;
+  /**
+   * The bar above this body: the disclosure's `<summary>` for the first call in a run, or a filename line
+   * for the rest. Supplied by the host so there is exactly ONE bar per call.
+   */
+  header?: ReactNode;
 }) {
   const lines = tool.result.length > 0 ? tool.result.split("\n") : [];
   const preview = lines.slice(0, PREVIEW_LINES).join("\n");
   const truncated = lines.length > PREVIEW_LINES;
 
   return (
-    <div className="tool-detail">
-      <div className="tool-detail-head">
-        <span className="label">Tool output</span>
-        <span className="mono">{tool.toolName}</span>
-        {tool.isError && <span className="err">failed</span>}
-        {tool.running && <span className="m-running">running</span>}
-        <span className="spacer" />
-        <span className="tool-detail-meta">{formatBytes(tool.result.length)}</span>
-        <button type="button" className="copy" onClick={onOpenInTrace}>
-          Open in trace
-        </button>
-      </div>
+    /*
+     * NO HEADER BAR (issue #136). The disclosure's `<summary>` above IS the header — it carries the tool
+     * name, the state and the open/closed affordance in one line, so the reader never has to move the
+     * mouse to close what they just opened. A second bar repeating the name was one line of chrome per
+     * call for no information.
+     *
+     * `header` is supplied by the host rather than assumed, because `ToolMarker` renders one disclosure
+     * around a run of calls: the FIRST call's bar is the summary, so the later ones still need to say
+     * which call they are.
+     */
+    <div className="tool-detail" data-tool={tool.toolName}>
+      {header}
 
       {/*
         Arguments first: they are the command line the MODEL wrote, and they describe the output below
-        them. `open` because without them the output is unreadable — "what did it run?" is the first
-        question a marker raises.
+        them. Without them the output is unreadable — "what did it run?" is the first question a marker
+        raises.
       */}
       {tool.args !== undefined && <pre className="tool-detail-args mono">{safeJson(tool.args)}</pre>}
 
@@ -92,7 +95,7 @@ export function ToolDetail({
       {truncated && (
         /*
           The remainder is behind a disclosure rather than shown. Not a truncation with no way forward:
-          `Open in trace` above gives the whole thing, and the count says how much is hidden.
+          `Open in trace` in the bar above gives the whole thing, and the count says how much is hidden.
         */
         <details className="tool-detail-rest">
           <summary>{lines.length - PREVIEW_LINES} more lines</summary>
