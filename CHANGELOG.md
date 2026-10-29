@@ -85,6 +85,30 @@ findable in a long conversation.
 
 ### Fixed
 
+- **Where to look when a fix appears not to work** (issue #114, follow-up). The build stamp existed and was
+  correctly placed — in Settings, beside the package version, which is where every released application
+  keeps it — but **nothing said so**, so it could not be found. That is a documentation gap and not a
+  design one: a commit hash in the product's chrome would be a dev artefact in a shipped UI.
+
+  `docs/DOGFOODING.md` now answers the question the symptom actually raises, with both halves and where
+  each lives: the tab's own identity in **Settings → This build**, and the entry bundle the orchestrator is
+  **serving** in its startup log. If they disagree with what you just built, the page is stale.
+
+- **The dev proxy no longer prints a stack trace for a normal event** (issue #114, follow-up).
+  `read ECONNRESET` fires when the orchestrator restarts, a session ends, or the tab reloads — routine. Vite
+  logged it through its generic error path, so it arrived as:
+
+  ```
+  [vite] ws proxy error:
+  Error: read ECONNRESET
+      at TCP.onStreamRead (node:internal/stream_base_commons:221:20)
+  ```
+
+  Logging noise as failure trains you to ignore the prefix, which is how an `EADDRINUSE`-shaped message
+  stops being read — the same lesson as the port collision, in a different log line. The routine codes are
+  now one line per socket, with no stack, and say *"normal on reload or restart"*. Anything else still
+  reports as an error, because a proxy failing for any other reason is worth a stack trace.
+
 - **The dev loop can say which build is running** (issue #114). Four times in one session a UI fix
   appeared not to work because half the system was stale — a rebuilt `dist/`, a tab holding an old bundle,
   an orchestrator with cached modules — and each time the only way to tell was to `curl` the served HTML,
