@@ -11,77 +11,11 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
-## [0.3.0] — 2026-10-27
+## [0.4.0] — 2026-10-29
 
-Increment 2 — *Drive a session from the UI* — plus the release machinery it ships behind. The
-dashboard stops being a viewer and starts being a place to work: the right-hand panel gets out of the
-way by default, the transcript remembers where you were reading, and the reader's own turns are
-findable in a long conversation.
-
-### Changed
-
-- **The trace's nested scroll regions are marked as such** (issue #73). The transcript column has two
-  scroll regions — the transcript and the trace list — and a reviewer could not tell them apart:
-  *"the inner thumb is easy to mistake for the outer one"*.
-
-  Two ways out, and the one NOT taken matters as much as the one that was:
-
-  - **Remove the nesting** — rejected. The trace's bounded height is a stated design choice (*"the
-    trace never grows with the number of calls"*), so without a bound the list pushes the composer off
-    screen; and windowing the rows instead would put calls out of reach of the `↑↓` traversal that
-    exists for exactly that purpose.
-  - **Keep it and mark it** — taken. The inner scrollers now carry **their own scrollbar** (wider, and
-    tinted `--line-strong` rather than the platform default), and the trace list sits on a **recessed
-    `--bg` viewport** so the bounded area reads as a surface of its own rather than as more of the page.
-
-  Worth stating plainly: neither the hierarchy nor the wheel behaviour was ever wrong — a browser
-  chains the wheel from a finished inner scroller to the outer one. What was missing was a signal a
-  glance could use. The words were already there (*"latest 5 shown · the rest below for debugging ·
-  ↑↓ to traverse"*) and were not enough.
-  
-- **The transcript can be told never to scroll itself** (issue #86). The reader's own request:
-  *"user wants to automatically follow the transcript; user is investigating and reading outputs in
-  their own pace, enforcing auto-follow would not enable them to do so."*
-
-  The existing model — follow while at the bottom, stop when you scroll away, resume when you return —
-  already serves both, but it makes the reader **prove** their intent over and over: every glance
-  further up silently turns following off until they scroll back down, so someone reading at their own
-  pace cannot leave the pane at all. The toggle is not a second mechanism; it is a way to say *once*
-  what the scroll position says every time.
-
-  `auto-follow on` / `auto-follow off` sits at the right end of the legend bar, in the same chip
-  language as `markers on` beside it, with the state in the words as well as `aria-pressed`. Off means
-  the pane never moves on its own — and *Jump to latest* still works, which is the difference between
-  "do not move me" and "do not let me move".
-
-  In memory, not persisted: persisting UI state is #15, and inventing a second persistence mechanism
-  here would pre-empt the decision that issue is waiting on.
-
-  The chip affordance is now one class, `.toggle-chip`, shared by this toggle and the markers toggle —
-  rather than two copies of the same five declarations.
-
-  Four falsifications: `autoFollow` ignored; the pane not consulting it; the state removed from the
-  label; and `aria-pressed` dropped.
-
-- **The right panel is collapsed by default, and the user decides** (issue #75). It had gone from
-  `display: none` below 1440px to permanently visible, which was an over-correction: on a normal
-  window it took roughly as much room as the transcript, to show material nobody reads while working.
-  Session facts and the file browser are special-purpose views, not something to keep in front of you.
-
-  `PanelToggle` now sits in the topbar — where `styles.css` already said the control belonged, when
-  the panel became permanent — and its label states the **action** (`Show panel` / `Hide panel`) while
-  `aria-expanded` carries the state, because a label that reads as a status gets clicked twice. The
-  panel's width and mode survive being hidden, so re-opening returns it where the user left it.
-
-  The stored `collapsed` field is read as `!== false`, so an absent value — anyone who used an earlier
-  build — means the new default rather than "expanded"; an `=== true` test would have opened the panel
-  for every existing user.
-
-  The panel is not rendered while collapsed rather than rendered at zero width, and
-  `.panes.is-collapsed` removes its grid track so hiding the panel does not leave an empty column. The
-  `≤1023px` query had to be taught to name `.panes.is-collapsed` too: that selector out-specifies a
-  bare `.panes` and would otherwise have won inside the query, leaving a 288px empty track where the
-  hidden rail used to be.
+Increment 2 closed, and the product became something you can install. The two bugs reported from a real
+window — a transcript that stopped following a stream, and a panel that stretched on a wide screen — are
+fixed, and so is the class of defect behind them: the build now says which build it is.
 
 ### Fixed
 
@@ -254,6 +188,80 @@ findable in a long conversation.
   Both detection paths are covered, because they have separate messages and a test on one would let
   the other regress.
 
+## [0.3.0] — 2026-10-27
+
+Increment 2 — *Drive a session from the UI* — plus the release machinery it ships behind. The
+dashboard stops being a viewer and starts being a place to work: the right-hand panel gets out of the
+way by default, the transcript remembers where you were reading, and the reader's own turns are
+findable in a long conversation.
+
+### Changed
+
+- **The trace's nested scroll regions are marked as such** (issue #73). The transcript column has two
+  scroll regions — the transcript and the trace list — and a reviewer could not tell them apart:
+  *"the inner thumb is easy to mistake for the outer one"*.
+
+  Two ways out, and the one NOT taken matters as much as the one that was:
+
+  - **Remove the nesting** — rejected. The trace's bounded height is a stated design choice (*"the
+    trace never grows with the number of calls"*), so without a bound the list pushes the composer off
+    screen; and windowing the rows instead would put calls out of reach of the `↑↓` traversal that
+    exists for exactly that purpose.
+  - **Keep it and mark it** — taken. The inner scrollers now carry **their own scrollbar** (wider, and
+    tinted `--line-strong` rather than the platform default), and the trace list sits on a **recessed
+    `--bg` viewport** so the bounded area reads as a surface of its own rather than as more of the page.
+
+  Worth stating plainly: neither the hierarchy nor the wheel behaviour was ever wrong — a browser
+  chains the wheel from a finished inner scroller to the outer one. What was missing was a signal a
+  glance could use. The words were already there (*"latest 5 shown · the rest below for debugging ·
+  ↑↓ to traverse"*) and were not enough.
+
+- **The transcript can be told never to scroll itself** (issue #86). The reader's own request:
+  *"user wants to automatically follow the transcript; user is investigating and reading outputs in
+  their own pace, enforcing auto-follow would not enable them to do so."*
+
+  The existing model — follow while at the bottom, stop when you scroll away, resume when you return —
+  already serves both, but it makes the reader **prove** their intent over and over: every glance
+  further up silently turns following off until they scroll back down, so someone reading at their own
+  pace cannot leave the pane at all. The toggle is not a second mechanism; it is a way to say *once*
+  what the scroll position says every time.
+
+  `auto-follow on` / `auto-follow off` sits at the right end of the legend bar, in the same chip
+  language as `markers on` beside it, with the state in the words as well as `aria-pressed`. Off means
+  the pane never moves on its own — and *Jump to latest* still works, which is the difference between
+  "do not move me" and "do not let me move".
+
+  In memory, not persisted: persisting UI state is #15, and inventing a second persistence mechanism
+  here would pre-empt the decision that issue is waiting on.
+
+  The chip affordance is now one class, `.toggle-chip`, shared by this toggle and the markers toggle —
+  rather than two copies of the same five declarations.
+
+  Four falsifications: `autoFollow` ignored; the pane not consulting it; the state removed from the
+  label; and `aria-pressed` dropped.
+
+- **The right panel is collapsed by default, and the user decides** (issue #75). It had gone from
+  `display: none` below 1440px to permanently visible, which was an over-correction: on a normal
+  window it took roughly as much room as the transcript, to show material nobody reads while working.
+  Session facts and the file browser are special-purpose views, not something to keep in front of you.
+
+  `PanelToggle` now sits in the topbar — where `styles.css` already said the control belonged, when
+  the panel became permanent — and its label states the **action** (`Show panel` / `Hide panel`) while
+  `aria-expanded` carries the state, because a label that reads as a status gets clicked twice. The
+  panel's width and mode survive being hidden, so re-opening returns it where the user left it.
+
+  The stored `collapsed` field is read as `!== false`, so an absent value — anyone who used an earlier
+  build — means the new default rather than "expanded"; an `=== true` test would have opened the panel
+  for every existing user.
+
+  The panel is not rendered while collapsed rather than rendered at zero width, and
+  `.panes.is-collapsed` removes its grid track so hiding the panel does not leave an empty column. The
+  `≤1023px` query had to be taught to name `.panes.is-collapsed` too: that selector out-specifies a
+  bare `.panes` and would otherwise have won inside the query, leaving a 288px empty track where the
+  hidden rail used to be.
+
+### Fixed
+
 - **The copy-path button said `Copy copy path changelog.md`** (issue #72). Two faults in one line:
 
   - the **caller** passed `Copy path ${path}` while the button prefixed its own `Copy`, so the verb
@@ -407,6 +415,7 @@ findable in a long conversation.
     offset set then is clamped to `0` — landing the reader at the top, which is the bug itself.
   - **Following is re-enabled before the scroll**, or the scroll event it causes immediately
     un-follows the reader again.
+
 - **An affordance and legibility sweep from looking at a screenshot** (issue #74). Three things, none
   of which any test could have caught, all found by eye while the suite was green.
 
