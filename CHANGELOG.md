@@ -85,6 +85,25 @@ findable in a long conversation.
 
 ### Fixed
 
+- **The transcript and the composer are held to one line, centred** (issue #92). With the panel collapsed
+  on a wide window the report was that *"the transcript looks lost, there is a lot of empty space right
+  to the transcript"* and *"the prompt console is just stretched to the right, which makes it cumbersome
+  to hit the send button"*.
+
+  One omission caused both: `max-width: 72ch` was a property of **prose**, not of the column. So the text
+  sat against the left edge of a very wide column with all the emptiness on one side — which reads as a
+  broken layout rather than as a line-length limit — and the composer, which had no measure at all,
+  stretched its send button to the far edge.
+
+  The measure is now a token (`--measure: 72ch`) and the thing that is laid out: the conversation centres
+  against it, the composer's rows take the same line, and the send button keeps its own width instead of
+  riding to the end of the row. `margin-inline: auto` rather than fixed padding, because the padding has
+  to grow and shrink with the window *and* with the panel opening.
+
+  The scroller's own horizontal padding stays, and there is a test for it: `margin-inline: auto` collapses
+  to nothing when the column is narrower than the measure, so on a narrow window that padding is what
+  keeps the text off the edges.
+
 - **Every image was blocked by our own CSP, and a comment said it could not be** (issue #111). Reported
   as *"could not decode this image"* about a perfectly valid PNG — and the file was innocent all along.
 
