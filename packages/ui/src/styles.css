@@ -1324,9 +1324,19 @@ select.btn { font-family: var(--sans); }
 /* --- the compact marker in the transcript ---------------------------------------------------- */
 
 .tool-marker {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
+  /*
+   * `display: block`, NOT `flex` (issue #136).
+   *
+   * This element is a `<details>`, and its layout is the browser's: the `<summary>` is a block-level child
+   * and everything after it stacks BELOW. `display: flex` overrode that and made the summary and the body
+   * *flex items side by side* — so opening a call pushed its output to the right of the bar instead of under
+   * it, and the bar the reader had just clicked was no longer the thing spanning the width. That is why
+   * closing meant hunting for the left-hand edge again.
+   *
+   * The summary is a flex row of its own (`.tool-marker-summary`), which is where the horizontal alignment
+   * belongs.
+   */
+  display: block;
   width: 100%;
   text-align: left;
   background: none;
@@ -1344,6 +1354,7 @@ select.btn { font-family: var(--sans); }
 }
 /* The summary is the disclosure handle now, so the hover affordance moves to it (issue #131). */
 .tool-marker-summary {
+  /* The bar is the row, so the alignment lives here and the `<details>` stays a plain block. */
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -1368,7 +1379,9 @@ select.btn { font-family: var(--sans); }
  * own legend makes about every surface carrying tool output.
  */
 .tool-detail {
-  margin: 0 0 var(--sp-3);
+  /* `display: block` on the `<details>` means there is no flex `gap` between the bar and its body any more,
+     so the separation is stated here rather than inherited from a container that no longer applies. */
+  margin: 2px 0 var(--sp-3);
   /* No top margin: the block hangs directly off the bar it belongs to, so the bar and its body read as one
      object rather than two (issue #136). */
   border-left: 3px solid var(--quarantine);

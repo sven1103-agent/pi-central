@@ -242,6 +242,11 @@ findable in a long conversation.
   a re-render — which is the bug #108 was about — and keyboard behaviour comes free. The result is rendered
   as a **text node**, so ADR-0006's single insertion point stays in `Prose`.
 
+  **`display: block` on the `<details>`, not `flex`** (issue #136). A `<details>` lays its `<summary>` out as a
+  block-level child and stacks everything after it **below**; `display: flex` overrode that and made the
+  summary and the body *flex items side by side*, pushing the output to the right of the bar. So the bar the
+  reader had just clicked no longer spanned the width, and closing it meant hunting for the left-hand edge.
+
   **One bar per call** (issue #136). The first version put a second header bar *inside* the body, repeating
   the tool name — so opening a call meant moving the mouse down to close it again. The disclosure's
   `<summary>` is the bar now: it carries the tool name, the state, the size and `Open in trace`, which is

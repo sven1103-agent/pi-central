@@ -36,6 +36,14 @@ function stripComments(text) {
 const components = new URL("../src/components/", import.meta.url);
 const css = stripComments(readFileSync(new URL("../src/styles.css", import.meta.url), "utf8"));
 
+/** The LAST rule whose selector matches — last, because that is what CSS resolves to. */
+function rule(selector) {
+  const normalised = css.replace(/\s+/g, " ");
+  const wanted = selector.replace(/\s+/g, " ").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const all = [...normalised.matchAll(new RegExp(`${wanted} ?\\{([^}]*)\\}`, "g"))];
+  return all.length > 0 ? all[all.length - 1][1] : undefined;
+}
+
 before(async () => {
   server = await createServer({
     root: new URL("..", import.meta.url).pathname,
@@ -151,4 +159,26 @@ test("the frame survives `forced-colors`, where the hatch is dropped", () => {
   // DESIGN §5.2: the header text is the non-textual-signal fallback. Pinned here because a future change
   // that dropped the words would leave nothing in forced-colors mode.
   assert.match(css, /\.tool-detail-head \.label\s*\{[^}]*--quarantine/, "the label carries the colour");
+});
+
+test("the disclosure is a BLOCK, so its body stacks under the bar rather than beside it", () => {
+  // The bug this pins, reported as *"when a user clicks it, it opens and the user needs to now navigate to
+  // the left side of the tool output to close it again."*
+  //
+  // `.tool-marker` is a `<details>`, and its layout is the browser's: the `<summary>` is a block-level child
+  // and everything after it stacks BELOW. `display: flex` overrode that and made the summary and the body
+  // *flex items side by side* — pushing the output to the right of the bar, so the bar the reader had just
+  // clicked no longer spanned the width.
+  const marker = rule(".tool-marker");
+  assert.ok(marker, ".tool-marker must have a rule");
+  assert.match(marker, /display:\s*block/, "a <details> must not be made a flex container");
+  assert.ok(
+    !/display:\s*flex/.test(marker),
+    "`flex` here makes the summary a flex item and puts the body BESIDE it",
+  );
+
+  // The horizontal alignment belongs on the bar, which is a flex row of its own.
+  const summary = rule(".tool-marker-summary");
+  assert.ok(summary, "the summary must have a rule");
+  assert.match(summary, /display:\s*flex/, "the BAR is the row");
 });
