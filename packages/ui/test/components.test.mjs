@@ -1537,15 +1537,25 @@ test("a MATCHING protocol is stated as matching, and does not cry wolf", async (
   assert.match(html, /matches this UI/);
 });
 
-test("Settings contains NO preference control, only a statement about updates", async () => {
-  // The rule this slice is built around: a control that looks functional and is not is worse than
-  // its absence. The update toggle belongs here, and must not appear until #55 makes it work — so
-  // this asserts the absence, which is what would silently rot as someone "helpfully" adds it.
+test("Settings has no UPDATE control, only a statement about it", async () => {
+  // The rule this slice is built around: a control that looks functional and is not is worse than its
+  // absence. The update toggle belongs here, and must not appear until #55 makes it work.
+  //
+  // NARROWED in #134: this used to assert that Settings contained no `<input>` AT ALL, which was a proxy
+  // for the rule rather than the rule itself. The Reading panel adds real, working sliders, and the proxy
+  // then failed on controls that are exactly the opposite of the problem. What must stay absent is the
+  // UPDATE control — so the assertion follows the rule: no update-shaped control, and the question "why
+  // can I not turn this on?" still answered in words.
   const html = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {} }));
-  assert.ok(!/<input/i.test(html), `no input may appear in Settings yet: ${html}`);
-  assert.ok(!/type="checkbox"/i.test(html), "no checkbox may appear in Settings yet");
   assert.ok(!/role="switch"/i.test(html), "no switch may appear in Settings yet");
-  // But the question "why can I not turn this on?" is answered, rather than left to the reader.
+  assert.ok(
+    !/check for updates[^<]*<input/i.test(html) && !/<input[^>]*update/i.test(html),
+    `no control may be attached to updating: ${html}`,
+  );
+  // The one input that IS legitimate here must be a preference that works, not a placeholder.
+  assert.match(html, /type="range"/, "the Reading sliders are real controls");
+  assert.match(html, /Reading/, "…in a section that names them");
+  // And the question "why can I not turn this on?" is answered, rather than left to the reader.
   assert.match(html, /does not check for updates/i);
   assert.match(html, /off unless you\s+turn it on|off unless you turn it on/i);
 });

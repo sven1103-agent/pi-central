@@ -34,9 +34,25 @@
  *   2. **The reason is stated once, not six times.** Each row said "the orchestrator has not sent this
  *      yet", which is six repetitions of one fact and buries the actionable part.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PROTOCOL_VERSION, type InstallFacts } from "@pi-central/protocol";
 import { buildInfo, buildLabel } from "../build-info.ts";
+import {
+  READING_MEASURE_DEFAULT,
+  READING_MEASURE_FILL,
+  READING_MEASURE_MAX,
+  READING_MEASURE_MIN,
+  READING_SIZE_MAX,
+  READING_SIZE_MIN,
+  clampReadingMeasure,
+  clampReadingSize,
+  defaultReadingPrefs,
+  parseReadingPrefs,
+  readingStyle,
+  serializeReadingPrefs,
+  type ReadingPrefs,
+} from "../reading.ts";
+import { READING_PREFS_KEY } from "../reading.ts";
 import { CopyButton } from "./CopyButton.tsx";
 
 /**
@@ -149,6 +165,8 @@ export function Settings({
           </p>
         )}
 
+        <ReadingPanel />
+
         <section>
           <h4>This build</h4>
           <dl className="kv">
@@ -223,5 +241,112 @@ export function Settings({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The transcript's text size and measure (issue #134).
+ *
+ * ## Why these two, and not alignment
+ *
+ * *"The transcript looks lost on bigger screens"* is a preference — 72ch at 15px is comfortable on a 13"
+ * laptop and cramped on a 27" display. Alignment was tried once (#92), produced five defects, and was
+ * reverted; it is deliberately not offered here.
+ *
+ * ## The live sample
+ *
+ * The choice is judged **in the panel it is made in**, at the same size and measure, so the reader does not
+ * have to close Settings to see what they did. It also makes the `ch`/`px` interaction visible: raising the
+ * size widens the measure too, because `1ch` is measured in the prose's own font.
+ */
+function ReadingPanel() {
+  const [prefs, setPrefs] = useState<ReadingPrefs>(() => {
+    try {
+      return parseReadingPrefs(localStorage.getItem(READING_PREFS_KEY));
+    } catch {
+      // Storage disabled or an opaque origin: the defaults still apply, the panel just does not remember.
+      return defaultReadingPrefs();
+    }
+  });
+
+  // Applied to `:root` so the whole app reads them, and written on every change — a size that did not
+  // survive a reload would be a control lying about being a setting.
+  useEffect(() => {
+    const root = document.documentElement;
+    for (const [property, value] of Object.entries(readingStyle(prefs))) {
+      root.style.setProperty(property, value);
+    }
+    try {
+      localStorage.setItem(READING_PREFS_KEY, serializeReadingPrefs(prefs));
+    } catch {
+      // As above.
+    }
+  }, [prefs]);
+
+  const filled = prefs.measure === READING_MEASURE_FILL;
+
+  return (
+    <section>
+      <h4>Reading</h4>
+      <p className="settings-note" style={{ marginTop: 0 }}>
+        Affects the transcript only. Raising the size widens the line too, because the measure is relative
+        to the text.
+      </p>
+
+      <label className="reading-row">
+        <span>Text size</span>
+        <input
+          type="range"
+          min={READING_SIZE_MIN}
+          max={READING_SIZE_MAX}
+          step={1}
+          value={prefs.sizePx}
+          aria-label="Transcript text size in pixels"
+          onChange={(event) => setPrefs((c) => ({ ...c, sizePx: clampReadingSize(Number(event.target.value)) }))}
+        />
+        <span className="mono reading-value">{prefs.sizePx}px</span>
+      </label>
+
+      <label className="reading-row">
+        <span>Line length</span>
+        <input
+          type="range"
+          min={READING_MEASURE_MIN}
+          max={READING_MEASURE_MAX}
+          step={2}
+          value={filled ? READING_MEASURE_MAX : prefs.measure}
+          disabled={filled}
+          aria-label="Transcript line length in characters"
+          onChange={(event) =>
+            setPrefs((c) => ({ ...c, measure: clampReadingMeasure(Number(event.target.value)) }))
+          }
+        />
+        <span className="mono reading-value">{filled ? "fill" : `${prefs.measure}ch`}</span>
+      </label>
+
+      <label className="reading-row">
+        <span />
+        <span style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+          <input
+            type="checkbox"
+            checked={filled}
+            onChange={(event) =>
+              setPrefs((c) => ({ ...c, measure: event.target.checked ? READING_MEASURE_FILL : READING_MEASURE_DEFAULT }))
+            }
+          />
+          Use the full width
+        </span>
+        <span />
+      </label>
+
+      {/* The sample, at the reader's own numbers. `aria-hidden` because it is the same sentence as the
+          description above, and repeating it to a screen reader adds nothing. */}
+      <div className="reading-sample" aria-hidden="true">
+        <p>
+          Prose at this setting. The quick brown fox jumps over the lazy dog, and then explains why it did
+          so at slightly more length than strictly necessary.
+        </p>
+      </div>
+    </section>
   );
 }

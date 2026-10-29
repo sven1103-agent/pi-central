@@ -239,7 +239,10 @@ test("the tool bar measures the SAME width as the prose", () => {
     `.measure sits on <article class="turn">, which inherits ${inherited} — the bar must set the SAME token, ` +
       `or the two 72ch values resolve to different widths`,
   );
-  assert.match(marker, /max-width:\s*72ch/, "…and the same number");
+  // The same TOKEN, which is what makes them agree when the reader changes it (#134). Asserting the literal
+  // would pass for the default and fail the moment anyone touched the setting.
+  assert.match(marker, /max-width:\s*var\(--reading-measure\)/, "…and the same token as `.measure`");
+  assert.match(rule(".measure") ?? "", /max-width:\s*var\(--reading-measure\)/, "…confirmed on `.measure`");
 
   // The children restore their own small size, or the whole block would render at the inherited size.
   for (const sel of [".tool-marker-summary", ".tool-detail"]) {

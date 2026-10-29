@@ -48,7 +48,11 @@ function rule(selector) {
 test("the prose is CAPPED, which is the readability limit that matters", () => {
   const measure = rule(".measure");
   assert.ok(measure, ".measure must have a rule");
-  assert.match(measure, /max-width:\s*72ch/, "a line-length cap, in ch so it scales with the prose font");
+  // The cap is now the READER's token (#134), defaulting to 72ch. Asserting the literal would fail on the
+  // feature that makes it configurable — the property is "a cap in ch", not "the number 72".
+  assert.match(measure, /max-width:\s*var\(--reading-measure\)/, "the reader's measure token");
+  const root = /:root\s*\{([\s\S]*?)\n\}/m.exec(css)?.[1] ?? "";
+  assert.match(root, /--reading-measure:\s*72ch/, "…which defaults to the 72ch that shipped");
 });
 
 test("the prose is NOT centred", () => {

@@ -87,6 +87,20 @@
   --fs-sm: 12px;
   --fs-base: 13px;
   --fs-md: 15px;
+  /*
+   * The READER's two numbers (issue #134).
+   *
+   * Not `--fs-md` and not `.measure`'s literal: `--fs-md` is used by seven other rules — headings, dialogs,
+   * the composer — so letting the reading preference write to it would resize the whole application. These
+   * two are the transcript's own, and nothing else reads them.
+   *
+   * They default to exactly what shipped: 15px prose and a 72ch measure. A reader who never opens Settings
+   * sees no change at all, which is the acceptance criterion.
+   *
+   * Set at runtime on `:root` by `reading.ts`, from `localStorage`.
+   */
+  --reading-size: 15px;
+  --reading-measure: 72ch;
   --fs-lg: 18px;
 
   --sh-1: 0 1px 0 rgba(255, 255, 255, 0.03);
@@ -557,7 +571,7 @@ button { font: inherit; color: inherit; }
  * The original complaint is more likely about text SIZE than alignment — 72ch at 15px is small on a 27"
  * display — and that is a one-line change to `--fs-md` or to the number here, without moving anything.
  */
-.measure { max-width: 72ch; }
+.measure { max-width: var(--reading-measure); }
 
 .turn { margin-bottom: var(--sp-4); }
 
@@ -600,7 +614,8 @@ button { font: inherit; color: inherit; }
   gap: var(--sp-2);
 }
 
-.prose { font-size: var(--fs-md); line-height: 1.55; }
+/* The reader's size, not `--fs-md`: the preference must not resize headings and dialogs (issue #134). */
+.prose { font-size: var(--reading-size); line-height: 1.55; }
 .prose > :first-child { margin-top: 0; }
 .prose > :last-child { margin-bottom: 0; }
 .prose h1, .prose h2, .prose h3 { font-size: 1.1em; margin: 1em 0 0.4em; }
@@ -1349,7 +1364,9 @@ select.btn { font-family: var(--sans); }
    * but `font-size` resolves where it is inherited, which is what makes this work.
    */
   font-size: var(--fs-base);
-  max-width: 72ch;
+  /* The same token `.measure` uses, so the bar keeps matching the prose when the reader changes it
+     (issue #140's rule, now expressed once). */
+  max-width: var(--reading-measure);
   text-align: left;
   border-left: 3px solid var(--quarantine);
   /*
@@ -1818,6 +1835,35 @@ select.btn { font-family: var(--sans); }
   background-position: 0 0, 8px 8px;
 }
 .imagepane-meta { margin: 0; font-family: var(--mono); font-size: var(--fs-xs); color: var(--dim); }
+
+/* --- The Reading preference (issue #134) -------------------------------------------------------
+
+   Two sliders and a sample. The sample uses the reader's own tokens, so the choice is judged where it is
+   made rather than after closing the dialog — and so the `ch`/`px` interaction is visible: raising the size
+   widens the line, because the measure is relative to the prose's font. */
+.reading-row {
+  display: grid;
+  grid-template-columns: 76px 1fr 44px;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: 6px;
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+.reading-row input[type="range"] { width: 100%; accent-color: var(--accent); }
+.reading-row input[type="range"]:disabled { opacity: 0.4; }
+.reading-value { color: var(--text); text-align: right; }
+.reading-sample {
+  margin-top: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--line-strong);
+  background: var(--bg);
+  border-radius: 0 var(--r-2) var(--r-2) 0;
+  /* The reader's numbers, so the sample cannot disagree with the transcript. */
+  font-size: var(--reading-size);
+  max-width: var(--reading-measure);
+}
+.reading-sample p { margin: 0; line-height: 1.55; }
 
 /* --- The panel: a region with modes, and a draggable edge (issue #8, reworked) ------------------
 
