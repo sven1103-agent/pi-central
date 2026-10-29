@@ -1,6 +1,6 @@
 {
   "name": "@pi-central/protocol",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Shared contract: Pi Central envelopes and the Pi RPC types it consumes.",
