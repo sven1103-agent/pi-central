@@ -13,6 +13,23 @@ from one another. Pi Central does the same for agent sessions.
 here: `pi-central --version` reports the version of the package it was actually shipped in, and a
 number restated in prose is a number that drifts. See [docs/RELEASING.md](docs/RELEASING.md).
 
+## Install it as an app
+
+Pi Central is a web app that installs to your dock. Start it once (see [Quick start](#quick-start)),
+open <http://127.0.0.1:8787>, and then install it from the browser's own menu:
+
+| Browser | How |
+|---|---|
+| **Safari** | *File → Add to Dock* |
+| **Chrome / Edge** | the install icon at the right end of the address bar, or *⋮ → Install page as app* |
+| **Firefox** | **not supported** — Mozilla has no PWA install on desktop. The service worker still works; use another browser for the dock icon. |
+
+You get the π mark in the dock and a window with no tab bar or address field.
+
+**It is not an offline app, deliberately.** Every screen is fed by the socket, so if the orchestrator is
+not running the installed app says `disconnected` and nothing else. A window that claimed to work
+offline would open onto a blank dashboard.
+
 ## The problem
 
 Pi has no fleet concept. One `pi` process owns one session and one working directory:
