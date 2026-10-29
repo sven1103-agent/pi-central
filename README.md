@@ -2,6 +2,14 @@
   <img src="assets/pi-central-logo-full-dark-mode.svg" alt="Pi Central" width="420" />
 </p>
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/pi-central"><img alt="npm version" src="https://img.shields.io/npm/v/pi-central" /></a>
+  <a href="https://www.npmjs.com/package/pi-central"><img alt="npm downloads" src="https://img.shields.io/npm/dm/pi-central" /></a>
+  <a href="https://github.com/sven1103-agent/pi-central/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/sven1103-agent/pi-central/actions/workflows/ci.yml/badge.svg" /></a>
+  <img alt="node version" src="https://img.shields.io/node/v/pi-central" />
+  <img alt="license" src="https://img.shields.io/npm/l/pi-central" />
+</p>
+
 **Pi Central** (/paɪ ˈsɛntrəl/) is a local dashboard for running, watching, and switching between
 multiple [Pi](https://pi.dev) coding-agent sessions that live in **different working directories**,
 while keeping every session inside its own **Agent Safehouse** sandbox.
@@ -96,7 +104,29 @@ never runs untrusted content, so being outside the sandbox is safe by constructi
 
 **One process.** The orchestrator serves the built UI and the WebSocket from the same origin, so
 there is no dev server to start and no port to coordinate. It must run from a plain terminal (see
-the constraint above).
+the constraint above), and it prints the URL it is serving on — <http://127.0.0.1:8787> unless you
+passed `--port`.
+
+### From npm — what a user does
+
+```bash
+npm install --global pi-central
+pi-central
+```
+
+Or without installing it at all:
+
+```bash
+npx pi-central
+```
+
+Once it is running, [install it as an app](#install-it-as-an-app) and you will not need the terminal
+again until the next reboot.
+
+The package is **one bundled ESM file plus the built UI**, with a single runtime dependency (`ws`),
+and `pi-central --version` reports the version of the package it was actually shipped in.
+
+### From a checkout — what a contributor does
 
 ```bash
 npm install
@@ -104,11 +134,7 @@ npm run ui:build      # once, and after any UI change
 npm run server        # the orchestrator, which also serves the UI
 ```
 
-Then open <http://127.0.0.1:8787> — the URL the server prints.
-
-### From the packaged artifact
-
-Nothing is published yet, but the artifact is buildable and installable today (issue #52):
+To build the publishable artifact from a checkout:
 
 ```bash
 npm run build:package     # bundles the orchestrator, copies the built UI
@@ -116,10 +142,8 @@ npm pack --dry-run        # show exactly what would ship
 npm run serve:package     # run the packaged binary from ./bin
 ```
 
-It ships as JavaScript — TypeScript cannot be loaded from `node_modules` — as **one bundled ESM
-file plus the built UI**, with a single runtime dependency. `pi-central --version` reports the
-version of the package it was actually shipped in, read from that `package.json` rather than
-restated in code. See [ADR-0011](docs/decisions/0011-distribution-and-update.md).
+It ships as JavaScript — TypeScript cannot be loaded from `node_modules` — as one bundled ESM file
+plus the built UI. See [ADR-0011](docs/decisions/0011-distribution-and-update.md).
 
 Serving the UI from the orchestrator is not only convenience. A Vite dev server watches
 `packages/ui/src`, so an agent editing a component reloads the interface you are using out from

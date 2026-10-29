@@ -11,7 +11,10 @@ built by hand and the orchestrator loading TypeScript straight off disk. That ha
 advantage while the product is being built — there is no build step between an edit and the thing
 you are looking at. It also means:
 
-- There is **no artifact**. `README.md` says so: *"Not yet published; there is no released artifact."*
+- There was **no artifact** when this record was written. (`README.md` said so at the time: *"Not yet
+  published; there is no released artifact."* That line is **now false and has been removed** — the
+  package is published, which is exactly what this ADR set out to make possible. Kept here as the
+  premise the decision rested on, marked so a reader does not take a quoted claim for a current one.)
 - Nothing can say **which version is running**, so "is this the build with the fix?" is unanswerable.
 - Picking up a change is a manual `git pull` and restart, so using Pi Central to improve Pi Central
   has a step in the loop the tool cannot own.

@@ -85,6 +85,28 @@ findable in a long conversation.
 
 ### Fixed
 
+- **The README said the package was not published. It has been on npm since 0.2.0** (issue #127). A real
+  falsehood in the first document a user reads, and one that costs them time: *"Nothing is published yet,
+  but the artifact is buildable and installable today"* sent them looking for a build-from-source path they
+  did not need.
+
+  It now opens with **`npm install --global pi-central`** (and `npx pi-central` for a one-off), and the two
+  paths are separated by *who they are for*: **"From npm — what a user does"** and **"From a checkout — what
+  a contributor does"**. Before this the checkout path was the only one presented, which implied it was the
+  only one available.
+
+  **npm badges** — version, downloads, CI status, node version, licence — under the banner. Claims that are
+  checkable at a glance, rather than prose that has to be trusted.
+
+  **A second copy of the same falsehood was in ADR-0011**, quoting the README as justification for the
+  decision. It is left in place and marked **historical**: that record rested on "there is no artifact",
+  and rewriting the premise would hide why the decision was made. A quoted claim now says plainly that it
+  is no longer true.
+
+  `packages/orchestrator/test/readme-published.test.ts` asserts the README contains no
+  "not yet published" phrasing, **does** contain the install command, and carries the badge. A claim in
+  prose is not checked by anything, which is how this one survived three releases.
+
 - **Safari's Add to Dock used a screenshot instead of the logo** (issue #124). Reported from a real dock:
   *"I added it to dock via Safari, but it did not use the pi central icon."*
 
