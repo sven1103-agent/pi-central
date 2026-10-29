@@ -19,6 +19,37 @@ fixed, and so is the class of defect behind them: the build now says which build
 
 ### Fixed
 
+- **A reader who was following came back to a stale position** (issue #141). Reported: *"i have auto-follow
+  enabled, i am following, switch to another session, come back: the session's transcript view is pinned where i
+  left it. That is annoying, especially when i come back because i see the session is in idle and the task is
+  finished. The user makes the follow decision, not the app."*
+
+  `decideOnSessionChange` restored `{ scrollTop, pinned: true }` — the offset **and** the flag. The offset won:
+  the restore effect wrote `scrollTop` to where the tail happened to be, while `pinnedRef` still said "follow".
+  The two contradicted each other, and since the follow effect only moves when content **grows**, an idle
+  session — a task that finished while the reader was away — left them stranded mid-history with the answer
+  below the fold.
+
+  The rule is now about **who was in control when they left**:
+
+  - they were **following** → come back following, at the end. The stored offset is irrelevant; it is where the
+    tail *was*, not where they meant to be.
+  - they had **scrolled away** → come back exactly there. They left to read something specific.
+
+  Follow-on-return also means no offset is written at all in the first case, so nothing can contradict the
+  follow — verified by tracing the three `scrollTop` writes: the other two are the send-prompt re-arm
+  (`followToken`, unchanged by a session switch) and `jumpToLatest` (a click).
+
+  **A second bug in the same place, reported immediately after**: *"now it is jumping to the beginning of the
+  transcript."* The scroll listener runs once on **mount**, and the pane mounts before its history is fetched —
+  so the first measurement was of an empty box, `{ scrollTop: 0, height: 0, client: 0 }`, and writing that to
+  the session memory **destroyed the offset the reader had actually left at**. The next visit restored
+  `scrollTop: 0`: the beginning.
+
+  `isMeasured` already existed to keep an unmeasured sample out of the growth discount; the same predicate now
+  guards the memory write, so a mount records nothing. Verified against a real jsdom scroller: mount writes
+  `[]`, a real scroll writes `{ scrollTop: 850, pinned: false }`.
+
 - **The README said the package was not published. It has been on npm since 0.2.0** (issue #127). A real
   falsehood in the first document a user reads, and one that costs them time: *"Nothing is published yet,
   but the artifact is buildable and installable today"* sent them looking for a build-from-source path they

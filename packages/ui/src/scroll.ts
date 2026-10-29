@@ -35,19 +35,34 @@ export type ScrollDecision =
   | { kind: "restore"; scrollTop: number; pinned: boolean };
 
 /**
- * The one judgement: a session the reader has never opened opens at the **end**.
+ * What to do when the reader returns to a session.
  *
- * Following the newest content is what a reader arriving wants, and it is what a live session needs
- * — an agent may have produced a great deal since the last look. Restoring a position only makes
- * sense for a session they actually read and left.
+ * **Following is a decision the reader makes, not one the app remembers against their will**
+ * (issue #141).
  *
- * A stored entry is trusted as-is. `scrollTop` is clamped by the browser to whatever the new content
- * allows, so a session that has since grown or shrunk lands at a sane place without this function
- * having to know anything about the content's height.
+ * Two cases, and the distinction is *who was in control when they left*:
+ *
+ *   - **They were FOLLOWING** — pinned to the tail. Coming back must follow again, at the end. The
+ *     stored `scrollTop` is irrelevant here: it is where the tail *happened to be* at that moment, and
+ *     restoring it would pin the reader to a stale offset while `pinned` still said "follow". The two
+ *     would disagree, and since the follow effect only moves when content GROWS, an idle session — a
+ *     task that finished while they were away — would leave them stranded mid-history with the answer
+ *     they came back to read below the fold.
+ *   - **They had scrolled away** — not following. Restoring the offset is exactly right: they left to
+ *     read something specific and that is where they meant to resume.
+ *
+ * A session never opened before is the first case by definition: following is what a reader arriving
+ * wants, and an agent may have produced a great deal since the last look.
+ *
+ * `scrollTop` is trusted as-is in the second case because the browser clamps it to whatever the content
+ * allows — a session that has grown or shrunk still lands somewhere sane without this function knowing
+ * anything about the content's height.
  */
 export function decideOnSessionChange(previous: SessionScroll | undefined): ScrollDecision {
   if (previous === undefined) return { kind: "follow-end" };
-  return { kind: "restore", scrollTop: previous.scrollTop, pinned: previous.pinned };
+  // Were they following when they left? Then they are still following now.
+  if (previous.pinned) return { kind: "follow-end" };
+  return { kind: "restore", scrollTop: previous.scrollTop, pinned: false };
 }
 
 /**

@@ -32,16 +32,35 @@ test("a session read before goes back exactly where it was left", () => {
   assert.deepEqual(decideOnSessionChange(left), { kind: "restore", scrollTop: 412, pinned: false });
 });
 
-test("the follow flag is restored with the offset, not assumed", () => {
-  // The half that makes #86 possible: a reader who had scrolled up was still at the bottom of the
-  // *stored* state, so the restored flag has to travel with the offset. Assuming `true` would
-  // re-pin someone who deliberately scrolled away; assuming `false` would strand a reader following
-  // a stream at a stale offset.
-  assert.equal(decideOnSessionChange({ scrollTop: 0, pinned: true }).kind, "restore");
-  assert.deepEqual(decideOnSessionChange({ scrollTop: 0, pinned: true }), {
+test("a reader who was FOLLOWING comes back following", () => {
+  // The report (issue #141): *"i have auto-follow enabled, i am following, switch to another session, come
+  // back: the session's transcript view is pinned where i left it. That is annoying, especially when i come
+  // back because i see the session is in idle and the task is finished."*
+  //
+  // The old rule restored `{ scrollTop, pinned: true }` — the offset AND the flag. The offset then won: the
+  // restore effect set `scrollTop` to where the tail happened to be, while `pinned` still said "follow".
+  // Because the follow effect only moves when content GROWS, an idle session — a task that finished while
+  // the reader was away — left them stranded mid-history with the answer below the fold.
+  //
+  // Following is the READER's decision, so it survives the switch. The stored offset is irrelevant when they
+  // were pinned: it is where the tail was, not where they meant to be.
+  for (const scrollTop of [0, 412, 9999]) {
+    assert.deepEqual(
+      decideOnSessionChange({ scrollTop, pinned: true }),
+      { kind: "follow-end" },
+      `a following reader at ${scrollTop} must come back following`,
+    );
+  }
+});
+
+test("a reader who had scrolled AWAY comes back where they were", () => {
+  // The other half, and the reason this is a decision rather than "always follow": someone who scrolled up
+  // to read something specific meant to resume there. Assuming `true` would drag them to the bottom every
+  // time they changed session.
+  assert.deepEqual(decideOnSessionChange({ scrollTop: 412, pinned: false }), {
     kind: "restore",
-    scrollTop: 0,
-    pinned: true,
+    scrollTop: 412,
+    pinned: false,
   });
 });
 
@@ -292,4 +311,31 @@ test("the trace state lives in App, not in the pane that remounts", () => {
   assert.match(app, /key=\{focused\?\.id\}/, "…and that key is why");
   assert.match(app, /readTracePrefs\(\)/, "the state is restored on load");
   assert.match(app, /writeTracePrefs\(/, "…and written back");
+});
+
+// --- A position is only recorded when there is something to measure (issue #141 follow-up) --------
+
+test("the memory write is skipped for an unmeasured container", () => {
+  // The bug this pins, reported after the follow-on-return fix: *"now it is jumping to the beginning of the
+  // transcript."*
+  //
+  // The scroll listener runs once on MOUNT, and the pane mounts before its history is fetched — so the first
+  // measurement was of an empty box: `{ scrollTop: 0, height: 0, client: 0 }`. Writing that to the session
+  // memory DESTROYED the offset the reader actually left at, and the next visit restored `scrollTop: 0`.
+  //
+  // `isMeasured` already existed to keep an unmeasured sample out of the growth discount. The same predicate
+  // is what says "there is a real position here", so it guards the write too.
+  assert.equal(isMeasured({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 }), false, "empty box");
+  assert.equal(isMeasured({ scrollTop: 850, scrollHeight: 2000, clientHeight: 500 }), true, "real position");
+
+  // And the pane must actually consult it before writing. Asserted on the source, because the behaviour is a
+  // guard around a callback rather than a value this test can observe.
+  const pane = source("../src/components/Transcript.tsx");
+  // `assert.match` takes (string, regex) — I had the arguments the wrong way round, which is the kind of
+  // thing that only shows up when typecheck runs.
+  assert.match(
+    pane,
+    /if \(isMeasured\(current\)\) \{\s*\n\s*memoryRef\.current\?\.\(\{ scrollTop: current\.scrollTop/,
+    "the memory write must be guarded by `isMeasured`, or a mount destroys the saved position",
+  );
 });
