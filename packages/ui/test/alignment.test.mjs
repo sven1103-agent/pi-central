@@ -24,9 +24,21 @@ const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").
   "",
 );
 
+/**
+ * The declarations of the LAST rule whose selector matches.
+ *
+ * The LAST, because CSS resolves equal-specificity conflicts by source order — so the last one is the one
+ * that wins, and it is what the element actually gets. Reading the first match found a *partial* fragment
+ * (a rule with one declaration) and the assertion then described CSS that had no effect. Third time in this
+ * slice that a text-scanning helper read the wrong thing.
+ *
+ * Selectors are matched on normalised whitespace, because a selector list is formatted across lines.
+ */
 function rule(selector) {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css)?.[1];
+  const normalised = css.replace(/\s+/g, " ");
+  const wanted = selector.replace(/\s+/g, " ").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const all = [...normalised.matchAll(new RegExp(`${wanted} ?\\{([^}]*)\\}`, "g"))];
+  return all.length > 0 ? all[all.length - 1][1] : undefined;
 }
 
 test("every measured child of the transcript centres, including the tool marker", () => {
@@ -111,4 +123,41 @@ test("the send button cannot overflow the field's right edge", () => {
   const textarea = rule(".composer-row textarea");
   assert.ok(textarea, "the textarea needs its own rule inside the row");
   assert.match(textarea, /min-width:\s*0/, "a flex child with `min-width: auto` cannot shrink");
+});
+
+// --- The trace lines up with the transcript (issue #129, second report) -------------------------
+
+test("the trace's TEXT shares the transcript's left edge, not the column's", () => {
+  // Reported from the fixed version: *"the tool output is padded right and not aligned with the transcript
+  // content."* The trace is a full-width sibling of the transcript, and its body used `padding: … 18px`
+  // measured from the COLUMN edge — while the prose above is centred at `--measure`. Two references, one
+  // column, so the tool output sat 30px right of every paragraph.
+  //
+  // Capping the trace entirely would be wrong: its header genuinely uses the full width (`latest 5 shown ·
+  // ↑↓ to traverse` is hard right). Only the text-bearing surfaces take the measure.
+  const list = rule(".trace-list");
+  assert.ok(list, ".trace-list must have a rule");
+  assert.match(list, /max-width:\s*var\(--measure\)/, "rows on the measure");
+  assert.match(list, /margin-inline:\s*auto/, "…centred like the prose");
+
+  for (const sel of [".trace-args", ".trace-output"]) {
+    const body = rule(sel);
+    assert.ok(body, `${sel} must have a rule`);
+    assert.match(
+      body,
+      /padding:\s*var\(--sp-2\)\s*max\(18px,\s*calc\(\(100% - var\(--measure\)\) \/ 2\)\)/,
+      `${sel} must inset to the measure, not to 18px from the column edge`,
+    );
+  }
+});
+
+test("no trace rule uses a padding SHORTHAND that would reset the measure inset", () => {
+  // Same class of bug as the margin shorthand that made #130 appear not to work: a shorthand declared
+  // anywhere in the same rule silently wins over the longhand beside it. `.trace-detail-head` had exactly
+  // that — `padding: 4px 18px` — and it took a second pass to notice.
+  const head = rule(".trace-detail-head");
+  assert.ok(head, ".trace-detail-head must have a rule");
+  assert.ok(!/(^|;)\s*padding\s*:/.test(head), "a padding shorthand here resets the inline inset");
+  assert.match(head, /padding-inline:/, "the inline inset is set explicitly");
+  assert.match(head, /padding-block:/, "…and the vertical one separately");
 });

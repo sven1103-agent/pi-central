@@ -39,6 +39,21 @@ fixed, and so is the class of defect behind them: the build now says which build
   `margin-inline: auto` the shared rule had just given it. The declaration was correct, in the file, and
   **never reached the element**. `.run-notices` had the identical shorthand. Both now use `margin-block`.
 
+- **The tool output was inset from the column edge while the transcript was centred** (issue #129, second
+  report). *"it is better, but now the tool output is padded right and not aligned with the transcript
+  content."*
+
+  The trace is a **full-width sibling** of the transcript, and its body used `padding: … 18px` measured from
+  the *column* edge — while the prose above it is centred at `--measure`. Two references, one column, so the
+  tool output sat ~30px right of every paragraph.
+
+  Only the text-bearing surfaces take the measure. The trace's own header keeps the full width, because
+  `latest 5 shown · ↑↓ to traverse` is genuinely hard right, and a command line is as wide as it is.
+
+  The `padding` shorthand struck again: `.trace-detail-head` had `padding: 4px 18px` in the same rule as its
+  longhand, so the inset was reset. That is the **same bug as the margin shorthand** that made #130 appear
+  not to work, which is why the guard now rejects a shorthand in any rule that also declares the longhand.
+
   The original test asserted *"the shared rule contains `margin-inline: auto`"*, which was true throughout.
   A test that checks a declaration checks the **code**; it has to check the **outcome**. The guard now walks
   every rule that mentions each covered class, and fails if any of them — declared later — uses a `margin`
