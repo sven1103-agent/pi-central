@@ -21,6 +21,12 @@
     <link rel="icon" type="image/png" href="/src/assets/logo-icon.png" />
     <link rel="apple-touch-icon" href="/src/assets/logo-icon.png" />
     <meta name="theme-color" content="#3fa383" />
+    <!--
+      Installable to the dock as a standalone window (issue #119). Deliberately NOT an offline app: every
+      screen is fed by the socket, so an installed Pi Central with the orchestrator down shows
+      `disconnected`. The manifest says `display: standalone`, not "works offline".
+    -->
+    <link rel="manifest" href="/manifest.webmanifest" />
   </head>
   <body>
     <div id="root"></div>
