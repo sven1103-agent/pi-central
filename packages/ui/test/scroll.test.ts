@@ -32,16 +32,35 @@ test("a session read before goes back exactly where it was left", () => {
   assert.deepEqual(decideOnSessionChange(left), { kind: "restore", scrollTop: 412, pinned: false });
 });
 
-test("the follow flag is restored with the offset, not assumed", () => {
-  // The half that makes #86 possible: a reader who had scrolled up was still at the bottom of the
-  // *stored* state, so the restored flag has to travel with the offset. Assuming `true` would
-  // re-pin someone who deliberately scrolled away; assuming `false` would strand a reader following
-  // a stream at a stale offset.
-  assert.equal(decideOnSessionChange({ scrollTop: 0, pinned: true }).kind, "restore");
-  assert.deepEqual(decideOnSessionChange({ scrollTop: 0, pinned: true }), {
+test("a reader who was FOLLOWING comes back following", () => {
+  // The report (issue #141): *"i have auto-follow enabled, i am following, switch to another session, come
+  // back: the session's transcript view is pinned where i left it. That is annoying, especially when i come
+  // back because i see the session is in idle and the task is finished."*
+  //
+  // The old rule restored `{ scrollTop, pinned: true }` — the offset AND the flag. The offset then won: the
+  // restore effect set `scrollTop` to where the tail happened to be, while `pinned` still said "follow".
+  // Because the follow effect only moves when content GROWS, an idle session — a task that finished while
+  // the reader was away — left them stranded mid-history with the answer below the fold.
+  //
+  // Following is the READER's decision, so it survives the switch. The stored offset is irrelevant when they
+  // were pinned: it is where the tail was, not where they meant to be.
+  for (const scrollTop of [0, 412, 9999]) {
+    assert.deepEqual(
+      decideOnSessionChange({ scrollTop, pinned: true }),
+      { kind: "follow-end" },
+      `a following reader at ${scrollTop} must come back following`,
+    );
+  }
+});
+
+test("a reader who had scrolled AWAY comes back where they were", () => {
+  // The other half, and the reason this is a decision rather than "always follow": someone who scrolled up
+  // to read something specific meant to resume there. Assuming `true` would drag them to the bottom every
+  // time they changed session.
+  assert.deepEqual(decideOnSessionChange({ scrollTop: 412, pinned: false }), {
     kind: "restore",
-    scrollTop: 0,
-    pinned: true,
+    scrollTop: 412,
+    pinned: false,
   });
 });
 
