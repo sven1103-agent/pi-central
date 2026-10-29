@@ -40,7 +40,9 @@ const css = stripComments(readFileSync(new URL("../src/styles.css", import.meta.
 function rule(selector) {
   const normalised = css.replace(/\s+/g, " ");
   const wanted = selector.replace(/\s+/g, " ").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const all = [...normalised.matchAll(new RegExp(`${wanted} ?\\{([^}]*)\\}`, "g"))];
+  // `(?<![\w-])` so `body` does not also match `.xbody` — which it did, and the assertion then read a
+  // fragment of an unrelated rule.
+  const all = [...normalised.matchAll(new RegExp(`(?<![\\w-])${wanted} ?\\{([^}]*)\\}`, "g"))];
   return all.length > 0 ? all[all.length - 1][1] : undefined;
 }
 
@@ -211,5 +213,36 @@ test("the transcript's legend describes the frame that actually exists", () => {
     assert.ok(hatched, `the legend promises a "hatched frame" but no surface has one: ${legend}`);
   } else {
     assert.ok(!hatched, `a surface is hatched but the legend does not say so: ${legend}`);
+  }
+});
+
+test("the tool bar measures the SAME width as the prose", () => {
+  // Reported: *"why is the tool bar inline not in the width of the transcript?"*
+  //
+  // `1ch` is the width of "0" in the element's OWN font, so `max-width: 72ch` means two different widths if
+  // the two elements resolve `font-size` differently. The bar rendered at `--fs-2xs` (10px) against the
+  // transcript's 13px — a third narrower for the same number.
+  //
+  // The fix is to measure in the same font, not to widen the bar: `width: 100%` is the column (~1294px), i.e.
+  // 700px WIDER than the text, and a `rem`/`em` multiplier would be a ratio invented to bridge the two — the
+  // first version of this fix used `calc(72 * 0.55rem)`, and that 0.55 was a guess with nothing behind it.
+  const body = rule("body") ?? "";
+  // `body` declares `font: var(--fs-base) / 1.45 var(--sans)` — the SIZE token is the first one.
+  const inherited = /font:\s*var\(--([a-z0-9-]+)\)/.exec(body)?.[1];
+  assert.ok(inherited, `body must set its size from a token, got: ${body.slice(0, 60)}`);
+
+  const marker = rule(".tool-marker") ?? "";
+  const measured = /font-size:\s*var\(--([a-z0-9-]+)\)/.exec(marker)?.[1];
+  assert.equal(
+    measured,
+    inherited,
+    `.measure sits on <article class="turn">, which inherits ${inherited} — the bar must set the SAME token, ` +
+      `or the two 72ch values resolve to different widths`,
+  );
+  assert.match(marker, /max-width:\s*72ch/, "…and the same number");
+
+  // The children restore their own small size, or the whole block would render at the inherited size.
+  for (const sel of [".tool-marker-summary", ".tool-detail"]) {
+    assert.match(rule(sel) ?? "", /font-size:\s*var\(--fs-2xs\)/, `${sel} must restore its own size`);
   }
 });

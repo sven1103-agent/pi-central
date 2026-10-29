@@ -242,6 +242,24 @@ findable in a long conversation.
   a re-render — which is the bug #108 was about — and keyboard behaviour comes free. The result is rendered
   as a **text node**, so ADR-0006's single insertion point stays in `Prose`.
 
+  **The bar is the same width as the prose** (issue #140): *"why is the tool bar inline not in the width of the
+  transcript?"*
+
+  `1ch` is the width of "0" in the element's **own** font. `.measure` (72ch) sits on `<article class="turn">`,
+  which inherits `--fs-base`; the tool bar declared the same `72ch` while rendering at `--fs-2xs`. The same
+  number, a third narrower — which is exactly the inset.
+
+  The fix measures in the **same font** rather than converting the number: the bar sets
+  `font-size: var(--fs-base)`, applies `72ch` in it, and its children restore `--fs-2xs`. Both `72ch` values
+  then resolve identically **by construction**, and a change to `--fs-base` moves them together.
+
+  Two wrong fixes were tried and discarded first, and both are worth recording because each *looked* right:
+
+  - `width: 100%` — spans the column at ~1294px, i.e. 700px **wider** than the text it belongs to. The
+    opposite complaint.
+  - `calc(72 * 0.55rem)` — a ratio with **nothing behind it**. 0.55 appears nowhere else in the codebase; I
+    invented it, and it also assumed the prose was 15px when `.measure` inherits 13px.
+
   **No hatch, and no `Open in trace` button** (issues #138, #139). Two pieces of visual noise removed on the
   reader's report.
 

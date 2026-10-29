@@ -1325,6 +1325,30 @@ select.btn { font-family: var(--sans); }
    */
   display: block;
   width: 100%;
+  /*
+   * The width of the PROSE MEASURE, which `ch` could not express from here (issue #140).
+   *
+   * `1ch` is the width of "0" in the element's OWN font, and this bar renders at `--fs-2xs` (10px) while
+   * prose renders at `--fs-md` (15px). So `max-width: 72ch` gave the bar ~396px against the prose's
+   * ~594px — the same number, a third narrower, which is exactly the inset that was reported.
+   *
+   * Widening to the column is the wrong fix: `width: 100%` makes it ~1294px, i.e. 700px *wider* than the
+   * text it belongs to. `rem` and `em` do not help either — `em` is this element's font, and any `rem`
+   * multiplier would be a ratio I would have to invent and then keep true.
+   *
+   * So the cap is declared on the SIZE, not on a converted number: the bar sets its font to the size that
+   * `.measure` INHERITS and then applies `72ch` in it, and `.tool-marker-summary` sets its own size back.
+   * The two `72ch` then resolve in the same font by construction.
+   *
+   * **`--fs-base`, not `--fs-md`** — and this was the trap. `.measure` sits on `<article class="turn">`,
+   * which inherits from `body` (`--fs-base`, 13px); it is `.prose` INSIDE the article that is 15px. My first
+   * version measured in `--fs-md` and was ~80px too wide, which would have been a *different* silent
+   * mismatch than the one being fixed.
+   *
+   * A custom property cannot carry this because `ch` resolves where it is USED, not where it is defined —
+   * but `font-size` resolves where it is inherited, which is what makes this work.
+   */
+  font-size: var(--fs-base);
   max-width: 72ch;
   text-align: left;
   border-left: 3px solid var(--quarantine);
@@ -1347,12 +1371,17 @@ select.btn { font-family: var(--sans); }
   /* Attached under the turn it follows rather than floating between turns: it reads as "and it ran this",
      which is the actual relationship, and costs almost no vertical space. */
   margin: 2px 0 var(--sp-3);
-  font-size: var(--fs-2xs);
+  /* No `font-size` here: this element carries `--fs-base` — the size `.measure` inherits — so its `72ch`
+     measures the same width as the transcript's text (issue #140). The children set their own. */
   color: var(--dim);
 }
 /* The summary is the disclosure handle now, so the hover affordance moves to it (issue #131). */
 .tool-marker-summary {
-  /* The bar is the row, so the alignment lives here and the `<details>` stays a plain block. */
+  /* The bar is the row, so the alignment lives here and the `<details>` stays a plain block.
+   *
+   * `font-size` is set EXPLICITLY: the marker carries `--fs-base` so its `72ch` matches the transcript's
+   * width (issue #140), and this bar renders small. Inheriting would silently make every tool bar 13px. */
+  font-size: var(--fs-2xs);
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -1377,6 +1406,9 @@ select.btn { font-family: var(--sans); }
  * own legend makes about every surface carrying tool output.
  */
 .tool-detail {
+  /* Same as the summary: the marker carries `--fs-base` for measurement, so this restores the size the
+     content actually renders at (issue #140). The `<pre>` children set their own font too. */
+  font-size: var(--fs-2xs);
 
   /*
    * NO border, NO hatching, NO radius (issue #137). It sits INSIDE `.tool-marker`'s frame, which already
