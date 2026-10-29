@@ -189,7 +189,20 @@ export function TranscriptView({
       // about whether the reader is at the bottom.
       pinnedRef.current = following;
       setPinned(following);
-      memoryRef.current?.({ scrollTop: current.scrollTop, pinned: following });
+      /*
+       * Do NOT record a position measured before there is content to scroll (issue #141, follow-up).
+       *
+       * The listener runs once on mount, and the pane mounts BEFORE its history is fetched — so the first
+       * measurement is `{ scrollTop: 0, height: 0, client: 0 }` of an empty box. Writing that to memory
+       * destroyed the offset the reader actually left at, and the next visit restored `scrollTop: 0`: the
+       * transcript jumped to the BEGINNING.
+       *
+       * `isMeasured` already existed for the growth-discount; the same predicate is what distinguishes
+       * "a real position" from "nothing to measure yet".
+       */
+      if (isMeasured(current)) {
+        memoryRef.current?.({ scrollTop: current.scrollTop, pinned: following });
+      }
     };
     container.addEventListener("scroll", onScroll, { passive: true });
     // Measured once on mount as well: a restored page or a re-render after resize can already be

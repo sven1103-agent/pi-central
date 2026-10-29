@@ -312,3 +312,30 @@ test("the trace state lives in App, not in the pane that remounts", () => {
   assert.match(app, /readTracePrefs\(\)/, "the state is restored on load");
   assert.match(app, /writeTracePrefs\(/, "…and written back");
 });
+
+// --- A position is only recorded when there is something to measure (issue #141 follow-up) --------
+
+test("the memory write is skipped for an unmeasured container", () => {
+  // The bug this pins, reported after the follow-on-return fix: *"now it is jumping to the beginning of the
+  // transcript."*
+  //
+  // The scroll listener runs once on MOUNT, and the pane mounts before its history is fetched — so the first
+  // measurement was of an empty box: `{ scrollTop: 0, height: 0, client: 0 }`. Writing that to the session
+  // memory DESTROYED the offset the reader actually left at, and the next visit restored `scrollTop: 0`.
+  //
+  // `isMeasured` already existed to keep an unmeasured sample out of the growth discount. The same predicate
+  // is what says "there is a real position here", so it guards the write too.
+  assert.equal(isMeasured({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 }), false, "empty box");
+  assert.equal(isMeasured({ scrollTop: 850, scrollHeight: 2000, clientHeight: 500 }), true, "real position");
+
+  // And the pane must actually consult it before writing. Asserted on the source, because the behaviour is a
+  // guard around a callback rather than a value this test can observe.
+  const pane = source("../src/components/Transcript.tsx");
+  // `assert.match` takes (string, regex) — I had the arguments the wrong way round, which is the kind of
+  // thing that only shows up when typecheck runs.
+  assert.match(
+    pane,
+    /if \(isMeasured\(current\)\) \{\s*\n\s*memoryRef\.current\?\.\(\{ scrollTop: current\.scrollTop/,
+    "the memory write must be guarded by `isMeasured`, or a mount destroys the saved position",
+  );
+});

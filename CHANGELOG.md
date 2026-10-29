@@ -40,6 +40,16 @@ fixed, and so is the class of defect behind them: the build now says which build
   follow — verified by tracing the three `scrollTop` writes: the other two are the send-prompt re-arm
   (`followToken`, unchanged by a session switch) and `jumpToLatest` (a click).
 
+  **A second bug in the same place, reported immediately after**: *"now it is jumping to the beginning of the
+  transcript."* The scroll listener runs once on **mount**, and the pane mounts before its history is fetched —
+  so the first measurement was of an empty box, `{ scrollTop: 0, height: 0, client: 0 }`, and writing that to
+  the session memory **destroyed the offset the reader had actually left at**. The next visit restored
+  `scrollTop: 0`: the beginning.
+
+  `isMeasured` already existed to keep an unmeasured sample out of the growth discount; the same predicate now
+  guards the memory write, so a mount records nothing. Verified against a real jsdom scroller: mount writes
+  `[]`, a real scroll writes `{ scrollTop: 850, pinned: false }`.
+
 - **The README said the package was not published. It has been on npm since 0.2.0** (issue #127). A real
   falsehood in the first document a user reads, and one that costs them time: *"Nothing is published yet,
   but the artifact is buildable and installable today"* sent them looking for a build-from-source path they
