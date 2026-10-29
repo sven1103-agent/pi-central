@@ -197,6 +197,28 @@ findable in a long conversation.
 
 ### Changed
 
+- **Reverted the centred transcript measure from #92** (issue #132). It did not solve the problem it was
+  aimed at, and it produced five defects, each fix finding the previous fix's bug:
+
+  1. tool markers were capped but not centred, so the transcript **flickered** left/centre as tools ran;
+  2. the composer's `align-items: center` centred each child on its own width — **three left edges** in one
+     stack;
+  3. a `margin` shorthand silently cancelled the centring, so the fix **appeared not to work at all**;
+  4. trace text was inset from the column edge — **30px right** of the prose, on the surface that reports the
+     same tool output;
+  5. and the inline tool detail inherited the same inset problem.
+
+  The original complaint was *"the transcript looks lost on bigger screens"*. Centring a 590px column inside
+  1330px made the emptiness **more** obvious, not less. The complaint was probably about text SIZE on a 27"
+  display, which is a one-line change to the prose font or to the cap — and does not move anything.
+
+  The measure is a **cap** again (`.measure { max-width: 72ch }`), the composer spans the column, and the
+  1330px of a wide window is simply empty on the right, as it was before 0.4.0.
+
+  **Kept from #92:** `flex: none` on the send button — with its comment corrected. It never stopped the
+  button growing (a flex item defaults to `flex: 0 1 auto` and cannot grow); it only stops it shrinking
+  below its label. It did not fix *"cumbersome to hit"*, which was the composer spanning 1900px.
+
 - **The trace's nested scroll regions are marked as such** (issue #73). The transcript column has two
   scroll regions — the transcript and the trace list — and a reviewer could not tell them apart:
   *"the inner thumb is easy to mistake for the outer one"*.
