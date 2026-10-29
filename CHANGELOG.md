@@ -454,6 +454,20 @@ manifest and the three private workspace manifests cannot disagree.
 
 ### Added
 
+- **The README says how to install Pi Central as an app** (issue #119, follow-up). The PWA shipped but the
+  documentation did not mention it, so the feature existed and nobody would have found it — the same gap as
+  #114's build stamp, in a different place.
+
+  It sits near the top, because it is the first thing someone who wants to *use* the product needs: start
+  it once, open the URL, install from the browser's own menu. Per-browser instructions are given because
+  they genuinely differ, including the one that is not a difference in wording — **Firefox desktop has no
+  PWA install at all**, so a reader there gets a clear "use another browser for the dock icon" rather than
+  hunting for a menu item that does not exist.
+
+  And the caveat is stated where it is most likely to be misread: **it is not an offline app.** Every
+  screen is fed by the socket, so an installed Pi Central with the orchestrator down says `disconnected`
+  and nothing else.
+
 - **Pi Central installs to the dock as a standalone window** (issue #119). A manifest, 192 and 512 icons
   rendered from the logo's own SVG, and a service worker — which together get the dock icon, a window with
   no browser chrome, and no tab to lose.
