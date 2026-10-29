@@ -55,14 +55,6 @@
    * "this went well". One token, one meaning.
    */
   --brand: #3fa383;
-  /*
-   * The transcript's line length (issue #92). A token because the conversation and the composer beneath
-   * it must share one line — two literals is exactly how they drifted apart.
-   *
-   * In `ch`, so it is measured in the prose font: roughly 65–75 characters at 72ch, which is the
-   * readable range. Wide enough for code, narrow enough that the eye finds the next line.
-   */
-  --measure: 72ch;
   --accent-text: #a5d6ff;
   --accent-tint: rgba(76, 154, 255, 0.15);
   --ok: #3fb950;
@@ -554,22 +546,18 @@ button { font: inherit; color: inherit; }
 
 /* Prose is capped so it stays readable on a wide display; tool output may use full width. */
 /*
- * The transcript column has ONE measure, and everything in it is centred against it (issue #92).
+ * Prose is capped so it stays readable on a wide display; tool output may use full width.
  *
- * The report: with the panel collapsed on a wide window, "the transcript looks lost, there is a lot of
- * empty space right to the transcript". `72ch` was applied to the prose turns only, so with the panel
- * hidden the text sat against the left edge of a very wide column and the emptiness was all on one
- * side — which reads as a broken layout rather than as a max-width.
+ * LEFT-ALIGNED, and the centring that used to be here was reverted (#92 → this revert). It answered
+ * "the transcript looks lost on a big screen" by centring a 590px column inside 1330px, which made the
+ * emptiness MORE obvious and produced five downstream defects: markers capped but not centred (a visible
+ * flicker as tools ran), three left edges in the composer, a `margin` shorthand that silently cancelled
+ * the centring, and trace text inset 30px from the prose. Each fix found the previous fix's bug.
  *
- * So the MEASURE is the layout, not a property of prose: the scroller centres its content, and the
- * things that use the full width — tool frames, markers — are held to the same line. `margin-inline:
- * auto` rather than a fixed padding, because the padding has to grow and shrink with the window and
- * with the panel opening; a fixed value would be wrong at one of the two ends.
- *
- * `72ch` measured in the prose font is roughly 65–75 characters, which is the readable range. Wide
- * enough for code, narrow enough that the eye finds the start of the next line.
+ * The original complaint is more likely about text SIZE than alignment — 72ch at 15px is small on a 27"
+ * display — and that is a one-line change to `--fs-md` or to the number here, without moving anything.
  */
-.measure { max-width: var(--measure); margin-inline: auto; }
+.measure { max-width: 72ch; }
 
 .turn { margin-bottom: var(--sp-4); }
 
@@ -736,24 +724,10 @@ button { font: inherit; color: inherit; }
 .composer {
   border-top: 1px solid var(--line);
   background: var(--panel);
-  /*
-   * The bar spans the column; its CONTENT is held to the transcript's measure, so a prompt field and the
-   * conversation above it share the same line length (issue #92). Full-bleed was the other option and it
-   * makes a 1900px-wide input on a collapsed panel.
-   */
   padding: var(--sp-3) 18px;
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-  align-items: center;
-}
-/*
- * The inner rows take the measure. `width: 100%` with a `max-width` is what lets them shrink on a
- * narrow window while stopping at the same line as the prose.
- */
-.composer > * {
-  width: 100%;
-  max-width: var(--measure);
 }
 
 .mode-strip {
@@ -769,9 +743,12 @@ button { font: inherit; color: inherit; }
 }
 
 .composer-row { display: flex; gap: var(--sp-2); align-items: flex-end; }
-/* The textarea takes the room; the button keeps its own width. Before this the row was `align-items:
-   flex-end` with a stretching textarea, and on a wide window the SEND TARGET moved to the far right —
-   "cumbersome to hit". A control stays where the eye left it. */
+/* The textarea takes the room; the button keeps its own width.
+ *
+ * CORRECTION (#92 claimed otherwise): a flex item defaults to `flex: 0 1 auto`, so the button could
+ * already never grow — this only stops it SHRINKING below its label on a narrow window. It did not fix
+ * "cumbersome to hit": that was the composer spanning 1900px, which the row's `max-width` addressed and
+ * which is now reverted. Kept because it is harmless and mildly useful, not because it solved anything. */
 .composer-row .btn-send { flex: none; }
 
 .composer textarea {

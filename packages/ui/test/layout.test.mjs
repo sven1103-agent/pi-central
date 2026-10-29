@@ -1,17 +1,25 @@
 /**
- * The transcript column's measure, and where the send button sits (issue #92).
+ * The transcript's measure: capped, NOT centred (reverted from #92).
  *
- * The report, with the panel collapsed on a wide window:
+ * ## What this file used to be, and why it changed
  *
- * > *"the transcript looks lost, there is a lot of empty space right to the transcript… the prompt
- * > console is just stretched to the right, which makes it cumbersome to hit the send button."*
+ * #92 answered *"the transcript looks lost, there is a lot of empty space right to the transcript"* by
+ * centring a 590px column inside a 1330px one. That made the emptiness **more** obvious, and it produced
+ * five downstream defects, each fix finding the previous fix's bug:
  *
- * Both come from one omission: `max-width: 72ch` was a property of PROSE, not of the column. So the text
- * sat at the left of a very wide column with all the emptiness on one side, and the composer — which had
- * no measure at all — stretched its send button to the far edge of a 1900px window.
+ *   1. tool markers were capped but not centred → the transcript **flickered** left/centre as tools ran;
+ *   2. the composer's `align-items: center` centred each child on its own width → **three left edges**;
+ *   3. a `margin` shorthand silently cancelled the centring → the fix appeared not to work at all;
+ *   4. trace text was inset from the column edge → **30px right** of the prose;
+ *   5. and `.tool-detail` inherited the same inset problem.
  *
- * Asserted on the stylesheet because none of this is expressible in the markup the component tests
- * render: layout is the CSS.
+ * All reverted. The original complaint was more likely about text SIZE on a 27" display than about
+ * alignment, and the assertions below now describe what the layout actually does.
+ *
+ * ## What is still asserted
+ *
+ * The two things from #92 that were independently true: the measure is a CAP, and the Send button does not
+ * shrink below its label.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -22,49 +30,58 @@ const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").
   "",
 );
 
+/**
+ * The declarations of the LAST rule whose selector matches.
+ *
+ * Last, because CSS resolves equal-specificity conflicts by source order — the last one is what the element
+ * gets. First-match reading has twice described CSS with no effect.
+ *
+ * Selectors are matched on normalised whitespace, because a selector list is formatted across lines.
+ */
 function rule(selector) {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css)?.[1];
+  const normalised = css.replace(/\s+/g, " ");
+  const wanted = selector.replace(/\s+/g, " ").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const all = [...normalised.matchAll(new RegExp(`${wanted} ?\\{([^}]*)\\}`, "g"))];
+  return all.length > 0 ? all[all.length - 1][1] : undefined;
 }
 
-test("the measure is a token, so the column and the composer cannot disagree about it", () => {
-  // Two places need the same line length: the conversation and the prompt field under it. A literal in
-  // each is two numbers to keep in step, which is how they drifted in the first place.
-  assert.match(css, /:root\s*\{[^}]*--measure:\s*\d+ch/, "the measure is a custom property");
-  const measure = /--measure:\s*(\d+ch)/.exec(css)?.[1];
-  assert.ok(measure, "…and it is a ch value, so it scales with the prose font");
-});
-
-test("the measure CENTRES, so the empty space is not all on one side", () => {
-  // This is the actual complaint. `max-width` alone pins the content to the left, which on a wide
-  // collapsed-panel window reads as a broken layout rather than as a line-length limit.
+test("the prose is CAPPED, which is the readability limit that matters", () => {
   const measure = rule(".measure");
   assert.ok(measure, ".measure must have a rule");
-  assert.match(measure, /max-width:\s*var\(--measure\)/, "derived from the token");
-  assert.match(measure, /margin-inline:\s*auto/, "…and centred, which is the fix");
+  assert.match(measure, /max-width:\s*72ch/, "a line-length cap, in ch so it scales with the prose font");
 });
 
-test("the composer's content is held to the same line as the transcript", () => {
-  // A prompt field wider than the conversation above it is the second half of the report.
-  const composer = rule(".composer > *");
-  assert.ok(composer, "the composer's rows must be constrained");
-  assert.match(composer, /max-width:\s*var\(--measure\)/, "the same measure as the prose");
-  assert.match(composer, /width:\s*100%/, "…but still able to shrink on a narrow window");
+test("the prose is NOT centred", () => {
+  // The revert, pinned. If `margin-inline: auto` comes back, the five defects above come back with it —
+  // and the flicker is the one a reader notices immediately.
+  const measure = rule(".measure");
+  assert.ok(
+    !/margin-inline:\s*auto/.test(measure),
+    "centring was reverted: it made the emptiness more obvious and produced five downstream defects",
+  );
 });
 
-test("the send button keeps its own width instead of stretching with the field", () => {
-  // `cumbersome to hit` — the target moved to the far right of a wide window because the row stretched
-  // and the button was the last thing in it.
+test("the composer spans the column instead of being individually centred", () => {
+  // `align-items: center` was the three-left-edges bug: it centres each child on its own width, so a
+  // shrink-wrapped mode strip and a full-width row get different edges.
+  const composer = rule(".composer");
+  assert.ok(composer, ".composer must have a rule");
+  assert.ok(!/align-items:\s*center/.test(composer), "per-child centring is the bug");
+  assert.ok(!/align-items:\s*stretch/.test(composer), "…and the patch for it is gone too, with the cap");
+});
+
+test("the send button does not shrink below its label", () => {
+  // Kept from #92, with a corrected reason: a flex item defaults to `flex: 0 1 auto` and could never grow,
+  // so this only prevents SHRINKING. It is harmless and mildly useful on a narrow window — it did not fix
+  // "cumbersome to hit", which was the composer spanning 1900px.
   const button = rule(".composer-row .btn-send");
-  assert.ok(button, "the send button must be pinned against stretching");
-  assert.match(button, /flex:\s*none/, "it keeps its intrinsic width");
+  assert.ok(button, "the send button needs a rule");
+  assert.match(button, /flex:\s*none/, "`0 0 auto`: no shrinking, which is all this ever did");
 });
 
-test("the transcript's own padding still lets the measure breathe on a narrow window", () => {
-  // `margin-inline: auto` collapses to zero padding when the column is narrower than the measure, so the
-  // scroller's own padding is what keeps the text off the edges there. Losing it would make a narrow
-  // window worse than before the fix.
+test("the transcript keeps its own horizontal padding", () => {
+  // Independent of the centring, and the only thing keeping text off the edges on a narrow window.
   const transcript = rule(".transcript");
   assert.ok(transcript, ".transcript must have a rule");
-  assert.match(transcript, /padding:\s*var\(--sp-4\) 18px/, "horizontal breathing room survives");
+  assert.match(transcript, /padding:\s*var\(--sp-4\) 18px/, "horizontal breathing room");
 });
