@@ -412,6 +412,35 @@ manifest and the three private workspace manifests cannot disagree.
 
 ### Added
 
+- **Pi Central installs to the dock as a standalone window** (issue #119). A manifest, 192 and 512 icons
+  rendered from the logo's own SVG, and a service worker — which together get the dock icon, a window with
+  no browser chrome, and no tab to lose.
+
+  **It is deliberately not an offline app.** Every screen is fed by the socket, so an installed Pi Central
+  with the orchestrator down shows `disconnected` and nothing else; a worker that "worked offline" would
+  install, open, and be useless while implying otherwise. The word does not appear in the manifest, and a
+  test asserts it stays out.
+
+  **The worker never caches `index.html`.** That file names the current fingerprint set, which is what
+  `static-ui.ts` already says in its `Cache-Control` — and a worker that disagreed with the server would
+  win, silently and indefinitely. Hashed assets are cache-first because their name cannot change under new
+  content; the document is fetched from the network every time, with no cached fallback. This is the
+  property #120 exists to defend, and it has its own assertion now rather than a manual check.
+
+  **Nothing is precached.** The build emits 266 chunks and 8.8 MB, dominated by Shiki grammars (`elisp`
+  772 kB, `cpp` 492 kB) that a session may never open, so everything is runtime-cached on first request.
+
+  **`skipWaiting` is absent on purpose.** "Activate immediately" and "never interrupt a running session"
+  pull in opposite directions, and this app holds live sessions — a worker taking over mid-stream would
+  reload the UI under the reader. It waits for the next launch.
+
+  Registration is guarded by `import.meta.env.PROD`: in dev, Vite serves cache-busting module URLs and an
+  HMR channel, and `ui:dev` plus `server --no-ui` is the documented editing loop — a worker caching those
+  responses is exactly the "my edit did not appear" bug this increment has been removing.
+
+  The static handler now serves `.webmanifest` as `application/manifest+json`. A manifest served as
+  `octet-stream` is ignored by every browser, silently: no icon, no install prompt, no error anywhere.
+
 - **The product has an identity: a favicon, a mark in the topbar, and a banner in the README**
   (issue #115). Until now the header rendered the words `Pi Central` as plain text and a browser tab
   showed a blank document icon.
