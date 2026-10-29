@@ -339,3 +339,27 @@ test("the memory write is skipped for an unmeasured container", () => {
     "the memory write must be guarded by `isMeasured`, or a mount destroys the saved position",
   );
 });
+
+test("the mount measurement does not override the restore decision", () => {
+  // The third bug in this one behaviour, and the one that actually made the fix appear not to work.
+  //
+  // `onScroll()` is called once on mount to seed the control's state. It measures a container that has
+  // content but has not been POSITIONED yet: `scrollTop` is still 0, so the distance from the bottom is the
+  // whole transcript. That reads as "not at the bottom", and it set `pinnedRef = false` — overriding the
+  // decision the app had just taken to follow, before the follow effect ever ran.
+  //
+  // So returning to a session you were following left you at the top, no matter what the decision said.
+  // `restoring` is true for the mount tick only, so a real scroll still behaves as before.
+  const pane = source("../src/components/Transcript.tsx");
+  assert.match(pane, /const restoring = useRef\(true\)/, "a mount-tick flag must exist");
+  assert.match(
+    pane,
+    /if \(restoring\.current\) return;/,
+    "the mount measurement must return before it writes `pinnedRef`",
+  );
+  assert.match(
+    pane,
+    /onScroll\(\);\s*\n\s*\/[^\n]*\n\s*restoring\.current = false;/,
+    "and the flag is cleared straight after the seed, so later scrolls are the reader's",
+  );
+});

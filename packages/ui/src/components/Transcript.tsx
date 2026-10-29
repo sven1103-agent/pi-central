@@ -185,6 +185,19 @@ export function TranscriptView({
         previous !== undefined && isMeasured(previous)
           ? isFollowing(previous, current, FOLLOW_THRESHOLD_PX)
           : isAtBottom(container);
+      /*
+       * On MOUNT, the RESTORE DECISION wins over this measurement (issue #141).
+       *
+       * `onScroll()` is called once on mount to seed the control's state, and it measures a container
+       * that has not been positioned yet: content present, `scrollTop` still 0. That reads as "not at the
+       * bottom", so it set `pinnedRef = false` — the app had just decided to FOLLOW, and the measurement
+       * silently overrode it before the follow effect ever ran. Which is why returning to a session you
+       * were following left you at the top.
+       *
+       * `restoring` is true for exactly the mount tick and false ever after, so a real scroll — the reader
+       * taking control — behaves as it always did.
+       */
+      if (restoring.current) return;
       // One measurement, two consumers, so the control and the follow behaviour cannot disagree
       // about whether the reader is at the bottom.
       pinnedRef.current = following;
@@ -209,6 +222,8 @@ export function TranscriptView({
     // scrolled away from the bottom, and the control would otherwise stay hidden until the first
     // scroll event — which, if the reader never scrolls again, is never.
     onScroll();
+    // The seed is done; from here a scroll event is the reader moving, not the pane settling.
+    restoring.current = false;
     return () => container.removeEventListener("scroll", onScroll);
   }, []);
 
@@ -223,6 +238,14 @@ export function TranscriptView({
    * produced a great deal since the last look (see `decideOnSessionChange`).
    */
   const pendingRestore = useRef<SessionScroll | undefined>(undefined);
+  /**
+   * True for the mount tick only.
+   *
+   * The listener seeds `pinned` from a measurement on mount, and at that moment the container has content
+   * but no position yet — so the measurement says "not at the bottom" and would override the restore
+   * decision. Cleared after the first measurement, so every later scroll is the reader's and is honoured.
+   */
+  const restoring = useRef(true);
 
   useLayoutEffect(() => {
     const decision = decideOnSessionChange(initialScroll);
