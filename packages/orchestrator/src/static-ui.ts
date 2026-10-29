@@ -80,6 +80,12 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
   ".woff": "font/woff",
   ".woff2": "font/woff2",
   ".txt": "text/plain; charset=utf-8",
+  // A manifest served as `application/octet-stream` is IGNORED by every browser, silently — no icon, no
+  // install prompt, no error anywhere. The failure mode is a feature that simply does not exist.
+  ".webmanifest": "application/manifest+json",
+  // The service worker must be JavaScript, and must not be cached: a stale worker is the one artefact that
+  // can outlive a rebuild indefinitely (issues #119, #120).
+  ".webmanifest.json": "application/manifest+json",
 };
 
 /**
