@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import type { Control, HistoricalSession, LiveSession, ModelOption } from "@pi-central/protocol";
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
 import logoIcon from "./assets/logo-icon.svg";
-import type { SessionScroll } from "./scroll.ts";
+import { readTracePrefs, writeTracePrefs, type SessionScroll } from "./scroll.ts";
 import {
   directoryAt,
   initialFilesState,
@@ -97,6 +97,24 @@ export function App() {
   // inside it would be destroyed at the moment it is needed. A ref, so remembering a scroll never
   // re-renders the app.
   const scrollMemory = useRef(new Map<string, SessionScroll>());
+  //
+  // Per session, and owned HERE rather than in `SessionView` (issue #108).
+  //
+  // `SessionView` carries `key={focused?.id}`, so it remounts on every session switch — a `useState`
+  // inside it is destroyed and comes back at its default. That is exactly what the report describes:
+  // collapse the trace, switch away, come back, and it is open again.
+  //
+  // Persisted, like the panel geometry (issue #108: "it should survive restarts of the application").
+  // Read through an initialiser so a corrupt value cannot throw during the first render — the same rule
+  // `parsePanelPrefs` follows, and for the same reason: `localStorage` outlives upgrades and is shared
+  // with whatever else runs on this origin.
+  const [traceCollapsedBySession, setTraceCollapsedBySession] = useState<Record<string, boolean>>(
+    () => readTracePrefs().collapsed,
+  );
+  const [showMarkersBySession, setShowMarkersBySession] = useState<Record<string, boolean>>(
+    () => readTracePrefs().markers,
+  );
+
 
   // The right panel's geometry and mode, restored from the last visit (issue #8; #15 generalises
   // this to drafts and focus). Read through the initialiser so a corrupt value cannot throw during
@@ -122,6 +140,11 @@ export function App() {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  // Persisted on change, not on every render: the maps only change when a toggle is pressed.
+  useEffect(() => {
+    writeTracePrefs({ collapsed: traceCollapsedBySession, markers: showMarkersBySession });
+  }, [traceCollapsedBySession, showMarkersBySession]);
 
   const setPanelWidth = useCallback((width: number, userSized: boolean) => {
     setPanel((current) => ({ ...current, width, userSized }));
@@ -543,6 +566,19 @@ export function App() {
             <SessionView
               key={focused?.id}
               session={focused}
+              traceCollapsed={focused ? traceCollapsedBySession[focused.id] === true : false}
+              showMarkers={focused ? showMarkersBySession[focused.id] !== false : true}
+              onToggleTraceCollapsed={(collapsed) =>
+                focused &&
+                setTraceCollapsedBySession((current) => ({ ...current, [focused.id]: collapsed }))
+              }
+              onToggleMarkers={() =>
+                focused &&
+                setShowMarkersBySession((current) => ({
+                  ...current,
+                  [focused.id]: current[focused.id] === false,
+                }))
+              }
               transcript={transcript}
               home={home}
               historyError={state.transcriptErrors[focused?.id ?? ""]}
@@ -703,6 +739,10 @@ function SessionView({
   onClearQueueAndStop,
   followToken,
   autoFollow,
+  traceCollapsed,
+  showMarkers,
+  onToggleTraceCollapsed,
+  onToggleMarkers,
   onToggleAutoFollow,
   scrollMemory,
   restored,
@@ -728,6 +768,16 @@ function SessionView({
   followToken: number;
   /** Whether the transcript scrolls itself to new output (issue #86). */
   autoFollow: boolean;
+  /**
+   * The trace's collapse state and marker toggle, PER SESSION (issue #108).
+   *
+   * Passed in rather than held here: this component remounts on every session switch, so local state
+   * would reset — which is the reported bug.
+   */
+  traceCollapsed: boolean;
+  showMarkers: boolean;
+  onToggleTraceCollapsed: (collapsed: boolean) => void;
+  onToggleMarkers: () => void;
   onToggleAutoFollow: () => void;
   scrollMemory: React.MutableRefObject<Map<string, SessionScroll>>;
   restored: string[];
@@ -757,10 +807,9 @@ function SessionView({
   // Which tool call is open in the trace window, and whether that window is collapsed. Scoped to
   // the session view so a selection cannot leak into another session's trace.
   const [openTool, setOpenTool] = useState<string | undefined>(undefined);
-  const [traceCollapsed, setTraceCollapsed] = useState(false);
   // Markers on by default: they are how you tell WHERE the agent did something, which the trace
   // window cannot express. One click hides them for pure reading.
-  const [showMarkers, setShowMarkers] = useState(true);
+
   const busy = session.state === "streaming";
 
   return (
@@ -845,7 +894,7 @@ function SessionView({
         historyError={historyError}
         onOpenTool={(toolCallId) => {
           // Opening from a marker un-collapses the trace, or the click would appear to do nothing.
-          setTraceCollapsed(false);
+          onToggleTraceCollapsed(false);
           setOpenTool(toolCallId);
         }}
       />
@@ -858,9 +907,9 @@ function SessionView({
           selectedId={openTool}
           onSelect={setOpenTool}
           collapsed={traceCollapsed}
-          onToggleCollapsed={() => setTraceCollapsed((was) => !was)}
+          onToggleCollapsed={() => onToggleTraceCollapsed(!traceCollapsed)}
           showMarkers={showMarkers}
-          onToggleMarkers={() => setShowMarkers((was) => !was)}
+          onToggleMarkers={onToggleMarkers}
         />
       ) : null}
 
