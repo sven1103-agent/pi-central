@@ -219,6 +219,82 @@ findable in a long conversation.
   button growing (a flex item defaults to `flex: 0 1 auto` and cannot grow); it only stops it shrinking
   below its label. It did not fix *"cumbersome to hit"*, which was the composer spanning 1900px.
 
+- **Tool output opens inline in the transcript, not in a panel at the bottom** (issue #131). Reported after
+  clicking a marker: *"I expected the tool output to open inline the transcript in this case."*
+
+  Re-applied on top of the #92 revert, from a branch that had been built on the centring. Nothing about this
+  feature depends on the measure: the detail block inherits the marker's left edge, which is now the plain
+  `72ch` cap.
+
+  That expectation is right. A marker is a bookmark in the conversation, so the answer belongs where the
+  question was asked — opening the trace panel moved the reader's position twice and broke the thread.
+
+  The marker is now a **`<details>`**: the summary line is unchanged, and opening it reveals each call's
+  arguments and a **capped preview** of its output, in place, inside the quarantine frame the transcript's
+  legend promises. `Open in trace` remains the escape hatch for a result too long to read inline.
+
+  **The cap is not decoration.** `Transcript.tsx`'s own header records the defect that made tool output a
+  separate panel: a real session *"put 1138 frames below the conversation and the agent's actual output
+  became unfindable"*. So the preview is 12 lines, the block is capped at 220px and scrolls within it, and
+  the remainder is one more click — counted, never silently dropped.
+
+  `<details>` rather than a `useState` deliberately: the browser owns the open/closed state, so it survives
+  a re-render — which is the bug #108 was about — and keyboard behaviour comes free. The result is rendered
+  as a **text node**, so ADR-0006's single insertion point stays in `Prose`.
+
+  **The bar is the same width as the prose** (issue #140): *"why is the tool bar inline not in the width of the
+  transcript?"*
+
+  `1ch` is the width of "0" in the element's **own** font. `.measure` (72ch) sits on `<article class="turn">`,
+  which inherits `--fs-base`; the tool bar declared the same `72ch` while rendering at `--fs-2xs`. The same
+  number, a third narrower — which is exactly the inset.
+
+  The fix measures in the **same font** rather than converting the number: the bar sets
+  `font-size: var(--fs-base)`, applies `72ch` in it, and its children restore `--fs-2xs`. Both `72ch` values
+  then resolve identically **by construction**, and a change to `--fs-base` moves them together.
+
+  Two wrong fixes were tried and discarded first, and both are worth recording because each *looked* right:
+
+  - `width: 100%` — spans the column at ~1294px, i.e. 700px **wider** than the text it belongs to. The
+    opposite complaint.
+  - `calc(72 * 0.55rem)` — a ratio with **nothing behind it**. 0.55 appears nowhere else in the codebase; I
+    invented it, and it also assumed the prose was 15px when `.measure` inherits 13px.
+
+  **No hatch, and no `Open in trace` button** (issues #138, #139). Two pieces of visual noise removed on the
+  reader's report.
+
+  The 45° texture is gone **everywhere** — the thinking block, the trace panel and the tool run. At this size
+  it read as pattern rather than as signal, and the reader's verdict on the flat hover state was that it
+  looked right. What remains is the **quarantine gutter** plus the words in each bar, which is what
+  `DESIGN.md` §5.2 calls the load-bearing signal anyway: the texture was always the secondary one, and it is
+  the half that `forced-colors` drops. The transcript's one-time legend promised *"a hatched frame"* and was
+  corrected in the same change — a test now asserts that sentence and the CSS cannot disagree, because #43
+  exists precisely because they once did.
+
+  `Open in trace` is removed from the tool bar. It was a second control on a surface the reader is already
+  reading, and it bought nothing: the trace panel below the transcript reaches every call, and every row in
+  it is selectable. The remainder of a long result is still one click away and still counted.
+
+  **One frame, like the thinking block** (issue #137). The tool run had two left bars: one on `.tool-marker`
+  and another on `.tool-detail` inside it. Open, that showed a **doubled gutter** with nothing between them —
+  a vertical rule that meant nothing, on the surface whose job is to say "this is data".
+
+  `.quarantine` already had the right shape and is the model: one `<details>` wrapping head and body, so the
+  bar runs unbroken from the summary down through the output and the hatch covers both. `.tool-marker` is now
+  that frame, `.tool-marker-summary` is its head, and `.tool-detail` has **no border, hatch or radius of its
+  own** — it sits inside a frame that already provides all three.
+
+  **`display: block` on the `<details>`, not `flex`** (issue #136). A `<details>` lays its `<summary>` out as a
+  block-level child and stacks everything after it **below**; `display: flex` overrode that and made the
+  summary and the body *flex items side by side*, pushing the output to the right of the bar. So the bar the
+  reader had just clicked no longer spanned the width, and closing it meant hunting for the left-hand edge.
+
+  **One bar per call** (issue #136). The first version put a second header bar *inside* the body, repeating
+  the tool name — so opening a call meant moving the mouse down to close it again. The disclosure's
+  `<summary>` is the bar now: it carries the tool name, the state, the size and `Open in trace`, which is
+  everything the second bar said. A **later** call in the same run still gets its own line, because it is
+  not the summary and would otherwise be unlabelled.
+
 - **The trace's nested scroll regions are marked as such** (issue #73). The transcript column has two
   scroll regions — the transcript and the trace list — and a reviewer could not tell them apart:
   *"the inner thumb is easy to mistake for the outer one"*.

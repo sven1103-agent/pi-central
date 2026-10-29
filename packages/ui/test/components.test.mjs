@@ -316,28 +316,34 @@ test("the tool output panel carries the QUARANTINE frame, not merely the words",
   const panel = /<div class="([^"]*trace-detail[^"]*)"/.exec(html);
   assert.ok(panel, "the output panel must render");
   assert.match(panel[1], /\bis-quarantined\b/, `the frame class must be on the panel, got "${panel[1]}"`);
-  // The hatch is a background, so the class is only meaningful if a rule carries the gradient.
-  // Asserted against the stylesheet rather than the class name, because a class with no rule is
-  // exactly the state this bug was in.
+  // The class is only meaningful if a rule draws something, so it is asserted against the stylesheet
+  // rather than the class name — a class with no rule is exactly the state #43 was in.
+  //
+  // WHAT CHANGED (#138): the 45° hatch was removed everywhere. At this size it read as visual noise
+  // rather than as a signal, and the reader's verdict on the flat state was that it looked right. The
+  // frame is now the **gutter** — a mark, not a texture — which is what DESIGN §5.2 calls the
+  // load-bearing signal anyway, and it is the half that survives `forced-colors`.
   const css = readCss();
   const rule = /\.trace-detail\.is-quarantined\s*\{([^}]*)\}/.exec(css);
   assert.ok(rule, "a .trace-detail.is-quarantined rule must exist");
-  assert.match(rule[1], /repeating-linear-gradient/, "the rule must actually draw the hatch");
+  assert.match(rule[1], /border-left:\s*3px solid var\(--quarantine\)/, "the rule must draw the gutter");
   assert.match(rule[1], /var\(--quarantine\)/, "the frame colour must come from the quarantine token");
 });
 
-test("the quarantine hatch is not defeated by cascade order", () => {
-  // Found while fixing #43: `.quarantine` and `.trace-detail` both set `background`, and
-  // `.trace-detail` is declared LATER, so stacking both classes would let the plain background win
-  // on source order — markup correct, frame invisible. This asserts the property directly: whatever
-  // rule gives the panel its hatch must be declared after any rule that would override it.
+test("the quarantine FRAME is not defeated by cascade order", () => {
+  // Found while fixing #43: `.quarantine` and `.trace-detail` both set `background`, and `.trace-detail`
+  // is declared LATER, so stacking both classes let the plain background win on source order — markup
+  // correct, frame invisible.
+  //
+  // The frame is now the GUTTER rather than a background (#138), so the property to protect changed with
+  // it: every later rule that sets `border-left` on a bare `.trace-detail` would win, because `border`
+  // resets all four sides.
   const css = readCss();
-  const hatchAt = css.indexOf(".trace-detail.is-quarantined {");
-  assert.ok(hatchAt > 0);
-  // Every later rule that sets `background` on a bare `.trace-detail` would win. There must be none.
-  const after = css.slice(hatchAt);
-  const laterPlain = /\.trace-detail\s*\{[^}]*background/.exec(after);
-  assert.equal(laterPlain, null, "a later `.trace-detail` background rule would override the hatch");
+  const frameAt = css.indexOf(".trace-detail.is-quarantined {");
+  assert.ok(frameAt > 0);
+  const after = css.slice(frameAt);
+  const laterReset = /\.trace-detail\s*\{[^}]*border\s*:/.exec(after);
+  assert.equal(laterReset, null, "a later `.trace-detail` border shorthand would reset the gutter");
 });
 
 test("a collapsed trace shows a preview instead of the full list", () => {

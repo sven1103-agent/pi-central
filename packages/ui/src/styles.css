@@ -642,15 +642,7 @@ button { font: inherit; color: inherit; }
  */
 .quarantine {
   border-left: 3px solid var(--quarantine);
-  background:
-    repeating-linear-gradient(
-      45deg,
-      transparent,
-      transparent 6px,
-      rgba(88, 96, 105, 0.12) 6px,
-      rgba(88, 96, 105, 0.12) 12px
-    ),
-    var(--panel);
+  background: var(--panel);
   border-radius: 0 var(--r-2) var(--r-2) 0;
   margin: var(--sp-2) 0;
   overflow: hidden;
@@ -1272,15 +1264,7 @@ select.btn { font-family: var(--sans); }
  */
 .trace-detail.is-quarantined {
   border-left: 3px solid var(--quarantine);
-  background:
-    repeating-linear-gradient(
-      45deg,
-      transparent,
-      transparent 6px,
-      rgba(88, 96, 105, 0.12) 6px,
-      rgba(88, 96, 105, 0.12) 12px
-    ),
-    var(--bg);
+  background: var(--bg);
 }
 /* The header sits on the recessed panel so the frame's body reads as one quarantined block, and the
    label takes the quarantine colour — the same pairing the transcript's thinking frames use. */
@@ -1324,25 +1308,156 @@ select.btn { font-family: var(--sans); }
 /* --- the compact marker in the transcript ---------------------------------------------------- */
 
 .tool-marker {
+
+  /*
+   * ONE frame, like the thinking block (issue #137).
+   *
+   * The first version had two: this element carried a 3px left bar, and `.tool-detail` carried another
+   * inside it. Open, that showed a DOUBLED gutter with nothing between them — a vertical rule that meant
+   * nothing, on the surface whose whole job is to say "this is data".
+   *
+   * `.quarantine` already had the right shape and is the model: one `<details>` wrapping head and body, so
+   * the bar runs unbroken from the summary down through the output, and the hatch covers both. This element
+   * is that frame; `.tool-marker-summary` is its head; `.tool-detail` is its body with no border of its own.
+   *
+   * `display: block`, not `flex` (issue #136): a `<details>` stacks its children below the `<summary>`, and
+   * `flex` made them siblings side by side.
+   */
+  display: block;
+  width: 100%;
+  /*
+   * The width of the PROSE MEASURE, which `ch` could not express from here (issue #140).
+   *
+   * `1ch` is the width of "0" in the element's OWN font, and this bar renders at `--fs-2xs` (10px) while
+   * prose renders at `--fs-md` (15px). So `max-width: 72ch` gave the bar ~396px against the prose's
+   * ~594px — the same number, a third narrower, which is exactly the inset that was reported.
+   *
+   * Widening to the column is the wrong fix: `width: 100%` makes it ~1294px, i.e. 700px *wider* than the
+   * text it belongs to. `rem` and `em` do not help either — `em` is this element's font, and any `rem`
+   * multiplier would be a ratio I would have to invent and then keep true.
+   *
+   * So the cap is declared on the SIZE, not on a converted number: the bar sets its font to the size that
+   * `.measure` INHERITS and then applies `72ch` in it, and `.tool-marker-summary` sets its own size back.
+   * The two `72ch` then resolve in the same font by construction.
+   *
+   * **`--fs-base`, not `--fs-md`** — and this was the trap. `.measure` sits on `<article class="turn">`,
+   * which inherits from `body` (`--fs-base`, 13px); it is `.prose` INSIDE the article that is 15px. My first
+   * version measured in `--fs-md` and was ~80px too wide, which would have been a *different* silent
+   * mismatch than the one being fixed.
+   *
+   * A custom property cannot carry this because `ch` resolves where it is USED, not where it is defined —
+   * but `font-size` resolves where it is inherited, which is what makes this work.
+   */
+  font-size: var(--fs-base);
+  max-width: 72ch;
+  text-align: left;
+  border-left: 3px solid var(--quarantine);
+  /*
+   * NO HATCH (issue #138). The 45° texture was dropped: at this size it read as visual noise rather than
+   * as a signal, and the reader's own verdict was that the HOVER state — flat `--panel` — was the one that
+   * looked right.
+   *
+   * The signal that this is untrusted data is carried by the two things that survive both `forced-colors`
+   * and a single glance: the **3px quarantine gutter** and the **words** in the bar (`1 tool · read`,
+   * coloured `--quarantine`). DESIGN §5.2 already says the header is the load-bearing signal and the
+   * texture is secondary — this removes the secondary one rather than the load-bearing one.
+   *
+   * The one-time legend in the transcript header said "a hatched frame", and that is now false; it was
+   * changed in the same commit, because a promise the UI does not keep is worse than no promise (issue #43).
+   */
+  background: var(--panel);
+  border-radius: 0 var(--r-2) var(--r-2) 0;
+  overflow: hidden;
+  /* Attached under the turn it follows rather than floating between turns: it reads as "and it ran this",
+     which is the actual relationship, and costs almost no vertical space. */
+  margin: 2px 0 var(--sp-3);
+  /* No `font-size` here: this element carries `--fs-base` — the size `.measure` inherits — so its `72ch`
+     measures the same width as the transcript's text (issue #140). The children set their own. */
+  color: var(--dim);
+}
+/* The summary is the disclosure handle now, so the hover affordance moves to it (issue #131). */
+.tool-marker-summary {
+  /* The bar is the row, so the alignment lives here and the `<details>` stays a plain block.
+   *
+   * `font-size` is set EXPLICITLY: the marker carries `--fs-base` so its `72ch` matches the transcript's
+   * width (issue #140), and this bar renders small. Inheriting would silently make every tool bar 13px. */
+  font-size: var(--fs-2xs);
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: none;
-  border-left: 3px solid var(--quarantine);
-  padding: 2px 10px;
-  /* Attached under the turn it follows rather than floating between turns: it reads as "and it
-     ran this", which is the actual relationship, and costs almost no vertical space. */
-  margin: 2px 0 var(--sp-3);
-  font-size: var(--fs-2xs);
-  color: var(--dim);
   cursor: pointer;
-  border-radius: 0 var(--r-1) var(--r-1) 0;
-  max-width: 72ch;
+  list-style: none;
+  /* The bar is the quarantine header now (issue #136), so it carries the label colour that says "this is
+     data, not the assistant" — the words are the signal under `forced-colors`, where the hatch is dropped. */
+  color: var(--quarantine);
+  font-weight: 600;
+  /* The default triangle is replaced by `.m-open` below, which rotates with the disclosure — one
+     affordance that moves, rather than a triangle plus an arrow saying the same thing. */
 }
-.tool-marker:hover { background: var(--panel); color: var(--text); }
+.tool-marker-summary::-webkit-details-marker { display: none; }
+.tool-marker-summary:hover { background: var(--panel); color: var(--text); }
+.tool-marker .m-open { margin-left: auto; transition: transform 120ms ease; }
+@media (prefers-reduced-motion: reduce) { .tool-marker .m-open { transition: none; } }
+.tool-marker[open] .m-open { transform: rotate(180deg); }
+
+/*
+ * The inline output: the quarantine frame the legend promises (ADR-0006 / DESIGN §5.2), not a plain block.
+ * `is-quarantined` is the same modifier the trace panel uses, because the hatch is a claim the transcript's
+ * own legend makes about every surface carrying tool output.
+ */
+.tool-detail {
+  /* Same as the summary: the marker carries `--fs-base` for measurement, so this restores the size the
+     content actually renders at (issue #140). The `<pre>` children set their own font too. */
+  font-size: var(--fs-2xs);
+
+  /*
+   * NO border, NO hatching, NO radius (issue #137). It sits INSIDE `.tool-marker`'s frame, which already
+   * provides all three — a second 3px bar here was the redundant vertical rule the report is about: two
+   * gutters with nothing between them.
+   *
+   * `.tool-marker` has `overflow: hidden`, so this body inherits the frame's rounded bottom corners without
+   * repeating them, and the hatch runs continuously from the bar down through the output — the same shape the
+   * thinking block has always had.
+   */
+  border-top: 1px solid var(--line);
+}
+.tool-detail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 4px 10px;
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  background: var(--panel-2);
+}
+.tool-detail-head .label { color: var(--quarantine); font-weight: 600; }
+.tool-detail-head .spacer { flex: 1; }
+.tool-detail-head .err { color: var(--danger-text); }
+.tool-detail-meta { font-family: var(--mono); font-size: var(--fs-2xs); }
+
+/* A CAP, because this is inline in the conversation. Without it a `read` of a 40 KB file pushes the next
+   turn off the screen — the defect this whole component exists to avoid. */
+.tool-detail > :first-child { margin-top: 0; }
+.tool-detail-args,
+.tool-detail-output {
+  margin: 0;
+  padding: var(--sp-2) 10px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: var(--fs-xs);
+}
+.tool-detail-args { color: var(--dim); border-bottom: 1px solid var(--line); }
+.tool-detail-output.error { color: var(--danger-text); }
+.tool-detail-rest > summary { padding: 4px 10px; font-size: var(--fs-2xs); color: var(--dim); cursor: pointer; }
+
+/*
+ * With the hatch gone, the resting background IS `--panel`, so the old hover lost its contrast. The bar
+ * carries the hover now (`--panel-2` on the summary, already there) and the gutter brightens — a cue that
+ * does not reintroduce a texture.
+ */
+.tool-marker:hover { border-left-color: var(--line-strong); }
 .tool-marker.has-error { border-left-color: var(--danger); }
 .tool-marker.running { border-left-color: var(--ok); }
 .tool-marker .m-count { color: var(--text); }

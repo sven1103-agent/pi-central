@@ -31,6 +31,8 @@ import {
   type SessionScroll,
 } from "../scroll.ts";
 import { RunNotices } from "./RunNotices.tsx";
+import { ToolDetail } from "./ToolDetail.tsx";
+import { formatBytes } from "../format.ts";
 
 /**
  * How close to the bottom still counts as "following the tail".
@@ -352,9 +354,7 @@ export function TranscriptView({
               burst of calls collapses to a single line instead of one line per call. */}
           {entries.map((entry, index) =>
             entry.kind === "tools" ? (
-              showMarkers ? (
-                <ToolMarker key={`tools-${index}`} tools={entry.tools} onOpenTool={onOpenTool} />
-              ) : null
+              showMarkers ? <ToolMarker key={`tools-${index}`} tools={entry.tools} /> : null
             ) : (
               <Turn key={entry.message.id} message={entry.message} />
             ),
@@ -400,35 +400,87 @@ export function TranscriptView({
  * reading what it did. The names are enough to orient, and the click is there for when they are
  * not.
  */
-function ToolMarker({
-  tools,
-  onOpenTool,
-}: {
-  tools: ToolExecution[];
-  onOpenTool?: ((toolCallId: string) => void) | undefined;
-}) {
+/**
+ * One run of tool work, inline in the transcript (issue #131).
+ *
+ * ## What changed, and why
+ *
+ * A marker used to be a button that opened the trace panel at the bottom of the window. Reported: *"I
+ * expected the tool output to open inline the transcript in this case."* The expectation is right — a
+ * marker is a bookmark in the conversation, so the answer belongs where the question was asked.
+ *
+ * So the marker is now a **`<details>`**: the summary line is unchanged (the count, the names, the state),
+ * and opening it reveals each call's arguments and a capped preview of its output, in place. The trace
+ * panel is still there and still reachable, because the header of this file records what happens when tool
+ * output grows without a bound: *"1138 frames below the conversation and the agent's actual output became
+ * unfindable."* The remainder of a long result is a disclosure, and the **trace panel below the transcript**
+ * is where the full view lives — every row in it is selectable, so no button is needed on this surface
+ * (issue #139).
+ *
+ * `<details>` rather than `useState`: the browser owns the open/closed state, so it survives a re-render —
+ * which is the bug #108 was about — and keyboard behaviour comes for free.
+ */
+function ToolMarker({ tools }: { tools: ToolExecution[] }) {
   if (tools.length === 0) return null;
   const summary = toolRunSummary(tools);
   const last = tools[tools.length - 1]!;
   const running = tools.some((tool) => tool.running);
 
   return (
-    <button
-      type="button"
-      className={`tool-marker${summary.failed > 0 ? " has-error" : ""}${running ? " running" : ""}`}
-      onClick={() => onOpenTool?.(last.toolCallId)}
-      title="Open the tool trace at this point"
-    >
-      <span className="m-glyph" aria-hidden="true">
-        {running ? "●" : summary.failed > 0 ? "✕" : "⌁"}
-      </span>
-      <span className="m-count">
-        {summary.count} tool{summary.count === 1 ? "" : "s"}
-      </span>
-      <span className="m-names mono">{summary.names.join(" · ")}</span>
-      {summary.failed > 0 && <span className="m-failed">{summary.failed} failed</span>}
-      {running && <span className="m-running">running</span>}
-    </button>
+    <details className={`tool-marker${summary.failed > 0 ? " has-error" : ""}${running ? " running" : ""}`}>
+      <summary
+        className="tool-marker-summary"
+        // Said plainly, because the summary is a disclosure now rather than a jump.
+        title="Show this call's arguments and output here"
+      >
+        <span className="m-glyph" aria-hidden="true">
+          {running ? "●" : summary.failed > 0 ? "✕" : "⌁"}
+        </span>
+        <span className="m-count">
+          {summary.count} tool{summary.count === 1 ? "" : "s"}
+        </span>
+        <span className="m-names mono">{summary.names.join(" · ")}</span>
+        {summary.failed > 0 && <span className="m-failed">{summary.failed} failed</span>}
+        {running && <span className="m-running">running</span>}
+        <span className="spacer" />
+        {/* Size only. The `Open in trace` button that used to sit here was removed (issue #139): it is a
+            second control on a surface the reader is already reading, and the trace panel below the
+            transcript already reaches every call — every row in it is selectable. */}
+        <span className="tool-detail-meta">{formatBytes(last.result.length)}</span>
+        {/* The expander marker is NOT `aria-hidden`: it is the only signal that this line opens. */}
+        <span className="m-open" aria-hidden="true">
+          ⌄
+        </span>
+      </summary>
+
+      {tools.map((tool, index) => (
+        <ToolDetail
+          key={tool.toolCallId}
+          tool={tool}
+          /*
+           * ONE bar per call (issue #136).
+           *
+           * The first call needs none: the `<summary>` above is its bar, carrying the tool name, the
+           * state and the open/closed affordance. That is what lets the reader keep the mouse where they
+           * clicked and close again — a second header bar meant moving to it.
+           *
+           * A LATER call in the same run does need one, because it is not the summary and would
+           * otherwise be an unlabelled block. It names the call and its size, nothing more.
+           */
+          header={
+            index === 0 ? undefined : (
+              <div className="tool-detail-head">
+                <span className="mono">{tool.toolName}</span>
+                {tool.isError && <span className="err">failed</span>}
+                {tool.running && <span className="m-running">running</span>}
+                <span className="spacer" />
+                <span className="tool-detail-meta">{formatBytes(tool.result.length)}</span>
+              </div>
+            )
+          }
+        />
+      ))}
+    </details>
   );
 }
 
