@@ -36,6 +36,7 @@
  */
 import { useEffect, useRef } from "react";
 import { PROTOCOL_VERSION, type InstallFacts } from "@pi-central/protocol";
+import { buildInfo, buildLabel } from "../build-info.ts";
 import { CopyButton } from "./CopyButton.tsx";
 
 /**
@@ -152,6 +153,21 @@ export function Settings({
           <h4>This build</h4>
           <dl className="kv">
             <Fact label="Version" value={install?.version} />
+            {/*
+              The UI's own identity (issue #114). The row above is the PACKAGE version, which is the same
+              for every build of it — so it cannot tell you whether the bundle your tab is running matches
+              the `dist/` on disk. This can, and it is the answer to a question that otherwise needs a
+              `curl`, a grep and a comparison.
+            */}
+            <Fact
+              label="UI build"
+              value={buildLabel()}
+              note={
+                buildInfo().commit === "dev"
+                  ? "built outside a git checkout, so there is no commit to name"
+                  : undefined
+              }
+            />
             <Fact
               label="Protocol"
               value={orchestratorProtocol === undefined ? undefined : `v${orchestratorProtocol}`}

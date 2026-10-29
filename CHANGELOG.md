@@ -85,6 +85,34 @@ findable in a long conversation.
 
 ### Fixed
 
+- **The dev loop can say which build is running** (issue #114). Four times in one session a UI fix
+  appeared not to work because half the system was stale — a rebuilt `dist/`, a tab holding an old bundle,
+  an orchestrator with cached modules — and each time the only way to tell was to `curl` the served HTML,
+  grep an asset hash, and compare it to the file on disk.
+
+  **The build is now stamped.** Vite injects the commit and build time, Settings shows them beside the
+  package version, and the orchestrator logs the entry bundle it is serving at startup — so the terminal
+  says what is on disk, the page says what the tab is running, and comparing the two is the diagnosis.
+  Compiled in rather than queried: a value the page *asks for* could come back newer than the code it is
+  stamped onto.
+
+  **A port collision now explains itself.** `EADDRINUSE` used to arrive as
+  `listen EADDRINUSE: address already in use 127.0.0.1:8787` — which names a syscall and not the
+  situation. It now says that a second server is almost certainly running, that its pages are still being
+  served, that Node has its old modules cached, and gives the `lsof`/`kill`/`--port` commands. `EACCES`
+  and `EADDRNOTAVAIL` get their own messages, since their fixes differ.
+
+  *A correction to my own issue:* I wrote that a second `npm run server` "exits 0 and does nothing". It
+  does not — it rejects and exits 1. The failure was never invisible; it was unhelpful, which is why the
+  fix is the wording rather than the plumbing.
+
+  **The dev server binds `127.0.0.1` explicitly.** Vite 7 binds `localhost`, which on macOS resolves to
+  `::1` first — so `http://localhost:5173` worked and `http://127.0.0.1:5173` was refused, while the
+  browser's error named the WebSocket and sent you looking at the orchestrator.
+
+  **`PI_CENTRAL_WS` is validated at startup**: a target with no port, or one that is not `ws://`, fails
+  with a message naming the variable instead of being accepted and then refusing per connection.
+
 - **The transcript and the composer are held to one line, centred** (issue #92). With the panel collapsed
   on a wide window the report was that *"the transcript looks lost, there is a lot of empty space right
   to the transcript"* and *"the prompt console is just stretched to the right, which makes it cumbersome
