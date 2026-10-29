@@ -39,6 +39,46 @@ test("every measured child of the transcript centres, including the tool marker"
   assert.match(shared, /width:\s*100%/, "a flex child must claim the width before `max-width` can clamp it");
 });
 
+test("NO later rule can override the shared alignment", () => {
+  // The bug that made this fix appear not to work, and the assertion that would have caught it.
+  //
+  // `.tool-marker` also has its own rule, declared LATER in the stylesheet at equal specificity. Its
+  // `margin: 2px 0 <x>` SHORTHAND set `margin-left/right: 0` and silently cancelled the
+  // `margin-inline: auto` from the shared rule. The fix was correct, in the file, and never reached the
+  // element — so a test asserting "the shared rule contains margin-inline: auto" passed while the marker
+  // stayed flush left.
+  //
+  // A test that only checks a declaration checks the CODE. This checks the outcome: for each class the
+  // shared rule covers, nothing it declares for horizontal placement may be clobbered by a later rule.
+  const normalised = css.replace(/\s+/g, " ");
+  const rules = [...normalised.matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => ({
+    selector: m[1].trim(),
+    body: m[2],
+    at: m.index,
+  }));
+  const shared = rules.find((r) => r.selector === ".measure, .tool-marker, .run-notices");
+  assert.ok(shared, "the shared rule must exist");
+
+  for (const cls of [".tool-marker", ".run-notices"]) {
+    const later = rules.filter((r) => r.at > shared.at && r.selector.split(",").map((s) => s.trim()).includes(cls));
+    for (const rule of later) {
+      for (const decl of rule.body.split(";")) {
+        // A margin SHORTHAND resets all four sides, including the `auto` that centres. So does
+        // `margin-left`/`margin-right` and a bare `width`.
+        assert.ok(
+          !/^\s*margin\s*:/.test(decl),
+          `${cls} is re-declared later with \`${decl.trim()}\` — a margin shorthand resets margin-inline, ` +
+            `cancelling the centring even though the shared rule still contains it`,
+        );
+        assert.ok(
+          !/^\s*margin-(left|right)\s*:/.test(decl),
+          `${cls} is re-declared later with \`${decl.trim()}\`, which overrides the centring`,
+        );
+      }
+    }
+  }
+});
+
 test("the tool marker no longer declares its own alignment", () => {
   // A second source of truth for the same decision is how the marker ended up capped-but-not-centred
   // while the turns were centred-and-capped.
@@ -46,6 +86,8 @@ test("the tool marker no longer declares its own alignment", () => {
   assert.ok(marker, ".tool-marker must have a rule");
   assert.ok(!/max-width/.test(marker), "the cap belongs to the shared rule, not to the marker");
   assert.ok(!/margin-inline/.test(marker), "and so does the centring");
+  assert.ok(!/(^|;)\s*margin\s*:/.test(marker), "a margin SHORTHAND here would reset the centring");
+  assert.match(marker, /margin-block:/, "vertical rhythm is set with margin-block");
 });
 
 test("the composer aligns children by the CONTAINER, not by each child's width", () => {

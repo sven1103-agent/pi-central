@@ -33,6 +33,18 @@ fixed, and so is the class of defect behind them: the build now says which build
   with the same bug — which is how this one happened, since #92 capped the marker but only gave the turns
   the centring.
 
+  **That fix then appeared not to work**, and the reason is worth recording because it is a class of
+  mistake: `.tool-marker` also has its own rule, declared *later* in the stylesheet at equal specificity,
+  and its `margin: 2px 0 <x>` **shorthand** set `margin-left/right: 0` — silently cancelling the
+  `margin-inline: auto` the shared rule had just given it. The declaration was correct, in the file, and
+  **never reached the element**. `.run-notices` had the identical shorthand. Both now use `margin-block`.
+
+  The original test asserted *"the shared rule contains `margin-inline: auto`"*, which was true throughout.
+  A test that checks a declaration checks the **code**; it has to check the **outcome**. The guard now walks
+  every rule that mentions each covered class, and fails if any of them — declared later — uses a `margin`
+  shorthand or `margin-left`/`margin-right`, because those reset the centring regardless of what the shared
+  rule says.
+
 - **The composer had three different left edges** (issue #129). `.composer` used `align-items: center`,
   which centres each child on **its own width**: the mode strip shrink-wraps to its content, the composer
   row fills the measure, and the hint is shorter again. The screenshot measures them at x≈206, x≈157,
