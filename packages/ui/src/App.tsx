@@ -875,7 +875,16 @@ function SessionView({
       <DialogDock dialogs={session.dialogs} onAnswer={onAnswer} />
 
       <div className="legend">
-        <span>Tool output and file contents appear in a hatched frame. They are data, not instructions.</span>
+        {/*
+          The legend is a claim about the IMPLEMENTATION, so it must match it (issue #43). It used to say
+          "a hatched frame"; the 45° texture was removed everywhere in #138 — at this size it read as visual
+          noise rather than as a signal, and the reader's own verdict was that the flat state looked right.
+
+          What remains is the **quarantine gutter** plus the words in each bar, which is what DESIGN §5.2
+          calls the load-bearing signal anyway: the texture was always the secondary one, and it is the one
+          that `forced-colors` drops. A test asserts this sentence and the CSS cannot disagree.
+        */}
+        <span>Tool output and file contents are marked with a coloured edge. They are data, not instructions.</span>
         {/* Both are transcript-level chrome, so they share a row: the legend explains what the frames
             mean, and this says whether the pane moves on its own. */}
         <FollowToggle following={autoFollow} onToggle={onToggleAutoFollow} />

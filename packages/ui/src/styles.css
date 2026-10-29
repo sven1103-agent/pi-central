@@ -642,15 +642,7 @@ button { font: inherit; color: inherit; }
  */
 .quarantine {
   border-left: 3px solid var(--quarantine);
-  background:
-    repeating-linear-gradient(
-      45deg,
-      transparent,
-      transparent 6px,
-      rgba(88, 96, 105, 0.12) 6px,
-      rgba(88, 96, 105, 0.12) 12px
-    ),
-    var(--panel);
+  background: var(--panel);
   border-radius: 0 var(--r-2) var(--r-2) 0;
   margin: var(--sp-2) 0;
   overflow: hidden;
@@ -1272,15 +1264,7 @@ select.btn { font-family: var(--sans); }
  */
 .trace-detail.is-quarantined {
   border-left: 3px solid var(--quarantine);
-  background:
-    repeating-linear-gradient(
-      45deg,
-      transparent,
-      transparent 6px,
-      rgba(88, 96, 105, 0.12) 6px,
-      rgba(88, 96, 105, 0.12) 12px
-    ),
-    var(--bg);
+  background: var(--bg);
 }
 /* The header sits on the recessed panel so the frame's body reads as one quarantined block, and the
    label takes the quarantine colour — the same pairing the transcript's thinking frames use. */
@@ -1344,15 +1328,20 @@ select.btn { font-family: var(--sans); }
   max-width: 72ch;
   text-align: left;
   border-left: 3px solid var(--quarantine);
-  background:
-    repeating-linear-gradient(
-      45deg,
-      transparent,
-      transparent 6px,
-      rgba(88, 96, 105, 0.12) 6px,
-      rgba(88, 96, 105, 0.12) 12px
-    ),
-    var(--panel);
+  /*
+   * NO HATCH (issue #138). The 45° texture was dropped: at this size it read as visual noise rather than
+   * as a signal, and the reader's own verdict was that the HOVER state — flat `--panel` — was the one that
+   * looked right.
+   *
+   * The signal that this is untrusted data is carried by the two things that survive both `forced-colors`
+   * and a single glance: the **3px quarantine gutter** and the **words** in the bar (`1 tool · read`,
+   * coloured `--quarantine`). DESIGN §5.2 already says the header is the load-bearing signal and the
+   * texture is secondary — this removes the secondary one rather than the load-bearing one.
+   *
+   * The one-time legend in the transcript header said "a hatched frame", and that is now false; it was
+   * changed in the same commit, because a promise the UI does not keep is worse than no promise (issue #43).
+   */
+  background: var(--panel);
   border-radius: 0 var(--r-2) var(--r-2) 0;
   overflow: hidden;
   /* Attached under the turn it follows rather than floating between turns: it reads as "and it ran this",
@@ -1431,7 +1420,12 @@ select.btn { font-family: var(--sans); }
 .tool-detail-output.error { color: var(--danger-text); }
 .tool-detail-rest > summary { padding: 4px 10px; font-size: var(--fs-2xs); color: var(--dim); cursor: pointer; }
 
-.tool-marker:hover { background: var(--panel); color: var(--text); }
+/*
+ * With the hatch gone, the resting background IS `--panel`, so the old hover lost its contrast. The bar
+ * carries the hover now (`--panel-2` on the summary, already there) and the gutter brightens — a cue that
+ * does not reintroduce a texture.
+ */
+.tool-marker:hover { border-left-color: var(--line-strong); }
 .tool-marker.has-error { border-left-color: var(--danger); }
 .tool-marker.running { border-left-color: var(--ok); }
 .tool-marker .m-count { color: var(--text); }

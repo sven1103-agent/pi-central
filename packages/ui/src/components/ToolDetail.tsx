@@ -94,8 +94,8 @@ export function ToolDetail({
 
       {truncated && (
         /*
-          The remainder is behind a disclosure rather than shown. Not a truncation with no way forward:
-          `Open in trace` in the bar above gives the whole thing, and the count says how much is hidden.
+          The remainder is behind a disclosure rather than shown. Not a truncation with no way forward: the
+          count says how much is hidden, and the trace panel below the transcript reaches every call.
         */
         <details className="tool-detail-rest">
           <summary>{lines.length - PREVIEW_LINES} more lines</summary>

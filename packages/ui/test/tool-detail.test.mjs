@@ -91,18 +91,19 @@ test("the marker is a disclosure, not a jump to another panel", () => {
   const marker = source.slice(source.indexOf("function ToolMarker("), source.indexOf("function Turn("));
   assert.match(marker, /<details/, "the marker opens in place");
   assert.match(marker, /<summary/, "…with a summary as the handle");
-  // The bar now carries an `Open in trace` link (issue #136), so an `onClick` is expected — but it must
-  // not also toggle the disclosure, or a request for the full view would just open the preview.
-  assert.match(marker, /stopPropagation\(\)/, "the trace link must not toggle the disclosure");
+  // The bar carries NO button (issue #139): it is a reading surface, and `Open in trace` was a second
+  // control competing with the text. The trace panel below the transcript already reaches every call —
+  // its rows are selectable — so nothing is lost by removing it.
   assert.ok(
-    !/onSelect|setOpenTool/.test(marker),
-    "and nothing on the bar changes a selection elsewhere — the disclosure is the primary action",
+    !/Open in trace/.test(marker.slice(0, marker.indexOf("<ToolDetail"))),
+    "no trace button on the bar",
   );
+  assert.ok(!/onClick=/.test(marker), "no click handler at all — the summary is the only affordance");
   assert.match(marker, /<ToolDetail/, "…and each call renders the detail component in place");
   // `Open in trace` moved ONTO the bar in issue #136, rather than sitting in a second header bar inside
   // `ToolDetail`. That is the point of the change: one bar, so the reader can close what they opened
   // without moving the mouse.
-  assert.match(marker, /Open in trace/, "the escape hatch is on the same bar as the disclosure");
+  assert.ok(!/Open in trace/.test(marker), "and the escape hatch moved off this surface entirely (#139)");
 });
 
 test("a result is CAPPED, so it cannot bury the conversation", () => {
@@ -130,11 +131,11 @@ test("the output sits inside the quarantine frame the legend promises", () => {
   // showed a DOUBLED rule with nothing between them. The thinking block always had the right shape, one
   // `<details>` wrapping head and body, so the bar runs unbroken and the hatch covers both. The tool block
   // now matches it.
+  // The gutter is now the whole signal, because the hatch was removed (#138) — at this size it read as noise,
+  // and the reader's verdict was that the flat hover state looked right.
   const frame = rule(".tool-marker") ?? "";
-  assert.match(frame, /border-left:\s*3px solid var\(--quarantine\)/, "the hatched gutter");
-  // Scoped to THIS rule, not to the stylesheet: `.quarantine` also has a hatch, so a whole-file search
-  // passed even with the gradient removed. Found by falsifying it.
-  assert.match(frame, /repeating-linear-gradient/, "…and the hatch itself, inside this rule");
+  assert.match(frame, /border-left:\s*3px solid var\(--quarantine\)/, "the quarantine gutter");
+  assert.ok(!/repeating-linear-gradient/.test(frame), "no texture: the gutter carries it");
 
   // And the body must NOT repeat it, which is the redundant bar the report is about.
   const body = rule(".tool-detail") ?? "";
@@ -192,4 +193,23 @@ test("the disclosure is a BLOCK, so its body stacks under the bar rather than be
   const summary = rule(".tool-marker-summary");
   assert.ok(summary, "the summary must have a rule");
   assert.match(summary, /display:\s*flex/, "the BAR is the row");
+});
+
+test("the transcript's legend describes the frame that actually exists", () => {
+  // The legend is a CLAIM ABOUT THE IMPLEMENTATION, and issue #43 exists because it once described a hatch
+  // the trace did not have. So the sentence and the CSS have to be checked together: if a hatched surface
+  // returns, the words must return with it, and if the words promise a hatch and there is none, they are
+  // lying.
+  const app = stripComments(readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8"));
+  const legend = /Tool output and file contents[^<]*/.exec(app)?.[0] ?? "";
+  assert.ok(legend.length > 0, "the one-time legend must exist");
+
+  const hatched = ["tool-marker", "tool-detail", "quarantine"].some((cls) =>
+    /repeating-linear-gradient/.test(rule(`.${cls}`) ?? ""),
+  );
+  if (/hatched/.test(legend)) {
+    assert.ok(hatched, `the legend promises a "hatched frame" but no surface has one: ${legend}`);
+  } else {
+    assert.ok(!hatched, `a surface is hatched but the legend does not say so: ${legend}`);
+  }
 });

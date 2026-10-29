@@ -354,9 +354,7 @@ export function TranscriptView({
               burst of calls collapses to a single line instead of one line per call. */}
           {entries.map((entry, index) =>
             entry.kind === "tools" ? (
-              showMarkers ? (
-                <ToolMarker key={`tools-${index}`} tools={entry.tools} onOpenTool={onOpenTool} />
-              ) : null
+              showMarkers ? <ToolMarker key={`tools-${index}`} tools={entry.tools} /> : null
             ) : (
               <Turn key={entry.message.id} message={entry.message} />
             ),
@@ -415,18 +413,14 @@ export function TranscriptView({
  * and opening it reveals each call's arguments and a capped preview of its output, in place. The trace
  * panel is still there and still reachable, because the header of this file records what happens when tool
  * output grows without a bound: *"1138 frames below the conversation and the agent's actual output became
- * unfindable."* `Open in trace` is the link for a result too long to read here.
+ * unfindable."* The remainder of a long result is a disclosure, and the **trace panel below the transcript**
+ * is where the full view lives — every row in it is selectable, so no button is needed on this surface
+ * (issue #139).
  *
  * `<details>` rather than `useState`: the browser owns the open/closed state, so it survives a re-render —
  * which is the bug #108 was about — and keyboard behaviour comes for free.
  */
-function ToolMarker({
-  tools,
-  onOpenTool,
-}: {
-  tools: ToolExecution[];
-  onOpenTool?: ((toolCallId: string) => void) | undefined;
-}) {
+function ToolMarker({ tools }: { tools: ToolExecution[] }) {
   if (tools.length === 0) return null;
   const summary = toolRunSummary(tools);
   const last = tools[tools.length - 1]!;
@@ -449,24 +443,10 @@ function ToolMarker({
         {summary.failed > 0 && <span className="m-failed">{summary.failed} failed</span>}
         {running && <span className="m-running">running</span>}
         <span className="spacer" />
-        {/* What the second header used to carry, moved onto the one bar the reader is already on. */}
+        {/* Size only. The `Open in trace` button that used to sit here was removed (issue #139): it is a
+            second control on a surface the reader is already reading, and the trace panel below the
+            transcript already reaches every call — every row in it is selectable. */}
         <span className="tool-detail-meta">{formatBytes(last.result.length)}</span>
-        <button
-          type="button"
-          className="copy"
-          title="Open this call in the tool trace"
-          /*
-           * `stopPropagation`, or clicking it would also toggle the disclosure — the click is a request
-           * for the full view, not for a closer look at the preview.
-           */
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onOpenTool?.(last.toolCallId);
-          }}
-        >
-          Open in trace
-        </button>
         {/* The expander marker is NOT `aria-hidden`: it is the only signal that this line opens. */}
         <span className="m-open" aria-hidden="true">
           ⌄
@@ -485,7 +465,7 @@ function ToolMarker({
            * clicked and close again — a second header bar meant moving to it.
            *
            * A LATER call in the same run does need one, because it is not the summary and would
-           * otherwise be an unlabelled block. It names the call and repeats `Open in trace`.
+           * otherwise be an unlabelled block. It names the call and its size, nothing more.
            */
           header={
             index === 0 ? undefined : (
@@ -495,9 +475,6 @@ function ToolMarker({
                 {tool.running && <span className="m-running">running</span>}
                 <span className="spacer" />
                 <span className="tool-detail-meta">{formatBytes(tool.result.length)}</span>
-                <button type="button" className="copy" onClick={() => onOpenTool?.(tool.toolCallId)}>
-                  Open in trace
-                </button>
               </div>
             )
           }

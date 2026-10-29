@@ -242,6 +242,21 @@ findable in a long conversation.
   a re-render — which is the bug #108 was about — and keyboard behaviour comes free. The result is rendered
   as a **text node**, so ADR-0006's single insertion point stays in `Prose`.
 
+  **No hatch, and no `Open in trace` button** (issues #138, #139). Two pieces of visual noise removed on the
+  reader's report.
+
+  The 45° texture is gone **everywhere** — the thinking block, the trace panel and the tool run. At this size
+  it read as pattern rather than as signal, and the reader's verdict on the flat hover state was that it
+  looked right. What remains is the **quarantine gutter** plus the words in each bar, which is what
+  `DESIGN.md` §5.2 calls the load-bearing signal anyway: the texture was always the secondary one, and it is
+  the half that `forced-colors` drops. The transcript's one-time legend promised *"a hatched frame"* and was
+  corrected in the same change — a test now asserts that sentence and the CSS cannot disagree, because #43
+  exists precisely because they once did.
+
+  `Open in trace` is removed from the tool bar. It was a second control on a surface the reader is already
+  reading, and it bought nothing: the trace panel below the transcript reaches every call, and every row in
+  it is selectable. The remainder of a long result is still one click away and still counted.
+
   **One frame, like the thinking block** (issue #137). The tool run had two left bars: one on `.tool-marker`
   and another on `.tool-detail` inside it. Open, that showed a **doubled gutter** with nothing between them —
   a vertical rule that meant nothing, on the surface whose job is to say "this is data".
