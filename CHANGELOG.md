@@ -627,6 +627,30 @@ manifest and the three private workspace manifests cannot disagree.
 
 ### Added
 
+- **The transcript's text size and line length are the reader's to set** (issue #134). The honest answer to
+  *"the transcript looks lost on bigger screens"*, after centring the column (#92) produced five defects and
+  was reverted (#132).
+
+  The complaint was a **preference**: 72ch at 15px is comfortable on a 13" laptop and cramped on a 27"
+  display, and there is no single right number. So the app stops choosing one. Settings → **Reading** has a
+  text-size slider (13–18px) and a line-length slider (50–100ch, or *use the full width*), applied live and
+  remembered.
+
+  **The defaults are exactly what shipped** — 15px and 72ch — so a reader who never opens Settings sees no
+  change at all. That is the acceptance criterion, and a test asserts the defaults resolve to the same
+  declarations the stylesheet used to carry.
+
+  Two new tokens, `--reading-size` and `--reading-measure`, and **not** `--fs-md`: that one is used by seven
+  other rules — headings, dialogs, the composer — so letting the preference write to it would resize the whole
+  application. The measure is `ch`, so raising the size **widens the line proportionally**, which is what
+  "make the text bigger" means to a person; the panel says so, because two sliders usually behave the other
+  way.
+
+  Alignment is deliberately **not** offered. Centring versus left is the thing that failed, and a toggle would
+  invite the same five defects back at every setting. `localStorage` is read through a validating parser for
+  the reason `panel.ts` gives: storage outlives upgrades, so a stored `"sizePx": "big"` is reachable, and a
+  corrupt preference must degrade to the default rather than to a broken transcript.
+
 - **The README says how to install Pi Central as an app** (issue #119, follow-up). The PWA shipped but the
   documentation did not mention it, so the feature existed and nobody would have found it — the same gap as
   #114's build stamp, in a different place.
