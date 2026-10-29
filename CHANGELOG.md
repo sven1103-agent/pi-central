@@ -219,6 +219,29 @@ findable in a long conversation.
   button growing (a flex item defaults to `flex: 0 1 auto` and cannot grow); it only stops it shrinking
   below its label. It did not fix *"cumbersome to hit"*, which was the composer spanning 1900px.
 
+- **Tool output opens inline in the transcript, not in a panel at the bottom** (issue #131). Reported after
+  clicking a marker: *"I expected the tool output to open inline the transcript in this case."*
+
+  Re-applied on top of the #92 revert, from a branch that had been built on the centring. Nothing about this
+  feature depends on the measure: the detail block inherits the marker's left edge, which is now the plain
+  `72ch` cap.
+
+  That expectation is right. A marker is a bookmark in the conversation, so the answer belongs where the
+  question was asked — opening the trace panel moved the reader's position twice and broke the thread.
+
+  The marker is now a **`<details>`**: the summary line is unchanged, and opening it reveals each call's
+  arguments and a **capped preview** of its output, in place, inside the quarantine frame the transcript's
+  legend promises. `Open in trace` remains the escape hatch for a result too long to read inline.
+
+  **The cap is not decoration.** `Transcript.tsx`'s own header records the defect that made tool output a
+  separate panel: a real session *"put 1138 frames below the conversation and the agent's actual output
+  became unfindable"*. So the preview is 12 lines, the block is capped at 220px and scrolls within it, and
+  the remainder is one more click — counted, never silently dropped.
+
+  `<details>` rather than a `useState` deliberately: the browser owns the open/closed state, so it survives
+  a re-render — which is the bug #108 was about — and keyboard behaviour comes free. The result is rendered
+  as a **text node**, so ADR-0006's single insertion point stays in `Prose`.
+
 - **The trace's nested scroll regions are marked as such** (issue #73). The transcript column has two
   scroll regions — the transcript and the trace list — and a reviewer could not tell them apart:
   *"the inner thumb is easy to mistake for the outer one"*.
