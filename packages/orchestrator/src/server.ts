@@ -12,6 +12,7 @@
 import { defaultConfig } from "./config.ts";
 import { Supervisor } from "./supervisor.ts";
 import { Transport } from "./transport.ts";
+import { describeBuiltUi, explainStartupError } from "./startup-error.ts";
 import { assertNotSandboxed, SandboxedEnvironmentError } from "./sandbox-guard.ts";
 import { hasBuiltUi, resolveUiDistDir } from "./static-ui.ts";
 import { findOwnPackage, PACKAGE_NAME } from "./package-meta.ts";
@@ -74,6 +75,9 @@ Seatbelt does not nest, so a sandboxed shell cannot start a sandboxed session (C
  */
 const DEFAULT_PORT = 8787;
 
+/** The port the failed start was about, for the rejection handler. `undefined` before args are parsed. */
+let startupPort: number | undefined;
+
 function parseArgs(argv: string[]): Options {
   const options: Options = {
     port: DEFAULT_PORT,
@@ -121,6 +125,9 @@ function parseArgs(argv: string[]): Options {
 
 async function main(): Promise<number> {
   const options = parseArgs(process.argv.slice(2));
+  // Remembered so the rejection handler can name the port. `options` is scoped to `main`, and the
+  // failure it explains happens *inside* main — but the handler is outside it.
+  startupPort = options.port;
 
   // Answered before the sandbox probe and before any config is read. `--version` must work in a
   // sandbox, on a host with no Safehouse, and with no home directory — it is the question someone
@@ -185,6 +192,11 @@ async function main(): Promise<number> {
     console.log(`UI: not served (--no-ui). Use a dev server, or drop the flag to serve a build.`);
   } else if (hasBuiltUi(options.uiDir)) {
     console.log(`Open ${httpUrl} — the UI is served from ${options.uiDir}`);
+    // The identity of the bundle being served, so "am I looking at the code I just built?" is answerable
+    // here rather than by curling the HTML and grepping an asset hash (issue #114). The same values are
+    // in Settings, which is the other half: the terminal says what is on disk, the page says what the tab
+    // is running, and comparing the two is the whole diagnosis.
+    console.log(`  UI build: ${describeBuiltUi(options.uiDir)}`);
   } else {
     console.log(
       `No built UI at ${options.uiDir}\n` +
@@ -234,7 +246,11 @@ main().then(
     if (code !== 0) process.exit(code);
   },
   (error: unknown) => {
-    console.error(`Pi Central failed to start: ${(error as Error).message}`);
+    // A port collision has a *situation* behind it, not just a syscall name (issue #114). The generic
+    // message already carried `EADDRINUSE`; what it never said was "you probably have a second server
+    // running, and that is why the code you just rebuilt is not being served".
+    const explained = explainStartupError(error, "127.0.0.1", startupPort ?? 0);
+    console.error(explained ?? `Pi Central failed to start: ${(error as Error).message}`);
     process.exit(1);
   },
 );

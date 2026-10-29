@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -13,10 +14,76 @@ import { fileURLToPath } from "node:url";
  * The orchestrator prints `PI_CENTRAL_URL=ws://…` on startup; point this at it with
  * `PI_CENTRAL_WS=ws://127.0.0.1:<port>`.
  */
-const target = process.env.PI_CENTRAL_WS ?? "ws://127.0.0.1:8787";
+/**
+ * The orchestrator the dev server proxies `/ws` to (issue #114).
+ *
+ * ## Validated, because the failure was late and silent
+ *
+ * Any string used to be accepted. `ws://127.0.0.1` (no port) or a typo produced no complaint at startup
+ * and then refused *per connection* — so the browser reported `ECONNREFUSED` on the socket, which points
+ * at the orchestrator, while the actual mistake was in this variable.
+ *
+ * Failing here instead puts the error where the mistake is, once, before anything is served.
+ */
+function proxyTarget(): string {
+  const raw = process.env["PI_CENTRAL_WS"];
+  if (raw === undefined || raw === "") return "ws://127.0.0.1:8787";
+
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(
+      `PI_CENTRAL_WS is not a URL: ${JSON.stringify(raw)}\n` +
+        `  Expected something like:  PI_CENTRAL_WS=ws://127.0.0.1:8787`,
+    );
+  }
+  if (url.protocol !== "ws:" && url.protocol !== "wss:") {
+    throw new Error(`PI_CENTRAL_WS must be ws:// or wss://, got ${url.protocol}//`);
+  }
+  if (url.port === "") {
+    // The one that actually happened. A proxy target with no port cannot be reached, and the error the
+    // browser shows names the socket rather than the variable.
+    throw new Error(
+      `PI_CENTRAL_WS has no port: ${JSON.stringify(raw)}\n` +
+        `  The orchestrator prints it on startup as PI_CENTRAL_URL=ws://127.0.0.1:<port>`,
+    );
+  }
+  return raw;
+}
+
+const target = proxyTarget();
+
+/**
+ * The build's identity, injected as literals (issue #114).
+ *
+ * A page cannot ask git what it was built from, and it should not try: a stamp that is *queried* could
+ * answer with something newer than the code it is stamped onto. Compiled in, an old page is exactly the
+ * page with an old stamp.
+ *
+ * `dev` for the commit rather than a guess: a local `npm run ui:build` outside a git checkout has no
+ * commit, and saying so is more useful than an empty string.
+ */
+function buildIdentity(): { commit: string; builtAt: string } {
+  let commit = process.env["PI_CENTRAL_COMMIT"] ?? "";
+  if (commit === "") {
+    try {
+      commit = execSync("git rev-parse --short=7 HEAD", { encoding: "utf8" }).trim();
+    } catch {
+      commit = "dev";
+    }
+  }
+  return { commit: commit || "dev", builtAt: new Date().toISOString() };
+}
+
+const identity = buildIdentity();
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    "import.meta.env.VITE_PI_CENTRAL_COMMIT": JSON.stringify(identity.commit),
+    "import.meta.env.VITE_PI_CENTRAL_BUILT_AT": JSON.stringify(identity.builtAt),
+  },
   resolve: {
     // `@pi-central/protocol` is a workspace package resolved to its TypeScript source, so a
     // protocol change breaks the UI build rather than being masked by a stale build artifact.
@@ -27,6 +94,15 @@ export default defineConfig({
     },
   },
   server: {
+    /**
+     * `127.0.0.1`, explicitly (issue #114).
+     *
+     * Vite 7 binds `localhost` by default, which on macOS resolves to **`::1` first** — so
+     * `http://localhost:5173` works and `http://127.0.0.1:5173` is **refused**, while the browser's
+     * error names the WebSocket and sends you looking at the orchestrator. Binding the address the docs
+     * and the error messages use is the fix; the alternative was telling people to type `localhost`.
+     */
+    host: "127.0.0.1",
     port: 5173,
     strictPort: true,
     proxy: {
