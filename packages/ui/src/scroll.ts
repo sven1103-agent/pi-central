@@ -149,3 +149,63 @@ export function isMeasured(sample: ScrollSample): boolean {
 export function shouldFollow(autoFollow: boolean, pinned: boolean): boolean {
   return autoFollow && pinned;
 }
+
+/**
+ * The trace's per-session view state (issue #108).
+ *
+ * ## Why this is persisted at all
+ *
+ * The report is precise: *"when I have my tool window collapsed and I return to the session, the tool
+ * window opens again"* — and *"it should survive restarts"*. Both halves come from the same mistake:
+ * the state lived in `SessionView`, which carries `key={focused?.id}` and therefore **remounts on every
+ * session switch**, resetting to the default. Lifting it to `App` fixes the first; persisting it fixes
+ * the second.
+ *
+ * ## Why the validation is this paranoid
+ *
+ * `localStorage` outlives upgrades and is shared with whatever else runs on this origin. A stored value
+ * may be a string, an array, a half-written object from a crash, or a map naming sessions that no longer
+ * exist. None of those is worth a broken render, so anything unrecognised is dropped rather than trusted
+ * — and a stale session id is harmless because the map is only ever read by id.
+ */
+export const TRACE_PREFS_KEY = "pi-central.trace";
+
+/** Keep only `string -> boolean` entries; everything else is discarded. */
+function booleanRecord(value: unknown): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return out;
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === "boolean") out[key] = entry;
+  }
+  return out;
+}
+
+/** Read the persisted trace preferences. Never throws; absent or corrupt means empty. */
+export function readTracePrefs(): { collapsed: Record<string, boolean>; markers: Record<string, boolean> } {
+  try {
+    const raw = localStorage.getItem(TRACE_PREFS_KEY);
+    if (raw === null || raw === "") return { collapsed: {}, markers: {} };
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return { collapsed: {}, markers: {} };
+    const record = parsed as Record<string, unknown>;
+    return { collapsed: booleanRecord(record["collapsed"]), markers: booleanRecord(record["markers"]) };
+  } catch {
+    // Storage disabled, or an opaque origin. A preference that is not remembered is not an error.
+    return { collapsed: {}, markers: {} };
+  }
+}
+
+/** Write the persisted trace preferences. Silent on failure, for the same reason as `readTracePrefs`. */
+export function writeTracePrefs(prefs: {
+  collapsed: Record<string, boolean>;
+  markers: Record<string, boolean>;
+}): void {
+  try {
+    localStorage.setItem(
+      TRACE_PREFS_KEY,
+      JSON.stringify({ collapsed: prefs.collapsed, markers: prefs.markers }),
+    );
+  } catch {
+    // Full or disabled. Losing a remembered toggle is not worth failing a render over.
+  }
+}

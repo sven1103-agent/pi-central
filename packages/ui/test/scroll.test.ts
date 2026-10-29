@@ -13,8 +13,11 @@ import {
   hasScrollableContent,
   isFollowing,
   isMeasured,
+  readTracePrefs,
   readerDistanceFromTail,
   shouldFollow,
+  TRACE_PREFS_KEY,
+  writeTracePrefs,
   type ScrollSample,
 } from "../src/scroll.ts";
 
@@ -219,4 +222,74 @@ test("the toggle is a real control, and its label carries the state", () => {
   // It must reach the pane, or the setting is decoration.
   const pane = source("../src/components/Transcript.tsx");
   assert.match(pane, /shouldFollow\(autoFollow, pinnedRef\.current\)/, "the follow must consult it");
+});
+
+// --- The trace's view state is per session and survives a restart (issue #108) ---------------------
+
+test("trace preferences are keyed by session, so one session's toggle cannot move another's", () => {
+  // The report: "when I have my tool window collapsed and I return to the session, the tool window
+  // opens again". The cause was `useState` inside `SessionView`, which remounts on every switch because
+  // it carries `key={focused?.id}` — so the state was destroyed and came back at its default.
+  const store = new Map<string, string>();
+  globalThis.localStorage = {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => store.set(key, value),
+    removeItem: (key: string) => store.delete(key),
+    clear: () => store.clear(),
+    key: () => null,
+    length: 0,
+  } as unknown as Storage;
+
+  writeTracePrefs({ collapsed: { s1: true }, markers: { s1: false, s2: true } });
+  const read = readTracePrefs();
+  assert.equal(read.collapsed["s1"], true, "s1's collapse is remembered");
+  assert.equal(read.collapsed["s2"], undefined, "and s2 has no opinion of its own");
+  assert.equal(read.markers["s1"], false);
+  assert.equal(read.markers["s2"], true);
+});
+
+test("a corrupt or absent stored value degrades to nothing, and never throws", () => {
+  // `localStorage` outlives upgrades and is shared with whatever else runs on this origin, so each of
+  // these is reachable rather than hypothetical.
+  const cases: (string | null)[] = [
+    null,
+    "",
+    "not json",
+    "[]",
+    "null",
+    '{"collapsed":"nope"}',
+    '{"collapsed":{"s1":"yes"},"markers":{"s2":1}}',
+  ];
+  const store = new Map<string, string>();
+  globalThis.localStorage = {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => store.set(key, value),
+    removeItem: (key: string) => store.delete(key),
+    clear: () => store.clear(),
+    key: () => null,
+    length: 0,
+  } as unknown as Storage;
+
+  for (const raw of cases) {
+    if (raw === null) store.delete(TRACE_PREFS_KEY);
+    else store.set(TRACE_PREFS_KEY, raw);
+    const read = readTracePrefs();
+    assert.deepEqual(read.collapsed, {}, `collapsed for ${JSON.stringify(raw)}`);
+    assert.deepEqual(read.markers, {}, `markers for ${JSON.stringify(raw)}`);
+  }
+});
+
+test("the trace state lives in App, not in the pane that remounts", () => {
+  // Structural, because the failure is invisible: a `useState` in `SessionView` looks like it works
+  // until you switch sessions. `SessionView` carries `key={focused?.id}` — this is the reminder that
+  // anything which must survive a switch cannot live inside it.
+  const app = source("../src/App.tsx");
+  const sessionView = app.slice(app.indexOf("function SessionView("), app.indexOf("function ", app.indexOf("function SessionView(") + 10));
+  assert.ok(
+    !/useState<Record<string, boolean>>/.test(sessionView),
+    "the per-session trace maps must not be inside SessionView: it remounts",
+  );
+  assert.match(app, /key=\{focused\?\.id\}/, "…and that key is why");
+  assert.match(app, /readTracePrefs\(\)/, "the state is restored on load");
+  assert.match(app, /writeTracePrefs\(/, "…and written back");
 });
