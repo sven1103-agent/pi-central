@@ -19,6 +19,29 @@ fixed, and so is the class of defect behind them: the build now says which build
 
 ### Fixed
 
+- **The transcript flickered between left and centred as tools ran** (issue #129). Reported precisely:
+  *"when tool calls are happening and then the assistant is active with the green dot, it flickers now left
+  and centered, like something is not rendered properly. This did not happen before the centering."*
+
+  Exactly right, and the cause is one line. `.tool-marker` is a `<button>`, so it is **inline-level**:
+  `max-width: 72ch` clamped it but nothing centred it. The turns are blocks with `margin-inline: auto` and
+  *are* centred. So the column alternated centred-prose / left-flush-marker — and because a marker
+  re-renders on every tool event (`running` ↔ settled), it visibly jumped as tools fired.
+
+  The alignment is now a property of the **column**, not of each element: `.measure`, `.tool-marker` and
+  `.run-notices` share one rule. Patching the marker alone would have left the next element to be added
+  with the same bug — which is how this one happened, since #92 capped the marker but only gave the turns
+  the centring.
+
+- **The composer had three different left edges** (issue #129). `.composer` used `align-items: center`,
+  which centres each child on **its own width**: the mode strip shrink-wraps to its content, the composer
+  row fills the measure, and the hint is shorter again. The screenshot measures them at x≈206, x≈157,
+  x≈206 — three edges within one stack.
+
+  The column now **stretches** and `.composer > *` caps and centres once, so there is one reference. The
+  textarea also gained `min-width: 0`, without which a flex child refuses to shrink below its content and
+  pushes the row past the measure on a narrow window.
+
 - **The README said the package was not published. It has been on npm since 0.2.0** (issue #127). A real
   falsehood in the first document a user reads, and one that costs them time: *"Nothing is published yet,
   but the artifact is buildable and installable today"* sent them looking for a build-from-source path they

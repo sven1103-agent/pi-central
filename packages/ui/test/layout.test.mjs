@@ -22,9 +22,23 @@ const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").
   "",
 );
 
+/**
+ * The declarations of the rule whose selector list contains `selector`.
+ *
+ * Whitespace-tolerant in the selector, because a selector LIST is formatted across lines:
+ *
+ *     .measure,
+ *     .tool-marker,
+ *     .run-notices { … }
+ *
+ * A literal match for `.measure, .tool-marker, .run-notices` finds nothing, and the failure reads as
+ * "the rule is missing" rather than "the formatter broke up my selector". That cost a debugging round
+ * trip here, so the matching is done on a normalised copy instead of on the raw text.
+ */
 function rule(selector) {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css)?.[1];
+  const normalised = css.replace(/\s+/g, " ");
+  const wanted = selector.replace(/\s+/g, " ").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`${wanted} ?\\{([^}]*)\\}`).exec(normalised)?.[1];
 }
 
 test("the measure is a token, so the column and the composer cannot disagree about it", () => {
@@ -38,8 +52,12 @@ test("the measure is a token, so the column and the composer cannot disagree abo
 test("the measure CENTRES, so the empty space is not all on one side", () => {
   // This is the actual complaint. `max-width` alone pins the content to the left, which on a wide
   // collapsed-panel window reads as a broken layout rather than as a line-length limit.
-  const measure = rule(".measure");
-  assert.ok(measure, ".measure must have a rule");
+  // `.measure` is now one of THREE selectors sharing a rule (issue #129 added the tool marker and the
+  // notice strip, because those were capped without being centred and flickered between alignments). So
+  // the assertion follows the rule rather than the literal selector — a test that pins `.measure {`
+  // exactly would fail when the rule was *improved*.
+  const measure = rule(".measure, .tool-marker, .run-notices") ?? rule(".measure");
+  assert.ok(measure, "the measure must have a rule");
   assert.match(measure, /max-width:\s*var\(--measure\)/, "derived from the token");
   assert.match(measure, /margin-inline:\s*auto/, "…and centred, which is the fix");
 });

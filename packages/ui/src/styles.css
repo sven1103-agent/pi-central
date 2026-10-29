@@ -569,7 +569,36 @@ button { font: inherit; color: inherit; }
  * `72ch` measured in the prose font is roughly 65–75 characters, which is the readable range. Wide
  * enough for code, narrow enough that the eye finds the start of the next line.
  */
-.measure { max-width: var(--measure); margin-inline: auto; }
+/*
+ * ONE alignment rule for everything in the transcript column (issue #129).
+ *
+ * The report: *"when tool calls are happening and then the assistant is active with the green dot, it
+ * flickers left and centred."* The cause was visible in a two-line comparison:
+ *
+ *     .turn         block, no width                       → full width
+ *     .turn.measure block, max-width 72ch, margin auto    → CENTRED
+ *     .tool-marker  flex, width 100%, max-width 72ch      → LEFT-FLUSH at 72ch
+ *
+ * `.tool-marker` is a `<button>`, so it is **inline-level**: `max-width` clamps it but nothing centres
+ * it. So the transcript alternated centred-prose / left-flush-marker, and because a marker re-renders
+ * on every tool event (`running` ↔ settled) it visibly jumped as tools fired.
+ *
+ * Rather than patch the marker, the alignment is now a property of the COLUMN: these classes all take
+ * the measure and centre on it. A patch per element is how this happened — #92 capped the marker but
+ * only gave the turns the centring.
+ *
+ * `.measure` keeps its name because `Turn` and the transcript's empty state already use it.
+ */
+.measure,
+.tool-marker,
+.run-notices {
+  max-width: var(--measure);
+  /* `margin-inline: auto` on a block-level box centres it. `width: 100%` is required for the flex
+     children (`.tool-marker`, `.run-notices`), which would otherwise shrink-wrap and centre to a
+     different width than the prose above them. */
+  width: 100%;
+  margin-inline: auto;
+}
 
 .turn { margin-bottom: var(--sp-4); }
 
@@ -745,7 +774,17 @@ button { font: inherit; color: inherit; }
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-  align-items: center;
+  /*
+   * `stretch`, NOT `center` (issue #129).
+   *
+   * With `center`, each child was centred on its OWN width: the mode strip shrink-wraps to its content,
+   * the composer row fills the measure, and the hint is shorter again — so one stack had **three left
+   * edges**, which is what the screenshot shows. A screenshot measured them at x≈206, x≈157, x≈206.
+   *
+   * Stretching makes the column the reference: every child takes the full width, and `.composer > *`
+   * caps that at the measure. One left edge, and the cap does the centring.
+   */
+  align-items: stretch;
 }
 /*
  * The inner rows take the measure. `width: 100%` with a `max-width` is what lets them shrink on a
@@ -754,6 +793,27 @@ button { font: inherit; color: inherit; }
 .composer > * {
   width: 100%;
   max-width: var(--measure);
+  /*
+   * Centred HERE, once, because the column now stretches: this is the single thing that decides where
+   * the composer's content sits horizontally. The previous version relied on `align-items: center` on
+   * the parent, which centred each child by its own width and produced the three-left-edges bug.
+   */
+  margin-inline: auto;
+}
+
+/*
+ * The send button sits INSIDE the measure rather than past its right edge.
+ *
+ * The row is capped at the measure and holds `textarea (flex: 1) + button (flex: none)`, so the field
+ * ends before the row does and the button occupies the remainder — which reads as "the button is
+ * outside the field" on a wide window. Reserving the button's width on the TEXTAREA instead makes the
+ * pair a single object with one right edge, and keeps the field the thing that flexes.
+ */
+.composer-row {
+  align-items: flex-end;
+}
+.composer-row textarea {
+  min-width: 0;
 }
 
 .mode-strip {
@@ -1232,7 +1292,6 @@ select.btn { font-family: var(--sans); }
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  width: 100%;
   text-align: left;
   background: none;
   border: none;
@@ -1363,7 +1422,6 @@ select.btn { font-family: var(--sans); }
   color: var(--dim);
   cursor: pointer;
   border-radius: 0 var(--r-1) var(--r-1) 0;
-  max-width: 72ch;
 }
 .tool-marker:hover { background: var(--panel); color: var(--text); }
 .tool-marker.has-error { border-left-color: var(--danger); }
