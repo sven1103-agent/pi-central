@@ -34,6 +34,40 @@ fixed, and so is the class of defect behind them: the build now says which build
 
 ### Fixed
 
+- **The work ranks above the reasoning** (issue #144).
+
+  A screenshot review read the hierarchy as inverted, and the reader agreed: *"The tool call is the more
+  important signal to the user than the thinking."*
+
+  **The first fix got the principle wrong.** It found the two disclosure heads 1px apart with different
+  fills, called that an inconsistency, and made them **equal**. Equal does not fix an inversion — it removes
+  the means of telling the two apart, which is the same failure with a tidier table.
+
+  The inversion was measurable rather than aesthetic. The tool bar ran all of its text through
+  `--quarantine` (`#586069`) — **including the tool names** — which is **2.71:1** against `--panel`. The
+  thinking block's label sat at `--dim`, **5.62:1**. So the row recording *what actually ran* was less than
+  half as legible as the row saying something was being thought about, and thinking additionally carried a
+  filled `--panel-2` head. Both errors point the same way.
+
+  Three tiers now, and the middle one is the point:
+
+  | | treatment |
+  |---|---|
+  | the reader's words, the assistant's prose | `--text` on `--bg` |
+  | **the work — a tool call** | `--text` names, filled `--panel`, quarantine gutter |
+  | the reasoning about to be done | `--dim`, flat, no fill, no gutter |
+
+  Thinking is the demoted one because it is the thing collapsed by default, the thing whose job is to be
+  skippable. A tool call is evidence: it records what was executed, it is the audit trail, and it is what the
+  trust legend is about. Thinking still opens and still carries its gist (#143) — demoted, not hidden.
+
+  Two defects found while doing it: the tool bar's hover set `background: var(--panel)`, which is the
+  marker's **own** background, so it was a no-op — and a comment credited that invisible state with the
+  decision to drop the hatch in #138. The thinking head had no hover at all.
+
+  A falsification caught a third: the hover assertion compared against the resting background and **passed
+  when the hover was deleted**, because `none` is also "different". It now requires the hover to name a fill.
+
 - **A collapsed thinking block says what it is thinking about** (issue #143).
 
   A screenshot review of a real transcript found six thinking blocks rendered as the same 700px bar with the

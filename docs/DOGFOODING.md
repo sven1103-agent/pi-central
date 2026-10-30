@@ -144,6 +144,55 @@ one agent identity by design — see [ADR-0010](decisions/0010-agent-credential-
 4. **Do not run `npm run server` from an agent's checkout** while the stable one is running. Port
    `8787` is taken, and the failure is an `EADDRINUSE` that looks like a bug in the agent's work.
 
+## "I rebuilt, but nothing changed"
+
+Two causes, and neither is a stale build — the build itself is reliable. Check them in this order.
+
+### 1. You are looking at a globally installed copy
+
+`npm install -g pi-central` puts a complete copy at, for example,
+`/opt/homebrew/lib/node_modules/pi-central`, with its **own** pre-built `dist/ui`. `pi-central` on
+`PATH` runs that one. A `npm run ui:build` inside a checkout changes nothing it can see.
+
+```bash
+which pi-central        # if this is not your checkout, that is the answer
+npm root -g             # where the global copy lives
+grep -o 'tool-marker-summary:hover{[^}]*}' "$(npm root -g)"/pi-central/dist/ui/assets/*.css
+```
+
+Compare that last line against the same grep run on the built CSS in the checkout (`dist` is
+gitignored, so it exists only after a build). If they differ, you are running the wrong one. Serve
+the checkout instead:
+
+```bash
+npm run ui:build && npm run server
+```
+
+…and open the URL **that command prints**. A tab already open from the global install is a different
+origin and will keep showing the old UI.
+
+### 2. You are on `main`, and the change is on a branch
+
+Anything not yet merged does not exist on `main`. This is easy to get wrong because a slice is
+reviewed by checking it out, so "check it out" means "switch branches":
+
+```bash
+git log --oneline -1        # which commit am I actually on?
+git branch --show-current   # and therefore which slice
+```
+
+### Read the banner — it answers this without any of the above
+
+`npm run server` prints the identity of the bundle it is serving:
+
+```
+  UI build: assets/index-KF2xCvYb.js
+```
+
+and **Settings → About** prints the same value for the tab you have open. If those two disagree, the
+tab is running a different build from the one on disk — which is exactly the situation above, stated
+before you go looking for it. Both come from issue #114.
+
 ## Known rough edges
 
 These are filed rather than worked around, because they are the difference between "possible" and
