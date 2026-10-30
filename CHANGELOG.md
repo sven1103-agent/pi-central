@@ -9,29 +9,6 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
-<!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
-
-## [0.4.1] — 2026-10-29
-
-A hotfix for one behaviour: **returning to a session you were following left you at the top of the
-transcript.** Three mechanisms had to be corrected, and they were found in sequence rather than at once:
-
-1. `decideOnSessionChange` restored a stale offset *and* the follow flag, so the offset won.
-2. The scroll listener wrote the session's position on **mount**, when the pane has content but no position
-   yet — overwriting the real offset with `scrollTop: 0`.
-3. That same mount measurement set `pinnedRef = false`, overriding the decision to follow **before the follow
-   effect ran**. This is the one the reporter confirmed fixes it.
-
-The first two are defensible on their own mechanism and may be defence-in-depth rather than load-bearing;
-the third is the one with a confirmed effect. Saying so is more useful than claiming all three were
-necessary.
-
-## [0.4.0] — 2026-10-29
-
-Increment 2 closed, and the product became something you can install. The two bugs reported from a real
-window — a transcript that stopped following a stream, and a panel that stretched on a wide screen — are
-fixed, and so is the class of defect behind them: the build now says which build it is.
-
 ### Fixed
 
 - **The session you ask for becomes the active one** (issue #144).
@@ -84,6 +61,7 @@ fixed, and so is the class of defect behind them: the build now says which build
   The word stays because it says something the line above cannot — **which part** of the response is still
   arriving. Colour is `--dim`, not `--ok`: green means "this session is live", which is a different fact.
 
+
 - **The work ranks above the reasoning** (issue #144).
 
   A screenshot review read the hierarchy as inverted, and the reader agreed: *"The tool call is the more
@@ -118,6 +96,7 @@ fixed, and so is the class of defect behind them: the build now says which build
   A falsification caught a third: the hover assertion compared against the resting background and **passed
   when the hover was deleted**, because `none` is also "different". It now requires the hover to name a fill.
 
+
 - **A collapsed thinking block says what it is thinking about** (issue #143).
 
   A screenshot review of a real transcript found six thinking blocks rendered as the same 700px bar with the
@@ -142,6 +121,7 @@ fixed, and so is the class of defect behind them: the build now says which build
   asked for, and opening the `<details>` is the only gesture that means "show me this". The doc comment now
   records the limit instead of hiding it behind a tooltip.
 
+
 - **The Settings dialog is two panes, and the Reading preview actually shows the setting** (issue #142).
 
   Four sections in one column made a wall — a reader's own preferences, the build's identity, where the files
@@ -160,6 +140,7 @@ fixed, and so is the class of defect behind them: the build now says which build
   **The width preview is gone, deliberately.** Inside a 620px dialog it was a lie twice over: the dialog clamps
   it, so 82ch and 100ch looked identical, and it was not the width you get. Size is what a preview can honestly
   show; the reader sees the real width live in the transcript behind the dialog.
+
 
 - **A reader who was following came back to a stale position** (issue #141). Reported: *"i have auto-follow
   enabled, i am following, switch to another session, come back: the session's transcript view is pinned where i
@@ -191,6 +172,32 @@ fixed, and so is the class of defect behind them: the build now says which build
   `isMeasured` already existed to keep an unmeasured sample out of the growth discount; the same predicate now
   guards the memory write, so a mount records nothing. Verified against a real jsdom scroller: mount writes
   `[]`, a real scroll writes `{ scrollTop: 850, pinned: false }`.
+
+
+<!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
+
+## [0.4.1] — 2026-10-29
+
+A hotfix for one behaviour: **returning to a session you were following left you at the top of the
+transcript.** Three mechanisms had to be corrected, and they were found in sequence rather than at once:
+
+1. `decideOnSessionChange` restored a stale offset *and* the follow flag, so the offset won.
+2. The scroll listener wrote the session's position on **mount**, when the pane has content but no position
+   yet — overwriting the real offset with `scrollTop: 0`.
+3. That same mount measurement set `pinnedRef = false`, overriding the decision to follow **before the follow
+   effect ran**. This is the one the reporter confirmed fixes it.
+
+The first two are defensible on their own mechanism and may be defence-in-depth rather than load-bearing;
+the third is the one with a confirmed effect. Saying so is more useful than claiming all three were
+necessary.
+
+## [0.4.0] — 2026-10-29
+
+Increment 2 closed, and the product became something you can install. The two bugs reported from a real
+window — a transcript that stopped following a stream, and a panel that stretched on a wide screen — are
+fixed, and so is the class of defect behind them: the build now says which build it is.
+
+### Fixed
 
 - **The README said the package was not published. It has been on npm since 0.2.0** (issue #127). A real
   falsehood in the first document a user reads, and one that costs them time: *"Nothing is published yet,
