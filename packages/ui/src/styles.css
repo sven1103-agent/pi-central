@@ -677,6 +677,38 @@ button { font: inherit; color: inherit; }
   text-align: left;
 }
 .quarantine-head .label { color: var(--quarantine-filter, var(--dim)); font-weight: 600; }
+/*
+ * The thinking head is a disclosure handle too, and it had NO hover while its peer did (issue #144).
+ *
+ * That asymmetry is the mechanical cause of the review's reading: a head that answers the mouse looks
+ * operable, and one that does not looks like a static strip of chrome. Both are `<details>`; only one said
+ * so. It now lights up with the same token the tool bar uses, so the two respond identically.
+ */
+.quarantine-head:hover { background: var(--panel-3); color: var(--text); }
+/*
+ * Two peer disclosures, one register (issue #144).
+ *
+ * The screenshot review of a real transcript read the thinking block as the "big filled container" and the
+ * tool row as a "thin muted line", and concluded the hierarchy was inverted — that the inert content was
+ * louder than the actionable content. The premise was half wrong: BOTH are `<details>` you can open. But the
+ * sizes DID disagree, and that disagreement is what produced the impression:
+ *
+ *   thinking block head : --fs-xs  (11px), filled --panel-2
+ *   tool marker summary : --fs-2xs (10px), flat --panel
+ *
+ * Two 1px-apart sizes, two different fills, for two controls that do the same job on the same screen. The
+ * eye cannot read that as "one of these is more important" because there is no consistent scale to read it
+ * against — it reads as noise, and the noise lands on whichever one the reader happens to compare.
+ *
+ * The fix is ONE size for both heads — the LARGER of the two, `--fs-xs` — and the same hover fill. Neither
+ * the smaller number nor a compromise: the thinking head now carries a sentence (the gist from #143), and
+ * reading a sentence at 10px was the actual complaint about the tool row being "a thin muted line". The
+ * tool bar inheriting the bigger size is the review's point taken seriously, not overruled.
+ *
+ * It deliberately does NOT copy the thinking block's resting fill onto the tool bar: the tool marker is the
+ * denser row (a name, a state and a byte count, dozens per session), so a fill on every one would turn the
+ * transcript into stripes. Hover is where the affordance lives, and now both respond the same way.
+ */
 .quarantine-head .tool-name { font-family: var(--mono); color: var(--text); }
 .quarantine-head .spacer { flex: 1; }
 /*
@@ -1417,8 +1449,13 @@ select.btn { font-family: var(--sans); }
   /* The bar is the row, so the alignment lives here and the `<details>` stays a plain block.
    *
    * `font-size` is set EXPLICITLY: the marker carries `--fs-base` so its `72ch` matches the transcript's
-   * width (issue #140), and this bar renders small. Inheriting would silently make every tool bar 13px. */
-  font-size: var(--fs-2xs);
+   * width (issue #140), and this bar renders small. Inheriting would silently make every tool bar 13px.
+   *
+   * `--fs-xs`, not `--fs-2xs` (issue #144). This bar and the thinking block's head are peer disclosures on
+   * the same screen, and they were set one pixel apart (10px vs 11px) with different fills. Two sizes that
+   * close cannot read as a hierarchy — there is no scale to read them against — so the difference registered
+   * only as inconsistency, and the smaller number made the actionable row look weaker than the inert one. */
+  font-size: var(--fs-xs);
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -1432,7 +1469,18 @@ select.btn { font-family: var(--sans); }
      affordance that moves, rather than a triangle plus an arrow saying the same thing. */
 }
 .tool-marker-summary::-webkit-details-marker { display: none; }
-.tool-marker-summary:hover { background: var(--panel); color: var(--text); }
+/*
+ * The hover, and the no-op it used to contain (issue #144).
+ *
+ * The old rule was `background: var(--panel)` — which is `.tool-marker`'s OWN background, so the
+ * background half did nothing. Only the colour changed, on a 10px bar. The comment above it credited the
+ * hover as the reason the hatch was removed ("the reader's verdict was that the flat hover state looked
+ * right"), so the state that carried that judgement was itself broken: what was judged was not what shipped.
+ *
+ * `--panel-2` is the one step up from the marker's `--panel`, and it is the same token the thinking block's
+ * header uses — so the two disclosures light up identically, which is the point of this fix.
+ */
+.tool-marker-summary:hover { background: var(--panel-2); color: var(--text); }
 .tool-marker .m-open { margin-left: auto; transition: transform 120ms ease; }
 @media (prefers-reduced-motion: reduce) { .tool-marker .m-open { transition: none; } }
 .tool-marker[open] .m-open { transform: rotate(180deg); }

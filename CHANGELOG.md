@@ -34,6 +34,30 @@ fixed, and so is the class of defect behind them: the build now says which build
 
 ### Fixed
 
+- **The two disclosure rows look like they belong to the same UI** (issue #144).
+
+  A screenshot review read the hierarchy as inverted: *"the actionable/expandable content is a thin muted
+  line, while the non-actionable thinking blocks get big filled containers."* The premise was half wrong —
+  **both** are `<details>` you can open — but the numbers underneath it were real.
+
+  | | size | resting fill | hover |
+  |---|---|---|---|
+  | thinking head | `--fs-xs` (11px) | `--panel-2` | **none** |
+  | tool bar | `--fs-2xs` (10px) | `--panel` | `--panel` — **the no-op** |
+
+  A one-pixel difference cannot read as a hierarchy; there is no scale to read it against, so it registers
+  only as inconsistency, and the smaller number made the actionable row look weaker than the inert one. Both
+  heads are now `--fs-xs`, and both answer the mouse.
+
+  **The tool bar's hover was a no-op.** It set `background: var(--panel)`, which is the marker's *own*
+  background, so only the text colour changed. A comment credited that hover with the decision to drop the
+  hatch in #138 — so the state that carried the judgement was not the state that shipped.
+
+  Fixing it nearly repeated the bug: the thinking head's resting fill is already `--panel-2`, the token the
+  tool bar hovers to. Reusing it there would have produced a second invisible hover, in the same commit, one
+  rule apart. The thinking hover steps to `--panel-3`, and a test now asserts that **each** hover differs from
+  **its own** head's fill.
+
 - **A collapsed thinking block says what it is thinking about** (issue #143).
 
   A screenshot review of a real transcript found six thinking blocks rendered as the same 700px bar with the

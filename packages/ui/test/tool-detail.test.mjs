@@ -245,7 +245,16 @@ test("the tool bar measures the SAME width as the prose", () => {
   assert.match(rule(".measure") ?? "", /max-width:\s*var\(--reading-measure\)/, "…confirmed on `.measure`");
 
   // The children restore their own small size, or the whole block would render at the inherited size.
+  //
+  // NARROWED in issue #144, not deleted. The rule being guarded is "the child must not inherit the marker's
+  // `--fs-base`", and the original asserted the literal `--fs-2xs` as a proxy for it. The summary moved to
+  // `--fs-xs` so the two peer disclosures share a size, which is still small and still not inherited. The
+  // property that matters — NOT inheriting — is asserted directly instead of a specific token.
   for (const sel of [".tool-marker-summary", ".tool-detail"]) {
-    assert.match(rule(sel) ?? "", /font-size:\s*var\(--fs-2xs\)/, `${sel} must restore its own size`);
+    const child = rule(sel) ?? "";
+    const size = /font-size:\s*var\(--([a-z0-9-]+)\)/.exec(child)?.[1];
+    assert.ok(size, `${sel} must set its own size`);
+    assert.notEqual(size, inherited, `${sel} must not inherit the marker's ${inherited}`);
+    assert.match(size, /^fs-/, `${sel} must use a size token, not a magic number`);
   }
 });
