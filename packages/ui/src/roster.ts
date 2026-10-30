@@ -282,3 +282,26 @@ export function groupRows(rows: readonly RosterRow[]): { group: RailGroup; rows:
     .map((group) => ({ group, rows: rows.filter((row) => groupOf(row) === group) }))
     .filter((section) => section.rows.length > 0);
 }
+
+/**
+ * The live session a parked prompt is waiting for, if it has arrived (issue #89, resume-on-send).
+ *
+ * ## Why this is a function and not three lines inside an effect
+ *
+ * Resume-on-send is the only path where a message the reader typed crosses a restart of the session it belongs
+ * to. The interesting parts — "which session is this message for", "has it appeared yet", "must it be sent only
+ * once" — are exactly the parts that are invisible in a component test, because `renderToString` runs no
+ * effects. Pulling the decision out makes it testable; the effect keeps only the sending.
+ *
+ * ## Why the match is on the FILE
+ *
+ * Resuming spawns a process that reports a NEW handle (`s1` after a restart is a different session). The roster
+ * path is the only durable identity, so it is the only thing the parked message can be matched against.
+ */
+export function sessionForPendingPrompt(
+  pending: { path: string } | undefined,
+  live: readonly LiveSession[],
+): LiveSession | undefined {
+  if (pending === undefined) return undefined;
+  return live.find((session) => session.sessionFile === pending.path);
+}

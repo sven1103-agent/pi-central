@@ -236,6 +236,32 @@ They are kept because each one is the reason a constraint or an invariant test e
   3. **It says nothing about what the code may do.** That incident's payload ran unsandboxed and wrote
      `~/.ssh/authorized_keys`. Pi Central answers capability confinement for **sessions**, not for **itself**.
 
+- **The session roster survives a restart, and a stopped session can be resumed by typing** (issue #89,
+  slices 3 and 4).
+
+  > *"the app shall maintain the session roster and preserve it so it survives crashes, updates or restarts of
+  > the orchestrator."*
+
+  Reported from a restart: *"sessions are gone completly after restart"* — because the rail was `state.live`,
+  the sessions this orchestrator process had spawned, which is empty after a restart.
+
+  The roster is now persisted in browser `localStorage` beside the panel and reading prefs, **keyed by session
+  file** — never by handle, because `Supervisor` allocates `id` from a per-process counter, so `s1` after a
+  restart is a *different* session and a handle-keyed roster would silently point at the wrong conversation.
+
+  A session that is not running is a normal row under **Stopped**. It is still in your roster; activity is a
+  column, not a category. Nothing is derived from `state.live` and nothing retires, so a session cannot appear
+  twice — the defect that made an earlier attempt unusable.
+
+  **Resume-on-send.** A stopped row is focusable, and typing into the composer resumes it and then delivers the
+  message. The message is parked against the roster **path**, because the resumed process answers with a new
+  handle; it is sent once a live session with that file appears, and focus moves to it. Parked rather than
+  dropped: silently discarding what someone typed because a spawn takes a second would be the worst answer.
+
+  **Forget** takes a row off the roster and never touches the file — deleting is #150, separate and
+  irreversible. It is offered only on a row that is **not running**: hiding a live process from the rail while it
+  keeps working and spending would make the roster lie about what is happening.
+
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.4.1] — 2026-10-29

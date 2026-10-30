@@ -18,6 +18,7 @@ import {
   rosterRows,
   rowActivity,
   serializeRoster,
+  sessionForPendingPrompt,
   type RosterEntry,
 } from "../src/roster.ts";
 import type { LiveSession } from "@pi-central/protocol";
@@ -171,4 +172,31 @@ test("duplicate paths collapse to the first", () => {
 test("a roster round-trips", () => {
   const entries: RosterEntry[] = [{ path: "/s/a/s1.jsonl", cwd: "/git/a", name: "task" }, { path: "/s/b/s2.jsonl" }];
   assert.deepEqual(parseRoster(serializeRoster(entries)), entries);
+});
+
+// --- Resume-on-send: the parked prompt finds its session (issue #89) -----------------------------
+
+test("a parked prompt finds the session with its FILE, not its old handle", () => {
+  // Resuming reports a NEW handle, so matching by handle would never find it — and matching the OLD handle would
+  // send the message to whatever session has been given that number since.
+  const pending = { path: "/s/a/one.jsonl" };
+  const found = sessionForPendingPrompt(pending, [
+    live({ id: "s7", sessionFile: "/s/other.jsonl" }),
+    live({ id: "s12", sessionFile: "/s/a/one.jsonl" }),
+  ]);
+  assert.equal(found?.id, "s12", "matched by file, and it is the NEW handle");
+});
+
+test("a parked prompt does not match a session that has no file yet", () => {
+  // A session appears before `get_state` answers, so it briefly has no `sessionFile`. Sending the parked message
+  // then would be sending it to a session we cannot prove is the right one.
+  assert.equal(sessionForPendingPrompt({ path: "/s/a/one.jsonl" }, [live({ id: "s1" })]), undefined);
+});
+
+test("no pending prompt resolves to nothing", () => {
+  assert.equal(sessionForPendingPrompt(undefined, [live({ id: "s1", sessionFile: "/s/a/one.jsonl" })]), undefined);
+});
+
+test("a pending prompt for a session that never comes back stays parked", () => {
+  assert.equal(sessionForPendingPrompt({ path: "/s/a/gone.jsonl" }, [live({ id: "s1", sessionFile: "/s/b/x.jsonl" })]), undefined);
 });

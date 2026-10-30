@@ -34,6 +34,7 @@ export function SessionRail({
   rows,
   focusedId,
   onFocusRow,
+  onForgetRow,
   onStartSession,
   onOpenDirectory,
   home,
@@ -50,6 +51,13 @@ export function SessionRail({
   focusedId: string | undefined;
   /** Focus a row. A row that is not running focuses too, so the composer can send and resume on send. */
   onFocusRow: (row: RosterRow) => void;
+  /**
+   * Take a row off the roster.
+   *
+   * A view change, not a deletion: the session FILE stays on disk. Deleting is #150 and is irreversible, so it
+   * is a different action with its own confirmation.
+   */
+  onForgetRow: (row: RosterRow) => void;
   onStartSession: () => void;
   onOpenDirectory: () => void;
   home: string | undefined;
@@ -116,6 +124,7 @@ export function SessionRail({
                   row={row}
                   focused={rowKey(row) === focusedId}
                   onFocus={() => onFocusRow(row)}
+                  onForget={() => onForgetRow(row)}
                   home={home}
                 />
               ))}
@@ -166,11 +175,13 @@ function RailRow({
   row,
   focused,
   onFocus,
+  onForget,
   home,
 }: {
   row: RosterRow;
   focused: boolean;
   onFocus: () => void;
+  onForget: () => void;
   home: string | undefined;
 }) {
   const session = row.session;
@@ -182,12 +193,21 @@ function RailRow({
     row.entry.cwd === undefined ? "directory unknown" : shortenPath(row.entry.cwd, 34, home);
 
   return (
-    <button
-      type="button"
-      className={`rail-row state-${activity}`}
-      aria-current={focused ? "true" : undefined}
-      onClick={onFocus}
-    >
+    /*
+      A `<div>` wrapping two controls, not a `<button>`: the row is focusable AND dismissable, and nesting
+      buttons is invalid HTML that browsers resolve by breaking the inner one.
+
+      Forget appears only for a row that is NOT running (issue #89). Dismissing a row while its process runs
+      would hide a live session from the rail while it kept working and spending — the roster is a view, but it
+      must not be able to lie about what is happening.
+    */
+    <div className={`rail-row state-${activity}${focused ? " is-focused" : ""}`}>
+      <button
+        type="button"
+        className="rail-row-main"
+        aria-current={focused ? "true" : undefined}
+        onClick={onFocus}
+      >
       <span className="r1">
         <span className="name">{rowName(row)}</span>
         {session?.scratch && <span className="chip chip-scratch">scratch</span>}
@@ -226,6 +246,17 @@ function RailRow({
           )}
         </>
       )}
-    </button>
+      </button>
+      {session === undefined && (
+        <button
+          type="button"
+          className="rail-row-forget"
+          onClick={onForget}
+          title="Remove from the rail. The session file is not deleted."
+        >
+          Forget
+        </button>
+      )}
+    </div>
   );
 }

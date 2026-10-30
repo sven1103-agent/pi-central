@@ -23,6 +23,11 @@ import type {
   PiRecord,
 } from "@pi-central/protocol";
 import { applyRecord, emptyTranscript, seedTranscript, type Transcript } from "./transcript.ts";
+import { addToRoster, removeFromRoster, type RosterEntry } from "./roster.ts";
+// A type-only import from a component, which is the odd part of this file: `QueueBehavior` is the composer's
+// vocabulary for how a prompt joins a run, and `pendingPrompt` has to speak it so a parked prompt is sent with
+// the same behaviour the reader chose. Imported as a TYPE so no component code is pulled into the reducer.
+import type { QueueBehavior } from "./components/Composer.tsx";
 
 export interface UiState {
   live: LiveSession[];
@@ -78,6 +83,25 @@ export interface UiState {
    * and consumed exactly once by the next NEW session to arrive.
    */
   focusNextNewSession: boolean;
+  /**
+   * The sessions the reader is working with (issue #89).
+   *
+   * **This list is the rail.** Nothing retires entries from it and nothing derives it from `live`: activity is
+   * joined per row by `rosterRows`. A first attempt built it FROM `live` and retired rows as they came online —
+   * write, retire, re-add — and every session appeared twice as a result.
+   */
+  roster: RosterEntry[];
+  /**
+   * A prompt waiting for the session it belongs to come back (issue #89, resume-on-send).
+   *
+   * Sending to a session that is not running has to RESUME first, and the resumed session arrives later with a
+   * NEW handle (`s1` after a restart is a different session). So the message is parked against the roster
+   * PATH — the durable identity — and sent when a live session with that file appears.
+   *
+   * Parked rather than dropped: the reader typed something, and silently discarding it because a spawn takes a
+   * second would be the worst possible answer.
+   */
+  pendingPrompt: { path: string; message: string; behavior?: QueueBehavior } | undefined;
   connection: "connecting" | "open" | "closed";
   connectionDetail: string | undefined;
   /** Errors worth showing, newest first. */
@@ -133,6 +157,8 @@ export function initialState(): UiState {
     restoredQueue: {},
     focusedId: undefined,
     focusNextNewSession: false,
+    roster: [],
+    pendingPrompt: undefined,
     connection: "connecting",
     connectionDetail: undefined,
     errors: [],
@@ -171,7 +197,23 @@ export type LocalAction =
    * UI. A single event serving both is what made "the user clicked" indistinguishable from
    * "the supervisor sent an update".
    */
-  | { kind: "focusSession"; sessionId: string }
+  /**
+   * Focus a row by its KEY — a live session's handle, or a roster entry's file path.
+   *
+   * One key type, because the rail shows one list (issue #89). A row that is not running still has to be
+   * focusable: that is what makes the composer usable for it, which is how resume-on-send works.
+   */
+  | { kind: "focusRow"; key: string }
+  /** Adopt the roster read from `localStorage` at startup. */
+  | { kind: "loadRoster"; entries: RosterEntry[] }
+  /** Put a session in the roster, or refresh its hints. Order is preserved for one already there. */
+  | { kind: "remember"; entry: RosterEntry }
+  /** Take a session off the roster. The file is NOT deleted — that is #150. */
+  | { kind: "forget"; path: string }
+  /** Park a prompt against a session path until that session is running (resume-on-send). */
+  | { kind: "queuePrompt"; path: string; message: string; behavior?: QueueBehavior }
+  /** The parked prompt has been sent, or can never be — either way it is no longer waiting. */
+  | { kind: "clearPendingPrompt" }
   /**
    * "The session I am about to create or resume should become the active one" (issue #144).
    *
@@ -194,15 +236,43 @@ export function reduce(
     // A flag, not an id: the id does not exist yet. Consumed by the next new `session` event.
     return state.focusNextNewSession ? state : { ...state, focusNextNewSession: true };
   }
-  if (event.kind === "focusSession") {
-    // Ignored when the session is not live. Focus and presence are different facts, and clearing the
-    // focus would make `focusedSession` return undefined and blank the main column — a worse outcome
-    // than ignoring the click, and reachable by clicking a row for a session stopped concurrently.
-    if (!state.live.some((session) => session.id === event.sessionId)) return state;
-    // Returning the SAME state object when nothing changes keeps React from re-rendering the whole
-    // app for a click on the already-focused row.
-    if (state.focusedId === event.sessionId) return state;
-    return { ...state, focusedId: event.sessionId };
+  if (event.kind === "loadRoster") {
+    return { ...state, roster: event.entries };
+  }
+  if (event.kind === "remember") {
+    return { ...state, roster: addToRoster(state.roster, event.entry) };
+  }
+  if (event.kind === "forget") {
+    return { ...state, roster: removeFromRoster(state.roster, event.path) };
+  }
+  if (event.kind === "queuePrompt") {
+    return {
+      ...state,
+      pendingPrompt: {
+        path: event.path,
+        message: event.message,
+        ...(event.behavior ? { behavior: event.behavior } : {}),
+      },
+    };
+  }
+  if (event.kind === "clearPendingPrompt") {
+    return state.pendingPrompt === undefined ? state : { ...state, pendingPrompt: undefined };
+  }
+  if (event.kind === "focusRow") {
+    /*
+     * A row key is EITHER a live session's handle OR a roster entry's file path (issue #89).
+     *
+     * Ignored when it is neither: focus and presence are different facts, and focusing something unknown would
+     * blank the main column — a worse outcome than ignoring the click.
+     *
+     * Returning the SAME object when nothing changes keeps React from re-rendering the whole app for a click on
+     * the already-focused row.
+     */
+    const isLive = state.live.some((session) => session.id === event.key);
+    const isRoster = state.roster.some((entry) => entry.path === event.key);
+    if (!isLive && !isRoster) return state;
+    if (state.focusedId === event.key) return state;
+    return { ...state, focusedId: event.key };
   }
   return applyEvent(state, event);
 }
