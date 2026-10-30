@@ -26,8 +26,8 @@
  * one level and takes only regular files. `isFile()` is checked rather than assumed; it
  * costs one call and makes the invariant explicit instead of incidental.
  */
-import { createReadStream, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { createReadStream, readdirSync, realpathSync, statSync, type Stats } from "node:fs";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import type { HistoricalSession } from "@pi-central/protocol";
 import { isScratch, type Config } from "./config.ts";
 
@@ -180,6 +180,102 @@ export interface DiscoveryResult {
 }
 
 /** Discover every session file under the configured root, newest first. */
+/**
+ * Turn one session file into a row, or explain why it cannot be read.
+ *
+ * Extracted from `discover` so the same rules apply when a SINGLE path is described (see `sessionAt`). The
+ * alternative was a second implementation, and two implementations of "is this a valid session file" is the
+ * kind of drift that ends with resume accepting a file the History pane refuses to list.
+ */
+async function describeSessionFile(
+  config: Config,
+  path: string,
+  projectDir: string,
+  stats: Stats,
+): Promise<{ ok: true; session: HistoricalSession } | { ok: false; reason: string }> {
+  const parsed = parseHead(await readHead(path));
+  if (!parsed) return { ok: false, reason: "not a Pi session file (no valid header)" };
+  if (!KNOWN_SESSION_VERSIONS.has(parsed.header.version)) {
+    return { ok: false, reason: `unknown session version ${parsed.header.version}` };
+  }
+  const cwd = parsed.header.cwd || decodeSessionDir(projectDir);
+  return {
+    ok: true,
+    session: {
+      path,
+      id: parsed.header.id,
+      cwd,
+      ...(parsed.name ? { name: parsed.name } : {}),
+      created: parsed.header.timestamp,
+      modifiedMs: stats.mtimeMs,
+      bytes: stats.size,
+      messageCount: parsed.messageCount,
+      firstMessage: parsed.firstMessage,
+      cwdExists: directoryExists(cwd),
+      scratch: isScratch(config, cwd),
+    },
+  };
+}
+
+/**
+ * Describe ONE session file by path — the lookup `resume` needs, and the reason it exists.
+ *
+ * ## The bug this fixes
+ *
+ * `resume` used to do `const discovered = await discover(config)` and then
+ * `.find((s) => s.path === control.path)`. `discover` returns `sessions.slice(0, 500)`, so resuming any
+ * session outside the newest 500 reported **"no such session"** for a file that plainly exists — on a machine
+ * with 867 sessions, every session older than the most recent 500 was unresumable, with an error that named
+ * the wrong cause.
+ *
+ * ## Why this does not just call `discover(config, Infinity)`
+ *
+ * Because that walks and parses the entire store to find one file: it is the eager-work problem in #150,
+ * performed on a click. This reads exactly one header.
+ *
+ * ## Containment
+ *
+ * The path arrives from the client, so it is not trusted. It must resolve INSIDE `config.sessionsRoot`, and
+ * containment is checked on `realpath` as well as lexically — the same two-step `files.ts` uses, for the same
+ * reason: a symlink inside the store must not let a request reach outside it. The unit of the boundary is the
+ * DIRECTORY, per C15c, not a name list.
+ */
+export async function sessionAt(config: Config, requested: string): Promise<HistoricalSession | undefined> {
+  if (typeof requested !== "string" || requested.length === 0 || requested.includes("\u0000")) return undefined;
+
+  let root: string;
+  let real: string;
+  try {
+    root = realpathSync(config.sessionsRoot);
+    real = realpathSync(resolve(requested));
+  } catch {
+    // A missing file, an unreadable store, or a broken symlink are all "cannot resume this", not an error that
+    // should reach the user as a stack trace.
+    return undefined;
+  }
+
+  // Lexical containment on the RESOLVED paths, by segment rather than prefix: `/a/bc` must not satisfy a
+  // boundary of `/a/b`.
+  const inside = (parent: string, child: string): boolean =>
+    child === parent || child.startsWith(parent.endsWith(sep) ? parent : parent + sep);
+  if (!inside(root, real)) return undefined;
+  if (!real.endsWith(".jsonl")) return undefined;
+
+  let stats: Stats;
+  try {
+    stats = statSync(real);
+  } catch {
+    return undefined;
+  }
+  if (!stats.isFile()) return undefined;
+
+  // The project directory is the segment of the SESSIONS ROOT the file sits in, used for `decodeSessionDir`
+  // when a header carries no `cwd`. Taken from the stored path, not the client's string.
+  const projectDir = basename(dirname(real));
+  const row = await describeSessionFile(config, real, projectDir, stats);
+  return row.ok ? row.session : undefined;
+}
+
 export async function discover(config: Config, limit = 500): Promise<DiscoveryResult> {
   const sessions: HistoricalSession[] = [];
   const skipped: { path: string; reason: string }[] = [];
@@ -217,30 +313,12 @@ export async function discover(config: Config, limit = 500): Promise<DiscoveryRe
         continue;
       }
 
-      const parsed = parseHead(await readHead(path));
-      if (!parsed) {
-        skipped.push({ path, reason: "not a Pi session file (no valid header)" });
+      const row = await describeSessionFile(config, path, projectDir, stats);
+      if (!row.ok) {
+        skipped.push({ path, reason: row.reason });
         continue;
       }
-      if (!KNOWN_SESSION_VERSIONS.has(parsed.header.version)) {
-        skipped.push({ path, reason: `unknown session version ${parsed.header.version}` });
-        continue;
-      }
-
-      const cwd = parsed.header.cwd || decodeSessionDir(projectDir);
-      sessions.push({
-        path,
-        id: parsed.header.id,
-        cwd,
-        ...(parsed.name ? { name: parsed.name } : {}),
-        created: parsed.header.timestamp,
-        modifiedMs: stats.mtimeMs,
-        bytes: stats.size,
-        messageCount: parsed.messageCount,
-        firstMessage: parsed.firstMessage,
-        cwdExists: directoryExists(cwd),
-        scratch: isScratch(config, cwd),
-      });
+      sessions.push(row.session);
     }
   }
 

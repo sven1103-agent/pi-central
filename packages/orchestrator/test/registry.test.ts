@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { decodeSessionDir, discover, encodeSessionDir } from "../src/registry.ts";
+import { decodeSessionDir, discover, encodeSessionDir, sessionAt } from "../src/registry.ts";
 import type { Config } from "../src/config.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pi-central-registry-"));
@@ -207,4 +207,72 @@ test("an empty or absent sessions root reports a total of zero", async () => {
   const empty = await discover(config({ sessionsRoot: join(root, "does-not-exist") }));
   assert.deepEqual(empty.sessions, []);
   assert.equal(empty.total, 0, "a missing store is not an error, and not an unknown total");
+});
+
+// --- Resuming a session that the discovery cap excludes (the reported bug) ------------------------
+
+test("a session OLDER than the discovery cap can still be resumed", async () => {
+  // The bug: `resume` looked the path up in `discover()`'s result, and `discover` returns `slice(0, 500)`.
+  // On a machine with 867 sessions, resuming anything outside the newest 500 reported "no such session" —
+  // an error naming the wrong cause, for a file that plainly exists.
+  //
+  // `sessionAt` reads one header instead of walking the store, so the cap cannot apply.
+  const dir = join(root, "old-project");
+  const ancient = writeSession(dir, "ancient.jsonl", [header("id-old", "/Users/x/old-project")]);
+
+  // Pin it to the bottom by mtime, and cap discovery at ONE so it cannot be in the page.
+  const { utimesSync } = await import("node:fs");
+  utimesSync(ancient, new Date("2001-01-01"), new Date("2001-01-01"));
+  for (let i = 0; i < 3; i += 1) {
+    writeSession(dir, `recent-${i}.jsonl`, [header(`id-recent-${i}`, "/Users/x/old-project")]);
+  }
+
+  const page = await discover(config(), 1);
+  assert.equal(page.sessions.length, 1, "the cap hides everything else");
+  assert.ok(!page.sessions.some((s) => s.path === ancient), "the old one is NOT in the page");
+
+  const found = await sessionAt(config(), ancient);
+  assert.ok(found, "…but it is still resumable by path");
+  assert.equal(found.id, "id-old");
+  assert.equal(found.cwd, "/Users/x/old-project");
+});
+
+test("sessionAt refuses a path outside the sessions root", async () => {
+  // The path arrives from the client, so it is not trusted. Resuming is a SPAWN — a containment failure here
+  // does not just read the wrong file, it starts an agent in a directory the user never opened.
+  const outside = mkdtempSync(join(tmpdir(), "pi-central-outside-"));
+  process.on("exit", () => rmSync(outside, { recursive: true, force: true }));
+  const escapee = writeSession(outside, "bad.jsonl", [header("id-bad", "/Users/x/elsewhere")]);
+
+  assert.equal(await sessionAt(config(), escapee), undefined, "outside the store is refused");
+  assert.equal(await sessionAt(config(), "../../etc/passwd"), undefined, "traversal is refused");
+  assert.equal(await sessionAt(config(), ""), undefined, "an empty path is refused");
+  assert.equal(await sessionAt(config(), `${escapee}\u0000`), undefined, "a NUL is refused");
+});
+
+test("a path that merely PREFIXES the root is refused", async () => {
+  // `/a/bc` must not satisfy a boundary of `/a/b`: the unit of the boundary is the DIRECTORY (C15c), not a
+  // string prefix. A sibling directory whose name starts with the root's name is outside.
+  const sibling = `${root}-evil`;
+  mkdirSync(sibling, { recursive: true });
+  process.on("exit", () => rmSync(sibling, { recursive: true, force: true }));
+  const sneaky = writeSession(sibling, "s.jsonl", [header("id-sneaky", "/Users/x/sneaky")]);
+  assert.equal(await sessionAt(config(), sneaky), undefined);
+});
+
+test("a non-jsonl file or a directory is refused rather than described", async () => {
+  const dir = join(root, "proj-b");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "notes.txt"), "not a session");
+  assert.equal(await sessionAt(config(), join(dir, "notes.txt")), undefined);
+  assert.equal(await sessionAt(config(), dir), undefined);
+});
+
+test("a session file with an UNKNOWN version is refused, matching discover's rule", async () => {
+  // One implementation of "is this a valid session file" — otherwise resume accepts what History refuses.
+  const dir = join(root, "proj-c");
+  const path = writeSession(dir, "future.jsonl", [header("id-future", "/Users/x/proj-c", 99)]);
+  assert.equal(await sessionAt(config(), path), undefined);
+  const { skipped } = await discover(config());
+  assert.ok(skipped.some((s) => s.path === path), "discover skips it too");
 });
