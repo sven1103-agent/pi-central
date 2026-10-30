@@ -9,29 +9,47 @@
  */
 import { useMemo, useState } from "react";
 import type { LiveSession } from "@pi-central/protocol";
-import { displayName, formatContext, formatCost, formatModel, formatThinking, whereLine } from "../format.ts";
+import { displayName, formatContext, formatCost, formatModel, formatThinking, shortenPath, whereLine } from "../format.ts";
 import { stateLabel } from "../store.ts";
+import { groupRows, rowActivity, type RosterRow } from "../roster.ts";
 
+/**
+ * Section headings, in attention order.
+ *
+ * The CLASSIFICATION lives in `roster.ts#groupOf` so it is testable without a DOM and so "where does a row that
+ * is not running go" has one answer; only the words a person reads are here.
+ *
+ * These sections are kept deliberately (#68, settled): *"i now see directly when sth has finished without
+ * scrolling"*. A stable list with a state chip would show the same fact on a row the reader may not be looking at.
+ */
 const GROUPS = [
-  { key: "needs", label: "Needs you", match: (s: LiveSession) => s.state === "awaiting-approval" },
-  { key: "failed", label: "Failed", match: (s: LiveSession) => s.state === "failed" },
-  { key: "running", label: "Running", match: (s: LiveSession) => s.state === "streaming" || s.state === "starting" },
-  { key: "idle", label: "Idle", match: (s: LiveSession) => s.state === "idle" },
-  { key: "stopped", label: "Stopped", match: (s: LiveSession) => s.state === "stopped" || s.state === "registered" },
+  { key: "needs", label: "Needs you" },
+  { key: "failed", label: "Failed" },
+  { key: "running", label: "Running" },
+  { key: "idle", label: "Idle" },
+  { key: "stopped", label: "Stopped" },
 ] as const;
 
 export function SessionRail({
-  sessions,
+  rows,
   focusedId,
-  onFocus,
+  onFocusRow,
   onStartSession,
   onOpenDirectory,
   home,
   historyTotal,
 }: {
-  sessions: LiveSession[];
+  /**
+   * The roster, with activity joined in (issue #89).
+   *
+   * One list of rows — `session === undefined` means the session is not running and belongs under `Stopped`. The
+   * roster decides WHICH rows exist and their order within a section; activity decides the section.
+   */
+  rows: RosterRow[];
+  /** The focused row's key: a live session's id, or a row's file path. */
   focusedId: string | undefined;
-  onFocus: (id: string) => void;
+  /** Focus a row. A row that is not running focuses too, so the composer can send and resume on send. */
+  onFocusRow: (row: RosterRow) => void;
   onStartSession: () => void;
   onOpenDirectory: () => void;
   home: string | undefined;
@@ -42,19 +60,16 @@ export function SessionRail({
 
   const filtered = useMemo(() => {
     const needle = filter.trim().toLowerCase();
-    if (needle.length === 0) return sessions;
-    return sessions.filter(
-      (session) =>
-        displayName(session).toLowerCase().includes(needle) ||
-        session.cwd.toLowerCase().includes(needle) ||
-        session.id.toLowerCase().includes(needle),
-    );
-  }, [sessions, filter]);
+    if (needle.length === 0) return rows;
+    return rows.filter((row) => {
+      const name = rowName(row).toLowerCase();
+      const cwd = (row.entry.cwd ?? "").toLowerCase();
+      const id = row.session?.id.toLowerCase() ?? "";
+      return name.includes(needle) || cwd.includes(needle) || id.includes(needle);
+    });
+  }, [rows, filter]);
 
-  const grouped = useMemo(
-    () => GROUPS.map((group) => ({ ...group, items: filtered.filter(group.match) })).filter((g) => g.items.length > 0),
-    [filtered],
-  );
+  const sections = useMemo(() => groupRows(filtered), [filtered]);
 
   return (
     <nav className="rail" aria-label="Sessions">
@@ -82,25 +97,25 @@ export function SessionRail({
       </div>
 
       <div className="rail-list">
-        {sessions.length === 0 ? (
+        {rows.length === 0 ? (
           <p className="rail-empty">
-            No live sessions. Start one with <kbd>⌘N</kbd>.
+            No sessions yet. Start one with <kbd>⌘N</kbd>.
           </p>
-        ) : grouped.length === 0 ? (
+        ) : sections.length === 0 ? (
           <p className="rail-empty">No sessions match “{filter}”.</p>
         ) : (
-          grouped.map((group) => (
-            <section key={group.key} aria-label={group.label}>
+          sections.map((section) => (
+            <section key={section.group} aria-label={labelOf(section.group)}>
               <h3 className="group-header">
-                <span>{group.label}</span>
-                <span className="count">{group.items.length}</span>
+                <span>{labelOf(section.group)}</span>
+                <span className="count">{section.rows.length}</span>
               </h3>
-              {group.items.map((session) => (
+              {section.rows.map((row) => (
                 <RailRow
-                  key={session.id}
-                  session={session}
-                  focused={session.id === focusedId}
-                  onFocus={() => onFocus(session.id)}
+                  key={rowKey(row)}
+                  row={row}
+                  focused={rowKey(row) === focusedId}
+                  onFocus={() => onFocusRow(row)}
                   home={home}
                 />
               ))}
@@ -120,29 +135,65 @@ export function SessionRail({
   );
 }
 
+/** The section label for a group key. The words live here; the classification lives in `roster.ts`. */
+function labelOf(group: (typeof GROUPS)[number]["key"]): string {
+  return GROUPS.find((candidate) => candidate.key === group)?.label ?? group;
+}
+
+/**
+ * The render key for a row.
+ *
+ * A live session has a handle; a row that is not running has only its file. Both are stable, and a row can never
+ * be keyed by BOTH, so the two namespaces cannot collide.
+ */
+function rowKey(row: RosterRow): string {
+  return row.session?.id ?? row.entry.path;
+}
+
+/** What to call a row before anything else answers. Never the handle for a row that is not running. */
+function rowName(row: RosterRow): string {
+  if (row.session !== undefined) return displayName(row.session);
+  return row.entry.name ?? filenameOf(row.entry.path);
+}
+
+/** The file's name without its extension, as a last-resort label. */
+function filenameOf(path: string): string {
+  const segment = path.split("/").filter((part) => part.length > 0).pop() ?? path;
+  return segment.replace(/\.jsonl$/, "");
+}
+
 function RailRow({
-  session,
+  row,
   focused,
   onFocus,
   home,
 }: {
-  session: LiveSession;
+  row: RosterRow;
   focused: boolean;
   onFocus: () => void;
   home: string | undefined;
 }) {
-  const ask = session.dialogs[0]?.message ?? session.dialogs[0]?.title;
+  const session = row.session;
+  const ask = session?.dialogs[0]?.message ?? session?.dialogs[0]?.title;
+  // The activity column. For a row with no live session this is `stopped` — the same word `LiveState` already
+  // uses, so a roster with sessions that are not running adds rows to an existing group and invents nothing.
+  const activity = rowActivity(row);
+  const where =
+    row.entry.cwd === undefined ? "directory unknown" : shortenPath(row.entry.cwd, 34, home);
+
   return (
     <button
       type="button"
-      className={`rail-row state-${session.state}`}
+      className={`rail-row state-${activity}`}
       aria-current={focused ? "true" : undefined}
       onClick={onFocus}
     >
       <span className="r1">
-        <span className="name">{displayName(session)}</span>
-        {session.scratch && <span className="chip chip-scratch">scratch</span>}
-        <span className={`chip chip-${session.state}`}>{stateLabel(session)}</span>
+        <span className="name">{rowName(row)}</span>
+        {session?.scratch && <span className="chip chip-scratch">scratch</span>}
+        <span className={`chip chip-${activity}`}>
+          {session === undefined ? "stopped" : stateLabel(session)}
+        </span>
       </span>
       {/* The line carries the ask when one exists, because that is what the row is FOR then. */}
       {ask ? (
@@ -150,21 +201,30 @@ function RailRow({
           ⚠ {ask}
         </span>
       ) : (
-        <span className="r2" title={session.cwd}>
-          {whereLine(session, home)}
+        <span className="r2" title={row.entry.cwd}>
+          {session === undefined ? where : whereLine(session, home)}
         </span>
       )}
-      <span className="r3">
-        <span>{formatModel(session.model)}</span>
-        <span>{formatThinking(session.thinkingLevel)}</span>
-        <span>{formatContext(session.contextPercent)}</span>
-        <span>{formatCost(session.cost)}</span>
-        {session.pending > 0 && <span>+{session.pending} queued</span>}
-      </span>
-      {session.warnings.length > 0 && (
-        <span className="r3" style={{ color: "var(--warn-text)" }} title={session.warnings.join("\n")}>
-          ⚠ {session.warnings[0]}
-        </span>
+      {/*
+        The metrics line exists only for a running session: a row with no live process has no model, no context
+        percentage and no cost, and printing `0%` / `$0.00` for it would state facts nobody measured (the same
+        rule as `contextPercent` returning null rather than a fabricated zero).
+      */}
+      {session !== undefined && (
+        <>
+          <span className="r3">
+            <span>{formatModel(session.model)}</span>
+            <span>{formatThinking(session.thinkingLevel)}</span>
+            <span>{formatContext(session.contextPercent)}</span>
+            <span>{formatCost(session.cost)}</span>
+            {session.pending > 0 && <span>+{session.pending} queued</span>}
+          </span>
+          {session.warnings.length > 0 && (
+            <span className="r3" style={{ color: "var(--warn-text)" }} title={session.warnings.join("\n")}>
+              ⚠ {session.warnings[0]}
+            </span>
+          )}
+        </>
       )}
     </button>
   );

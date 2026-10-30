@@ -244,3 +244,41 @@ export function rosterRows(entries: readonly RosterEntry[], live: readonly LiveS
 export function rowActivity(row: RosterRow): string {
   return row.session === undefined ? "stopped" : row.session.state;
 }
+
+/**
+ * Where a row belongs in the rail's attention ordering.
+ *
+ * The sections are kept deliberately — the maintainer's verdict after using them was *"i now see directly when
+ * sth has finished without scrolling"* (#68, settled), so grouping is doing real work that a chip on a stable
+ * list would not.
+ *
+ * A session this process is not running is `stopped`, which is already a section and already in `LiveState`. So
+ * a persisted roster adds rows to a group that exists rather than inventing a second list under a second name.
+ */
+export type RailGroup = "needs" | "failed" | "running" | "idle" | "stopped";
+
+export function groupOf(row: RosterRow): RailGroup {
+  const state = row.session?.state;
+  switch (state) {
+    case "awaiting-approval":
+      return "needs";
+    case "failed":
+      return "failed";
+    case "streaming":
+    case "starting":
+      return "running";
+    case "idle":
+      return "idle";
+    // `registered` and `stopped` and "no live session at all" are the same answer to the reader's question.
+    default:
+      return "stopped";
+  }
+}
+
+/** Group rows for the rail, preserving the roster's order WITHIN each group. Empty groups are dropped. */
+export function groupRows(rows: readonly RosterRow[]): { group: RailGroup; rows: RosterRow[] }[] {
+  const order: RailGroup[] = ["needs", "failed", "running", "idle", "stopped"];
+  return order
+    .map((group) => ({ group, rows: rows.filter((row) => groupOf(row) === group) }))
+    .filter((section) => section.rows.length > 0);
+}

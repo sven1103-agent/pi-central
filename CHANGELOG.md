@@ -202,6 +202,26 @@ They are kept because each one is the reason a constraint or an invariant test e
   header version is known — the same rule `discover` applies, now shared through one `describeSessionFile` so
   the History pane and Resume cannot disagree about what a valid session is.
 
+### Added
+
+- **The rail takes a roster, and keeps its sections** (issue #89, slice 2 of 4).
+
+  The rail now renders `RosterRow[]` — `{ entry, session }` — instead of `LiveSession[]`. `session === undefined`
+  means the session is not running, and it lands under the existing **Stopped** heading. No new section, no new
+  noun: `stopped` is already in `LiveState`.
+
+  **Behaviour is unchanged in this slice** — nothing is persisted yet, so the roster is exactly `state.live`. What
+  changes is the shape, which is the shape a persisted roster needs.
+
+  **The sections stay**, settled on #68: *"i now see directly when sth has finished without scrolling"*. Grouping
+  is doing real work a chip on a stable list would not, and `DESIGN.md` §47 already said "ordered by attention",
+  so the document and the behaviour agree. The classification moved to `roster.ts#groupOf` so it is testable
+  without a DOM and there is one answer to "where does a row that is not running go".
+
+  A row with no live session prints **no metrics**. No model, no context percentage, no cost — printing `0%` or
+  `$0.00` would state facts nobody measured, the same rule as `contextPercent` returning null rather than a
+  fabricated zero.
+
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.4.1] — 2026-10-29

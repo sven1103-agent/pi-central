@@ -93,12 +93,23 @@ function session(over = {}) {
   };
 }
 
+
+/**
+ * Rows for the rail from a list of live sessions.
+ *
+ * The rail takes `RosterRow[]` now (issue #89) — `{entry, session?}` — but every rail test is about a LIVE
+ * session's presentation, so the join is done here once rather than in eight call sites. A row with no session
+ * is a separate concern and is asserted directly in the roster tests.
+ */
+const rowsOf = (sessions) =>
+  sessions.map((s) => ({ entry: { path: s.sessionFile ?? `live:${s.id}`, cwd: s.cwd, name: s.name }, session: s }));
+
 // --- The rail: attention ordering and honest labels (US-1, US-3) ------------------------------
 
 test("the primary action is first and mentions no directory", () => {
   // The governing decision: starting a session must not require choosing a path (US-1).
   const html = renderToString(createElement(SessionRail, {
-    sessions: [], focusedId: undefined, onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
+    rows: [], focusedId: undefined, onFocusRow() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
   }));
   assert.match(html, /class="btn-primary"/);
   assert.match(html, /New session/);
@@ -111,11 +122,11 @@ test("the primary action is first and mentions no directory", () => {
 test("sessions needing an answer are grouped first", () => {
   // A session blocked on a dialog cannot progress; an idle one can wait.
   const html = renderToString(createElement(SessionRail, {
-    sessions: [
+    rows: rowsOf([
       session({ id: "idle", state: "idle" }),
       session({ id: "blocked", state: "awaiting-approval", dialogs: [{ id: "d", method: "confirm", message: "Allow?", receivedAt: 0 }] }),
-    ],
-    focusedId: undefined, onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
+    ]),
+    focusedId: undefined, onFocusRow() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
   }));
   assert.ok(html.indexOf("Needs you") < html.indexOf("Idle"), "the blocked group must come first");
 });
@@ -123,8 +134,8 @@ test("sessions needing an answer are grouped first", () => {
 test("a scratch session shows a label, not its internal workspace path", () => {
   // The workspace path is an implementation detail (US-3).
   const html = renderToString(createElement(SessionRail, {
-    sessions: [session({ scratch: true, cwd: "/Users/x/.local/share/pi-central/workspaces/s7" })],
-    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
+    rows: rowsOf([session({ scratch: true, cwd: "/Users/x/.local/share/pi-central/workspaces/s7" })]),
+    focusedId: "s7", onFocusRow() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
   }));
   assert.match(html, /Scratch session/);
   assert.match(html, /scratch · s7/);
@@ -138,7 +149,7 @@ test("the rail states the TRUE total on disk, not the number loaded", () => {
   // Observed: "500 sessions on disk" while 1115 existed, because the page size was presented as
   // a total. Presenting a page as a total is the kind of confident lie this UI must not tell.
   const html = renderToString(createElement(SessionRail, {
-    sessions: [session()], focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {},
+    rows: rowsOf([session()]), focusedId: "s7", onFocusRow() {}, onStartSession() {}, onOpenDirectory() {},
     home: "/Users/x", historyTotal: 1115,
   }));
   assert.match(html, /1115 sessions on disk/);
@@ -150,8 +161,8 @@ test("a long model name does not swallow the rail's metrics line", () => {
   // off entirely, which is worse than a shortened model because those are the scanned values.
   const html = renderToString(createElement(SessionRail, {
     // contextPercent and cost are set deliberately: the point is that THEY survive the model.
-    sessions: [session({ model: "deepseek-ai/DeepSeek-V4.1-Flash", contextPercent: 62, cost: 0.0142 })],
-    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: "/Users/x", historyTotal: 0,
+    rows: rowsOf([session({ model: "deepseek-ai/DeepSeek-V4.1-Flash", contextPercent: 62, cost: 0.0142 })]),
+    focusedId: "s7", onFocusRow() {}, onStartSession() {}, onOpenDirectory() {}, home: "/Users/x", historyTotal: 0,
   }));
   assert.ok(!html.includes("deepseek-ai/DeepSeek-V4.1-Flash"), "the raw model name must be shortened");
   assert.match(html, /…/, "the shortening should be visible");
@@ -161,8 +172,8 @@ test("a long model name does not swallow the rail's metrics line", () => {
 
 test("the rail abbreviates HOME, so rows are scannable", () => {
   const html = renderToString(createElement(SessionRail, {
-    sessions: [session({ cwd: "/Users/x/git/api-gateway", scratch: false })],
-    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: "/Users/x", historyTotal: 0,
+    rows: rowsOf([session({ cwd: "/Users/x/git/api-gateway", scratch: false })]),
+    focusedId: "s7", onFocusRow() {}, onStartSession() {}, onOpenDirectory() {}, home: "/Users/x", historyTotal: 0,
   }));
   assert.match(html, /~\/git\/api-gateway/);
   assert.ok(!html.includes(">/Users/x/git"), "the home prefix should be abbreviated away");
@@ -170,8 +181,8 @@ test("the rail abbreviates HOME, so rows are scannable", () => {
 
 test("the rail states an unknown cost as an em dash, never $0.0000", () => {
   const html = renderToString(createElement(SessionRail, {
-    sessions: [session({ cost: null })],
-    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
+    rows: rowsOf([session({ cost: null })]),
+    focusedId: "s7", onFocusRow() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
   }));
   assert.ok(html.includes("—"), "expected an em dash for unknown values");
   assert.ok(!html.includes("$0.0000"), "an unknown cost must not read as free");
@@ -179,8 +190,8 @@ test("the rail states an unknown cost as an em dash, never $0.0000", () => {
 
 test("a dialog's ask replaces the path line, because that is what the row is for", () => {
   const html = renderToString(createElement(SessionRail, {
-    sessions: [session({ state: "awaiting-approval", dialogs: [{ id: "d", method: "confirm", message: "Allow running npm test?", receivedAt: 0 }] })],
-    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
+    rows: rowsOf([session({ state: "awaiting-approval", dialogs: [{ id: "d", method: "confirm", message: "Allow running npm test?", receivedAt: 0 }] })]),
+    focusedId: "s7", onFocusRow() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
   }));
   assert.match(html, /Allow running npm test\?/);
 });
@@ -1051,8 +1062,8 @@ test("the rail's row handler receives the session it belongs to", async () => {
   // Guards the other half of the wiring: a handler closed over the wrong index would focus a
   // neighbouring row, which reads as "clicking does something random" rather than "nothing happens".
   const html = renderToString(createElement(SessionRail, {
-    sessions: [session({ id: "s1", name: "first" }), session({ id: "s2", name: "second" })],
-    focusedId: "s1", onFocus() {}, onStartSession() {}, onOpenDirectory() {},
+    rows: rowsOf([session({ id: "s1", name: "first" }), session({ id: "s2", name: "second" })]),
+    focusedId: "s1", onFocusRow() {}, onStartSession() {}, onOpenDirectory() {},
     home: undefined, historyTotal: 0,
   }));
   const rows = html.match(/class="rail-row[^"]*"/g) ?? [];
@@ -1063,8 +1074,8 @@ test("the rail's row handler receives the session it belongs to", async () => {
 
 test("focus is marked with aria-current so the focus is not colour-only", async () => {
   const html = renderToString(createElement(SessionRail, {
-    sessions: [session({ id: "s1" }), session({ id: "s2" })],
-    focusedId: "s2", onFocus() {}, onStartSession() {}, onOpenDirectory() {},
+    rows: rowsOf([session({ id: "s1" }), session({ id: "s2" })]),
+    focusedId: "s2", onFocusRow() {}, onStartSession() {}, onOpenDirectory() {},
     home: undefined, historyTotal: 0,
   }));
   const rows = html.match(/<button[^>]*rail-row[^>]*>/g) ?? [];
@@ -1944,4 +1955,41 @@ test("a thinking block with no text yet still shows it is running", () => {
   }));
   assert.match(html, /thinking\u2026/, "an empty in-progress block still announces itself");
   assert.ok(!html.includes("quarantine-gist"), "…but has no gist, which would be empty");
+});
+
+// --- A row that is not running is still in the rail (issue #89) ----------------------------------
+
+test("a roster row with no live session appears under Stopped, and claims no metrics", () => {
+  // The whole point of #89: the roster is the list, activity is a column. A session you are not running is still
+  // yours — it sits under the existing `Stopped` heading, and prompting it resumes it later.
+  const html = renderToString(createElement(SessionRail, {
+    rows: [{ entry: { path: "/s/a/01a171ff.jsonl", name: "yesterday's task", cwd: "/Users/x/git/proj" } }],
+    focusedId: undefined, onFocusRow() {}, onStartSession() {}, onOpenDirectory() {},
+    home: "/Users/x", historyTotal: 0,
+  }));
+
+  assert.match(html, /Stopped/, "it lands in the section that already exists");
+  assert.match(html, /yesterday&#x27;s task|yesterday's task/, "by its remembered name");
+  assert.match(html, />stopped</, "the activity is stated in words, in the chip");
+  // No fabricated metrics: a row with no process has no model, context or cost, and printing 0% / $0.00 would
+  // state facts nobody measured — the same rule as `contextPercent` returning null rather than a zero.
+  assert.ok(!/ctx 0%/.test(html), `no fabricated context: ${html}`);
+  assert.ok(!/\$0\.0000/.test(html), `no fabricated cost: ${html}`);
+});
+
+test("a roster row with no live session still carries its directory on hover", () => {
+  const html = renderToString(createElement(SessionRail, {
+    rows: [{ entry: { path: "/s/a/x.jsonl", cwd: "/Users/x/git/proj" } }],
+    focusedId: undefined, onFocusRow() {}, onStartSession() {}, onOpenDirectory() {},
+    home: "/Users/x", historyTotal: 0,
+  }));
+  assert.match(html, /~\/git\/proj/, "the directory is shown, home abbreviated");
+});
+
+test("an empty roster says so, and does not claim sessions are missing", () => {
+  const html = renderToString(createElement(SessionRail, {
+    rows: [], focusedId: undefined, onFocusRow() {}, onStartSession() {}, onOpenDirectory() {},
+    home: undefined, historyTotal: 0,
+  }));
+  assert.match(html, /No sessions yet/);
 });
