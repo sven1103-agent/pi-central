@@ -34,6 +34,30 @@ fixed, and so is the class of defect behind them: the build now says which build
 
 ### Fixed
 
+- **A collapsed thinking block says what it is thinking about** (issue #143).
+
+  A screenshot review of a real transcript found six thinking blocks rendered as the same 700px bar with the
+  same single word in it. Nothing differed, so the feed's most common element carried no information: the eye
+  could not tell a two-second aside from a long derivation, could not tell one block from the next, and could
+  not decide which was worth opening. The one thing a reader wants from a collapsed block — "was this worth
+  reading?" — was absent.
+
+  Each block now shows its own first sentence, elided at a word boundary at 72 characters, with the
+  untruncated text on `title` so a word lost to the cap is recoverable by hovering without opening the block.
+
+  **Not a duration.** "Thought for 4s" was the obvious alternative and it is worse here: `durationMs` exists on
+  tool calls, not on thinking blocks, so a duration would be invented from arrival times and would measure the
+  transport rather than the thinking.
+
+  The gist is the block's own words, already rendered in full behind the same `<details>` — a preview, not a
+  disclosure.
+
+  **Nothing is revealed on hover.** A first version put the untruncated thought on `title` so a word lost to
+  the 72-character cap could be recovered on mouse-over; reported from use, that produced a screen-filling
+  native tooltip on a stray hover. A collapsed block exists so a long derivation costs one line until it is
+  asked for, and opening the `<details>` is the only gesture that means "show me this". The doc comment now
+  records the limit instead of hiding it behind a tooltip.
+
 - **The Settings dialog is two panes, and the Reading preview actually shows the setting** (issue #142).
 
   Four sections in one column made a wall — a reader's own preferences, the build's identity, where the files

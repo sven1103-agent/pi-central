@@ -19,7 +19,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Transcript as TranscriptModel } from "../transcript.ts";
-import { assistantText, hasProse, planTranscript, toolRunSummary, type ToolExecution, type TranscriptMessage } from "../transcript.ts";
+import { assistantText, hasProse, planTranscript, thinkingGist, toolRunSummary, type ToolExecution, type TranscriptMessage } from "../transcript.ts";
 import { MessageBody } from "./MessageBody.tsx";
 import {
   decideOnSessionChange,
@@ -544,14 +544,38 @@ function Turn({ message }: { message: TranscriptMessage }) {
         )}
       </div>
 
-      {thinking.map((block, i) => (
-        <details key={i} className="quarantine" style={{ marginBottom: 8 }}>
-          <summary className="quarantine-head">
-            <span className="label">Thinking</span>
-          </summary>
-          <pre className="quarantine-body">{block.kind === "thinking" ? block.text : ""}</pre>
-        </details>
-      ))}
+      {thinking.map((block, i) => {
+        // The gist, so four collapsed blocks are not four identical bars (issue #143). It is the block's
+        // own first sentence, which is content already present behind this `<details>` — a preview, not a
+        // disclosure. `thinkingGist` explains why it is not a duration.
+        const gist = block.kind === "thinking" ? thinkingGist(block.text) : "";
+        return (
+          <details key={i} className="quarantine" style={{ marginBottom: 8 }}>
+            <summary className="quarantine-head">
+              <span className="label">Thinking</span>
+              {gist.length > 0 && (
+                <>
+                  <span className="spacer" />
+                  {/*
+                    The words, so the block says what it is about; the label already says what KIND of
+                    block it is, so this does not repeat it.
+
+                    NO `title`, and that is the whole point of a collapsed block (issue #143). A first
+                    version put the untruncated text on `title` so a word lost to the cap could be
+                    recovered by hovering — which handed the reader a screen-filling native tooltip
+                    carrying the ENTIRE thought. Collapsing exists so a long derivation costs one line
+                    until you ask for it; revealing it on a stray mouse-over undoes that, and it does so
+                    without a click, without focus and without a way to keep it open. Opening the
+                    `<details>` is the one gesture that says "show me this".
+                  */}
+                  <span className="quarantine-gist">{gist}</span>
+                </>
+              )}
+            </summary>
+            <pre className="quarantine-body">{block.kind === "thinking" ? block.text : ""}</pre>
+          </details>
+        );
+      })}
 
       {/* Through MessageBody rather than Prose directly: prose still goes to the one sanitized
           insertion site, while a fenced code block becomes React elements and contributes no HTML
