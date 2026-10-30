@@ -9,7 +9,8 @@
  */
 import { useMemo, useState } from "react";
 import type { LiveSession } from "@pi-central/protocol";
-import { displayName, formatContext, formatCost, formatModel, formatThinking, whereLine } from "../format.ts";
+import { displayName, formatContext, formatCost, formatModel, formatThinking, shortenPath, whereLine } from "../format.ts";
+import type { RosterEntry } from "../roster.ts";
 import { stateLabel } from "../store.ts";
 
 const GROUPS = [
@@ -28,6 +29,9 @@ export function SessionRail({
   onOpenDirectory,
   home,
   historyTotal,
+  restored,
+  onResumeRestored,
+  onForgetRestored,
 }: {
   sessions: LiveSession[];
   focusedId: string | undefined;
@@ -37,6 +41,17 @@ export function SessionRail({
   home: string | undefined;
   /** Total sessions on disk, which may exceed the number loaded. */
   historyTotal: number;
+  /**
+   * Sessions remembered from a previous run that are NOT running now (issue #89).
+   *
+   * Rendered as a separate, clearly-labelled group rather than merged into `sessions`, because the two mean
+   * different things: `sessions` are processes this orchestrator is running and whose state it has observed,
+   * while these are files it knows about and cannot observe. C3: "there is no daemon", so claiming one is
+   * idle would be a guess presented as a fact.
+   */
+  restored: RosterEntry[];
+  onResumeRestored: (entry: RosterEntry) => void;
+  onForgetRestored: (entry: RosterEntry) => void;
 }) {
   const [filter, setFilter] = useState("");
 
@@ -108,6 +123,30 @@ export function SessionRail({
           ))
         )}
 
+        {/*
+          Restored rows, in their own group with their own heading (issue #89).
+
+          They are drawn AFTER the live groups so a running session is never pushed down by remembered ones,
+          and every row says `stopped` in words plus the Resume action — never a bare absence of state, which
+          would read as "idle". C3 is the reason: this process did not spawn them and cannot observe them.
+        */}
+        {restored.length > 0 && (
+          <section>
+            <h3 className="rail-group">
+              Remembered <span className="rail-group-count">{restored.length}</span>
+            </h3>
+            {restored.map((entry) => (
+              <RestoredRow
+                key={entry.path}
+                entry={entry}
+                home={home}
+                onResume={() => onResumeRestored(entry)}
+                onForget={() => onForgetRestored(entry)}
+              />
+            ))}
+          </section>
+        )}
+
         {historyTotal > 0 && (
           <p className="rail-empty" style={{ borderTop: "1px solid var(--line)", marginTop: 8 }}>
             {/* The true total, not the size of the loaded page. See `historyTotal`. Built as one
@@ -118,6 +157,62 @@ export function SessionRail({
       </div>
     </nav>
   );
+}
+
+/**
+ * A session remembered from a previous run (issue #89).
+ *
+ * Deliberately NOT a `RailRow`: that renders a `LiveSession` and every one of its affordances assumes state
+ * this process has observed. The honest row for "I know this file exists and it is not running" has two
+ * actions, Resume and Forget, and no live chips at all.
+ *
+ * It is a `<div>` rather than a `<button>`, because it now contains two buttons and nesting them is invalid
+ * HTML that browsers resolve by breaking the inner ones.
+ */
+function RestoredRow({
+  entry,
+  home,
+  onResume,
+  onForget,
+}: {
+  entry: RosterEntry;
+  home: string | undefined;
+  onResume: () => void;
+  onForget: () => void;
+}) {
+  const label = entry.name ?? lastPathSegment(entry.path);
+  const where = entry.cwd === undefined ? "directory unknown" : shortenPath(entry.cwd, 34, home);
+  return (
+    <div className="rail-row rail-row-restored">
+      <span className="r1">
+        <span className="name">{label}</span>
+        {/* The word, not just an absent chip. "Not running" is the fact; a missing chip reads as unknown. */}
+        <span className="chip chip-stopped">not running</span>
+      </span>
+      <span className="r2" title={entry.cwd}>
+        {where}
+      </span>
+      <span className="r-restored-actions">
+        <button type="button" className="btn btn-quiet" onClick={onResume}>
+          Resume
+        </button>
+        <button
+          type="button"
+          className="btn btn-quiet"
+          onClick={onForget}
+          title="Remove from the remembered list. The session file is not deleted."
+        >
+          Forget
+        </button>
+      </span>
+    </div>
+  );
+}
+
+/** The filename without its extension, as a last-resort label. Never the session id. */
+function lastPathSegment(path: string): string {
+  const segment = path.split("/").filter((part) => part.length > 0).pop() ?? path;
+  return segment.replace(/\.jsonl$/, "");
 }
 
 function RailRow({

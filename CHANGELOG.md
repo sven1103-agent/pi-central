@@ -174,6 +174,32 @@ They are kept because each one is the reason a constraint or an invariant test e
   `[]`, a real scroll writes `{ scrollTop: 850, pinned: false }`.
 
 
+### Added
+
+- **The rail comes back as you left it** (issue #89).
+
+  > *"users see their roster state as they left off. Currently a Pi Central update, a computer restart or a
+  > process kill would require users to select their roster composition again from scratch."*
+
+  The rail is `state.live` — the sessions **this orchestrator process** spawned — so it was empty after a
+  restart, and every session had to be found and resumed by hand again.
+
+  **Keyed by session file, never by handle.** `Supervisor` allocates `id` from a per-process counter
+  (`s${++this.#created}`), so `s1` after a restart is a *different* session. A roster persisted by handle would
+  not fail loudly — it would point at the wrong conversation.
+
+  **A restored row is not live (C3).** *"Sessions are files plus private stdio; there is no daemon."* After a
+  restart Pi Central cannot know that anything is running, so a restored row appears in its own **Remembered**
+  group, says `not running` in words, and offers **Resume**. Nothing about a session's contents is stored —
+  this is a list of identifiers.
+
+  **No auto-resume.** Resuming spawns a sandboxed agent that spends money and writes to a directory; doing
+  that at start-up is a lot of consent to assume. The existing one-click Resume is the right friction.
+
+  Stored in browser `localStorage` beside the panel and reading prefs, because a roster answers *"which
+  sessions do I want in front of me"* — a view preference belonging to one browser profile, not a fact about
+  the installation. `~/.config/pi-central/` is where installation facts live (Q7, ADR-0010).
+
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.4.1] — 2026-10-29

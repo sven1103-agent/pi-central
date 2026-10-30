@@ -795,3 +795,69 @@ test("an update to ANOTHER existing session must not consume the intent", () => 
   state = reduce(state, { kind: "session", session: live({ id: "s3" }) });
   assert.equal(state.focusedId, "s3");
 });
+
+// --- The remembered roster (issue #89) -----------------------------------------------------------
+
+test("a restored row is retired once discovery or a snapshot proves it is LIVE", () => {
+  // Without this the rail shows the same session twice: once as the real live row, once as a remembered one
+  // with a Resume button. Matching is by sessionFile, never by id — ids are per-process, which is the
+  // constraint the whole issue turns on.
+  let state = reduce(initialState(), {
+    kind: "restoreRoster",
+    entries: [{ path: "/s/a/s1.jsonl" }, { path: "/s/b/s2.jsonl" }],
+  });
+  assert.equal(state.restored.length, 2);
+
+  state = reduce(state, { kind: "session", session: live({ id: "s1", sessionFile: "/s/a/s1.jsonl" }) });
+  assert.deepEqual(state.restored.map((e) => e.path), ["/s/b/s2.jsonl"], "the running one dropped out");
+});
+
+test("a snapshot retires every restored row it can resolve, and keeps the rest", () => {
+  let state = reduce(initialState(), {
+    kind: "restoreRoster",
+    entries: [{ path: "/s/a/s1.jsonl" }, { path: "/s/b/s2.jsonl" }],
+  });
+  state = reduce(state, {
+    kind: "snapshot",
+    live: [live({ id: "s1", sessionFile: "/s/a/s1.jsonl" })],
+    history: [], historyTotal: 0, home: "/Users/x",
+  });
+  assert.deepEqual(state.restored.map((e) => e.path), ["/s/b/s2.jsonl"]);
+});
+
+test("a live session with NO sessionFile does not retire anything", () => {
+  // The match key is undefined here, and there is nothing to match against: a session Pi has not yet reported a
+  // file for cannot be resolved back to a remembered row. Getting this wrong in the other direction — treating
+  // "unknown file" as "matches everything" — would clear the whole remembered list on every ordinary start,
+  // because a session always exists briefly before `get_state` answers.
+  //
+  // The first version of this test could not fail: it simulated the bug by filtering on `file ?? ""`, but an
+  // empty string matches no stored path (parseRoster refuses empty paths), so the mutation was a no-op and the
+  // test stayed green. What IS reachable is a miss-key, so that is what is asserted: an entry whose path
+  // differs in any way must survive, and only an exact match retires.
+  let state = reduce(initialState(), {
+    kind: "restoreRoster",
+    entries: [{ path: "/s/a/s1.jsonl" }, { path: "/s/a/S1.jsonl" }],
+  });
+  state = reduce(state, { kind: "session", session: live({ id: "s9" }) });
+  assert.equal(state.restored.length, 2, "an unresolved live session retires nothing");
+
+  // A near-miss must not match either: matching is exact path equality, so case or a trailing character
+  // cannot retire the wrong row.
+  state = reduce(state, { kind: "session", session: live({ id: "s1", sessionFile: "/s/a/s1.jsonl " }) });
+  assert.equal(state.restored.length, 2, "a path that merely looks similar must not match");
+
+  state = reduce(state, { kind: "session", session: live({ id: "s2", sessionFile: "/s/a/s1.jsonl" }) });
+  assert.deepEqual(state.restored.map((e) => e.path), ["/s/a/S1.jsonl"], "only the exact match retires");
+});
+
+test("forgetting a restored row does not touch the live list", () => {
+  // #87's dismissal, done durably. It is a view change: nothing is deleted from disk, and a running session
+  // must not be affected by forgetting a remembered row.
+  let state = reduce(initialState(), { kind: "session", session: live({ id: "s1", sessionFile: "/s/a/s1.jsonl" }) });
+  state = reduce(state, { kind: "restoreRoster", entries: [{ path: "/s/b/s2.jsonl" }] });
+  const before = state.live;
+  state = reduce(state, { kind: "forgetRestored", path: "/s/b/s2.jsonl" });
+  assert.deepEqual(state.restored, []);
+  assert.equal(state.live, before, "the live array is untouched");
+});

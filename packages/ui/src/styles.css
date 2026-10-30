@@ -421,6 +421,29 @@ button { font: inherit; color: inherit; }
 .rail-row .r3 { display: flex; gap: var(--sp-2); }
 .rail-row .ask { color: var(--warn-text); }
 
+/*
+ * A remembered session that is NOT running (issue #89).
+ *
+ * Visually quieter than a live row and never carrying a live state colour: C3 says "there is no daemon", so
+ * this process cannot know whether the task is running — it knows only that the file exists. The dim treatment
+ * is the honest rendering of that, and the `not running` chip states it in words so the difference is not
+ * carried by colour alone (DESIGN §539's rule, applied to state rather than motion).
+ *
+ * Not a `<button>`: it holds two actions, and nesting buttons is invalid HTML that browsers resolve by
+ * breaking the inner ones.
+ */
+.rail-row-restored { cursor: default; opacity: 0.85; }
+.rail-row-restored:hover { background: none; }
+.rail-row-restored .name { font-weight: 500; }
+.r-restored-actions { display: flex; gap: var(--sp-2); margin-top: 4px; }
+.r-restored-actions .btn { font-size: var(--fs-2xs); padding: 2px 8px; }
+.rail-group-count {
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  margin-left: 4px;
+}
+
 .state-idle { border-left-color: var(--dim); }
 .state-starting { border-left-color: var(--accent); }
 .state-streaming { border-left-color: var(--ok); }

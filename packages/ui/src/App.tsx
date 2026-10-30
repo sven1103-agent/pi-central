@@ -59,6 +59,13 @@ import { ThinkingPicker } from "./components/ThinkingPicker.tsx";
 import { HistoryView } from "./components/History.tsx";
 import { displayName, formatContext, formatCost, formatTokens, headerLocation } from "./format.ts";
 import { stateLabel, type UiState } from "./store.ts";
+import {
+  ROSTER_PREFS_KEY,
+  parseRoster,
+  rememberSession,
+  rosterEntryFor,
+  serializeRoster,
+} from "./roster.ts";
 
 type Tab = "sessions" | "history";
 
@@ -406,6 +413,45 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [send]);
 
+  /*
+   * The remembered roster (issue #89).
+   *
+   * Read once on mount, and written whenever it changes. `localStorage` is the right home — see `roster.ts`
+   * for why this is view preference rather than installation configuration — and it is read through
+   * `parseRoster` rather than trusted, for the reason `panel.ts` gives: it outlives upgrades and is shared
+   * with whatever else runs on this origin.
+   */
+  useEffect(() => {
+    dispatch({ kind: "restoreRoster", entries: parseRoster(localStorage.getItem(ROSTER_PREFS_KEY)) });
+  }, []);
+
+  const restoredRef = useRef(state.restored);
+  restoredRef.current = state.restored;
+
+  // Remember every live session that has a durable identity, newest first. A session with no `sessionFile`
+  // yet is skipped: remembering a handle would point at a different session after the next restart.
+  useEffect(() => {
+    const remembered = state.live
+      .map((session) => rosterEntryFor(session))
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
+    if (remembered.length === 0) return;
+    let next = restoredRef.current;
+    for (const entry of remembered) next = rememberSession(next, entry);
+    if (next !== restoredRef.current && JSON.stringify(next) !== JSON.stringify(restoredRef.current)) {
+      dispatch({ kind: "restoreRoster", entries: next });
+    }
+  }, [state.live]);
+
+  // Persist whatever the rail is showing. One writer, so the stored list cannot drift from the rendered one.
+  useEffect(() => {
+    try {
+      localStorage.setItem(ROSTER_PREFS_KEY, serializeRoster(state.restored));
+    } catch {
+      // A full or disabled `localStorage` must not break the rail — the roster is a convenience, and an
+      // unwritable store degrades to "not remembered", which is exactly the behaviour before #89.
+    }
+  }, [state.restored]);
+
   const onStartSession = useCallback(() => {
     // Ask for focus BEFORE the control goes out: the orchestrator answers `start` with the new `session`
     // event synchronously, so the intent has to be in the store when that event lands (issue #144).
@@ -547,6 +593,16 @@ export function App() {
             dispatch({ kind: "focusSession", sessionId: id });
             setTab("sessions");
           }}
+          restored={state.restored}
+          onResumeRestored={(entry) => {
+            // Resume spawns a sandboxed agent in that directory (C3: nothing was running), so it is an
+            // explicit click and not an auto-resume at startup — assumed consent for spending money and
+            // writing to a directory is not consent (issue #89).
+            dispatch({ kind: "expectNewSession" });
+            send({ kind: "resume", path: entry.path });
+            setTab("sessions");
+          }}
+          onForgetRestored={(entry) => dispatch({ kind: "forgetRestored", path: entry.path })}
           onStartSession={onStartSession}
           onOpenDirectory={() => setSheetOpen(true)}
           home={home}

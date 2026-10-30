@@ -22,6 +22,10 @@ import type {
   ModelOption,
   PiRecord,
 } from "@pi-central/protocol";
+
+// The roster is remembered in `localStorage` rather than on the wire (issue #89), so its types live here
+// rather than in the protocol package — nothing about a session's identity crosses the socket for this.
+import { forgetSession, type RosterEntry } from "./roster.ts";
 import { applyRecord, emptyTranscript, seedTranscript, type Transcript } from "./transcript.ts";
 
 export interface UiState {
@@ -78,6 +82,16 @@ export interface UiState {
    * and consumed exactly once by the next NEW session to arrive.
    */
   focusNextNewSession: boolean;
+  /**
+   * Sessions the reader had in the rail before this process started (issue #89).
+   *
+   * Kept SEPARATE from `live` on purpose. `live` means "this orchestrator spawned it" and carries the C3
+   * guarantee that its state was observed; a restored row was never observed by this process, so folding it
+   * into `live` would let the rail draw a session as idle when the truth is "we do not know, and it is almost
+   * certainly not running". Every restored row is therefore rendered `stopped` with a Resume action until a
+   * snapshot proves otherwise.
+   */
+  restored: RosterEntry[];
   connection: "connecting" | "open" | "closed";
   connectionDetail: string | undefined;
   /** Errors worth showing, newest first. */
@@ -133,6 +147,7 @@ export function initialState(): UiState {
     restoredQueue: {},
     focusedId: undefined,
     focusNextNewSession: false,
+    restored: [],
     connection: "connecting",
     connectionDetail: undefined,
     errors: [],
@@ -178,7 +193,16 @@ export type LocalAction =
    * Dispatched BEFORE the `start`/`resume` control is sent, because the orchestrator broadcasts the new
    * session synchronously in reply — so the intent has to already be in the store when that event lands.
    */
-  | { kind: "expectNewSession" };
+  | { kind: "expectNewSession" }
+  /**
+   * Adopt the remembered roster read from `localStorage` at startup (issue #89).
+   *
+   * A local action rather than part of `initialState`, because reading storage is an effect and the reducer
+   * must stay pure — the same reason `panel` and `reading` prefs are read in `App` and passed in.
+   */
+  | { kind: "restoreRoster"; entries: RosterEntry[] }
+  /** Drop one restored row — the durable half of #87's dismissal. */
+  | { kind: "forgetRestored"; path: string };
 
 export function reduce(
   state: UiState,
@@ -189,6 +213,12 @@ export function reduce(
   if (event.kind === "queueRestored") {
     const { [event.sessionId]: _taken, ...restoredQueue } = state.restoredQueue;
     return { ...state, restoredQueue };
+  }
+  if (event.kind === "restoreRoster") {
+    return { ...state, restored: event.entries };
+  }
+  if (event.kind === "forgetRestored") {
+    return { ...state, restored: forgetSession(state.restored, event.path) };
   }
   if (event.kind === "expectNewSession") {
     // A flag, not an id: the id does not exist yet. Consumed by the next new `session` event.
@@ -217,8 +247,14 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
         ? state.focusedId
         : // Otherwise focus the first session, which is what a user arriving expects.
           event.live[0]?.id;
+      // A snapshot is the authoritative list of what this process is running, so every restored row it can
+      // resolve is retired in the same pass (issue #89). Anything left is genuinely not running here.
+      const runningFiles = new Set(
+        event.live.map((session) => session.sessionFile).filter((file): file is string => file !== undefined),
+      );
       return {
         ...state,
+        restored: state.restored.filter((entry) => !runningFiles.has(entry.path)),
         live: event.live,
         history: event.history,
         historyTotal: event.historyTotal,
@@ -248,6 +284,18 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
        * session cannot trigger it, and it is cleared either way so a failed start does not redirect the
        * NEXT unrelated session.
        */
+      /*
+       * A restored row is retired the moment discovery or a snapshot shows that session is LIVE (issue #89).
+       *
+       * Without this the rail would show the same session twice: once as the real live row, once as the
+       * remembered one with a Resume button. Matching is by `sessionFile`, never by id — ids are per-process
+       * (`s1` after a restart is a different session), which is the constraint the whole issue turns on.
+       */
+      const file = event.session.sessionFile;
+      const restored = file === undefined
+        ? state.restored
+        : forgetSession(state.restored, file);
+
       const arrived = index === -1;
       const focusedId = state.focusNextNewSession && arrived
         ? event.session.id
@@ -255,6 +303,7 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
       return {
         ...state,
         live,
+        restored,
         focusedId,
         focusNextNewSession: arrived ? false : state.focusNextNewSession,
       };

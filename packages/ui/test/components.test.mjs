@@ -98,7 +98,7 @@ function session(over = {}) {
 test("the primary action is first and mentions no directory", () => {
   // The governing decision: starting a session must not require choosing a path (US-1).
   const html = renderToString(createElement(SessionRail, {
-    sessions: [], focusedId: undefined, onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
+    sessions: [], focusedId: undefined, onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0, restored: [], onResumeRestored() {}, onForgetRestored() {},
   }));
   assert.match(html, /class="btn-primary"/);
   assert.match(html, /New session/);
@@ -115,7 +115,7 @@ test("sessions needing an answer are grouped first", () => {
       session({ id: "idle", state: "idle" }),
       session({ id: "blocked", state: "awaiting-approval", dialogs: [{ id: "d", method: "confirm", message: "Allow?", receivedAt: 0 }] }),
     ],
-    focusedId: undefined, onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
+    focusedId: undefined, onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0, restored: [], onResumeRestored() {}, onForgetRestored() {},
   }));
   assert.ok(html.indexOf("Needs you") < html.indexOf("Idle"), "the blocked group must come first");
 });
@@ -124,7 +124,7 @@ test("a scratch session shows a label, not its internal workspace path", () => {
   // The workspace path is an implementation detail (US-3).
   const html = renderToString(createElement(SessionRail, {
     sessions: [session({ scratch: true, cwd: "/Users/x/.local/share/pi-central/workspaces/s7" })],
-    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
+    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0, restored: [], onResumeRestored() {}, onForgetRestored() {},
   }));
   assert.match(html, /Scratch session/);
   assert.match(html, /scratch · s7/);
@@ -139,7 +139,7 @@ test("the rail states the TRUE total on disk, not the number loaded", () => {
   // a total. Presenting a page as a total is the kind of confident lie this UI must not tell.
   const html = renderToString(createElement(SessionRail, {
     sessions: [session()], focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {},
-    home: "/Users/x", historyTotal: 1115,
+    home: "/Users/x", historyTotal: 1115, restored: [], onResumeRestored() {}, onForgetRestored() {},
   }));
   assert.match(html, /1115 sessions on disk/);
   assert.ok(!html.includes("500 sessions"), "the page size must not be shown as the total");
@@ -151,7 +151,7 @@ test("a long model name does not swallow the rail's metrics line", () => {
   const html = renderToString(createElement(SessionRail, {
     // contextPercent and cost are set deliberately: the point is that THEY survive the model.
     sessions: [session({ model: "deepseek-ai/DeepSeek-V4.1-Flash", contextPercent: 62, cost: 0.0142 })],
-    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: "/Users/x", historyTotal: 0,
+    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: "/Users/x", historyTotal: 0, restored: [], onResumeRestored() {}, onForgetRestored() {}, restored: [], onResumeRestored() {}, onForgetRestored() {},
   }));
   assert.ok(!html.includes("deepseek-ai/DeepSeek-V4.1-Flash"), "the raw model name must be shortened");
   assert.match(html, /…/, "the shortening should be visible");
@@ -162,7 +162,7 @@ test("a long model name does not swallow the rail's metrics line", () => {
 test("the rail abbreviates HOME, so rows are scannable", () => {
   const html = renderToString(createElement(SessionRail, {
     sessions: [session({ cwd: "/Users/x/git/api-gateway", scratch: false })],
-    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: "/Users/x", historyTotal: 0,
+    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: "/Users/x", historyTotal: 0, restored: [], onResumeRestored() {}, onForgetRestored() {}, restored: [], onResumeRestored() {}, onForgetRestored() {},
   }));
   assert.match(html, /~\/git\/api-gateway/);
   assert.ok(!html.includes(">/Users/x/git"), "the home prefix should be abbreviated away");
@@ -171,7 +171,7 @@ test("the rail abbreviates HOME, so rows are scannable", () => {
 test("the rail states an unknown cost as an em dash, never $0.0000", () => {
   const html = renderToString(createElement(SessionRail, {
     sessions: [session({ cost: null })],
-    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
+    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0, restored: [], onResumeRestored() {}, onForgetRestored() {},
   }));
   assert.ok(html.includes("—"), "expected an em dash for unknown values");
   assert.ok(!html.includes("$0.0000"), "an unknown cost must not read as free");
@@ -180,7 +180,7 @@ test("the rail states an unknown cost as an em dash, never $0.0000", () => {
 test("a dialog's ask replaces the path line, because that is what the row is for", () => {
   const html = renderToString(createElement(SessionRail, {
     sessions: [session({ state: "awaiting-approval", dialogs: [{ id: "d", method: "confirm", message: "Allow running npm test?", receivedAt: 0 }] })],
-    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
+    focusedId: "s7", onFocus() {}, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0, restored: [], onResumeRestored() {}, onForgetRestored() {},
   }));
   assert.match(html, /Allow running npm test\?/);
 });
@@ -1053,7 +1053,7 @@ test("the rail's row handler receives the session it belongs to", async () => {
   const html = renderToString(createElement(SessionRail, {
     sessions: [session({ id: "s1", name: "first" }), session({ id: "s2", name: "second" })],
     focusedId: "s1", onFocus() {}, onStartSession() {}, onOpenDirectory() {},
-    home: undefined, historyTotal: 0,
+    home: undefined, historyTotal: 0, restored: [], onResumeRestored() {}, onForgetRestored() {},
   }));
   const rows = html.match(/class="rail-row[^"]*"/g) ?? [];
   assert.equal(rows.length, 2, "both sessions must render a row");
@@ -1065,7 +1065,7 @@ test("focus is marked with aria-current so the focus is not colour-only", async 
   const html = renderToString(createElement(SessionRail, {
     sessions: [session({ id: "s1" }), session({ id: "s2" })],
     focusedId: "s2", onFocus() {}, onStartSession() {}, onOpenDirectory() {},
-    home: undefined, historyTotal: 0,
+    home: undefined, historyTotal: 0, restored: [], onResumeRestored() {}, onForgetRestored() {},
   }));
   const rows = html.match(/<button[^>]*rail-row[^>]*>/g) ?? [];
   const marked = rows.filter((row) => row.includes('aria-current="true"'));
@@ -1944,4 +1944,44 @@ test("a thinking block with no text yet still shows it is running", () => {
   }));
   assert.match(html, /thinking\u2026/, "an empty in-progress block still announces itself");
   assert.ok(!html.includes("quarantine-gist"), "…but has no gist, which would be empty");
+});
+
+// --- Remembered sessions are shown as NOT RUNNING (issue #89) ------------------------------------
+
+test("a restored row says 'not running' in words, and offers Resume", () => {
+  // C3: "sessions are files plus private stdio; there is no daemon." After a restart Pi Central cannot know
+  // that anything is running, so a restored row drawn as live — or as idle — would be a guess presented as a
+  // fact. The word carries it, so the distinction does not rest on a colour.
+  const html = renderToString(createElement(SessionRail, {
+    sessions: [], focusedId: undefined, onFocus() {}, onStartSession() {}, onOpenDirectory() {},
+    home: "/Users/x", historyTotal: 0,
+    restored: [{ path: "/s/a/s1.jsonl", cwd: "/Users/x/git/proj", name: "yesterday's task" }],
+    onResumeRestored() {}, onForgetRestored() {},
+  }));
+  assert.match(html, /Remembered/, "the group is named");
+  assert.match(html, /yesterday&#x27;s task|yesterday's task/, "the remembered name is shown");
+  assert.match(html, /not running/, "the state is stated in words");
+  assert.match(html, /Resume/, "…with the action that makes it true again");
+  assert.ok(!/state-streaming|state-idle/.test(html), `no live state may be claimed: ${html}`);
+});
+
+test("a restored row without a remembered name falls back to the file name, not the handle", () => {
+  // A session id is per-process (`s1` after a restart is a different session), so it can never label a
+  // remembered row. The file name is stable and at least identifies which file this is.
+  const html = renderToString(createElement(SessionRail, {
+    sessions: [], focusedId: undefined, onFocus() {}, onStartSession() {}, onOpenDirectory() {},
+    home: "/Users/x", historyTotal: 0,
+    restored: [{ path: "/s/a/01a171ff-ab.jsonl" }],
+    onResumeRestored() {}, onForgetRestored() {},
+  }));
+  assert.match(html, /01a171ff-ab/, "the file name is the fallback");
+  assert.match(html, /directory unknown/, "and an unknown directory says so rather than showing nothing");
+});
+
+test("nothing remembered renders no group at all", () => {
+  const html = renderToString(createElement(SessionRail, {
+    sessions: [], focusedId: undefined, onFocus() {}, onStartSession() {}, onOpenDirectory() {},
+    home: "/Users/x", historyTotal: 0, restored: [], onResumeRestored() {}, onForgetRestored() {},
+  }));
+  assert.ok(!html.includes("Remembered"), "an empty group would be noise");
 });
