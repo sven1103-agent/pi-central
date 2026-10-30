@@ -34,6 +34,32 @@ fixed, and so is the class of defect behind them: the build now says which build
 
 ### Fixed
 
+- **A thinking block says when it is still thinking** (issue #146).
+
+  Reported from use: *"I definitely dont see any response in the thinking bar, there is no visual indication
+  that the thinking is still running. Users just see the bar and thats it."*
+
+  The state was already on the wire — `TextBlock.complete` is set `false` by `thinking_start` and `true` by
+  `thinking_end` — it was simply never rendered. A block being written looked exactly like a finished one
+  that had been collapsed, so a reader could not tell *"it is thinking right now"* from *"it thought, a while
+  ago, about something else"*.
+
+  It now shows the word **`thinking…`** next to the label.
+
+  **A word, not a spinner.** DESIGN §539: *"No motion is ever the only carrier of meaning."* A bare spinner
+  is motion as the sole signal — no accessible name, no reduced-motion equivalent.
+
+  **And not a dot.** A green `live-dot` was tried while this was being developed and came straight back from
+  use as *"now it is redundant"*, for a structural reason: a thinking block only ever streams **inside** an
+  assistant message, and the `.role` line above already shows `● responding…` for as long as that message
+  streams — a tool call does not close the message, so `responding…` is on screen the entire time a block
+  grows. A second dot would repeat the first, one line lower, and `.live-dot` only pulses under
+  `.state-streaming`, so it would be a static dot beside a pulsing one: two indicators of the same fact that
+  disagree about whether it is ongoing.
+
+  The word stays because it says something the line above cannot — **which part** of the response is still
+  arriving. Colour is `--dim`, not `--ok`: green means "this session is live", which is a different fact.
+
 - **The work ranks above the reasoning** (issue #144).
 
   A screenshot review read the hierarchy as inverted, and the reader agreed: *"The tool call is the more

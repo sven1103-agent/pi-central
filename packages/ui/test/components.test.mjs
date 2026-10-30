@@ -1880,3 +1880,68 @@ test("a collapsed thinking block does NOT reveal its text on hover", () => {
   // The full text is still there, inside `<details>`, so opening the block is what reveals it.
   assert.ok(html.includes(long.slice(0, 80)), "the body still carries the whole thought");
 });
+
+// --- A thinking block says when it is STILL thinking (issue #146) ---------------------------------
+
+test("an in-progress thinking block says so, and a finished one does not", () => {
+  // Reported from use: "I definitely dont see any response in the thinking bar, there is no visual indication
+  // that the thinking is still running. Users just see the bar and thats it."
+  //
+  // `TextBlock.complete` was already on the wire — set false by `thinking_start`, true by `thinking_end` — it
+  // was simply never rendered, so a block being written looked identical to one that had finished.
+  const msg = {
+    id: "1", role: "assistant", streaming: true,
+    blocks: [
+      { kind: "thinking", text: "Still working this out", complete: false },
+      { kind: "thinking", text: "This one is finished.", complete: true },
+      { kind: "text", text: "…" },
+    ],
+  };
+  const html = renderToString(createElement(TranscriptView, {
+    transcript: { messages: [msg], tools: [] }, busy: true, sessionLabel: "Demo",
+  }));
+
+  const summaries = [...html.matchAll(/<summary class="quarantine-head">([\s\S]*?)<\/summary>/g)].map((m) => m[1]);
+  assert.equal(summaries.length, 2, "both blocks render");
+  assert.match(summaries[0], /thinking\u2026/, "the in-progress block says so");
+  assert.ok(!/thinking\u2026/.test(summaries[1]), "the finished block must NOT — or the state means nothing");
+});
+
+test("the thinking state is a WORD, and does not repeat the message's own dot", () => {
+  // Two rejected versions, both recorded because each looked right in isolation.
+  //
+  // 1. A bare spinner would have been motion as the only carrier of meaning, which DESIGN §539 forbids.
+  // 2. A green `live-dot` beside the word was rendered and reported from use: "i think now it is redundant".
+  //    A thinking block only ever streams INSIDE an assistant message, whose `.role` line already shows
+  //    `● responding…` for the whole message; a tool call does not close the message, so `responding…` is on
+  //    screen the entire time a block is growing. The second dot repeated the first, one line lower.
+  //
+  // So: the word alone, and no dot anywhere in the summary.
+  const msg = {
+    id: "1", role: "assistant", streaming: true,
+    blocks: [{ kind: "thinking", text: "Working", complete: false }, { kind: "text", text: "…" }],
+  };
+  const html = renderToString(createElement(TranscriptView, {
+    transcript: { messages: [msg], tools: [] }, busy: true, sessionLabel: "Demo",
+  }));
+  const summary = /<summary class="quarantine-head">([\s\S]*?)<\/summary>/.exec(html)?.[1] ?? "";
+  assert.match(summary, /thinking\u2026/, `the word must be present: ${summary}`);
+  assert.ok(!/live-dot/.test(summary), `no dot may repeat the message's own indicator: ${summary}`);
+
+  // And the message-level indicator is still there, which is what makes the block's dot redundant.
+  assert.match(html, /responding\u2026/, "the message still says it is responding");
+});
+
+test("a thinking block with no text yet still shows it is running", () => {
+  // The first moment of a block is `thinking_start`: the text is empty. If the state were tied to the gist
+  // being non-empty, the bar would be silent for exactly the period the reader is waiting through.
+  const msg = {
+    id: "1", role: "assistant", streaming: true,
+    blocks: [{ kind: "thinking", text: "", complete: false }, { kind: "text", text: "…" }],
+  };
+  const html = renderToString(createElement(TranscriptView, {
+    transcript: { messages: [msg], tools: [] }, busy: true, sessionLabel: "Demo",
+  }));
+  assert.match(html, /thinking\u2026/, "an empty in-progress block still announces itself");
+  assert.ok(!html.includes("quarantine-gist"), "…but has no gist, which would be empty");
+});
