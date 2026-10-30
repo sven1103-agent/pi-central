@@ -679,6 +679,26 @@ button { font: inherit; color: inherit; }
 .quarantine-head .label { color: var(--quarantine-filter, var(--dim)); font-weight: 600; }
 .quarantine-head .tool-name { font-family: var(--mono); color: var(--text); }
 .quarantine-head .spacer { flex: 1; }
+/*
+ * The gist (issue #143).
+ *
+ * It sits to the RIGHT of the label and is truncated, so it can never push the summary wider than the
+ * bar or wrap it: `min-width: 0` is what allows a flex item to shrink below its content width, and
+ * without it a long gist would overflow the `<details>` instead of eliding.
+ *
+ * Dimmer and lighter than the label, because it is subordinate: the label says what KIND of block this
+ * is, the gist says which one. Not the `--quarantine` label colour: that says "this is data", and a gist
+ * is the agent's own prose — colouring it like tool output would be a lie about its provenance.
+ */
+.quarantine-gist {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+  opacity: 0.8;
+  text-align: right;
+}
 .quarantine-head .err { color: var(--danger-text); }
 .quarantine-body {
   padding: var(--sp-3);

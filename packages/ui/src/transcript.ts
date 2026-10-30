@@ -946,6 +946,62 @@ export function toolRunSummary(tools: ToolExecution[]): {
  * Many assistant messages are a tool call with no text at all — 212 of them in one real session —
  * and rendering a heading above nothing is pure noise.
  */
+/**
+ * One line of a thinking block, so four collapsed blocks are not four identical bars (issue #143).
+ *
+ * ## The defect this fixes
+ *
+ * A screenshot review of a real transcript found a column where SIX thinking blocks rendered as the
+ * same 700px-wide bar with the same single word in it. Nothing about them differed, so the feed's
+ * most common element carried no information: the eye cannot tell a two-second aside from a long
+ * derivation, cannot tell one block from the next, and cannot decide which to open. The one thing
+ * the reader wants from a collapsed block — "was this worth reading?" — was absent.
+ *
+ * ## Why the block's own words, and not a duration
+ *
+ * "Thought for 4s" was the obvious alternative and it is a worse answer here. `durationMs` exists on
+ * TOOL calls, not on thinking blocks, so a duration would have to be invented from arrival times —
+ * a number that measures the transport, not the thinking. The agent's first sentence is real, is
+ * already on the wire, and is the thing that actually says what the block is about.
+ *
+ * ## Why it cannot leak more than the block already does
+ *
+ * The body is rendered in full behind the same `<details>`, so the gist exposes nothing that opening
+ * the block would not. It is a preview of content already present and already marked as data.
+ *
+ * ## What the cap does NOT promise, and why the rest is not put on `title`
+ *
+ * A block whose distinguishing word arrives late — "Let me check whether this repository already has a
+ * helper for reading PNG bytes" — loses "PNG" to the 72-character cut, because the lead-in spent the
+ * budget. That is a real limit, and the first fix for it was a `title` carrying the whole block: hover the
+ * bar, read the lost word.
+ *
+ * That was wrong, and it took a reader to see why. A native tooltip holding an entire thought is a
+ * screen-filling panel that appears on a stray mouse-over — no click, no focus, no way to keep it open or
+ * dismiss it. A collapsed block exists so a long derivation costs ONE LINE until it is asked for; the gist
+ * is that one line. Opening the `<details>` is the only gesture that means "show me this".
+ *
+ * So the cap is honest instead: the gist may not contain the distinguishing word, and the way to read the
+ * rest is to open the block. Two different thoughts still produce two different gists in practice, which is
+ * the property that matters — a signature word surviving is common but not guaranteed.
+ */
+export function thinkingGist(text: string, max = 72): string {
+  // Collapse newlines and runs of space first: markdown prose wraps, and a gist with a line break in it
+  // is not one line. Then drop the leading markdown emphasis a thought often opens with (`**`, `_`, `#`),
+  // which costs characters and says nothing.
+  const flat = text
+    .replace(/\s+/g, " ")
+    .replace(/^[\s*_#>\-]+/, "")
+    .trim();
+  if (flat.length === 0) return "";
+  if (flat.length <= max) return flat;
+  // Cut at a word boundary rather than mid-word, and only announce the elision with an ellipsis: the
+  // block is expandable, so a reader who wants the rest knows exactly where to get it.
+  const cut = flat.slice(0, max);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > max * 0.5 ? cut.slice(0, space) : cut).replace(/[,;:.\u2014-]+$/, "")}…`;
+}
+
 export function hasProse(message: TranscriptMessage): boolean {
   return (
     message.blocks.some((block) => block.kind === "text" && block.text.trim().length > 0) ||

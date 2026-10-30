@@ -1807,3 +1807,76 @@ test("the sample does not pretend to preview the WIDTH", async () => {
     "the sample must not cap itself to the measure — the dialog clamps it anyway, so it proves nothing",
   );
 });
+
+// --- Collapsed thinking blocks are distinguishable (issue #143) -----------------------------------
+
+test("a collapsed thinking block shows a gist, so four blocks are not four identical bars", () => {
+  // From a screenshot review of a real transcript: six thinking blocks, all the same width, all reading
+  // only "Thinking". The feed's most common element carried no information — the eye could not tell a
+  // two-second aside from a long derivation, nor decide which to open.
+  const msg = {
+    id: "1", role: "assistant", streaming: false,
+    blocks: [
+      { kind: "thinking", text: "The user says the tests fail. Let me reproduce it first.", complete: true },
+      { kind: "thinking", text: "Now the symlink case, which is the suspicious one.", complete: true },
+      { kind: "text", text: "Found it." },
+    ],
+  };
+  const html = renderToString(createElement(TranscriptView, {
+    transcript: { messages: [msg], tools: [] }, busy: false, sessionLabel: "Demo",
+  }));
+  const gists = [...html.matchAll(/class="quarantine-gist"[^>]*>([^<]*)/g)].map((m) => m[1]);
+  assert.equal(gists.length, 2, `each thinking block gets a gist: ${html}`);
+  assert.notEqual(gists[0], gists[1], "…and they differ from each other, which is the whole fix");
+  assert.match(gists[0], /reproduce it first/);
+});
+
+test("a thinking block with no words still renders the label, and no empty gist", () => {
+  const msg = {
+    id: "1", role: "assistant", streaming: false,
+    blocks: [{ kind: "thinking", text: "   ", complete: true }, { kind: "text", text: "Done." }],
+  };
+  const html = renderToString(createElement(TranscriptView, {
+    transcript: { messages: [msg], tools: [] }, busy: false, sessionLabel: "Demo",
+  }));
+  assert.match(html, /Thinking/, "the block is still announced");
+  assert.ok(!html.includes("quarantine-gist"), "but no empty gist element is emitted");
+});
+
+test("a collapsed thinking block does NOT reveal its text on hover", () => {
+  // Reported from use: "on mouse hover i dont want to see the complete thinking block. I only want to see
+  // it when i explicitly open the thinking block. Otherwise on mouse over actions huge tool tips occur."
+  //
+  // A first version put the untruncated text on `title` so a word lost to the 72-character cap could be
+  // recovered by hovering. That handed the reader a screen-filling native tooltip on a stray mouse-over —
+  // no click, no focus, no way to keep it open or dismiss it. Collapsing exists so a long derivation costs
+  // ONE LINE until it is asked for; opening the `<details>` is the only gesture that means "show me this".
+  const long = `A very long thought. ${"more detail ".repeat(40)}`;
+  const msg = {
+    id: "1", role: "assistant", streaming: false,
+    blocks: [{ kind: "thinking", text: long, complete: true }, { kind: "text", text: "Done." }],
+  };
+  const html = renderToString(createElement(TranscriptView, {
+    transcript: { messages: [msg], tools: [] }, busy: false, sessionLabel: "Demo",
+  }));
+
+  const gistTag = /<span class="quarantine-gist"[^>]*>/.exec(html)?.[0];
+  assert.ok(gistTag !== undefined, `the gist must exist: ${html}`);
+  assert.ok(!/title=/.test(gistTag), `the gist must carry no tooltip: ${gistTag}`);
+
+  // The summary must be BOUNDED, not merely tooltip-free: the whole point is that a long derivation costs
+  // one line. Asserting "does not contain the full text" was the first attempt and it was wrong twice — the
+  // thought is 500 characters so any preview "fails" to contain it trivially, and the repeated padding words
+  // made the phrase check pass on the gist itself. Bounding the summary is the property that actually holds.
+  const summary = /<summary class="quarantine-head"[^>]*>([\s\S]*?)<\/summary>/.exec(html)?.[1] ?? "";
+  assert.ok(summary.length > 0, "the summary must exist");
+  assert.ok(
+    summary.length < 200,
+    `a collapsed summary must stay one line, not carry the thought (${summary.length} chars): ${summary}`,
+  );
+  assert.match(summary, /\u2026/, "the gist is elided, so no title is needed to shorten it");
+  assert.ok(!/title=/.test(summary), `nothing in the summary may pop a tooltip: ${summary}`);
+
+  // The full text is still there, inside `<details>`, so opening the block is what reveals it.
+  assert.ok(html.includes(long.slice(0, 80)), "the body still carries the whole thought");
+});
