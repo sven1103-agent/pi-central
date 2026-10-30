@@ -553,6 +553,36 @@ function Turn({ message }: { message: TranscriptMessage }) {
           <details key={i} className="quarantine" style={{ marginBottom: 8 }}>
             <summary className="quarantine-head">
               <span className="label">Thinking</span>
+              {/*
+                That this block is STILL BEING WRITTEN (issue #146).
+
+                Reported from use: "I definitely dont see any response in the thinking bar, there is no visual
+                indication that the thinking is still running. Users just see the bar and thats it."
+
+                The state was already on the wire — `TextBlock.complete` is set false by `thinking_start` and
+                true by `thinking_end` — it was simply not rendered. A block that is still growing looked
+                exactly like a finished one that had been collapsed, so a reader could not tell "it is
+                thinking right now" from "it thought, a while ago, about something else".
+
+                NO DOT. The first version put a green `live-dot` here beside the word, and the reader's verdict
+                was immediate: "i think now it is redundant". They were right, and the reason is structural —
+                a thinking block is only ever streamed INSIDE an assistant message, and the `.role` line above
+                already carries `● responding…` for as long as that message streams. A tool call does not
+                close the message (only `message_end` does), so `responding…` is on screen the whole time a
+                block is growing. The second dot therefore repeated the first, one line lower, with the same
+                colour.
+
+                It was also worse than merely redundant: `.live-dot` only pulses under `.state-streaming`, so
+                this was a STATIC green dot next to a pulsing one — two indicators of the same fact that did
+                not even agree on whether the fact was ongoing.
+
+                The word stays, because it is the part that says something the line above does not: WHICH part
+                of the response is still arriving. And the word was always the carrier — DESIGN §539, "no
+                motion is ever the only carrier of meaning" — so removing the decoration costs nothing.
+              */}
+              {block.kind === "thinking" && !block.complete && (
+                <span className="quarantine-state">thinking…</span>
+              )}
               {gist.length > 0 && (
                 <>
                   <span className="spacer" />

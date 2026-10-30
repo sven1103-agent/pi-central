@@ -682,6 +682,25 @@ button { font: inherit; color: inherit; }
 }
 .quarantine-head .label { color: var(--quarantine-filter, var(--dim)); font-weight: 600; }
 /*
+ * "thinking…" while a block is still being written (issue #146).
+ *
+ * It sits next to the label, not out at the right edge with the gist: the gist is a property of the content
+ * and grows as deltas arrive, while this is the block's STATE. Opposite ends would reflow the bar every time
+ * the gist got longer.
+ *
+ * `--dim`, and text only — no dot, no motion. The first version paired it with a green `live-dot` and the
+ * reader's verdict was "now it is redundant": a thinking block only ever streams inside an assistant message,
+ * whose `.role` line already shows `● responding…` the whole time. Two green dots one line apart, and only
+ * one of them pulsing, said the same thing twice and disagreed about whether it was still happening.
+ *
+ * The colour is `--dim` rather than `--ok` for the remaining word: green means "this session is live", which
+ * is a different fact from "this particular block is still arriving".
+ */
+.quarantine-state {
+  color: var(--dim);
+  font-weight: 400;
+}
+/*
  * The thinking head is a disclosure handle too, and it had NO hover while its peer did (issue #144).
  *
  * That asymmetry is the mechanical cause of the review's reading: a head that answers the mouse looks
