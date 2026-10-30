@@ -61,6 +61,23 @@ export interface UiState {
   transcriptErrors: Record<string, string>;
   /** The session the user is looking at. Not necessarily the one that is streaming. */
   focusedId: string | undefined;
+  /**
+   * A session the reader has ASKED for and that has not arrived yet (issue #144).
+   *
+   * Reported: "When I open a session (from the history or from scratch), it is not made the active one in
+   * the transcript window. That leads to confusion, and I started to type prompts into the wrong
+   * conversation."
+   *
+   * The `session` event's focus rule is `state.focusedId ?? event.session.id` — deliberately, so a session
+   * the reader is READING never has focus stolen by a broadcast about some other process. That rule is
+   * correct and stays. The bug was that nothing distinguished "a session appeared" from "the session I just
+   * asked for appeared", so the intent was lost the moment any session was already focused — which is the
+   * normal case.
+   *
+   * This is that intent, not a second focus. It is set by a local action when the reader starts or resumes,
+   * and consumed exactly once by the next NEW session to arrive.
+   */
+  focusNextNewSession: boolean;
   connection: "connecting" | "open" | "closed";
   connectionDetail: string | undefined;
   /** Errors worth showing, newest first. */
@@ -115,6 +132,7 @@ export function initialState(): UiState {
     queues: {},
     restoredQueue: {},
     focusedId: undefined,
+    focusNextNewSession: false,
     connection: "connecting",
     connectionDetail: undefined,
     errors: [],
@@ -153,7 +171,14 @@ export type LocalAction =
    * UI. A single event serving both is what made "the user clicked" indistinguishable from
    * "the supervisor sent an update".
    */
-  | { kind: "focusSession"; sessionId: string };
+  | { kind: "focusSession"; sessionId: string }
+  /**
+   * "The session I am about to create or resume should become the active one" (issue #144).
+   *
+   * Dispatched BEFORE the `start`/`resume` control is sent, because the orchestrator broadcasts the new
+   * session synchronously in reply — so the intent has to already be in the store when that event lands.
+   */
+  | { kind: "expectNewSession" };
 
 export function reduce(
   state: UiState,
@@ -164,6 +189,10 @@ export function reduce(
   if (event.kind === "queueRestored") {
     const { [event.sessionId]: _taken, ...restoredQueue } = state.restoredQueue;
     return { ...state, restoredQueue };
+  }
+  if (event.kind === "expectNewSession") {
+    // A flag, not an id: the id does not exist yet. Consumed by the next new `session` event.
+    return state.focusNextNewSession ? state : { ...state, focusNextNewSession: true };
   }
   if (event.kind === "focusSession") {
     // Ignored when the session is not live. Focus and presence are different facts, and clearing the
@@ -206,9 +235,29 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
       const live = index === -1
         ? [...state.live, event.session]
         : state.live.map((s) => (s.id === event.session.id ? event.session : s));
-      // Focus a newly started session, but never steal focus from one the user is reading.
-      const focusedId = state.focusedId ?? event.session.id;
-      return { ...state, live, focusedId };
+      /*
+       * Focus a newly started session, but never steal focus from one the user is reading.
+       *
+       * The `??` alone is not enough (issue #144): it focuses a new session only when NOTHING was focused,
+       * which is the rare case. When the reader already has a session open and starts another, the
+       * `focusedId` is set, so the `??` keeps the OLD one and the new session opens invisibly — the reader
+       * then types into a conversation they cannot see.
+       *
+       * `focusNextNewSession` is the missing half: an explicit "I asked for this one". It is consumed only
+       * by a session that is NEW to the list (`index === -1`), so a later broadcast about an existing
+       * session cannot trigger it, and it is cleared either way so a failed start does not redirect the
+       * NEXT unrelated session.
+       */
+      const arrived = index === -1;
+      const focusedId = state.focusNextNewSession && arrived
+        ? event.session.id
+        : (state.focusedId ?? event.session.id);
+      return {
+        ...state,
+        live,
+        focusedId,
+        focusNextNewSession: arrived ? false : state.focusNextNewSession,
+      };
     }
 
     case "record": {
@@ -304,8 +353,13 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
       return state;
 
     case "error":
+      // An error DISARMS a pending "focus the session I asked for" (issue #144). The orchestrator answers a
+      // refused `start`/`resume` with an error and no `session` event, so without this the intent would sit
+      // armed and pull the view to some unrelated session later. It is spent, not deferred: the reader's
+      // request did not produce a session, so there is nothing to focus.
       return {
         ...state,
+        focusNextNewSession: false,
         errors: [event.message, ...state.errors].slice(0, MAX_ERRORS),
       };
   }
