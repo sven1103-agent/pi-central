@@ -407,11 +407,15 @@ export function App() {
   }, [send]);
 
   const onStartSession = useCallback(() => {
+    // Ask for focus BEFORE the control goes out: the orchestrator answers `start` with the new `session`
+    // event synchronously, so the intent has to be in the store when that event lands (issue #144).
+    dispatch({ kind: "expectNewSession" });
     send({ kind: "start" });
   }, [send]);
 
   const onOpenDirectory = useCallback(
     (cwd: string) => {
+      dispatch({ kind: "expectNewSession" });
       send({ kind: "start", cwd });
       setSheetOpen(false);
       setTab("sessions");
@@ -556,6 +560,9 @@ export function App() {
               historyTotal={state.historyTotal}
               home={home}
               onResume={(session: HistoricalSession) => {
+                // Same as starting: the reader asked for THIS session, so it must become the active one
+                // even when another is already focused (issue #144).
+                dispatch({ kind: "expectNewSession" });
                 send({ kind: "resume", path: session.path });
                 setTab("sessions");
               }}

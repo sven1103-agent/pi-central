@@ -702,3 +702,96 @@ test("a snapshot that omits the facts CLEARS them, because a snapshot is authori
   });
   assert.equal(afterOlder.install, undefined, "a snapshot without the facts must not retain older ones");
 });
+
+// --- The session you asked for becomes the active one (issue #144) -------------------------------
+
+test("starting a session while another is focused focuses the NEW one", () => {
+  // The report, verbatim: "When I open a session (from the history or from scratch), it is not made the
+  // active one in the transcript window. That leads to confusion, and I started to type prompts into the
+  // wrong conversation."
+  //
+  // The `session` event's rule is `focusedId ?? newId` — "never steal focus from a session the reader is
+  // reading". That rule is correct and stays. The missing piece was intent: nothing distinguished "a
+  // session appeared" from "the session I just asked for appeared", so with anything already focused the
+  // new one opened invisibly.
+  let state = reduce(initialState(), { kind: "session", session: live({ id: "s1" }) });
+  assert.equal(state.focusedId, "s1");
+
+  // The reader clicks "New session": intent is recorded, then the control goes out.
+  state = reduce(state, { kind: "expectNewSession" });
+  state = reduce(state, { kind: "session", session: live({ id: "s2" }) });
+
+  assert.equal(state.focusedId, "s2", "the session the reader asked for must become active");
+  assert.equal(focusedSession(state)?.id, "s2");
+});
+
+test("an UNREQUESTED session still never steals focus", () => {
+  // The original rule must survive, or this fix trades one bug for a worse one: a background broadcast
+  // pulling the reader out of what they are reading. A session that appears without `expectNewSession` is
+  // exactly the case the `??` was protecting.
+  let state = reduce(initialState(), { kind: "session", session: live({ id: "s1" }) });
+  state = reduce(state, { kind: "session", session: live({ id: "s9" }) });
+  assert.equal(state.focusedId, "s1", "a session appearing on its own must not move the view");
+});
+
+test("the intent is consumed once, so it cannot redirect a LATER session", () => {
+  // A flag that stays set would make every subsequent new session jump the view — turning a one-shot
+  // request into "the view follows any new process forever". It is cleared by the first NEW session.
+  let state = reduce(initialState(), { kind: "session", session: live({ id: "s1" }) });
+  state = reduce(state, { kind: "expectNewSession" });
+  state = reduce(state, { kind: "session", session: live({ id: "s2" }) });
+  assert.equal(state.focusedId, "s2");
+
+  state = reduce(state, { kind: "session", session: live({ id: "s3" }) });
+  assert.equal(state.focusedId, "s2", "the second new session must NOT pull focus again");
+});
+
+test("a broadcast about an EXISTING session does not consume the intent", () => {
+  // `session` is an upsert, so it also fires for routine updates to a session already in the list. If that
+  // consumed the flag, a heartbeat landing between the intent and the new session would swallow it — the
+  // original bug, intermittently.
+  let state = reduce(initialState(), { kind: "session", session: live({ id: "s1" }) });
+  state = reduce(state, { kind: "expectNewSession" });
+  // An update to the session the reader is already looking at.
+  state = reduce(state, { kind: "session", session: live({ id: "s1", state: "streaming" }) });
+
+  // Asserting the FLAG is the point, not `focusedId`. A first version checked only `focusedId`, and that
+  // could not fail: the stray event here is about `s1`, which is already focused, so "focus s1" is a no-op
+  // and the assertion held even with the `arrived` guard removed. The flag is the thing that distinguishes
+  // a consumed intent from a surviving one.
+  assert.equal(state.focusNextNewSession, true, "the intent must survive an update to an existing session");
+
+  state = reduce(state, { kind: "session", session: live({ id: "s2" }) });
+  assert.equal(state.focusedId, "s2", "…and still apply to the session that actually arrives");
+});
+
+test("a failed start does not leave the intent armed", () => {
+  // If the orchestrator refuses, no `session` event arrives. The flag must not sit there waiting to
+  // redirect an unrelated session minutes later.
+  let state = reduce(initialState(), { kind: "session", session: live({ id: "s1" }) });
+  state = reduce(state, { kind: "expectNewSession" });
+  state = reduce(state, { kind: "error", message: "could not start: port in use" });
+  assert.equal(state.focusedId, "s1", "focus must not move on an error");
+  assert.equal(state.focusNextNewSession, false, "…and the intent must be spent, not left armed");
+});
+
+test("an update to ANOTHER existing session must not consume the intent", () => {
+  // The case the `arrived` guard exists for, and the one my first attempt could not see: with two sessions
+  // live and the reader focused on s1, a routine `session` broadcast about s2 while the intent is armed
+  // would — without the guard — move focus to s2 and swallow the request. That is worse than the original
+  // bug, because it takes the reader somewhere they never asked to go.
+  let state = reduce(initialState(), { kind: "session", session: live({ id: "s1" }) });
+  state = reduce(state, { kind: "snapshot", live: [live({ id: "s1" }), live({ id: "s2" })], history: [], historyTotal: 0, home: "/Users/x" });
+  assert.equal(state.focusedId, "s1");
+
+  state = reduce(state, { kind: "expectNewSession" });
+  // A heartbeat about the OTHER session, which is not the one the reader is waiting for.
+  state = reduce(state, { kind: "session", session: live({ id: "s2", state: "streaming" }) });
+
+  assert.equal(state.focusedId, "s1", "an unrelated update must not move the view");
+  assert.equal(state.focusNextNewSession, true, "…nor consume the pending request");
+
+  // …and the request still applies when its session finally arrives.
+  state = reduce(state, { kind: "session", session: live({ id: "s3" }) });
+  assert.equal(state.focusedId, "s3");
+});
