@@ -255,6 +255,32 @@ npm audit signatures
 
 This is the difference between "the maintainer says this is the code" and "this can be verified".
 
+### What it does not cover, stated plainly
+
+Provenance is the answer to *"did the publisher produce this artifact?"*. It is **not** an answer to
+anything else, and three gaps are worth naming because each has a real incident behind it:
+
+**1. Nobody enforces it.** npm shows an attestation badge; it does not refuse an unattested tarball,
+and neither does `npx`. Verification is a command the user has to know to run — which is why it is in
+the README's install section and not only here. Evidence nobody checks is a claim, not a control.
+
+**2. It cannot vouch for the publisher.** If the release identity were compromised, the attestation
+would be *valid* and the artifact malicious. Provenance is only as trustworthy as the identity minting
+it. On 2026-10-29 a trojanized `Anthropic.claude-code` 2.1.313 was served by the Cursor extension
+marketplace for eleven hours and reached ~5,000 machines: the artefact was not produced by Anthropic
+at all, and the marketplace had no way for a user to tell. That is the failure a transparency log and
+*required* verified provenance exist to prevent — the two halves most publishing systems skip.
+
+**3. It says nothing about what the code may DO.** The same incident is the illustration: even a
+correctly signed extension ran unsandboxed and wrote `~/.ssh/authorized_keys`. Attestation is about
+authenticity; confinement is about capability. Pi Central answers the second one for **sessions**
+(the Safehouse profile) and not for **itself** — the orchestrator runs with the user's privileges by
+design, because it is the thing that spawns the sandbox. A malicious release of Pi Central would not
+need an exploit.
+
+So the honest summary: provenance makes a **tampered** tarball detectable. It cannot make a
+**genuinely malicious** release safe, and it is not checked unless someone asks.
+
 ## Rolling back
 
 Releases are append-only. `npm unpublish` is available only for a short window, breaks anyone who
