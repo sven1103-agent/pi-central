@@ -123,6 +123,24 @@ npx pi-central
 Once it is running, [install it as an app](#install-it-as-an-app) and you will not need the terminal
 again until the next reboot.
 
+#### Verify what you installed
+
+```bash
+npm audit signatures
+```
+
+Every release carries a **provenance attestation** — a signed statement, minted by the release
+workflow's OIDC identity rather than a stored token, that this tarball came from this commit via this
+workflow. That command checks it, along with the registry signature.
+
+**Be clear about what this does and does not do.** It is a check you have to run; npm does not refuse
+an unattested tarball, and neither does the app. And it answers *"did the publisher produce this?"* —
+**not** *"is the publisher trustworthy?"*. Pi Central runs **outside** the sandbox (see the constraint
+above) with your privileges, deliberately, because it is the component that spawns the sandboxed
+sessions. A malicious release of it would not need an exploit; it would have exactly what you have.
+The attestation is what lets you tell a tampered tarball from a genuine one. It cannot make a genuine
+tarball safe.
+
 The package is **one bundled ESM file plus the built UI**, with a single runtime dependency (`ws`),
 and `pi-central --version` reports the version of the package it was actually shipped in.
 

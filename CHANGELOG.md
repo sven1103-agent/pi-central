@@ -202,6 +202,22 @@ They are kept because each one is the reason a constraint or an invariant test e
   header version is known — the same rule `discover` applies, now shared through one `describeSessionFile` so
   the History pane and Resume cannot disagree about what a valid session is.
 
+### Added
+
+- **How to verify what you installed, and what that check cannot tell you.**
+
+  Every release already carried a provenance attestation; nothing told a *user* to check it, and
+  `docs/RELEASING.md` described it more confidently than it deserves. Prompted by the 2026-10-29 Cursor
+  marketplace incident — a trojanized `Anthropic.claude-code` 2.1.313 served for eleven hours to ~5,000
+  machines — the README's install section now says `npm audit signatures` in one line, and three limits are
+  written down rather than implied:
+
+  1. **Nobody enforces it.** npm does not refuse an unattested tarball. Evidence nobody checks is a claim,
+     not a control.
+  2. **It cannot vouch for the publisher.** A compromised release identity produces a *valid* attestation.
+  3. **It says nothing about what the code may do.** That incident's payload ran unsandboxed and wrote
+     `~/.ssh/authorized_keys`. Pi Central answers capability confinement for **sessions**, not for **itself**.
+
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.4.1] — 2026-10-29
