@@ -2068,3 +2068,29 @@ test("Forget is offered only on a row that is not running", () => {
   }));
   assert.ok(!/rail-row-forget/.test(running), `a running row must not offer Forget: ${running}`);
 });
+
+test("a scratch session that is not running shows 'Scratch session', not its handle", () => {
+  // Reported after a restart: "they carry the handle name". The remembered row must use the same labelling rule
+  // as a live one, or the two paths disagree and the row loses the only human-readable word it had.
+  const html = renderToString(createElement(SessionRail, {
+    rows: [{ entry: { path: "/s/a/s2.jsonl", name: "s2", scratch: true, cwd: "/w/s2" }, session: undefined }],
+    focusedId: undefined, onFocusRow() {}, onForgetRow() {}, onStartSession() {}, onOpenDirectory() {},
+    home: undefined, historyTotal: 0,
+  }));
+  assert.match(html, /Scratch session/, `the generic label, not the handle: ${html}`);
+  assert.ok(!/>s2</.test(html), `the bare handle must not be the row's name: ${html}`);
+});
+
+test("a remembered row with a placeholder name shows a label, never the word", () => {
+  const html = renderToString(createElement(SessionRail, {
+    rows: [
+      { entry: { path: "/s/a/x.jsonl", name: "undefined", scratch: true }, session: undefined },
+      { entry: { path: "/s/a/y.jsonl", name: "Undefined" }, session: undefined },
+    ],
+    focusedId: undefined, onFocusRow() {}, onForgetRow() {}, onStartSession() {}, onOpenDirectory() {},
+    home: undefined, historyTotal: 0,
+  }));
+  assert.ok(!/undefined/i.test(html.replace(/live:undefined|data-[a-z-]+="[^"]*"/g, "")), `no placeholder word: ${html}`);
+  assert.match(html, /Scratch session/);
+  assert.match(html, /y</, "a non-scratch unnamed row falls back to its file name");
+});

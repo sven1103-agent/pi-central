@@ -9,7 +9,7 @@
  */
 import { useMemo, useState } from "react";
 import type { LiveSession } from "@pi-central/protocol";
-import { displayName, formatContext, formatCost, formatModel, formatThinking, shortenPath, whereLine } from "../format.ts";
+import { displayName, formatContext, formatCost, formatModel, formatThinking, nameLabel, shortenPath, whereLine } from "../format.ts";
 import { stateLabel } from "../store.ts";
 import { groupRows, rowActivity, type RosterRow } from "../roster.ts";
 
@@ -159,10 +159,18 @@ function rowKey(row: RosterRow): string {
   return row.session?.id ?? row.entry.path;
 }
 
-/** What to call a row before anything else answers. Never the handle for a row that is not running. */
+/**
+ * What to call a row — the SAME rule for a live session and one that is not running.
+ *
+ * The first version read `entry.name` raw for a remembered row, which is how a scratch session came back after a
+ * restart as `s2` instead of `Scratch session`, and how a placeholder value came back as the word itself. One
+ * function decides, so the two paths cannot disagree.
+ *
+ * A remembered entry with no id of its own uses the file name, which is stable and at least identifies the row.
+ */
 function rowName(row: RosterRow): string {
   if (row.session !== undefined) return displayName(row.session);
-  return row.entry.name ?? filenameOf(row.entry.path);
+  return nameLabel(row.entry.name, row.entry.scratch === true, filenameOf(row.entry.path));
 }
 
 /** The file's name without its extension, as a last-resort label. */

@@ -22,6 +22,7 @@ import {
   type RosterEntry,
 } from "../src/roster.ts";
 import type { LiveSession } from "@pi-central/protocol";
+import { nameLabel } from "../src/format.ts";
 
 /** A live session with only the fields these rules read. */
 const live = (over: Partial<LiveSession> & { id: string }): LiveSession =>
@@ -98,6 +99,9 @@ test("the durable KEY is the session file, never the handle", () => {
     path: "/s/a/s1.jsonl",
     cwd: "/git/a",
     name: "session s1",
+    // Recorded even when false: a session that is NOT scratch must not be mistaken for one after a restart,
+    // because the LABEL depends on this flag.
+    scratch: false,
   });
 });
 
@@ -199,4 +203,55 @@ test("no pending prompt resolves to nothing", () => {
 
 test("a pending prompt for a session that never comes back stays parked", () => {
   assert.equal(sessionForPendingPrompt({ path: "/s/a/gone.jsonl" }, [live({ id: "s1", sessionFile: "/s/b/x.jsonl" })]), undefined);
+});
+
+// --- The label after a restart (reported from use) -----------------------------------------------
+
+test("a scratch session stored with its handle is still labelled 'Scratch session' after a restart", () => {
+  // Reported: "when i create scratch sessions without a name, they are called Undefined in the roster. Now when i
+  // restart, they carry the handle name."
+  //
+  // Two symptoms, one defect: the remembered row read `entry.name` RAW, so whatever had been stored was shown.
+  // A scratch session's default name IS its handle, so a restart showed `s2` where the rail had said
+  // `Scratch session`.
+  const entry = rosterEntryFor(live({ id: "s2", name: "s2", scratch: true, sessionFile: "/s/a/s2.jsonl" }))!;
+  const [row] = rosterRows([entry], []);
+  assert.equal(nameLabel(row!.entry.name, row!.entry.scratch === true, row!.entry.path), "Scratch session");
+});
+
+test("a stored placeholder name never reaches the rail as a word", () => {
+  // The other half of the same report: a value that arrived as `undefined` was stored and rendered as though a
+  // person had typed it. A placeholder is not a name.
+  for (const placeholder of ["undefined", "Undefined", "", "   ", null, undefined]) {
+    assert.equal(
+      nameLabel(placeholder ?? undefined, true, "s1"),
+      "Scratch session",
+      `scratch + ${JSON.stringify(placeholder)}`,
+    );
+    assert.equal(nameLabel(placeholder ?? undefined, false, "s1"), "s1", `named + ${JSON.stringify(placeholder)}`);
+  }
+});
+
+test("a name a person chose survives a restart unchanged", () => {
+  assert.equal(nameLabel("refactor auth", true, "s1"), "refactor auth");
+  assert.equal(nameLabel("refactor auth", false, "s1"), "refactor auth");
+});
+
+test("scratch is persisted, so the label rule works after a restart", () => {
+  // Without this flag a remembered row cannot know it was a scratch session, and falls back to its handle.
+  const entry = rosterEntryFor(live({ id: "s3", name: "s3", scratch: true, sessionFile: "/s/a/s3.jsonl" }))!;
+  const roundTripped = parseRoster(serializeRoster([entry]));
+  assert.equal(roundTripped[0]!.scratch, true);
+});
+
+test("a non-scratch session is NOT labelled scratch after a restart", () => {
+  // The flag is recorded even when false, so the rule cannot misfire in the other direction.
+  const entry = rosterEntryFor(live({ id: "s4", name: "", scratch: false, sessionFile: "/s/a/s4.jsonl" }))!;
+  assert.equal(entry.scratch, false);
+  const [restored] = parseRoster(serializeRoster([entry]));
+  // The label is computed BEFORE any assertion: `assert.equal` narrows the value it checks, and comparing a
+  // narrowed literal to `true` is a compile error rather than a failing test.
+  const label = nameLabel(restored!.name, restored!.scratch === true, restored!.path);
+  assert.equal(label, restored!.path, "falls back to the path, and is not labelled scratch");
+  assert.equal(restored!.scratch, false, "the flag survived the round trip as false, not undefined");
 });

@@ -262,6 +262,25 @@ They are kept because each one is the reason a constraint or an invariant test e
   irreversible. It is offered only on a row that is **not running**: hiding a live process from the rail while it
   keeps working and spending would make the roster lie about what is happening.
 
+### Fixed
+
+- **A session's name is decided by one rule, so a restart does not rename it** (issue #89, reported from use).
+
+  > *"when i create scratch sessions without a name, they are called Undefined in the roster. Now when i restart,
+  > they carry the handle name."*
+
+  Two symptoms, one defect. A row that was **not running** read its stored name **raw**, while a live row went
+  through `displayName`. So whatever had been persisted was rendered as though a person had chosen it. And a
+  scratch session's *default* name is its handle (`defaultName` falls back to the id), so the same session was
+  `Scratch session` before a restart and `s2` after it.
+
+  `nameLabel(name, scratch, id)` is now the single rule, used by both paths. A name is shown only when it is a
+  name a person chose — a handle, an empty string, or a value that arrived as `undefined` is not information.
+
+  **`scratch` is persisted** in the roster entry. The label depends on it and a remembered row has no way to
+  know otherwise, which is what made the handle appear. Recorded even when `false`, so the rule cannot misfire in
+  the other direction.
+
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.4.1] — 2026-10-29
