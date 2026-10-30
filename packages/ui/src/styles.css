@@ -666,14 +666,18 @@ button { font: inherit; color: inherit; }
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: 5px 10px;
-  font-size: var(--fs-xs);
+  padding: 2px 2px;
+  font-size: var(--fs-2xs);
   color: var(--dim);
-  background: var(--panel-2);
-  border-bottom: 1px solid var(--line);
+  /*
+   * FLAT, and this is the hierarchy (issue #144). The filled `--panel-2` head made a collapsed thinking
+   * block — a preview of reasoning the reader is skipping — heavier than the tool row recording what ran.
+   * No background, no divider: it recedes until hovered or opened.
+   */
+  background: none;
+  border: none;
   cursor: pointer;
   width: 100%;
-  border-left: none; border-right: none; border-top: none;
   text-align: left;
 }
 .quarantine-head .label { color: var(--quarantine-filter, var(--dim)); font-weight: 600; }
@@ -684,30 +688,47 @@ button { font: inherit; color: inherit; }
  * operable, and one that does not looks like a static strip of chrome. Both are `<details>`; only one said
  * so. It now lights up with the same token the tool bar uses, so the two respond identically.
  */
-.quarantine-head:hover { background: var(--panel-3); color: var(--text); }
 /*
- * Two peer disclosures, one register (issue #144).
+ * Hover, on a head with no resting fill: this one ADDS `--panel-2` rather than stepping up from a fill. That
+ * is the mirror of the tool bar, which steps `--panel` -> `--panel-2`, so both arrive at the same visible
+ * state while starting from different ones — which is what makes hover feel like the same affordance without
+ * making the rows look the same at rest.
+ */
+.quarantine-head:hover { background: var(--panel-2); color: var(--text); }
+/*
+ * THE HIERARCHY, stated once (issue #144).
  *
- * The screenshot review of a real transcript read the thinking block as the "big filled container" and the
- * tool row as a "thin muted line", and concluded the hierarchy was inverted — that the inert content was
- * louder than the actionable content. The premise was half wrong: BOTH are `<details>` you can open. But the
- * sizes DID disagree, and that disagreement is what produced the impression:
+ * The review's finding, and the reader's agreement: "The tool call is the more important signal to the user
+ * than the thinking."
  *
- *   thinking block head : --fs-xs  (11px), filled --panel-2
- *   tool marker summary : --fs-2xs (10px), flat --panel
+ * The first attempt at this got the principle wrong. It found that the two heads were 1px apart with
+ * different fills, called that an inconsistency, and made them EQUAL. Equal does not fix an inversion — it
+ * removes the means of telling them apart, which is the same failure with a tidier table. What the hierarchy
+ * needs is not parity but ORDER, and the review had already named it.
  *
- * Two 1px-apart sizes, two different fills, for two controls that do the same job on the same screen. The
- * eye cannot read that as "one of these is more important" because there is no consistent scale to read it
- * against — it reads as noise, and the noise lands on whichever one the reader happens to compare.
+ * Three levels, and the middle one is the whole point:
  *
- * The fix is ONE size for both heads — the LARGER of the two, `--fs-xs` — and the same hover fill. Neither
- * the smaller number nor a compromise: the thinking head now carries a sentence (the gist from #143), and
- * reading a sentence at 10px was the actual complaint about the tool row being "a thin muted line". The
- * tool bar inheriting the bigger size is the review's point taken seriously, not overruled.
+ *   1. the reader's own words and the assistant's prose   — full --text on --bg
+ *   2. the work: a tool call                              — --text, filled --panel, quarantine gutter
+ *   3. the reasoning about to be done                     — --dim, flat, no fill, no gutter
  *
- * It deliberately does NOT copy the thinking block's resting fill onto the tool bar: the tool marker is the
- * denser row (a name, a state and a byte count, dozens per session), so a fill on every one would turn the
- * transcript into stripes. Hover is where the affordance lives, and now both respond the same way.
+ * ## What was actually inverted, measured
+ *
+ * The tool bar ran ALL of its text through `--quarantine` (#586069) — including the tool names — which is
+ * 2.71:1 on `--panel`. The thinking block's label was `--dim` at 5.62:1. So the row showing WHAT RAN was
+ * less than half as legible as the row showing that something was being thought about, and the thinking
+ * block additionally carried a filled `--panel-2` head. Both errors point the same way.
+ *
+ * ## Why thinking is the demoted one, not the tool call
+ *
+ * Thinking is a preview of something the reader usually does not need: it is the agent's reasoning, it is
+ * long, it is the thing collapsed by default, and its job is to be skippable. A tool call is evidence — it
+ * records what was executed against the machine, it is the audit trail, and it is what the trust legend in
+ * the header is about. When a reader scans a session for "what actually happened", they scan the tool rows.
+ *
+ * So thinking goes flat and quiet: no resting fill, `--dim` label, no gutter. It still opens, and it still
+ * carries the gist from #143 — it is demoted, not hidden. The tool bar keeps its filled `--panel` head, its
+ * quarantine gutter, and gets `--text` names so it is legible at a glance.
  */
 .quarantine-head .tool-name { font-family: var(--mono); color: var(--text); }
 .quarantine-head .spacer { flex: 1; }
@@ -1465,10 +1486,25 @@ select.btn { font-family: var(--sans); }
      data, not the assistant" — the words are the signal under `forced-colors`, where the hatch is dropped. */
   color: var(--quarantine);
   font-weight: 600;
-  /* The default triangle is replaced by `.m-open` below, which rotates with the disclosure — one
-     affordance that moves, rather than a triangle plus an arrow saying the same thing. */
+  /*
+   * The default triangle is replaced by `.m-open` below, which rotates with the disclosure — one
+   * affordance that moves, rather than a triangle plus an arrow saying the same thing.
+   */
+
+  /* The WORK tier (issue #144). The bar's base colour stays `--quarantine` for its structural parts, but
+     the tool NAMES are the thing a reader scans for — they were inheriting `--quarantine`, which is 2.71:1
+     on `--panel` and the least legible text in the transcript. See `.m-names` below. */
+  background: var(--panel);
 }
 .tool-marker-summary::-webkit-details-marker { display: none; }
+/*
+ * The tool names are the signal (issue #144).
+ *
+ * They inherited the bar's `--quarantine` (#586069), which measures 2.71:1 against `--panel` — the dimmest
+ * text anywhere in the transcript, on the row that records what actually ran. The thinking block's label sat
+ * at 5.62:1 for content the reader is usually skipping. Full `--text` (14.6:1) puts the work above the
+ * reasoning, which is the order the reader asked for.
+ */
 /*
  * The hover, and the no-op it used to contain (issue #144).
  *
@@ -1552,6 +1588,13 @@ select.btn { font-family: var(--sans); }
   white-space: nowrap;
   flex: 1;
   min-width: 0;
+  /*
+   * THE WORK IS THE SIGNAL (issue #144). These were inheriting the bar's `--quarantine` (#586069), which is
+   * 2.71:1 on `--panel` — the dimmest text in the transcript, on the row recording what actually ran, while
+   * the thinking block's label sat at 5.62:1 for content the reader is usually skipping. Full `--text` is
+   * 14.6:1 and puts the work above the reasoning.
+   */
+  color: var(--text);
 }
 .tool-marker .m-failed { color: var(--danger-text); }
 .tool-marker .m-running { color: var(--ok-text); }

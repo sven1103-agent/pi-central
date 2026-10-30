@@ -1,73 +1,99 @@
 /**
- * Two peer disclosures must share one register (issue #144).
+ * The hierarchy: the work ranks above the reasoning (issue #144).
  *
- * From a screenshot review of a real transcript: "Tool-call rows are visually weaker than the thinking
- * boxes — the actionable/expandable content is a thin muted line, while the non-actionable thinking blocks
- * get big filled containers. Hierarchy is inverted."
+ * From a screenshot review, and confirmed by the reader: "The tool call is the more important signal to the
+ * user than the thinking."
  *
- * The premise was half wrong — BOTH are `<details>` you can open — but the sizes DID disagree (10px vs 11px)
- * with different fills, and a 1px gap cannot read as a hierarchy. It reads as inconsistency.
+ * The FIRST attempt at this fix got the principle wrong. It found the two heads 1px apart with different
+ * fills, called that an inconsistency, and made them EQUAL. Equal does not fix an inversion — it removes the
+ * means of telling them apart, which is the same failure with a tidier table. These tests assert ORDER.
+ *
+ *   1. the reader's words and the assistant's prose  — --text on --bg
+ *   2. the work: a tool call                         — --text names, filled --panel, quarantine gutter
+ *   3. the reasoning about to be done                — --dim, flat, no fill, no gutter
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+const raw = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+const css = raw.replace(/\/\*[\s\S]*?\*\//g, "");
 
-/** The LAST declaration of a property in the LAST rule for a selector — source order wins. */
+/** The LAST rule for a selector: source order wins, so the first match can be a stale earlier draft. */
 function rule(selector) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const matches = [...css.matchAll(new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`, "g"))];
   return matches.length === 0 ? undefined : matches[matches.length - 1][1];
 }
+const prop = (selector, name) =>
+  new RegExp(`(?:^|;|\\s)${name}:\\s*([^;]+)`).exec(rule(selector) ?? "")?.[1]?.trim();
 
-test("the two disclosure heads share one text size", () => {
-  // 10px next to 11px is not a scale — it is two numbers that happen to differ. The eye cannot rank them,
-  // so the only thing the difference communicates is that nobody chose.
-  const sizeOf = (selector) =>
-    /font-size:\s*var\(--([a-z0-9-]+)\)/.exec(rule(selector) ?? "")?.[1] ?? "none";
-  const thinking = sizeOf(".quarantine-head");
-  const tools = sizeOf(".tool-marker-summary");
-  assert.ok(thinking !== "none" && tools !== "none", `both heads must set a size: ${thinking} / ${tools}`);
-  assert.equal(tools, thinking, `the two heads must agree, got ${tools} vs ${thinking}`);
+/** WCAG relative luminance, for the contrast claim rather than a colour name comparison. */
+const lum = (hex) => {
+  const ch = [1, 3, 5].map((i) => {
+    const v = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+};
+const contrast = (a, b) => {
+  const [x, y] = [lum(a), lum(b)];
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+};
+const token = (name) => new RegExp(`--${name}:\\s*(#[0-9a-f]{6})`, "i").exec(raw)?.[1];
+
+test("the tool names are more legible than the thinking label", () => {
+  // This is the inversion, measured. The tool names inherited `--quarantine` at 2.71:1 while the thinking
+  // label sat at `--dim`, 5.62:1 — so the row showing WHAT RAN was less than half as legible as the row
+  // saying something was being thought about. A pixel comparison would not have caught this; contrast does.
+  const names = prop(".tool-marker .m-names", "color");
+  const thinkingLabel = prop(".quarantine-head", "color");
+  assert.ok(names && thinkingLabel, `both must declare a colour: ${names} / ${thinkingLabel}`);
+
+  const resolve = (v) => token(/^var\(--([a-z0-9-]+)\)$/.exec(v)?.[1] ?? "");
+  const bg = token("panel");
+  assert.ok(bg, "need --panel to measure against");
+
+  const workContrast = contrast(resolve(names), bg);
+  const thinkContrast = contrast(resolve(thinkingLabel), bg);
+  assert.ok(
+    workContrast > thinkContrast,
+    `the work must out-rank the reasoning: names ${workContrast.toFixed(2)}:1 vs thinking ${thinkContrast.toFixed(2)}:1`,
+  );
+  assert.ok(workContrast >= 4.5, `the tool names must be AA-readable, got ${workContrast.toFixed(2)}:1`);
 });
 
-test("both disclosure heads respond to hover the same way", () => {
-  const hasHover = (selector) => {
-    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(`(?:^|\\n)${escaped}:hover\\s*\\{`).test(css);
-  };
-  assert.ok(hasHover(".tool-marker-summary"), "the tool bar is a disclosure handle and must show it");
-  // The thinking head had no hover at all while its peer did, which is the asymmetry that reads as
-  // "one of these is interactive and the other is not". They are both `<details>`.
-  assert.ok(hasHover(".quarantine-head"), "the thinking head is a disclosure handle too");
+test("only the work carries a resting fill", () => {
+  // The "big filled container" the review saw was on the THINKING block — content the reader is usually
+  // skipping. A fill is what makes a row read as a record; it belongs to the row that records something.
+  const thinkingBg = prop(".quarantine-head", "background");
+  assert.equal(thinkingBg, "none", `the thinking head must be flat, got ${thinkingBg}`);
+  assert.ok(prop(".tool-marker", "background"), "the tool marker keeps its fill");
 });
 
-test("the tool bar's hover is not a no-op", () => {
-  // The reported defect: `.tool-marker-summary:hover { background: var(--panel) }` — and `--panel` is
-  // `.tool-marker`'s OWN background, so the background half did nothing. Only the colour changed, on a 10px
-  // bar. Worse, a comment credited that hover with the decision to drop the hatch (#138), so the state that
-  // carried the judgement was not the state that shipped.
-  const markerBg = /background:\s*var\(--([a-z0-9-]+)\)/.exec(rule(".tool-marker") ?? "")?.[1];
-  assert.ok(markerBg, "the marker must set a background for this comparison to mean anything");
-  const hoverBg = /background:\s*var\(--([a-z0-9-]+)\)/.exec(rule(".tool-marker-summary:hover") ?? "")?.[1];
-  assert.ok(hoverBg, "the hover must change the background, not only the text colour");
-  assert.notEqual(hoverBg, markerBg, `hover background must differ from the marker's own (${markerBg})`);
-});
+test("both are still disclosures, and both answer the mouse", () => {
+  // Demotion is not removal. Thinking still opens, still carries its gist (#143), and must still show that
+  // it is operable — otherwise the fix trades an inverted hierarchy for a hidden control.
+  const hover = (sel) => rule(`${sel}:hover`);
+  assert.ok(hover(".tool-marker-summary"), "the tool bar shows its affordance");
+  assert.ok(hover(".quarantine-head"), "the thinking head is a disclosure too");
 
-test("NEITHER hover is a no-op against its own resting fill", () => {
-  // This is the guard that matters most, because the fix nearly repeated the bug it was fixing. The thinking
-  // head's resting background is already `--panel-2` — the token the TOOL bar hovers to. Reusing `--panel-2`
-  // for the thinking hover would have produced a second invisible hover, in the same commit, one rule apart.
+  // Each hover must CHANGE the background relative to its own resting state. The original bug was
+  // `background: var(--panel)` on a marker already on `--panel` — an invisible hover, credited in a comment
+  // with a design decision (#138) that therefore rested on a state nobody could see.
   //
-  // Each hover must step AWAY from its own head's fill, whatever that fill is.
-  const hovering = (headSel, hoverSel) => {
-    const headBg = /background:\s*var\(--([a-z0-9-]+)\)/.exec(rule(headSel) ?? "")?.[1];
-    const hoverBg = /background:\s*var\(--([a-z0-9-]+)\)/.exec(rule(hoverSel) ?? "")?.[1];
-    assert.ok(headBg, `${headSel} must set a resting background`);
-    assert.ok(hoverBg, `${hoverSel} must change the background`);
-    assert.notEqual(hoverBg, headBg, `${hoverSel} must not hover to its own resting ${headBg}`);
-  };
-  hovering(".quarantine-head", ".quarantine-head:hover");
-  hovering(".tool-marker", ".tool-marker-summary:hover");
+  // A first version compared the hover against the resting background and PASSED when the hover was emptied
+  // to `none` — because `none` is also different from the resting value. "Differs from" is not "is visible":
+  // the hover must name a FILL. That is the assertion that fails when the hover is deleted, which is what a
+  // guard has to do.
+  const hoverBg = (sel) => prop(`${sel}:hover`, "background");
+  const restBg = (sel) => prop(sel, "background") ?? "none";
+  for (const [hover, rest, label] of [
+    [".quarantine-head", ".quarantine-head", "thinking"],
+    [".tool-marker-summary", ".tool-marker", "tool"],
+  ]) {
+    const bg = hoverBg(hover);
+    assert.ok(bg && bg !== "none", `${label} hover must name a fill, got ${bg}`);
+    assert.notEqual(bg, restBg(rest), `${label} hover must differ from its own resting fill`);
+  }
 });

@@ -160,8 +160,9 @@ npm root -g             # where the global copy lives
 grep -o 'tool-marker-summary:hover{[^}]*}' "$(npm root -g)"/pi-central/dist/ui/assets/*.css
 ```
 
-Compare that last line against the same grep on `packages/ui/dist/assets/*.css` in the checkout. If
-they differ, you are running the wrong one. Serve the checkout instead:
+Compare that last line against the same grep run on the built CSS in the checkout (`dist` is
+gitignored, so it exists only after a build). If they differ, you are running the wrong one. Serve
+the checkout instead:
 
 ```bash
 npm run ui:build && npm run server

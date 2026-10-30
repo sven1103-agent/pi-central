@@ -34,29 +34,39 @@ fixed, and so is the class of defect behind them: the build now says which build
 
 ### Fixed
 
-- **The two disclosure rows look like they belong to the same UI** (issue #144).
+- **The work ranks above the reasoning** (issue #144).
 
-  A screenshot review read the hierarchy as inverted: *"the actionable/expandable content is a thin muted
-  line, while the non-actionable thinking blocks get big filled containers."* The premise was half wrong —
-  **both** are `<details>` you can open — but the numbers underneath it were real.
+  A screenshot review read the hierarchy as inverted, and the reader agreed: *"The tool call is the more
+  important signal to the user than the thinking."*
 
-  | | size | resting fill | hover |
-  |---|---|---|---|
-  | thinking head | `--fs-xs` (11px) | `--panel-2` | **none** |
-  | tool bar | `--fs-2xs` (10px) | `--panel` | `--panel` — **the no-op** |
+  **The first fix got the principle wrong.** It found the two disclosure heads 1px apart with different
+  fills, called that an inconsistency, and made them **equal**. Equal does not fix an inversion — it removes
+  the means of telling the two apart, which is the same failure with a tidier table.
 
-  A one-pixel difference cannot read as a hierarchy; there is no scale to read it against, so it registers
-  only as inconsistency, and the smaller number made the actionable row look weaker than the inert one. Both
-  heads are now `--fs-xs`, and both answer the mouse.
+  The inversion was measurable rather than aesthetic. The tool bar ran all of its text through
+  `--quarantine` (`#586069`) — **including the tool names** — which is **2.71:1** against `--panel`. The
+  thinking block's label sat at `--dim`, **5.62:1**. So the row recording *what actually ran* was less than
+  half as legible as the row saying something was being thought about, and thinking additionally carried a
+  filled `--panel-2` head. Both errors point the same way.
 
-  **The tool bar's hover was a no-op.** It set `background: var(--panel)`, which is the marker's *own*
-  background, so only the text colour changed. A comment credited that hover with the decision to drop the
-  hatch in #138 — so the state that carried the judgement was not the state that shipped.
+  Three tiers now, and the middle one is the point:
 
-  Fixing it nearly repeated the bug: the thinking head's resting fill is already `--panel-2`, the token the
-  tool bar hovers to. Reusing it there would have produced a second invisible hover, in the same commit, one
-  rule apart. The thinking hover steps to `--panel-3`, and a test now asserts that **each** hover differs from
-  **its own** head's fill.
+  | | treatment |
+  |---|---|
+  | the reader's words, the assistant's prose | `--text` on `--bg` |
+  | **the work — a tool call** | `--text` names, filled `--panel`, quarantine gutter |
+  | the reasoning about to be done | `--dim`, flat, no fill, no gutter |
+
+  Thinking is the demoted one because it is the thing collapsed by default, the thing whose job is to be
+  skippable. A tool call is evidence: it records what was executed, it is the audit trail, and it is what the
+  trust legend is about. Thinking still opens and still carries its gist (#143) — demoted, not hidden.
+
+  Two defects found while doing it: the tool bar's hover set `background: var(--panel)`, which is the
+  marker's **own** background, so it was a no-op — and a comment credited that invisible state with the
+  decision to drop the hatch in #138. The thinking head had no hover at all.
+
+  A falsification caught a third: the hover assertion compared against the resting background and **passed
+  when the hover was deleted**, because `none` is also "different". It now requires the hover to name a fill.
 
 - **A collapsed thinking block says what it is thinking about** (issue #143).
 
