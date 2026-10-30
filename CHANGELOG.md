@@ -34,6 +34,30 @@ fixed, and so is the class of defect behind them: the build now says which build
 
 ### Fixed
 
+- **The session you ask for becomes the active one** (issue #144).
+
+  > *"When I open a session (from the history or from scratch), it is not made the active one in the
+  > transcript window. That leads to confusion, and I started to type prompts into the wrong conversation."*
+
+  The transcript stayed on the previous session, so **prompts went to the wrong conversation** — the worst
+  kind of wrong answer, because the screen shows one thing and the keystrokes go to another.
+
+  The cause was a rule that is correct on its own. A `session` event focuses a new session only when nothing
+  was focused (`state.focusedId ?? event.session.id`), deliberately, so a background broadcast cannot pull a
+  reader out of what they are reading. But **nothing distinguished "a session appeared" from "the session I
+  just asked for appeared"**, so with any session already open — the normal case — the `??` kept the old one
+  and the new session opened invisibly. Starting a session, `Open in a directory…`, and resuming from History
+  all relied on that rule and all failed the same way.
+
+  There is no correlation id on `start`/`resume`, so the client cannot tell which `session` event answers its
+  request. What it *can* know is intent: a local `expectNewSession` action is dispatched **before** the
+  control goes out, and the next session that is genuinely **new** to the list consumes it.
+
+  The original guarantee is untouched — an unrequested session still never steals focus — and the intent is
+  spent exactly once, so it cannot turn into "the view follows any new process". It is also disarmed by an
+  `error`, since a refused start produces no session at all and a flag left armed would redirect something
+  unrelated later.
+
 - **A thinking block says when it is still thinking** (issue #146).
 
   Reported from use: *"I definitely dont see any response in the thinking bar, there is no visual indication
