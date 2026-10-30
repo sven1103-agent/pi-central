@@ -174,6 +174,34 @@ They are kept because each one is the reason a constraint or an invariant test e
   `[]`, a real scroll writes `{ scrollTop: 850, pinned: false }`.
 
 
+### Fixed
+
+- **Resuming a session outside the newest 500 said "no such session"**.
+
+  Reported from a window: a red banner reading `no such session: …/sessions/--…--/2026-10-30T10-29-48….jsonl`
+  for a file that plainly existed, while the rail said **867 sessions on disk**.
+
+  ```ts
+  // transport.ts, before
+  const discovered = await discover(this.#config);          // → sessions.slice(0, 500)
+  const target = discovered.sessions.find((s) => s.path === control.path);
+  if (!target) { broadcast({ kind: "error", message: `no such session: ${control.path}` }); }
+  ```
+
+  `discover()` applies its 500-cap **after the whole walk**, so every session older than the newest 500 was
+  unresumable — from History *and* from any restored roster — with an error that named the wrong cause. It
+  read as corruption rather than as a limit.
+
+  `resume` now calls a new `sessionAt(config, path)`, which describes **one** file: it reads a single header
+  instead of walking the store, so the cap cannot apply and resume is O(1) rather than O(everything) — the
+  eager-work problem from #150, which was being paid on a click.
+
+  The path arrives from the client, so it is contained: resolved against `sessionsRoot`, checked **by path
+  segment** rather than string prefix (`/a/bc` must not satisfy `/a/b`, per C15c), and checked again on
+  `realpath` so a symlink inside the store cannot reach outside it. It must be a regular `.jsonl` file whose
+  header version is known — the same rule `discover` applies, now shared through one `describeSessionFile` so
+  the History pane and Resume cannot disagree about what a valid session is.
+
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.4.1] — 2026-10-29

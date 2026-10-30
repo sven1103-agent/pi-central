@@ -36,7 +36,7 @@ import {
 import { findOwnPackage } from "./package-meta.ts";
 import type { Supervisor } from "./supervisor.ts";
 import type { FileError } from "./files.ts";
-import { discover } from "./registry.ts";
+import { discover, sessionAt } from "./registry.ts";
 import type { Config } from "./config.ts";
 import { createUiRequestHandler, resolveUiDistDir } from "./static-ui.ts";
 
@@ -329,10 +329,23 @@ export class Transport {
         return;
       }
       case "resume": {
-        const discovered = await discover(this.#config);
-        const target = discovered.sessions.find((s) => s.path === control.path);
+        /*
+         * Look the file up DIRECTLY, not through `discover` (bug fixed here).
+         *
+         * This used to be `const discovered = await discover(config); discovered.sessions.find(...)`, and
+         * `discover` returns `sessions.slice(0, 500)` — so on a machine with 867 sessions, resuming anything
+         * older than the newest 500 reported "no such session" for a file that exists. The error named the
+         * wrong cause, which is why it read as a mystery rather than as a limit.
+         *
+         * `sessionAt` reads one header instead of walking the store, so resume is also O(1) rather than
+         * O(everything) — the eager-work problem from #150, which was being paid on a click.
+         */
+        const target = await sessionAt(this.#config, control.path);
         if (!target) {
-          this.#broadcast({ kind: "error", message: `no such session: ${control.path}` });
+          this.#broadcast({
+            kind: "error",
+            message: `no such session: ${control.path}`,
+          });
           return;
         }
         const result = this.#supervisor.resume(target, control.mode ? { mode: control.mode } : {});
