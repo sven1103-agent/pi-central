@@ -2280,3 +2280,34 @@ test("Provider and Model share ONE label column, and Thinking is on the model's 
   assert.ok(modelCell.querySelector(".thinking-probe"), "Thinking shares the model's row");
   assert.ok(modelCell.querySelector(".picker-field"), "…alongside the model field itself");
 });
+
+// --- The rail is for SELECTION; renaming belongs to the session you are looking at -----------------
+
+test("nothing on the rail is a rename target", () => {
+  // Reported from use: "users can now also rename a session from the left session roster. The mouse changes on
+  // mouse over of the small card session title, which i find weird. Maybe just use the roster for selection of a
+  // session, and leave the renaming to the active session rail."
+  //
+  // The rail's job is navigation. An edit target inside a 12px row competes with the row's own click, and the
+  // cursor promised something the row cannot offer without that competition — so the header owns renaming.
+  const html = renderToString(createElement(SessionRail, {
+    rows: rowsOf([session({ id: "s1", state: "idle" })]),
+    focusedId: "s1", onFocusRow() {}, onForgetRow() {}, onRetryRow() {}, retryAvailable: true,
+    onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
+  }));
+  assert.ok(!/Double-click to rename/.test(html), `no rename affordance on a row: ${html}`);
+  assert.ok(!/rail-row-rename/.test(html), "and no hidden rename field either");
+  // It still shows the name, and is still selectable.
+  assert.match(html, /class="name"/, "the name is still there");
+  assert.match(html, /class="rail-row-main"/, "and the row is still a button");
+});
+
+test("the text cursor belongs to the header's name only", () => {
+  // The cursor was the visible symptom. Asserted on the rule, because that is where the promise is made — and
+  // asserted as ONE rule, since a second block for the same selector would be decided by source order.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = [...css.matchAll(/(?:^|\n)\.session-name\s*\{([^}]*)\}/g)].map((m) => m[1]);
+  assert.equal(rules.length, 1, "one rule for .session-name, or source order decides");
+  assert.match(rules[0], /cursor:\s*text/, "the header's name is a rename target");
+  assert.ok(!/\.rail-row-main \.name[^{]*\{[^}]*cursor:\s*text/.test(css), "the rail's name is not");
+});
