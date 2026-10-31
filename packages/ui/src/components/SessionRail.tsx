@@ -35,6 +35,7 @@ export function SessionRail({
   focusedId,
   onFocusRow,
   onForgetRow,
+  onRetryRow,
   onStartSession,
   onOpenDirectory,
   home,
@@ -58,6 +59,13 @@ export function SessionRail({
    * is a different action with its own confirmation.
    */
   onForgetRow: (row: RosterRow) => void;
+  /**
+   * Retry a FAILED session (issue #11).
+   *
+   * The affordance `DESIGN.md` promised and never had: its composer text says "Retry it from the rail", and
+   * the rail had no such control.
+   */
+  onRetryRow: (row: RosterRow) => void;
   onStartSession: () => void;
   onOpenDirectory: () => void;
   home: string | undefined;
@@ -125,6 +133,7 @@ export function SessionRail({
                   focused={rowKey(row) === focusedId}
                   onFocus={() => onFocusRow(row)}
                   onForget={() => onForgetRow(row)}
+                  onRetry={() => onRetryRow(row)}
                   home={home}
                 />
               ))}
@@ -184,12 +193,14 @@ function RailRow({
   focused,
   onFocus,
   onForget,
+  onRetry,
   home,
 }: {
   row: RosterRow;
   focused: boolean;
   onFocus: () => void;
   onForget: () => void;
+  onRetry: () => void;
   home: string | undefined;
 }) {
   const session = row.session;
@@ -255,6 +266,38 @@ function RailRow({
         </>
       )}
       </button>
+      {/*
+        Retry appears only on a FAILED session, and only a failed one can be retried (#11). It is explicit —
+        nothing restarts on its own — because a silent restart is how a crash loop hides itself.
+
+        The previous failure is shown beneath it once a retry has happened: the second attempt clears `error`
+        (the composer becomes usable again), and erasing the evidence would leave a reader unable to compare
+        attempts.
+      */}
+      {session?.state === "failed" && (
+        <span className="rail-row-actions">
+          <button
+            type="button"
+            className="rail-row-retry"
+            onClick={onRetry}
+            title={session.error ?? "Try this session again in the same directory"}
+          >
+            Retry
+          </button>
+        </span>
+      )}
+      {/*
+        The earlier failure, whenever there IS one — NOT only while the session is failed.
+
+        The first version rendered this inside the failed-only block above, so it appeared exactly when it was
+        redundant (the current `error` already says what went wrong) and disappeared exactly when it mattered
+        (after a retry cleared `error`). A test for the acceptance criterion caught it.
+      */}
+      {session?.previousError !== undefined && (
+        <span className="rail-row-earlier" title={session.previousError}>
+          last failure: {session.previousError}
+        </span>
+      )}
       {session === undefined && (
         <button
           type="button"

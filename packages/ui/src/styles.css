@@ -448,6 +448,30 @@ button { font: inherit; color: inherit; }
 .rail-row:hover .rail-row-forget, .rail-row:focus-within .rail-row-forget { opacity: 1; }
 .rail-row-forget:hover { color: var(--text); text-decoration: underline; }
 .rail-row-forget:focus-visible { outline: none; box-shadow: var(--focus); opacity: 1; }
+
+/*
+ * Retry, and the previous failure beneath it (issue #11).
+ *
+ * Retry is ALWAYS visible, unlike Forget: a failed session is the row that needs a human, and hiding the only
+ * action that helps behind a hover would mean the reader has to discover it. It is also never red — the
+ * session is not being destroyed, it is being tried again.
+ */
+.rail-row-actions { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+.rail-row-retry {
+  background: none; border: 0; padding: 0 0 2px 2px;
+  font: inherit; font-size: var(--fs-2xs); font-weight: 600;
+  color: var(--accent-text); cursor: pointer;
+}
+.rail-row-retry:hover { text-decoration: underline; }
+.rail-row-retry:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--r-1); }
+/*
+ * The earlier failure, kept after a retry. One dim line, truncated: it is evidence to compare against the next
+ * attempt, not something to read in full on a rail row — the full text is on the row's `title`.
+ */
+.rail-row-earlier {
+  font-size: var(--fs-2xs); color: var(--dim);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 @media (prefers-reduced-motion: no-preference) { .rail-row-forget { transition: opacity 120ms ease; } }
 /* Touch and keyboard users get it without hovering, since there is no hover to give. */
 @media (hover: none) { .rail-row-forget { opacity: 1; } }

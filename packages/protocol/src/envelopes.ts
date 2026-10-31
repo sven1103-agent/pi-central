@@ -71,6 +71,15 @@ export interface LiveSession {
    */
   sessionId?: string | undefined;
   /**
+   * The error from the attempt BEFORE a retry (issue #11).
+   *
+   * `error` describes the current state, so a retry clears it — but clearing it would erase the evidence of
+   * the first failure, and a reader retrying a spawn problem needs to compare attempts. Kept separate rather
+   * than appended to `error`, because the two answer different questions: "is it broken now" and "how did it
+   * break last time".
+   */
+  previousError?: string | undefined;
+  /**
    * Whether the existing conversation has been fetched from Pi.
    *
    * Guards a single load: the UI reducer APPENDS every message it receives, so loading twice
@@ -119,6 +128,18 @@ export interface ModelOption {
 export type Control =
   | { kind: "list" }
   | { kind: "start"; cwd?: string; name?: string; mode?: "sandboxed" | "direct" }
+  /**
+   * Re-spawn a session that FAILED, in the directory it already had (issue #11).
+   *
+   * A dedicated control rather than "stop then start", because those two are not the same request: the
+   * reader is asking for *this* session to try again, not for a new one, and a client-side sequence would
+   * leave the failed row in the rail beside its replacement. `previousError` is carried so the second
+   * attempt does not erase the evidence of the first.
+   *
+   * Only a `failed` session can be retried. A running one is refused rather than restarted: a silent
+   * restart is how a crash loop hides itself.
+   */
+  | { kind: "retry"; sessionId: string }
   | { kind: "prompt"; sessionId: string; message: string; behavior?: "steer" | "followUp" }
   /**
    * Empty Pi's message queue, optionally stopping the run.
@@ -413,7 +434,13 @@ export type FileErrorReason =
  *        type error at the one call site that read `text`, which is the backstop the
  *        fingerprint documents.
  */
-export const PROTOCOL_VERSION = 3 as const;
+/**
+ * v4 (issue #11): the `retry` control, and `LiveSession.previousError`.
+ *
+ * Bumped rather than slipped in: a v3 orchestrator would receive `retry`, ignore it as unknown, and the
+ * reader would press a button that does nothing — which is exactly what the handshake exists to catch.
+ */
+export const PROTOCOL_VERSION = 4 as const;
 
 export interface Hello {
   kind: "hello";

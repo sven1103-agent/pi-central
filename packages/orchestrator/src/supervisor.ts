@@ -24,6 +24,7 @@ import { join } from "node:path";
 import type { Command, HistoricalSession, LiveSession, ModelOption, PiRecord } from "@pi-central/protocol";
 import { composePolicy, describe, type LaunchMode, type SessionSpec } from "./policy.ts";
 import { RpcProcess, type LaunchSpec } from "./rpc.ts";
+import { retryRefusal } from "./retry.ts";
 import { checkResumable } from "./resume.ts";
 import { isScratch, scratchDirFor, type Config } from "./config.ts";
 import { agentRoutingEnv } from "./env.ts";
@@ -170,6 +171,55 @@ export class Supervisor extends EventEmitter {
     return undefined;
   }
 
+  /**
+   * Re-spawn a session that failed, in the directory it already had (issue #11).
+   *
+   * ## Why this is not "stop, then start"
+   *
+   * The reader is asking for THIS session to try again. A client-side stop+start would put a second row in
+   * the rail beside the failed one, and the roster (keyed by session file) would then have two live entries
+   * pointing at one conversation. Reusing the id keeps the row where the reader put it.
+   *
+   * ## Refusals, all before anything is spawned
+   *
+   * - **Not failed** → refused. A silent restart is how a crash loop hides itself, and a running session is
+   *   not broken.
+   * - **Directory gone or unreadable** → refused with the reason, for the same purpose `resume` refuses: RPC
+   *   Pi exits 1 on a missing directory rather than prompting (C2), so re-spawning would produce a second
+   *   failure that says less than the first.
+   *
+   * ## What is preserved
+   *
+   * `previousError` holds the last failure. Clearing `error` is what makes the retry a retry — the composer
+   * becomes usable again — but erasing the evidence would leave a reader unable to compare attempts.
+   */
+  async retry(id: string): Promise<StartResult | StartFailure> {
+    const existing = this.#sessions.get(id);
+    if (existing === undefined) return { ok: false, message: `no such session: ${id}` };
+    const refusal = retryRefusal(existing);
+    if (refusal !== undefined) return { ok: false, message: refusal };
+
+    // Dispose the old process before spawning a replacement under the same id, so the map cannot end up
+    // holding a dead RpcProcess while a new one runs.
+    const previous = this.#processes.get(id);
+    this.#processes.delete(id);
+    // `stop()` on a process that already exited is the cheap case; awaiting it means the replacement cannot
+    // race the old one for the same session file.
+    await previous?.stop().catch(() => undefined);
+
+    return this.#spawn({
+      id,
+      cwd: existing.cwd,
+      mode: existing.mode,
+      name: existing.name,
+      sessionPath: existing.sessionFile,
+      previousError: existing.error ?? existing.previousError,
+      // `enable` and `env` are not part of `LiveSession`, so a retry cannot reproduce logins granted per
+      // spawn. Stated here rather than silently lost: a retried session may come back with fewer
+      // capabilities than the original, which is visible in the composer when a credential is missing.
+    });
+  }
+
   #spawn(input: {
     id: string;
     cwd: string;
@@ -178,6 +228,7 @@ export class Supervisor extends EventEmitter {
     enable?: string[] | undefined;
     env?: Record<string, string> | undefined;
     sessionPath?: string | undefined;
+    previousError?: string | undefined;
   }): StartResult | StartFailure {
     // A resumed session must reopen its file; a new one gets a fresh name.
     //
@@ -282,6 +333,7 @@ export class Supervisor extends EventEmitter {
       ],
       startedAt: Date.now(),
       ...(input.sessionPath ? { sessionFile: input.sessionPath } : {}),
+      ...(input.previousError ? { previousError: input.previousError } : {}),
     };
     this.#sessions.set(session.id, session);
 
@@ -797,3 +849,4 @@ export async function clearQueueVia(
   if (andStop) await send({ type: "abort" }, 30_000);
   return result;
 }
+

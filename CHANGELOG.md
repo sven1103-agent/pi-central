@@ -313,6 +313,42 @@ They are kept because each one is the reason a constraint or an invariant test e
   no `.package-lock.json` under the global prefix, and no `_integrity` in the installed manifest. Printing
   one would mean inventing it.
 
+### Added
+
+- **A failed session can be retried from the rail** (issue #11).
+
+  `DESIGN.md` promised this and it did not exist: the composer says *"Retry it from the rail"*, and the rail had
+  no such control. A failed session offered only "Stop session".
+
+  A `retry` control re-spawns the session in **the same directory and mode**, reusing its id so the row stays
+  where the reader put it — a client-side stop-then-start would leave the failed row beside its replacement.
+  `PROTOCOL_VERSION` 3 → 4, because a v3 orchestrator would ignore the control and the button would silently do
+  nothing.
+
+  **Every refusal happens before anything is spawned**, and each is a different message:
+
+  | state | answer |
+  |---|---|
+  | starting / streaming / awaiting-approval | *"still running. Stop it before retrying."* |
+  | idle / registered / stopped | *"Only a failed session can be retried."* |
+  | directory gone | *"no longer exists"* + the path |
+  | directory unreadable | *"not readable by this process"* — **not** "no longer exists" |
+
+  That last distinction is the bug `checkResumable` already had: a bare `catch` called every failure "no longer
+  exists", including an `EACCES` on an ancestor whose path was present and fine.
+
+  **Nothing restarts on its own.** A silent restart is how a crash loop hides itself, which is why a running
+  session is refused rather than restarted.
+
+  **The previous failure stays visible.** A retry clears `error` — that is what makes the composer usable again —
+  so the earlier message moves to `previousError` and is rendered on the row as `last failure: …`. Kept as a
+  separate field because the two answer different questions: *"is it broken now"* and *"how did it break last
+  time"*.
+
+  The refusals live in `retry.ts` rather than inside `Supervisor.retry`: a retry needs a real spawn to exercise
+  end to end, which no test here can do (C1: the sandbox does not nest). Extracting the decisions makes all four
+  criteria checkable.
+
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.4.1] — 2026-10-29

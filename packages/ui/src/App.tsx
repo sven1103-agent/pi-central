@@ -624,6 +624,12 @@ export function App() {
             setTab("sessions");
           }}
           onForgetRow={(row) => dispatch({ kind: "forget", path: row.entry.path })}
+          onRetryRow={(row) => {
+            // Only a live session has a handle to retry with; a row that is not running has no process to
+            // restart, so it resumes through the composer instead (resume-on-send, #89).
+            if (row.session === undefined) return;
+            send({ kind: "retry", sessionId: row.session.id });
+          }}
           onStartSession={onStartSession}
           onOpenDirectory={() => setSheetOpen(true)}
           home={home}

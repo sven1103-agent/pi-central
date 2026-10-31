@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "control": [
     "abort",
     "answerDialog",
@@ -12,6 +12,7 @@
     "readFile",
     "rename",
     "resume",
+    "retry",
     "setModel",
     "setThinkingLevel",
     "start",

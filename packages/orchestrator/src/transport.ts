@@ -356,6 +356,23 @@ export class Transport {
         this.#broadcast({ kind: "session", session: result.session });
         return;
       }
+      case "retry": {
+        /*
+         * Re-spawn a failed session (issue #11).
+         *
+         * A dedicated control rather than stop-then-start: the reader wants THIS session to try again, and a
+         * client-side sequence would leave the failed row beside its replacement. The failure is broadcast
+         * like every other refusal — with the reason, never a silent no-op, because a button that does
+         * nothing is indistinguishable from one that is broken.
+         */
+        const result = await this.#supervisor.retry(control.sessionId);
+        if (!result.ok) {
+          this.#broadcast({ kind: "error", message: result.message });
+          return;
+        }
+        this.#broadcast({ kind: "session", session: result.session });
+        return;
+      }
       case "prompt":
         // `behavior` is forwarded only when the client chose one; the supervisor decides what a
         // missing choice means (see `Supervisor#prompt`).
