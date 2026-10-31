@@ -140,10 +140,13 @@ test("scratch marks sessions inside the app workspace (US-3)", async () => {
   assert.equal(sessions.find((s) => s.id === "id-real2")?.scratch, false);
 });
 
-test("a name beyond the head window is not detected -- a documented limitation", async () => {
-  // Discovery caps its read (see HEAD_BYTES): it is a list operation over hundreds of files,
-  // not a full transcript scan. A `session_info` set late in a very large session is
-  // therefore missed. This pins that behavior so it is a known trade-off, not a surprise.
+test("a name set BEYOND the head window is still found (issue #164)", async () => {
+  // This test used to pin the opposite, as "a documented limitation": discovery capped its read at HEAD_BYTES,
+  // so a `session_info` appended late in a large session was missed. That was a real defect rather than a
+  // trade-off, and measuring it decided the matter — 272 of 873 sessions on this machine exceed the window, so
+  // 31% of sessions could never show a rename in History, however often the app reconnected.
+  //
+  // The read is still not a full transcript scan: the tail window exists precisely so a huge file stays cheap.
   const dir = join(root, "proj-late");
   const padding = Array.from({ length: 4000 }, (_, i) => ({
     type: "message",
@@ -157,7 +160,27 @@ test("a name beyond the head window is not detected -- a documented limitation",
   ]);
 
   const { sessions } = await discover(config());
-  assert.equal(sessions.find((s) => s.id === "id-late")?.name, undefined);
+  assert.equal(
+    sessions.find((s) => s.id === "id-late")?.name,
+    "named very late",
+    "the LAST session_info wins, wherever it is in the file",
+  );
+});
+
+test("the LAST rename wins, not the first", () => {
+  // Pi appends a `session_info` per rename, so a file can hold several. Showing the earliest would make a rename
+  // look like it did nothing.
+  const dir = join(root, "proj-renamed-twice");
+  const path = writeSession(dir, "twice.jsonl", [
+    header("id-twice", "/Users/x/proj-renamed-twice"),
+    { type: "session_info", name: "first name" },
+    { type: "session_info", name: "second name" },
+  ]);
+  assert.ok(path, "fixture written");
+
+  return discover(config()).then(({ sessions }) => {
+    assert.equal(sessions.find((s) => s.id === "id-twice")?.name, "second name");
+  });
 });
 
 test("a missing sessions root yields an empty result, not an error", async () => {

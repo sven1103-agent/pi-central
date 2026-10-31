@@ -337,9 +337,27 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
       const focusedId = state.focusNextNewSession && arrived
         ? event.session.id
         : (state.focusedId ?? event.session.id);
+      /*
+       * Keep the HISTORY entry in step when this is the same session (issue #164).
+       *
+       * A rename updates the live session, but History is a separate list built from `discover()` on connect — and
+       * nothing re-broadcasts it. The UI never sends `list` at all, so History showed the old name until a full
+       * page reload. Matching on `sessionFile` is the same identity the roster uses, and it needs no new event and
+       * no protocol change: the `session` patch already carries both the file and the new name.
+       */
+      const file = event.session.sessionFile;
+      // ONE guard, not two. A first version wrapped this in `file === undefined ? state.history : map(...)` as well,
+      // and that made the behaviour unfalsifiable: either guard alone was enough, so removing one changed nothing
+      // and a test could not tell. `entry.path` is always a string, so an unknown `file` matches nothing on its
+      // own — the comparison is sufficient, and now removing it fails a test.
+      const history = state.history.map((entry) =>
+        entry.path === file ? { ...entry, ...(event.session.name ? { name: event.session.name } : {}) } : entry,
+      );
+
       return {
         ...state,
         live,
+        history,
         focusedId,
         focusNextNewSession: arrived ? false : state.focusNextNewSession,
       };

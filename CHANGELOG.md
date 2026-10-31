@@ -467,6 +467,31 @@ They are kept because each one is the reason a constraint or an invariant test e
   (`set_session_name`), so a row whose process is gone has nobody to ask. It shows plain text rather than a field
   that could not work.
 
+### Fixed
+
+- **A renamed session keeps its new name in History** (issue #164).
+
+  Renaming sent `set_session_name`, and Pi appended a `session_info` record — so the name *was* persisted. History
+  did not read it back, for two independent reasons:
+
+  **1. History was never refreshed after a rename.** `case "rename"` returned without re-broadcasting, the only
+  `history` event is the connect snapshot, and the UI never sends `list` at all — so History kept the old name
+  until a full page reload. The `session` patch already carries the file and the new name, so the reducer now
+  updates the matching history entry by `path`. No new event, no protocol change. A re-walk of the store on every
+  rename would have been the wrong fix: `discover()` costs ~360 ms at 873 sessions.
+
+  **2. Even on reload, a late name was invisible.** `discover()` read at most `HEAD_BYTES` (256 KB) per file, and
+  the parser said so itself: *"a name set late in a large session will not be seen"*. A rename appends at the END.
+  Measured on this machine: **272 of 873 sessions exceed the window**, so 31% could never show a rename, however
+  often the app reconnected. The session header carries no name, so there was no cheaper fallback.
+
+  The last 8 KB of a large file is now read for the LAST `session_info`, and only when the file exceeds the head
+  window. Measured cost on the real store: **873 sessions, 340 ms without the tail read → 371 ms with it** (~9%),
+  paid only for files that need it.
+
+  A test that pinned the old limitation — *"a name beyond the head window is not detected -- a documented
+  limitation"* — was **reversed**, not deleted: measuring decided that it was a defect rather than a trade-off.
+
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.4.1] — 2026-10-29
