@@ -2469,6 +2469,12 @@ select.btn { font-family: var(--sans); }
   /* A ROW that centres its two boxes. `flex-direction` must be said explicitly: the base `.transcript-wrap` is a
      column, and a second rule that only changed `display` would leave the companion stacked under the prose. */
   flex-direction: row;
+  /*
+   * `center` centres the two boxes as a pair. The pair is not symmetric — 72ch of prose plus a 340px companion — so
+   * the pair's centre is left of the column's centre by half the companion's width. That is correct for "the
+   * composition is centred"; making the PROSE the centred thing instead is #92's mistake and puts the box off the
+   * right edge on a wide window.
+   */
   justify-content: center;
   /* The gap between the prose and the box is this one number. */
   gap: var(--sp-5);
@@ -2476,6 +2482,21 @@ select.btn { font-family: var(--sans); }
   min-width: 0;
   flex: 1;
 }
+
+/*
+ * VISUAL ORDER: reading column first, companion second.
+ *
+ * The companion is the FIRST child in the DOM, which is right — a screen reader and a keyboard should meet the
+ * session's identity before its conversation, and the tab order should follow the same path. But in a flex ROW that
+ * put it on the LEFT, so the layout was `[companion][conversation]` (`img_32.png`) while every description of it —
+ * and the review that asked for it — says the box sits to the RIGHT of the prose.
+ *
+ * `order` moves the boxes without touching the source, which is the one thing it is good for: the reading order and
+ * the visual order legitimately differ here, and this keeps them both correct instead of bending the DOM to the
+ * picture.
+ */
+.transcript-wrap.has-header .transcript-main { order: 1; }
+.transcript-wrap.has-header .transcript-header { order: 2; }
 
 /*
  * The reading column: the scroller and the composer, stacked, at the reader's measure.
@@ -2526,6 +2547,10 @@ select.btn { font-family: var(--sans); }
     justify-content: flex-start;
     gap: 0;
   }
+  /* The visual-order swap exists for the ROW only. Stacked, the companion must be on top, so `order` returns to
+     source order — which is already header-then-main. */
+  .transcript-wrap.has-header .transcript-main,
+  .transcript-wrap.has-header .transcript-header { order: 0; }
   .transcript-header {
     position: static;
     /* Full width across the top, and no longer a floating box. */

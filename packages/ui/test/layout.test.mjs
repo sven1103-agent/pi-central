@@ -125,3 +125,35 @@ test("the transcript keeps its own horizontal padding, and centres ONE lane", ()
     `per-child centring is #92's defect: a narrower child gets a different centre. Found: ${centred.join(", ")}`,
   );
 });
+test("the companion sits to the RIGHT of the prose, and the pair is centred", () => {
+  /*
+   * Two properties, and the first was wrong twice.
+   *
+   * The companion is the first child in the DOM, which is correct for reading and tab order — a screen reader should
+   * meet the session's identity before its conversation. In a flex ROW that put it on the LEFT, so the layout was
+   * `[companion][conversation]` (`img_32.png`) while every description of the design, and the review that asked for
+   * it, says the box is to the right of the prose.
+   *
+   * `order` is the one tool that separates visual order from source order, and this is a legitimate use: both orders
+   * are correct, they simply differ. The guard is that the swap exists in the row form and is neutralised when the
+   * layout stacks, because there the companion must be on top.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const rowOrder = /\.transcript-wrap\.has-header \.transcript-main\s*\{\s*order:\s*(\d+)/.exec(css)?.[1];
+  const boxOrder = /\.transcript-wrap\.has-header \.transcript-header\s*\{\s*order:\s*(\d+)/.exec(css)?.[1];
+  assert.ok(rowOrder !== undefined && boxOrder !== undefined, "both boxes must declare their visual order");
+  assert.ok(
+    Number(boxOrder) > Number(rowOrder),
+    `the companion must come after the prose visually, got main=${rowOrder} header=${boxOrder}`,
+  );
+
+  const pair = /\.transcript-wrap\.has-header\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(pair, /justify-content:\s*center/, "the pair is centred as a unit");
+
+  // Stacked, the swap must be neutralised or the companion would be reordered below the conversation it labels.
+  const stacked = /@container transcript[^{]*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+  assert.match(stacked, /order:\s*0/, "the visual-order swap is row-only");
+});
