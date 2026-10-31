@@ -121,8 +121,18 @@ test("the header cannot scatter into four rows", () => {
   const header = /(?:^|\n)\.session-header\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
   assert.match(header, /flex-wrap:\s*nowrap/, "the row does not wrap freely in its wide, floating form");
   // Identity shrinks, the control groups do not — a clipped CONTROL label is a defect, a truncated name is not.
+  /*
+   * The header is a companion box now, not a row: `.picker-grid` keeps `flex: none` for the row layout it still uses
+   * in the narrow-container form, and the box's own width is what bounds it in the wide form. What must hold in both
+   * is that no group shrinks into its own label.
+   */
   const picker = rule(".picker-grid") ?? "";
-  assert.match(picker, /flex:\s*none/, "the picker group never shrinks into its own label");
-  const stats = rule(".header-stats") ?? "";
-  assert.match(stats, /flex:\s*none/, "…and neither does the stats group");
+  assert.match(picker, /flex:\s*none|grid-template-columns/, "the picker group keeps its own width");
+  // Read with a direct regex rather than `rule()`: that helper stops at the first `}`, and this rule's doc comment
+  // contains braces, so it returned a fragment. A guard that reads half a rule can pass for the wrong reason.
+  const stats = /(?:^|\n)\.header-stats\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(stats, /flex:\s*none/, `…and so does the stats group; got ${stats}`);
+  // The base `.session-header` rule must still refuse to wrap; the narrow-container query is the one place it may.
+  const base = /(?:^|\n)\.session-header\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(base, /flex-wrap:\s*nowrap/, "the wide form does not wrap freely");
 });

@@ -2234,51 +2234,139 @@ select.btn { font-family: var(--sans); }
   container-type: inline-size;
   container-name: transcript;
 }
+/* With a companion the region becomes a two-column grid — see `.transcript-wrap.has-header`. */
+.transcript-wrap.has-header { flex: 1; min-height: 0; }
 
 /*
- * The session header, as a COMPANION to the conversation.
+ * THE SESSION HEADER IS A STICKY COMPANION BESIDE THE CONVERSATION.
  *
- * It used to be a full-width band above everything, which read as chrome belonging to the window rather than to the
- * session — a review asked for it to be embedded in the transcript instead, floating at the top right where there is
- * demonstrably room on a desktop. That is what this is: the identity and the pickers sit in the empty right-hand
- * region beside the prose's lane, so the conversation keeps its full height and the header is visibly part of it.
+ * ## The three placements this has had, and why this one
+ *
+ * 1. **A full-width band above everything.** Read as window chrome rather than as part of the session — the review
+ *    said so twice.
+ * 2. **Floating over the reading area, top right.** Worse: it COVERED prose. A screenshot (`img_27.png`) showed
+ *    "Interesting — doors=10…" cut off mid-sentence where the block began, and reserving padding under it only helps
+ *    the first message while the block still eats the page. Hovering information over reading text is the same
+ *    mistake as #92's centring, in a different costume.
+ * 3. **A box docked to the right of the prose lane.** This one. It occupies space that is otherwise empty on a
+ *    desktop, so it can never cover anything, and it scrolls with the page as a sticky block so the identity and
+ *    the model stay visible while the conversation moves.
+ *
+ * ## Why a grid, and not `float` or `position: fixed`
+ *
+ * `position: fixed` would escape the column and land over the panel. `float` would let the first paragraph wrap
+ * around it, which is the overlap problem again with a different shape. A two-column grid — prose, companion — is
+ * the only arrangement where the box is genuinely BESIDE the text: the prose lane keeps its measure, the box has its
+ * own track, and neither can overlap the other.
+ *
+ * Below the container width that can hold both, the box would be narrower than its content, so it becomes a compact
+ * row above the scroller — the shell's old arrangement, chosen here by the TRANSCRIPT's width rather than the
+ * window's, because an open panel leaves a wide window holding a narrow transcript.
  */
 .transcript-header {
-  /* Not a band: it takes no space of its own and lets the scroller sit under it. */
-  position: absolute;
+  /*
+   * Sticky, so it stays with the reader: the conversation scrolls past it and the identity, the state, the meter and
+   * the model remain in view. `align-self: start` is what makes `position: sticky` work inside a grid track — an
+   * item stretched to the row's height has no room to move.
+   */
+  position: sticky;
   top: 0;
-  right: 0;
-  left: 0;
-  z-index: 2;
+  align-self: start;
   display: flex;
   justify-content: flex-end;
-  /* Only the floating block catches clicks, so text under the rest of the strip stays selectable. */
-  pointer-events: none;
-  padding: var(--sp-3) 18px 0;
+  padding: var(--sp-4) 18px var(--sp-4) var(--sp-3);
+  grid-column: 2;
+  /* Spans the conversation AND the composer, so the box's height is not limited to the prose's row. */
+  grid-row: 1 / -1;
+  /* `sticky` needs the track to be the scroll container's height, which `align-self: start` provides. */
+  height: min-content;
 }
-.transcript-header > * { pointer-events: auto; }
 
-/* Room for the floating header, so the first message is never underneath it. */
-.transcript-wrap.has-header .transcript { padding-top: 96px; }
+/* The block itself: a quiet raised surface, wide enough for the pickers on one line each. */
+.transcript-header .session-header {
+  width: 340px;
+  max-width: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  /* Rounder and lighter than a panel, because it sits ON the page rather than being a region of it. */
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-4);
+}
+/* In the companion column the identity and the stats stack; the pickers keep their label column. */
+.transcript-header .session-header .title { min-width: 0; }
+/* The stats sit under the name, not pushed to a far edge: the `auto` margin belongs to a ROW layout, and inside a
+   column it became the gap that a screenshot showed between `idle` and `ctx 2%` (`img_27.png`). */
+.transcript-header .header-stats { margin-left: 0; }
+/* Same for the picker block: anchored left, under the stats, with its own label column intact. */
+.transcript-header .picker-grid {
+  margin-left: 0;
+  justify-content: start;
+  /* A 340px box cannot hold the model select beside its label on one line for a long id, so the controls wrap under
+     the label rather than overflowing the block. */
+  grid-template-columns: auto minmax(0, 1fr);
+}
+.transcript-header .picker-controls { flex-wrap: wrap; row-gap: 4px; }
+.transcript-header .picker-field,
+.transcript-header .picker-select { max-width: 100%; }
+/* The model id is capped by `LABEL_MAX` for the wide header; in the companion it gets the box's width instead, so the
+   elision is sized by the space that is actually there. */
+.transcript-header .picker-select { width: 100%; max-width: none; }
 
 /*
- * Narrow transcript: flip to a compact row above the scroller.
+ * The wide layout: prose in column 1, companion in column 2.
  *
- * Below this width the right-hand region is the prose's own space, so a floating block would cover text. The header
- * becomes an ordinary row in the flow, which is what the shell used to do — the difference is that it is now the
- * transcript's decision, and it happens at the TRANSCRIPT's width rather than the window's.
+ * `max-content` for the companion track, so the box is exactly as wide as it declares and the prose lane takes the
+ * rest. `align-items: start` on the scroller would break the sticky child, so the row alignment is left alone.
  */
-@container transcript (max-width: 760px) {
+.transcript-wrap.has-header {
+  display: grid;
+  /*
+   * Two columns, and TWO ROWS: the prose scrolls in row 1, the composer sits in row 2, and the companion spans both
+   * in column 2 — so it is beside the conversation and beside the input without either running under it.
+   *
+   * `1fr` for the prose row and `auto` for the composer: the scroller takes the remaining height, which is the same
+   * contract the flex column had.
+   */
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 1fr auto;
+}
+.transcript-wrap.has-header .transcript { grid-column: 1; grid-row: 1; }
+.transcript-wrap.has-header .transcript-footer { grid-column: 1; grid-row: 2; }
+/* The composer shares the prose's lane, so it never runs under the companion. */
+.transcript-wrap.has-header .composer-dock { max-width: var(--reading-measure); }
+
+/*
+ * Narrow: flip to a compact row above the scroller.
+ *
+ * The container query is the whole point of the arrangement: the box needs ~340px beside a 72ch lane, and the
+ * transcript knows whether it has that. Keying off the window would be wrong — an open panel leaves a wide window
+ * holding a narrow transcript, and the box would be squeezed into prose that has no room for it.
+ */
+@container transcript (max-width: 1080px) {
   .transcript-header {
     position: static;
-    background: var(--panel);
-    border-bottom: 1px solid var(--line);
-    padding: var(--sp-2) 18px;
-    flex: none;
+    grid-column: 1 / -1;
+    grid-row: 1;
+    padding: 0;
+    display: block;
   }
-  /* The band carries its own height, so the scroller needs no reservation. */
-  .transcript-wrap.has-header .transcript { padding-top: var(--sp-4); }
-  .session-header { flex-wrap: wrap; }
+  .transcript-header .session-header {
+    width: 100%;
+    max-width: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: var(--sp-2) 18px;
+    background: var(--panel);
+    border: none;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+  }
+  .transcript-wrap.has-header .transcript { grid-row: 2; }
+  .transcript-wrap.has-header .transcript-footer { grid-row: 3; }
 }
 
 /*
