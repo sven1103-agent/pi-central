@@ -102,9 +102,12 @@ was capped at 72ch while the composer spanned the whole column and the model con
 screenshot review found the result read as "three different widths" and as control panels assembled around a
 transcript. So:
 
-- **One header.** Identity and state left; `Usage` is a disclosure that restores the same four values on one line,
-  through the same formatters; context pressure earns a place in the header because it changes what the reader
-  should do. Model and Thinking keep their picker, their per-model coupling, and their next-turn semantics.
+- **One header, in three fixed groups.** Identity and state; then the two numbers that change a decision — a
+  **context meter** that fills amber past 80% with the words `ctx 84% full` beside it, and the session's **cost**;
+  then model and thinking, with their per-model coupling and next-turn semantics unchanged. Tokens and message count
+  are lookups and stay in the Session panel. The row is `flex-wrap: nowrap` with each control group `flex: none`:
+  an earlier version let it wrap freely, and one disclosure row was enough to produce a four-row header with a
+  stranded button (`img_23.png`).
 - **One lane.** `.lane` declares the reader's `--reading-measure` once, and both the prose and the composer use it.
   `ch` resolves in the element that uses it, so every consumer pins `--fs-base` first and children restore their own
   size — two `72ch` values then agree by construction rather than by a ratio somebody has to maintain (#140).

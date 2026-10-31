@@ -12,9 +12,13 @@
  * The review's finding was specific: *"the workspace uses three different widths"* — narrow conversation, wide
  * composer, distant controls — which reads as components assembled rather than a composed workspace.
  *
- * So: one header. Identity and state on the left, configuration on the right, telemetry folded into a
- * disclosure that states the same numbers on one line when opened. Nothing is removed; the detail is one click
- * away and the default view is the conversation.
+ * So: one header, in three fixed groups — identity, the two numbers that change a decision, then configuration.
+ *
+ * The first attempt put telemetry behind a disclosure instead, and a screenshot showed what that costs: opening it
+ * added a row that pushed the pickers onto two more lines and left the button stranded at the far right of a
+ * four-row header (`img_23.png`). A disclosure that BREAKS the row it lives in is worse than the density it was
+ * meant to relieve. So the stats are simply shown, and the lookups (tokens, messages) go where they already were:
+ * the Session panel.
  *
  * ## What stays in the header, and why
  *
@@ -22,20 +26,20 @@
  * - **Model and thinking**: a session-level decision like rename or stop, and the value the reader is most
  *   likely to want to check while a run costs money. Both keep `ModelPicker`/`ThinkingPicker`, with their
  *   loading, error and next-turn semantics unchanged.
- * - **Context pressure** when it is high: the one metric that changes what the reader should do. It is also
- *   stated in words (`ctx 84% full`), never by colour alone.
+ * - **Context usage and cost**: the two numbers that change a decision, always visible. Context is a meter, amber
+ *   past the threshold, with the words `ctx 84% full` beside it so nothing depends on colour. Tokens and message
+ *   count are lookups and stay in the Session panel, which already listed them.
  *
- * Telemetry is NOT hidden selectively: the disclosure shows every value the strip showed, through the same
- * formatters (`formatContext`, `formatTokens`, `formatCost`). One value, one format — the rule that a real
- * screenshot broke when the inspector said `127.2M` and the strip said `12723914`.
+ * One value, one format: everything goes through `format.ts`, the rule a real screenshot broke when the inspector
+ * said `127.2M` and the strip said `12723914`.
  */
-import { useState } from "react";
 import type { LiveSession } from "@pi-central/protocol";
-import { displayName, formatContext, formatCost, formatTokens, headerLocation } from "../format.ts";
+import { displayName, formatCost, headerLocation } from "../format.ts";
 import { stateLabel } from "../store.ts";
 import { InlineRename } from "./InlineRename.tsx";
 import { ModelPicker } from "./ModelPicker.tsx";
 import { ThinkingPicker } from "./ThinkingPicker.tsx";
+import { ContextMeter } from "./ContextMeter.tsx";
 
 export function SessionHeader({
   session,
@@ -60,13 +64,6 @@ export function SessionHeader({
   onSelectThinkingLevel: (level: string) => void;
   onRename: (name: string) => void;
 }) {
-  /*
-   * Local, and deliberately not persisted: it is a peek at numbers that are also in the Session panel. State
-   * that only decides whether a four-word line is showing does not deserve a storage key or a prop.
-   */
-  const [usageOpen, setUsageOpen] = useState(false);
-  const pressure = session.contextPercent !== null && session.contextPercent >= 80;
-
   return (
     <header className="session-header">
       <div className="title">
@@ -91,44 +88,23 @@ export function SessionHeader({
       </div>
 
       {/*
-        Context pressure earns its place in the header because it changes what the reader should do. Everything
-        else is a fact to look up, so it is behind the disclosure beside it.
+        THE TWO NUMBERS WORTH A PERMANENT PLACE.
+
+        Context usage changes what a reader should do — near the limit the session is about to compact — and cost is
+        what the run is spending. Both are always visible, on one line, with the meter turning amber past the
+        threshold and the word `full` beside it so nothing depends on colour.
+
+        What is NOT here: tokens and message count. They are lookups rather than decisions, and they are already in
+        the Session panel, so a disclosure in the header was offering a second copy of a panel the reader has. That
+        disclosure is what broke this row (`img_23.png`): it pushed the pickers onto two more lines and left its own
+        button stranded at the far right of a four-row header.
       */}
-      {pressure && (
-        <button
-          type="button"
-          className="header-pressure"
-          aria-expanded={usageOpen}
-          onClick={() => setUsageOpen((open) => !open)}
-          title="Context is nearly full — compaction or a new session may be needed"
-        >
-          {formatContext(session.contextPercent)}
-        </button>
-      )}
-
-      <button
-        type="button"
-        className="header-usage"
-        aria-expanded={usageOpen}
-        onClick={() => setUsageOpen((open) => !open)}
-        title="Tokens, cost and message count"
-      >
-        Usage
-      </button>
-
-      {usageOpen && (
-        /*
-          The strip, restored on demand. Same formatters as before, so a value cannot be spelled two ways on one
-          screen; `+N queued` stays here as well as in the chip, because the chip can be missed while reading.
-        */
-        <div className="header-usage-line" role="status">
-          <span>{formatTokens(session.tokensTotal)} tok</span>
-          <span>{formatCost(session.cost)}</span>
-          <span>{session.messageCount} msgs</span>
-          <span className={pressure ? "warn" : ""}>{formatContext(session.contextPercent)}</span>
-          {session.pending > 0 && <span className="warn">+{session.pending} queued</span>}
-        </div>
-      )}
+      <div className="header-stats">
+        <ContextMeter percent={session.contextPercent} />
+        <span className="header-cost mono" title="Total cost reported for this session">
+          {formatCost(session.cost)}
+        </span>
+      </div>
 
       {/*
         ONE block, two rows, one label column (issue #163): a `<label>` and a value of different widths cannot be
