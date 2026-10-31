@@ -414,6 +414,7 @@ export function TranscriptView({
         aria-label={`Transcript for ${sessionLabel}`}
         aria-busy={busy || undefined}
       >
+        <div className="transcript-lane">
         {failed ? (
         <div className="empty" style={{ padding: 0 }}>
           <h2>Could not load this session's history</h2>
@@ -462,10 +463,16 @@ export function TranscriptView({
           )}
         </>
       )}
-        {/* Above the end sentinel, inside the scroller: a compaction or retry is part of what is
-            happening, so following the tail should follow it too. Outside the transcript's own
-            content so that `aria-busy` on the region does not imply the notices are unfinished. */}
+        {/*
+          The notices are inside the LANE and OUTSIDE the branch: a compaction or a retry is part of what is
+          happening whether or not there is a message to show yet, and an empty transcript with a retry in flight is
+          exactly when a reader needs to see it. `aria-busy` on the region must not imply the notices are unfinished,
+          which is why they sit below the conversation rather than inside it.
+        */}
         <RunNotices notices={transcript.notices} />
+        </div>
+
+        {/* The end sentinel stays INSIDE the scroller and outside the lane: it is a scroll anchor, not content. */}
         <div ref={endRef} />
       </div>
       {/*

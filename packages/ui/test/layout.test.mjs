@@ -80,28 +80,48 @@ test("the composer spans the column instead of being individually centred", () =
  * button, Enter sends) is asserted in `components.test.mjs`, where the composer's markup is readable.
  */
 
-test("the transcript keeps its own horizontal padding", () => {
-  // Independent of the centring, and the only thing keeping text off the edges on a narrow window.
-  //
-  // The LEFT side now adds `--lane-inset`, which grows with the window so a wide display gets a composed column
-  // instead of a strip pinned to the corner. The property this guards is unchanged and is asserted as a FLOOR:
-  // 18px is still the narrow-window inset, and the right side still keeps its own 18px so the scrollbar stays at
-  // the column's edge.
-  const transcript = rule(".transcript");
-  assert.ok(transcript, ".transcript must have a rule");
-  // The declaration is normalised by the helper (whitespace collapsed), so the assertion reads the same shape.
+test("the transcript keeps its own horizontal padding, and centres ONE lane", () => {
   /*
-   * The padding is declared in two parts now: a `padding-top` override inside the narrow-container query (where the
-   * header becomes a row and the scroller needs no reservation for it), and the base rule that carries the sides.
-   * The helper returns the LAST matching rule, so the guarded declaration is the one with the horizontal insets.
+   * Two properties, and the second is a deliberate reversal of #92 with a different mechanism.
+   *
+   * #92 centred the transcript by putting `margin-inline: auto` on each CHILD. A tool marker is narrower than a
+   * paragraph, so each child was centred on its own width, the centres disagreed, and the column visibly flickered
+   * as tools ran. It was reverted, and the note in `.transcript` says centring is "the thing that failed".
+   *
+   * What actually failed was per-child centring. The review asked twice for a centred column, so it is centred ONCE,
+   * on a single lane wrapper that every entry fills: there is exactly one centre, so nothing can disagree about it.
+   * That is the property asserted here — one lane, one auto margin — rather than the presence or absence of centring.
    */
-  const sides = rule(".transcript") ?? "";
-  const base = /\.transcript\s*\{([^}]*)\}/.exec(
-    readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, ""),
-  )?.[1] ?? "";
+  // Read the BASE rule directly: `rule()` returns the LAST match, and the container-query override also sets
+  // `.transcript`, so the helper handed back `grid-row: 2`.
+  const source = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const transcript = /(?:^|\n)\.transcript\s*\{([^}]*)\}/.exec(source)?.[1] ?? "";
+  assert.ok(transcript, ".transcript must have a rule");
   assert.match(
-    base,
-    /padding:\s*var\(--sp-4\) 18px var\(--sp-4\) calc\(18px \+ var\(--lane-inset\)\)/,
-    `18px on the right and 18px + the lane inset on the left; got: ${base || sides}`,
+    transcript,
+    /padding:\s*var\(--sp-4\) 18px var\(--sp-4\) 18px/,
+    `18px on both sides, so the scrollbar sits at the column's edge; got: ${transcript}`,
+  );
+
+  const lane = rule(".transcript-lane");
+  assert.ok(lane, ".transcript-lane must exist — it is the one thing that is centred");
+  assert.match(lane, /margin-inline:\s*auto/, "the lane is centred");
+  assert.match(lane, /max-width:\s*var\(--reading-measure\)/, "…at the reader's measure, like the prose and composer");
+
+  // The guard that makes this safe: nothing else in the transcript may centre itself.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const centred = [...css.matchAll(/([^{}]+)\{([^}]*margin-inline:\s*auto[^}]*)\}/g)]
+    .map((m) => m[1].trim())
+    .filter((selector) => selector.includes("turn") || selector.includes("measure") || selector.includes("activity"));
+  assert.deepEqual(
+    centred,
+    [],
+    `per-child centring is #92's defect: a narrower child gets a different centre. Found: ${centred.join(", ")}`,
   );
 });

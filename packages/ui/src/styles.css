@@ -572,41 +572,19 @@ button { font: inherit; color: inherit; }
   flex-direction: column;
   min-height: 0;
   min-width: 0;
-  /*
-   * The lane's left inset, declared ONCE for the column so the prose and the composer cannot drift apart.
-   *
-   * Two separate `clamp()` expressions computing the same thing is the class of bug this file keeps recording:
-   * they agree until one is edited (#140's `ch` mismatch, #92's three left edges). It grows with the window up to
-   * 72px, so a wide display gets a composed column rather than a strip pinned to the corner, and a narrow one
-   * keeps the plain 18px.
-   */
-  --lane-inset: clamp(0px, calc((100% - var(--reading-measure)) * 0.18), 72px);
 }
 
 /*
- * The focused session's ONE header, where there used to be three full-width strips.
+ * The session header is a COMPANION to the conversation, docked beside the prose.
  *
- * The workspace opened with this header, a `metrics` strip (`ctx · tokens · cost · msgs`) and a `legend` row
- * explaining tool frames — each defensible alone, together a stack of control panels above a conversation that
- * had been squeezed into a narrow column. A review found the regions used three different widths and read as
- * assembled rather than composed.
+ * It has been three things: a full-width band above everything (read as window chrome), a block floating OVER the
+ * reading area (covered prose — `img_27.png`), and now a sticky box in its own grid track. The last is the only one
+ * where it can never cover anything, because it occupies space that is otherwise empty.
  *
- * So: identity and state left, configuration right, telemetry behind a disclosure on one line. `align-items:
- * center` because the row is a single band now, and `flex-wrap` so a narrow window moves the model block to its
- * own line instead of clipping the name or painting over a neighbour (issue #96).
- */
-/*
- * The session header is a COMPANION to the conversation, not a band above it.
- *
- * As a full-width strip with a bottom border and a `--panel` fill it read as chrome belonging to the window — a
- * review asked for it to be embedded in the transcript, floating at the top right where a desktop has room. So:
- * no fill, no border, no full-width rule, and `nowrap` with a single line.
- *
- * The `nowrap` is deliberate and was earned: a freely-wrapping row was one extra element away from a four-row header
- * with a stranded button (`img_23.png`). Only the identity block shrinks; the control groups keep their widths,
- * because a clipped CONTROL label is a defect while a truncated session name is not (the full name is in the rail,
- * in `title`, and in the panel). The narrow-container query below is the one place wrapping is reintroduced, and
- * there it is the point.
+ * `nowrap` is deliberate and was earned: a freely-wrapping row was one extra element away from a four-row header with
+ * a stranded button (`img_23.png`). Only the identity block shrinks; the control groups keep their widths, because a
+ * clipped CONTROL label is a defect while a truncated session name is not. The narrow-container query reintroduces
+ * wrapping, and there it is the point.
  */
 .session-header {
   /* `relative` for the run bar, which is positioned against this block's edge. */
@@ -731,14 +709,24 @@ button { font: inherit; color: inherit; }
 .transcript {
   flex: 1;
   overflow-y: auto;
-  /* The left side carries the lane inset, so the prose starts where the composer does. The right side keeps its
-     own small padding: it is next to the scrollbar, and an inset there would move the scrollbar away from the
-     column's edge, which is where a reader expects to find it.
-
-     The BOTTOM reserves the band the "Jump to latest" control floats in (#71), so the control can never cover the
-     last line. It lives here because the composer is inside the wrapper now: the reservation has to be part of what
-     scrolls, not a blank row under it. */
-  padding: var(--sp-4) 18px var(--sp-4) calc(18px + var(--lane-inset));
+  /*
+   * THE TRANSCRIPT IS CENTRED, and this is a deliberate reversal of a recorded decision.
+   *
+   * `#92` centred the transcript and was reverted, and its comment is worth reading before changing this again: it
+   * centred each CHILD on its own width, so a tool marker (narrow) and a paragraph (wide) landed on different centres
+   * and the column visibly flickered as tools ran. The lesson was never "centring is wrong" — it was "centring is a
+   * property of the LANE, not of each element".
+   *
+   * So the centring is done ONCE, here, on a single `.transcript-lane` wrapper whose width is the reader's measure.
+   * Every child fills it, so there is one centre and nothing can disagree about it. The review asked for this twice;
+   * at 1600px the left-anchored column left ~400px of dead space on one side only, which is what made the emptiness
+   * read as a mistake rather than as a margin.
+   *
+   * The right padding stays small so the scrollbar sits at the column's edge: an inset there would move the reader's
+   * scroller away from where they expect it. The bottom reserves the `Jump to latest` band (#71) — it has to be
+   * inside what scrolls, or it becomes a blank row above the composer.
+   */
+  padding: var(--sp-4) 18px var(--sp-4) 18px;
   min-height: 0;
   /*
    * NO `scroll-behavior: smooth`, and that is a correctness fix rather than a taste one (issue #86).
@@ -841,6 +829,25 @@ button { font: inherit; color: inherit; }
 .trace-list::-webkit-scrollbar-corner { background: transparent; }
 
 /* Prose is capped so it stays readable on a wide display; tool output may use full width. */
+/*
+ * THE LANE: one wrapper, centred, that every transcript child fills.
+ *
+ * `margin-inline: auto` appears exactly ONCE in the transcript, here. Putting it on the children was #92's defect —
+ * see the note on `.transcript`.
+ *
+ * `width: 100%` with the `max-width` cap means the lane fills the column when the column is narrow and stops growing
+ * at the reader's measure when it is wide, with the spare room split evenly on both sides.
+ *
+ * `--reading-measure` is inherited from the reader's setting (#134) and resolves in `--fs-base` — the size
+ * `.measure` inherits — so the lane, the prose cap inside it and the composer all agree on one number (#140).
+ */
+.transcript-lane {
+  width: 100%;
+  max-width: var(--reading-measure);
+  margin-inline: auto;
+  font-size: var(--fs-base);
+}
+
 /*
  * Prose is capped so it stays readable on a wide display; tool output may use full width.
  *
@@ -1169,11 +1176,10 @@ button { font: inherit; color: inherit; }
  * of the same width as the conversation above them.
  */
 .composer > * {
-  max-width: var(--reading-measure);
+  /* The dock already places and caps its children; this only stops a single strip (a mode toggle, a queue row) from
+     declaring its own width. Deliberately NO margin: the dock's `margin-inline: auto` is the one centring rule. */
+  max-width: 100%;
   width: 100%;
-  /* The same inset the prose uses (see `--lane-inset` on `.column`), so reading and writing share a left edge at
-     every window width. */
-  margin-left: var(--lane-inset);
 }
 
 .mode-strip {
@@ -2442,7 +2448,10 @@ select.btn { font-family: var(--sans); }
    */
   grid-template-columns: minmax(0, var(--reading-measure)) auto;
   grid-template-rows: 1fr auto;
-  justify-content: start;
+  /* The pair is CENTRED as a unit: the lane keeps its cap, the companion follows it, and the whole composition sits in
+     the middle of the column with equal room on both sides. `start` would pin it left, which is the state a review
+     called "pressed against the rail". */
+  justify-content: center;
   column-gap: var(--sp-5);
 }
 .transcript-wrap.has-header .transcript { grid-column: 1; grid-row: 1; }
@@ -2510,15 +2519,15 @@ select.btn { font-family: var(--sans); }
 }
 .composer-dock {
   /*
-   * The dock sits in the SAME lane as the prose, and is centred nowhere: it starts at the prose's left edge and is
-   * capped to the prose's measure, so the input's left edge is the paragraph's left edge at every width.
+   * The dock shares the lane's axis: same cap, same centre.
    *
-   * The same `max-width`, the same `--lane-inset`, inherited from `.column` — not a second computation of the same
-   * thing, which is the class of bug this file keeps recording.
+   * `margin-inline: auto` here and on `.transcript-lane` are the same two declarations, which is what guarantees the
+   * input sits under the paragraph rather than near it. `--lane-inset` is gone: it existed to push the lane off the
+   * column's left edge, and centring replaces that with one symmetrical rule.
    */
   max-width: var(--reading-measure);
   width: 100%;
-  margin-left: calc(18px + var(--lane-inset));
+  margin-inline: auto;
   padding: var(--sp-2) 0 0;
 }
 
