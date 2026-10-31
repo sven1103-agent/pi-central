@@ -205,8 +205,26 @@ test("the composer is unavailable, with a reason, in every other state", () => {
   }
 });
 
-test("a failed session surfaces its actual error in the composer", () => {
-  assert.equal(composerMode(live({ state: "failed", error: "EPERM" })).reason, "EPERM");
+test("a failed session's composer says what to DO, not what was printed", () => {
+  // REVERSED deliberately, and the reason is worth recording because the old assertion was not wrong in
+  // isolation: it required the composer to surface `session.error`.
+  //
+  // From a window: "the error is everywhere". The same multi-line stderr appeared in the banner, in the rail
+  // row's tooltip, under the composer, and in the Session panel. Four copies of one fact, three of them in
+  // places that are not for detail. DESIGN.md already specified this sentence for a failed session, so the
+  // composer goes back to saying what to do, and the reason lives in ONE place: the Session panel.
+  const mode = composerMode(live({ state: "failed", error: "pi exited (code=137)\n[LiteLLM] noise" }));
+  assert.equal(mode.mode, "unavailable");
+  assert.equal(mode.reason, "This session failed to start. Retry it from the rail.");
+  assert.ok(!mode.reason!.includes("LiteLLM"), "no stderr under the composer");
+});
+
+test("the failed session still CARRIES the error, so the Session panel can show it", () => {
+  // The other half of the contract: moving the reason out of the composer must not lose it. `error` is the
+  // durable record; the panel renders it.
+  const session = live({ state: "failed", error: "EPERM: sandbox_apply" });
+  assert.equal(session.error, "EPERM: sandbox_apply");
+  assert.equal(composerMode(session).reason, "This session failed to start. Retry it from the rail.");
 });
 
 test("no session selected says so rather than failing silently", () => {

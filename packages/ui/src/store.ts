@@ -553,7 +553,14 @@ export function composerMode(session: LiveSession | undefined): {
     case "awaiting-approval":
       return { mode: "unavailable", reason: "Waiting for your answer to a dialog below." };
     case "failed":
-      return { mode: "unavailable", reason: session.error ?? "This session failed to start." };
+      /*
+       * DESIGN.md's sentence, not the error.
+       *
+       * This used to return `session.error`, so the whole stderr appeared under the composer as well as in the
+       * banner and the Session panel. Reported as "the error is everywhere", and it is the same redundancy in
+       * a third place. The composer says what to DO; the Session panel says what happened.
+       */
+      return { mode: "unavailable", reason: "This session failed to start. Retry it from the rail." };
     case "stopped":
       return { mode: "unavailable", reason: "This session has stopped." };
     case "registered":

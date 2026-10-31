@@ -2179,3 +2179,24 @@ test("a single-line error gets no 'more lines' note", () => {
   assert.match(html, /no such session/);
   assert.ok(!/more line/.test(html), `nothing was withheld, so nothing may be claimed: ${html}`);
 });
+
+test("nothing on the rail puts the error in a hover tooltip", () => {
+  // Reported: "when users hover over retry, they also see the error. That does not make sense." Same mistake as
+  // the thinking block's `title` (issue #143): a native tooltip holding a wall of multi-line stderr, appearing
+  // on a stray hover with no way to keep it open or dismiss it. A control's tooltip says what the control does.
+  const html = renderToString(createElement(SessionRail, {
+    rows: rowsOf([session({
+      id: "s1", state: "failed", error: "pi exited (code=137)\n[LiteLLM] noise\n[nvim-tmux] noise",
+      previousError: "earlier failure\n[LiteLLM] more noise",
+    })]),
+    focusedId: undefined, onFocusRow() {}, onForgetRow() {}, onRetryRow() {}, retryAvailable: true,
+    onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
+  }));
+  assert.match(html, /rail-row-retry/, "the button is there");
+  assert.ok(!/title="[^"]*LiteLLM/.test(html), `no stderr in any tooltip: ${html}`);
+  assert.match(html, /title="Try this session again in the same directory"/, "a static tooltip instead");
+  // The earlier failure is one line on the row, not the stored wall.
+  assert.ok(!/nvim-tmux|LiteLLM/.test(html), `no stderr text on the row at all: ${html}`);
+  // React separates the label from the value with `<!-- -->`; asserting the sentence means normalising first.
+  assert.match(html.replace(/<!-- -->/g, ""), /last failure: earlier failure/, "and its first line is still shown");
+});

@@ -194,6 +194,11 @@ function rowName(row: RosterRow): string {
   return nameLabel(row.entry.name, row.entry.scratch === true, filenameOf(row.entry.path));
 }
 
+/** The first line of a message — the reason, as opposed to everything the process printed. */
+function firstLine(text: string): string {
+  return text.split("\n")[0] ?? text;
+}
+
 /** The file's name without its extension, as a last-resort label. */
 function filenameOf(path: string): string {
   const segment = path.split("/").filter((part) => part.length > 0).pop() ?? path;
@@ -295,7 +300,13 @@ function RailRow({
               type="button"
               className="rail-row-retry"
               onClick={onRetry}
-              title={session.error ?? "Try this session again in the same directory"}
+              /*
+                A STATIC sentence. It used to be `session.error`, which put the whole multi-line stderr into a
+                native tooltip — the same mistake as the thinking block's `title` (issue #143): a wall of text
+                appearing on a stray hover, with no way to keep it open or dismiss it. Hovering a control should
+                say what the control DOES; the reason lives in one place, the Session panel.
+              */
+              title="Try this session again in the same directory"
             >
               Retry
             </button>
@@ -318,9 +329,12 @@ function RailRow({
         (after a retry cleared `error`). A test for the acceptance criterion caught it.
       */}
       {session?.previousError !== undefined && (
-        <span className="rail-row-earlier" title={session.previousError}>
-          last failure: {session.previousError}
-        </span>
+        /*
+          One line, and no `title`. The stored value is the whole stderr, and a rail row is not the place for
+          it: `title` would surface all of it on hover, which is exactly what hovering a row should not do.
+          `firstLine` is the same rule the error strip follows, so the two agree about what "the reason" is.
+        */
+        <span className="rail-row-earlier">last failure: {firstLine(session.previousError)}</span>
       )}
       {session === undefined && (
         <button

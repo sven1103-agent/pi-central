@@ -345,6 +345,25 @@ They are kept because each one is the reason a constraint or an invariant test e
   separate field because the two answer different questions: *"is it broken now"* and *"how did it break last
   time"*.
 
+  **The error now appears in exactly one durable place.** Reported after dismissal: *"the error is everywhere
+  and when users hover over retry, they also see the error. That does not make sense."* It was in four:
+
+  | where | before | now |
+  |---|---|---|
+  | the strip | 9 lines of stderr | the reason + a count of what it is not showing |
+  | the rail's Retry tooltip | the whole stderr | a static sentence about the button |
+  | the `last failure:` row line | the whole stored stderr | its first line, no tooltip |
+  | under the composer | the whole stderr | *"This session failed to start. Retry it from the rail."* |
+  | the Session panel | full text | full text — **the one place detail belongs** |
+
+  The tooltip is the same mistake as the thinking block's `title` (issue #143): a wall of text on a stray
+  hover, with no way to keep it open or dismiss it. A control's tooltip says what the control does.
+
+  An existing test had to be **reversed** rather than fixed: it required the composer to surface
+  `session.error`. That was not wrong in isolation — it was wrong four times over. It now asserts the
+  documented sentence *and* keeps the other half of the contract: the session still carries `error`, so the
+  Session panel can show it.
+
   **Dismiss actually dismissed, and the strip stopped pasting stderr.** Two defects reported together from a
   window. Dismiss dispatched `{ kind: "error", message: "" }`, which *prepends an empty string* rather than
   removing anything — so the strip stayed on screen and the button looked broken. It is now a `dismissError`
