@@ -12,6 +12,7 @@ import type { LiveSession } from "@pi-central/protocol";
 import { displayName, formatContext, formatCost, formatModel, formatThinking, nameLabel, shortenPath, whereLine } from "../format.ts";
 import { stateLabel } from "../store.ts";
 import { groupRows, rowActivity, type RosterRow } from "../roster.ts";
+import { useRenameEditor } from "./InlineRename.tsx";
 
 /**
  * Section headings, in attention order.
@@ -234,12 +235,37 @@ function RailRow({
   home: string | undefined;
 }) {
   const session = row.session;
+  /*
+   * Renaming from the rail (issues #78, #79).
+   *
+   * The row's content lives inside a `<button>`, and an `<input>` inside a button is invalid HTML that browsers
+   * resolve by breaking the row — so while editing, the whole row IS the field instead of the button. That is why
+   * the behaviour lives in `useRenameEditor` rather than inside the header's component: one state machine, two
+   * shapes. The rail half of #162 was claimed in its description and never wired; a test now asserts it.
+   *
+   * Only for a LIVE session: Pi performs the rename over RPC (`set_session_name`), so a row whose process is gone
+   * has nobody to ask, and offers plain text rather than a field that could not work.
+   */
+  const rename = useRenameEditor({ value: rowName(row), onCommit: onRename });
   const ask = session?.dialogs[0]?.message ?? session?.dialogs[0]?.title;
   // The activity column. For a row with no live session this is `stopped` — the same word `LiveState` already
   // uses, so a roster with sessions that are not running adds rows to an existing group and invents nothing.
   const activity = rowActivity(row);
   const where =
     row.entry.cwd === undefined ? "directory unknown" : shortenPath(row.entry.cwd, 34, home);
+
+  if (rename.editing) {
+    return (
+      <div className={`rail-row state-${activity}${focused ? " is-focused" : ""}`}>
+        <input
+          {...rename.inputProps}
+          ref={rename.inputRef}
+          className="inline-rename rail-row-rename"
+          aria-label="Session name"
+        />
+      </div>
+    );
+  }
 
   return (
     /*
@@ -258,7 +284,23 @@ function RailRow({
         onClick={onFocus}
       >
       <span className="r1">
-        <span className="name">{rowName(row)}</span>
+        {session === undefined ? (
+          // No process, so no `set_session_name`: a rename here would be a promise the app cannot keep.
+          <span className="name">{rowName(row)}</span>
+        ) : (
+          <span
+            className="name"
+            title="Double-click to rename"
+            onDoubleClick={(event) => {
+              // The name sits inside the row's button. Editing is the more specific intent, so it claims the event
+              // before the row reads it as "focus this session".
+              event.stopPropagation();
+              rename.start();
+            }}
+          >
+            {rowName(row)}
+          </span>
+        )}
         {session?.scratch && <span className="chip chip-scratch">scratch</span>}
         <span className={`chip chip-${activity}`}>
           {session === undefined ? "stopped" : stateLabel(session)}

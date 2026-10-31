@@ -4,27 +4,20 @@
  * ## Why this exists at all
  *
  * Reported: *"renaming a session is not easy"* — the only path was Inspector → Actions → expand `Rename…` →
- * type → `Save name`. The detail panel has to be visible and a disclosure opened before a single character can
+ * type → `Save name`. The detail panel had to be visible and a disclosure opened before a single character could
  * be typed, which is why nobody names a session. And `DESIGN.md` §12 already specified the intended gesture:
  *
  *   > **Double-click the header name** → inline rename (`set_session_name`)
  *
- * It had never been built. This is that gesture, written once so the header and the rail row share it rather
- * than growing two behaviours.
+ * ## Why the logic is a hook with two renderers
  *
- * ## The decision behind the fix
+ * The header can put the field where the text was, but the rail row cannot: its content lives inside a `<button>`,
+ * and an `<input>` inside a button is invalid HTML that browsers resolve by breaking the row. So the rail has to
+ * swap the whole row while editing.
  *
- * The alternative was a generated default name, so unnamed sessions would at least be distinguishable. Rejected:
- * a generated name *looks chosen*, which removes the nudge to ever name anything, and `brisk-otter` is no more
- * findable tomorrow than `s7`. Cheap renaming fixes the actual complaint — the name is only useful if giving one
- * is one gesture.
- *
- * ## Editing is a real input, not contenteditable
- *
- * An `<input>` brings IME, selection, clipboard and undo for free, and `contenteditable` brings a parser. The
- * input is rendered INSTEAD of the display node rather than inside it, so nothing nests interactive content
- * inside a button — the rail row is a `<button>`, and an `<input>` inside one is invalid HTML that browsers
- * resolve by breaking the row.
+ * A first version kept the state inside `InlineRename`, which left the rail unable to use it at all — and the rail
+ * half of #162 was then claimed in its description and never wired. The behaviour lives in `useRenameEditor`, and
+ * both renderers are thin: one state machine, two shapes.
  *
  * ## Commit and cancel
  *
@@ -34,38 +27,43 @@
  */
 import { useEffect, useRef, useState } from "react";
 
-export function InlineRename({
+export interface RenameEditor {
+  editing: boolean;
+  draft: string;
+  /** Begin editing. Prefills from `value`. */
+  start: () => void;
+  /**
+   * Behaviour props for the `<input>` (commit, cancel, focus guard).
+   *
+   * Spreading them is what keeps both renderers behaviourally identical. `ref`, `className` and `aria-label` stay
+   * with the caller, because those are the parts that differ between the header's field and the rail's.
+   */
+  inputProps: React.InputHTMLAttributes<HTMLInputElement>;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+}
+
+/**
+ * The state machine behind every rename affordance.
+ *
+ * `value` is the name **as displayed**, which is what the field edits. Reported from use: a scratch session's row
+ * read `Scratch session` but opened `s1`, because the caller passed the stored name and a separate display value.
+ * One value means the two cannot disagree — and an unchanged commit compares against what is on screen, so
+ * accepting a default label sends nothing rather than promoting it into a literal name.
+ */
+export function useRenameEditor({
   value,
   onCommit,
-  label,
-  className,
 }: {
-  /**
-   * The name **as displayed**, which is what the field edits.
-   *
-   * Reported from use: a scratch session showed `Scratch session` in the row but opened `s1` in the field,
-   * because the caller passed the raw `session.name` and a separate display value. Two values for one name is the
-   * defect — the reader was shown one thing and invited to edit another.
-   *
-   * Passing the display value has a consequence worth stating, because it is the reason this is safe: an
-   * UNCHANGED commit compares against what is on screen, so accepting `Scratch session` unchanged sends nothing.
-   * That keeps #78's decision intact — a default label cannot be silently promoted into a real name, which would
-   * give every scratch session the same literal title again.
-   */
   value: string;
-  /** Receives the trimmed name, only when it differs from `value`. */
   onCommit: (name: string) => void;
-  /** The accessible name of the input while editing. */
-  label: string;
-  className?: string;
-}) {
+}): RenameEditor {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   // Focus and select on entering edit mode, so the common case is "type the new name" rather than
-  // "select all, then type". `useEffect` rather than an autoFocus attribute: the element mounts inside a
-  // component that may already have focus, and selecting after mount is what makes it usable.
+  // "select all, then type". A `useEffect` rather than `autoFocus`: the element mounts inside a subtree that may
+  // already have focus, and selecting after mount is what makes it usable.
   useEffect(() => {
     if (!editing) return;
     inputRef.current?.focus();
@@ -84,29 +82,59 @@ export function InlineRename({
     setEditing(false);
   };
 
-  if (editing) {
+  const start = () => {
+    setDraft(value);
+    setEditing(true);
+  };
+
+  return {
+    editing,
+    draft,
+    start,
+    inputRef,
+    inputProps: {
+      value: draft,
+      onChange: (event) => setDraft(event.target.value),
+      onBlur: commit,
+      onKeyDown: (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          commit();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          cancel();
+        }
+        // Name editing must not reach the window-level handlers: Escape is bound globally to close dialogs and to
+        // stop a run, and a key pressed inside a form field is not a command for the rest of the app.
+        event.stopPropagation();
+      },
+      // A double-click inside the field would start a second edit on the text; the field is already the editor.
+      onDoubleClick: (event) => event.stopPropagation(),
+    },
+  };
+}
+
+/** The header's shape: the text swaps for a field in place. */
+export function InlineRename({
+  value,
+  onCommit,
+  label,
+  className,
+}: {
+  value: string;
+  onCommit: (name: string) => void;
+  label: string;
+  className?: string;
+}) {
+  const editor = useRenameEditor({ value, onCommit });
+
+  if (editor.editing) {
     return (
       <input
-        ref={inputRef}
-        className={`inline-rename${className === undefined ? "" : ` ${className}`}`}
+        {...editor.inputProps}
+        ref={editor.inputRef}
+        className={`inline-rename${className ? ` ${className}` : ""}`}
         aria-label={label}
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            commit();
-          } else if (event.key === "Escape") {
-            event.preventDefault();
-            cancel();
-          }
-          // Name editing must not reach the window-level handlers: Escape is bound globally to close dialogs and
-          // to stop a run, and a key pressed inside a form field is not a command for the rest of the app.
-          event.stopPropagation();
-        }}
-        // A double-click inside the field would start a second edit on the text; the field is already the editor.
-        onDoubleClick={(event) => event.stopPropagation()}
       />
     );
   }
@@ -115,11 +143,9 @@ export function InlineRename({
     <span
       className={className}
       onDoubleClick={(event) => {
-        // The header and the rail row both sit inside clickable surfaces. Editing is the more specific intent,
-        // so it claims the event before the row treats it as "focus this session".
+        // The header sits inside clickable surfaces. Editing is the more specific intent, so it claims the event.
         event.stopPropagation();
-        setDraft(value);
-        setEditing(true);
+        editor.start();
       }}
       title="Double-click to rename"
     >
