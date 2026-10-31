@@ -842,3 +842,40 @@ test("dismissing with nothing to dismiss is a no-op on the same object", () => {
   const state = initialState();
   assert.equal(reduce(state, { kind: "dismissError" }), state, "no re-render for a no-op");
 });
+
+// --- A rename reaches History without a reload (issue #164) ---------------------------------------
+
+test("a session patch updates the matching HISTORY entry's name", () => {
+  // Reported as a question, and the answer was no: renaming updated the rail but History kept the old name until a
+  // full page reload, because `history` is built from `discover()` on connect and the UI never sends `list`.
+  let state = reduce(initialState(), {
+    kind: "snapshot",
+    live: [],
+    history: [
+      { path: "/s/a/one.jsonl", id: "id-1", cwd: "/git/a", created: "", modifiedMs: 0, bytes: 0, messageCount: 0, firstMessage: "", cwdExists: true, scratch: false, name: "old name" },
+      { path: "/s/b/two.jsonl", id: "id-2", cwd: "/git/b", created: "", modifiedMs: 0, bytes: 0, messageCount: 0, firstMessage: "", cwdExists: true, scratch: false },
+    ],
+    historyTotal: 2, home: "/Users/x",
+  } as never);
+
+  state = reduce(state, {
+    kind: "session",
+    session: live({ id: "s1", sessionFile: "/s/a/one.jsonl", name: "the name I chose" }),
+  });
+
+  assert.equal(state.history[0]!.name, "the name I chose", "History follows the rename");
+  assert.equal(state.history[1]!.name, undefined, "and only the matching entry is touched");
+});
+
+test("a session event with no file changes no history entry", () => {
+  // A session Pi has not yet reported a file for cannot be matched to a history entry. Treating "unknown file" as
+  // "matches everything" would rewrite the whole list on the first event of any new session.
+  let state = reduce(initialState(), {
+    kind: "snapshot", live: [],
+    history: [{ path: "/s/a/one.jsonl", id: "id-1", cwd: "/git/a", created: "", modifiedMs: 0, bytes: 0, messageCount: 0, firstMessage: "", cwdExists: true, scratch: false, name: "old name" }],
+    historyTotal: 1, home: "/Users/x",
+  } as never);
+
+  state = reduce(state, { kind: "session", session: live({ id: "s1", name: "unmatched" }) });
+  assert.equal(state.history[0]!.name, "old name", "nothing matched, nothing changed");
+});

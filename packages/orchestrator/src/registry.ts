@@ -64,6 +64,27 @@ export const KNOWN_SESSION_VERSIONS = new Set([3]);
  */
 const HEAD_BYTES = 256 * 1024;
 
+/**
+ * How much of the END of a large session file is read, for a name set late (issue #164).
+ *
+ * ## Why the head alone was not enough
+ *
+ * Pi stores a session's name as a `session_info` record, appended wherever the rename happened — and a rename
+ * appends at the END. `HEAD_BYTES` is 256 KB, so a name given to a session larger than that was never seen:
+ * `registry.ts` used to say so itself ("a name set late in a large session will not be seen").
+ *
+ * Measured on this machine: 272 of 873 sessions are larger than the window, so **31% of sessions could not show
+ * a rename in History at all**, however often the app reconnected. The session header carries no name — only
+ * `cwd`, `id`, `timestamp`, `type`, `version` — so there is no cheaper fallback.
+ *
+ * ## Why this is not a full read
+ *
+ * The window exists so a huge transcript is cheap to skip. This is one extra read per LARGE file, of a few KB,
+ * and only when the file is bigger than the head window. A `session_info` line is well under a kilobyte; 8 KB of
+ * tail holds the last few hundred records, which is where a rename sits.
+ */
+const TAIL_BYTES = 8 * 1024;
+
 /** Mirror Pi's directory encoding: strip leading slash, replace `/` and `:` with `-`. */
 export function encodeSessionDir(cwd: string): string {
   return `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
@@ -73,6 +94,52 @@ export function encodeSessionDir(cwd: string): string {
 export function decodeSessionDir(dirName: string): string {
   const inner = dirName.replace(/^--/, "").replace(/--$/, "");
   return `/${inner.replace(/-/g, "/")}`;
+}
+
+/**
+ * The name from the LAST `session_info` in a file's tail, or `undefined`.
+ *
+ * The tail can begin in the middle of a record — the read starts at an arbitrary byte — so the first (possibly
+ * partial) line is discarded rather than parsed. A partial JSON line would otherwise be the one case that makes
+ * this throw on a perfectly good file.
+ */
+async function readLateSessionName(path: string): Promise<string | undefined> {
+  let stats;
+  try {
+    stats = statSync(path);
+  } catch {
+    return undefined;
+  }
+  const start = Math.max(0, stats.size - TAIL_BYTES);
+  if (start === 0) return undefined;
+
+  const text = await new Promise<string>((resolve) => {
+    const chunks: Buffer[] = [];
+    const stream = createReadStream(path, { start, end: stats.size - 1 });
+    stream.on("data", (chunk) => chunks.push(chunk as Buffer));
+    // A tail that cannot be read is not a reason to lose the session: the head's name is still valid.
+    stream.on("error", () => resolve(""));
+    stream.on("close", () => resolve(Buffer.concat(chunks).toString("utf8")));
+  });
+  if (text === "") return undefined;
+
+  const lines = text.split("\n");
+  // Drop the first line: it is almost certainly a fragment of a record that began before `start`.
+  lines.shift();
+  let name: string | undefined;
+  for (const line of lines) {
+    if (!line.includes('"session_info"')) continue;
+    try {
+      const record = JSON.parse(line) as { type?: unknown; name?: unknown };
+      if (record.type === "session_info" && typeof record.name === "string") {
+        const trimmed = record.name.trim();
+        if (trimmed.length > 0) name = trimmed;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return name;
 }
 
 /** Read up to HEAD_BYTES of a file as utf8, streamed so a large file is not loaded whole. */
@@ -193,8 +260,16 @@ async function describeSessionFile(
   projectDir: string,
   stats: Stats,
 ): Promise<{ ok: true; session: HistoricalSession } | { ok: false; reason: string }> {
-  const parsed = parseHead(await readHead(path));
+  const head = await readHead(path);
+  const parsed = parseHead(head);
   if (!parsed) return { ok: false, reason: "not a Pi session file (no valid header)" };
+  /*
+   * The name Pi wrote LAST, which for a large session lives outside the head window (issue #164).
+   *
+   * Only for files bigger than the head read: for anything smaller the whole file was already parsed, and a second
+   * read would be pure cost.
+   */
+  const lateName = stats.size > HEAD_BYTES ? await readLateSessionName(path) : undefined;
   if (!KNOWN_SESSION_VERSIONS.has(parsed.header.version)) {
     return { ok: false, reason: `unknown session version ${parsed.header.version}` };
   }
@@ -205,7 +280,8 @@ async function describeSessionFile(
       path,
       id: parsed.header.id,
       cwd,
-      ...(parsed.name ? { name: parsed.name } : {}),
+      // The late name wins: it is the most recent rename, and the head's is the earliest one.
+      ...((lateName ?? parsed.name) ? { name: (lateName ?? parsed.name)! } : {}),
       created: parsed.header.timestamp,
       modifiedMs: stats.mtimeMs,
       bytes: stats.size,
