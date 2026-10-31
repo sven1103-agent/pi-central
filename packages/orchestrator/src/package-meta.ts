@@ -82,3 +82,16 @@ export function readPackageJson(path: string): { name?: unknown; version?: unkno
     return undefined;
   }
 }
+
+/**
+ * The one-line instruction for verifying an installed copy.
+ *
+ * Kept here rather than inline in the startup banner so it is a testable fact rather than prose in a
+ * `console.log`: the command must be the same one the README's install section gives, and a banner that
+ * names a command nobody runs is the "a claim nobody checks" failure in miniature.
+ *
+ * It is `npm audit signatures` and not an integrity hash, because npm records NO integrity for a global
+ * install — verified on a real one: there is no `.package-lock.json` under the global prefix and no
+ * `_integrity` in the installed manifest. Printing a hash would mean inventing one.
+ */
+export const VERIFY_INSTALL_HINT = "npm audit signatures";

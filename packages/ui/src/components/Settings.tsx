@@ -273,6 +273,25 @@ export function Settings({
                 </section>
 
                 <section>
+                  <h4>This copy</h4>
+                  {/*
+                    Where the command lives for the person who never reads a README.
+
+                    Deliberately NOT a button and NOT an automatic check: the app cannot verify itself — a
+                    malicious build would omit the check — and shelling out to `npm audit signatures` would
+                    introduce outbound network calls this app does not otherwise make. So it states the
+                    command and the reason to run it, which is the honest version of help.
+                  */}
+                  <p className="settings-note settings-verify">
+                    This build cannot check its own provenance; a compromised build would simply skip the
+                    check. To verify the package you installed, run{" "}
+                    <code>npm audit signatures</code> in a terminal — before the first run if you have not
+                    started it yet. The startup banner also prints the directory this copy was loaded from,
+                    which is how to tell a global install from a checkout.
+                  </p>
+                </section>
+
+                <section>
                   <h4>Updates</h4>
                   {/*
                     A statement, not a control. Update checking is not built (#55), and a disabled checkbox

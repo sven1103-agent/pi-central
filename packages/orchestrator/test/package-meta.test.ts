@@ -21,7 +21,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { findOwnPackage, PACKAGE_NAME } from "../src/package-meta.ts";
+import { VERIFY_INSTALL_HINT, findOwnPackage, PACKAGE_NAME } from "../src/package-meta.ts";
 import { resolveUiDistDir } from "../src/static-ui.ts";
 
 /** A directory that is removed at the end of the test that made it. */
@@ -231,4 +231,44 @@ test("PI_CENTRAL_UI_DIST still overrides everything", () => {
   // branches that could shadow it.
   const explicit = join(tmpdir(), "somewhere-else");
   assert.equal(resolveUiDistDir({ PI_CENTRAL_UI_DIST: explicit }), resolve(explicit));
+});
+
+// --- The package must stay inert on install (the install-path verification depends on it) ---------
+
+test("the published package declares NO install scripts", () => {
+  // This is load-bearing for the verification recipe in the README:
+  //
+  //   npm install --global pi-central   # inert: no install scripts run
+  //   npm audit signatures              # verify BEFORE the first run
+  //   pi-central
+  //
+  // That ordering is only sound because `npm install` executes no package code. Add a `postinstall` and
+  // the recipe becomes theatre: the package would run before anyone had a chance to check what it is.
+  // A `postinstall` would also be the first install script this package has ever had, and it is skipped
+  // entirely under `--ignore-scripts`, which many CI and enterprise setups use — so it would offer even
+  // less than it appears to.
+  // The ROOT manifest, not the workspace one: `scripts/build-package.mjs` publishes the root
+  // `package.json` verbatim (it only reads it, never regenerates it), so the root file is what a user
+  // actually installs. A first version of this test read `../package.json` — the orchestrator workspace —
+  // and passed with a `postinstall` added to the real one, which is exactly the kind of guard that looks
+  // present and checks nothing.
+  const manifest = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8")) as {
+    scripts?: Record<string, string>;
+  };
+  const installScripts = ["preinstall", "install", "postinstall", "prepare", "prepublish"].filter(
+    (name) => manifest.scripts?.[name] !== undefined,
+  );
+  assert.deepEqual(
+    installScripts,
+    [],
+    `the package must run no code at install time, found: ${installScripts.join(", ")}`,
+  );
+});
+
+test("the verify hint names the command the README gives", () => {
+  // A banner naming a command nobody runs is the "claim nobody checks" failure in miniature. One constant,
+  // used by the banner and asserted against the README, so the two cannot drift silently.
+  assert.equal(VERIFY_INSTALL_HINT, "npm audit signatures");
+  const readme = readFileSync(new URL("../../../README.md", import.meta.url), "utf8");
+  assert.ok(readme.includes(VERIFY_INSTALL_HINT), "the README's install section must give the same command");
 });

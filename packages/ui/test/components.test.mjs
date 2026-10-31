@@ -2094,3 +2094,15 @@ test("a remembered row with a placeholder name shows a label, never the word", (
   assert.match(html, /Scratch session/);
   assert.match(html, /y</, "a non-scratch unnamed row falls back to its file name");
 });
+
+test("Settings says how to verify the install, and why it cannot do it itself", () => {
+  // The app must not offer a self-check it cannot perform: a malicious build omits it, and shelling out to
+  // npm would add outbound calls this app does not make. Stating the command and its limit is the honest
+  // version — and it puts the instruction where a user already looks, not only in a README.
+  const html = renderToString(createElement(Settings, {
+    install: installFacts(), ready: true, onClose() {}, initialSection: "about",
+  }));
+  assert.match(html, /npm audit signatures/, "the command must be named");
+  assert.match(html, /cannot check its own provenance/, "the limit must be stated");
+  assert.ok(!/<button[^>]*>[^<]*audit signatures/i.test(html), "and it must not pretend to run it");
+});

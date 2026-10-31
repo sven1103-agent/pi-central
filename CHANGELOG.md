@@ -281,6 +281,38 @@ They are kept because each one is the reason a constraint or an invariant test e
   know otherwise, which is what made the handle appear. Recorded even when `false`, so the rule cannot misfire in
   the other direction.
 
+### Changed
+
+- **Verification is part of the install path, and the least verifiable path says so.**
+
+  Three moves, in the order they matter:
+
+  **1. The install recipe has an order, and the order is load-bearing.**
+
+  ```bash
+  npm install --global pi-central   # inert: this package runs no install scripts
+  npm audit signatures              # verify BEFORE the first run
+  pi-central
+  ```
+
+  That is only sound because `npm install` executes no package code. A test now fails if any `preinstall`,
+  `install`, `postinstall`, `prepare` or `prepublish` script appears in the **root** manifest — the one
+  `scripts/build-package.mjs` publishes verbatim. The first version of that test read the orchestrator
+  workspace's `package.json` instead and passed with a `postinstall` added to the real one; it was fixed by
+  falsifying it.
+
+  **2. `npx pi-central` is no longer presented as an equal alternative.** It fetches and executes in one
+  step, so there is no window to check what you got. Pinning is the minimum, and the README now says so.
+
+  **3. The app states which copy is running and how to check it**, in the startup banner and in
+  **Settings → About**. Deliberately no self-check: a compromised build would omit it, and shelling out to
+  npm would add outbound calls this app does not make. Version, the directory it was loaded from, and the
+  command — which is what is knowable offline.
+
+  **No integrity hash is printed, because npm records none for a global install** — verified on a real one:
+  no `.package-lock.json` under the global prefix, and no `_integrity` in the installed manifest. Printing
+  one would mean inventing it.
+
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.4.1] — 2026-10-29

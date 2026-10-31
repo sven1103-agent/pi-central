@@ -110,15 +110,19 @@ passed `--port`.
 ### From npm — what a user does
 
 ```bash
-npm install --global pi-central
+npm install --global pi-central   # inert: this package runs no install scripts
+npm audit signatures              # verify BEFORE the first run
 pi-central
 ```
 
-Or without installing it at all:
+**The order is the point, and it is only sound because of the comment on line one.** `npm install`
+executes no code from this package — it declares no `preinstall`, `install`, `postinstall` or `prepare`
+script, and a test asserts that stays true. So there is a window between "the bytes are on disk" and
+"anything has run" in which you can check what you got.
 
-```bash
-npx pi-central
-```
+`npx pi-central` has no such window: it fetches and executes in one step. It is convenient and it is the
+least verifiable way to run this. If you use it, pin the version (`npx pi-central@0.4.1`) so you at
+least know which artifact you asked for.
 
 Once it is running, [install it as an app](#install-it-as-an-app) and you will not need the terminal
 again until the next reboot.
