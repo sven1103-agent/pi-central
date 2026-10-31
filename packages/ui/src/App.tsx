@@ -32,6 +32,16 @@ import {
   transcriptFor,
 } from "./store.ts";
 import { SessionRail } from "./components/SessionRail.tsx";
+
+/**
+ * Below this width the rail becomes an overlay drawer.
+ *
+ * Chosen to match the stylesheet's own breakpoint, and stated here because the BUTTON that opens the drawer is
+ * rendered from JavaScript while the layout that needs it is CSS. The two are kept in step by `RAIL_DRAWER_MAX_WIDTH`
+ * being the one number, and a test asserts the media query uses the same value — the class of drift this project
+ * records for `FILES_SPLIT_MIN_WIDTH` in `panel.ts`.
+ */
+export const RAIL_DRAWER_MAX_WIDTH = 1024;
 import { TranscriptView } from "./components/Transcript.tsx";
 import { ToolTrace } from "./components/ToolTrace.tsx";
 import { Composer, type QueueBehavior } from "./components/Composer.tsx";
@@ -154,6 +164,15 @@ export function App() {
   // fraction of the window: a window narrowed after a drag must not leave the panel wider than the
   // transcript can survive.
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 1440 : window.innerWidth));
+  //
+  // Is the session rail showing as a DRAWER?
+  //
+  // Below `RAIL_DRAWER_MAX_WIDTH` the columns cannot all fit, so the rail leaves the grid and becomes an overlay —
+  // opened deliberately, closed by Escape, by the backdrop, or by choosing a session. Without this the rail was simply
+  // `display: none` at those widths, and `.rail.open` was styled for a class nothing ever set: the session list became
+  // unreachable, which is a worse failure than a cramped one.
+  const [railOpen, setRailOpen] = useState(false);
+  const railIsDrawer = viewportWidth < RAIL_DRAWER_MAX_WIDTH;
   useEffect(() => {
     const onResize = () => {
       setViewportWidth(window.innerWidth);
@@ -162,6 +181,30 @@ export function App() {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  /*
+   * Closing it on resize is not tidiness: a drawer left open while the window grows would cover a rail that is already
+   * there, so the reader would see two lists. The state is meaningless once the breakpoint is crossed.
+   */
+  useEffect(() => {
+    if (!railIsDrawer) setRailOpen(false);
+  }, [railIsDrawer]);
+
+  /*
+   * Escape closes the drawer, and it is registered HERE rather than in the rail because the composer already owns
+   * Escape for stopping a run. This handler is on the capture phase and stops the event only when the drawer is open,
+   * so the two never both act on one keystroke.
+   */
+  useEffect(() => {
+    if (!railOpen) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      setRailOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, [railOpen]);
 
   // Persisted on change, not on every render: the maps only change when a toggle is pressed.
   useEffect(() => {
@@ -562,6 +605,21 @@ export function App() {
           <img className="wordmark-mark" src={logoIcon} alt="" aria-hidden="true" />
           Pi Central
         </h1>
+        {/*
+          Only rendered when the rail is a drawer. A control that does nothing at every other width would be a permanent
+          question ("what is hidden?") on a layout where nothing is.
+        */}
+        {railIsDrawer && (
+          <button
+            type="button"
+            className="rail-toggle"
+            aria-expanded={railOpen}
+            aria-controls="session-rail"
+            onClick={() => setRailOpen((open) => !open)}
+          >
+            Sessions
+          </button>
+        )}
         <div className="tabs" role="tablist" aria-label="View">
           <button
             type="button"
@@ -649,6 +707,20 @@ export function App() {
         />
       )}
 
+      {railOpen && railIsDrawer && (
+        /*
+          The backdrop is the drawer's close affordance for a pointer, and it is a real button so it is reachable by
+          keyboard too. `aria-label` because an unlabelled button riding over the whole workspace announces as
+          "button" and nothing else.
+        */
+        <button
+          type="button"
+          className="rail-backdrop"
+          aria-label="Close the session list"
+          onClick={() => setRailOpen(false)}
+        />
+      )}
+
       <div
         className={panel.collapsed ? "panes is-collapsed" : "panes"}
         style={{ "--panel-width": `${panel.width}px` } as React.CSSProperties}
@@ -663,12 +735,16 @@ export function App() {
            */
           rows={rosterRows(state.roster, state.live)}
           focusedId={state.focusedId}
+          openAsDrawer={railOpen}
+          onCloseDrawer={() => setRailOpen(false)}
           onFocusRow={(row) => {
             // EVERY row is focusable, including one with no live session (issue #89). That is what makes the
             // composer usable for it, and the composer is how resume-on-send starts the session again.
             // Focus is local: a view change between rows, not a restart (C2).
             dispatch({ kind: "focusRow", key: rowKeyOf(row) });
             setTab("sessions");
+            // Choosing a session closes the overlay: leaving it open would cover the conversation just selected.
+            setRailOpen(false);
           }}
           onForgetRow={(row) => dispatch({ kind: "forget", path: row.entry.path })}
           retryAvailable={supportsRetry(state.install?.protocol)}

@@ -182,12 +182,27 @@ button { font: inherit; color: inherit; }
  */
 .panes {
   display: grid;
-  /* The panel column is set by the resizer (issue #8), via a custom property so the grid still owns
-     the track definition and `--panel-width` is the only thing JavaScript writes. */
-  grid-template-columns: 288px 1fr var(--panel-width, 320px);
+  /*
+   * The panel column is set by the resizer (issue #8), via a custom property so the grid still owns the track
+   * definition and `--panel-width` is the only thing JavaScript writes.
+   *
+   * `minmax(0, 1fr)` for the middle track rather than `1fr`, and that is not a micro-optimisation: a bare `1fr` is
+   * `minmax(auto, 1fr)`, whose minimum is the track's MIN-CONTENT width. A transcript containing a long unbroken
+   * command or a wide `<pre>` therefore pushed the track wider than the window, the column overflowed to the right,
+   * and the media query below never got a chance to fire because the layout was already wider than the viewport
+   * (`img_33.png`: the transcript off-screen, the rail clipped at both edges).
+   *
+   * `minmax(0, …)` lets the track shrink, which is what makes every narrower layout reachable at all.
+   */
+  grid-template-columns: 288px minmax(0, 1fr) var(--panel-width, 320px);
   gap: 1px;
   background: var(--line);
   min-height: 0;
+  /* The grid itself must not be wider than its container either. */
+  min-width: 0;
+  /* The positioning context for the drawer and its backdrop, at every width — not only inside the media query, or the
+     backdrop would resolve against a different ancestor than the drawer it covers. */
+  position: relative;
 }
 
 /*
@@ -217,13 +232,76 @@ button { font: inherit; color: inherit; }
  */
 
 @media (max-width: 1023px) {
+  /* Matches `RAIL_DRAWER_MAX_WIDTH` in `App.tsx` (1024, so `< 1024` is the same as `<= 1023`). The button that opens
+     this drawer is rendered from JavaScript, so the two numbers have to agree; a test asserts it. */
   /* Both selectors, because `.panes.is-collapsed` out-specifies a bare `.panes` and would otherwise
      win inside this query — leaving a 288px empty track where the hidden rail used to be. */
   .panes,
-  .panes.is-collapsed { grid-template-columns: 1fr; }
-  .rail { display: none; }
-  .rail.open { display: flex; }
+  .panes.is-collapsed { grid-template-columns: minmax(0, 1fr); }
+  /*
+   * The rail leaves the grid and becomes an OVERLAY drawer.
+   *
+   * It used to be `display: none` with a `.rail.open` rule for a class nothing ever set — so the session list was
+   * unreachable at these widths, which is a worse failure than a cramped layout.
+   *
+   * Absolute, not fixed: `.panes` is the containing block, so the drawer covers the workspace and not the topbar. The
+   * topbar keeps the control that closes it, which is where a reader will look for it.
+   */
+  .rail {
+    display: none;
+  }
+  .rail.open {
+    display: flex;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    /* 288px is the rail's own width; `min()` keeps it inside a very narrow window. */
+    width: min(288px, 86vw);
+    background: var(--panel);
+    border-right: 1px solid var(--line-strong);
+    box-shadow: var(--sh-2);
+  }
+  /* The rail needs the panes to be its positioning context. */
+  .panes { position: relative; }
 }
+
+/*
+ * The rail toggle, and the backdrop behind it.
+ *
+ * Both exist only below the drawer breakpoint. The toggle is a real button with `aria-expanded` and
+ * `aria-controls`, because it is the ONLY way to reach the session list at these widths — it is not a convenience.
+ */
+.rail-toggle {
+  /* Used alone on a `<button>`, so it declares its own face rather than inheriting the platform's light chrome on a
+     dark page (#100). */
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  padding: 4px var(--sp-2);
+  cursor: pointer;
+  flex: none;
+}
+.rail-toggle:hover { border-color: var(--line-strong); }
+.rail-toggle[aria-expanded="true"] { background: var(--accent-tint); border-color: var(--accent); color: var(--accent-text); }
+
+/* Everything behind the drawer, dimmed and clickable. Full-bleed so a click anywhere outside closes it. */
+.rail-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  background: rgb(0 0 0 / 0.5);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+/* Visually hidden text for a control whose label is its own `aria-label`; kept for the focus ring only. */
+.rail-backdrop:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
 
 /* ------------------------------------------------------------------ topbar */
 
@@ -2559,18 +2637,43 @@ select.btn { font-family: var(--sans); }
     padding: 0;
     display: block;
   }
+  /*
+   * THE COMPANION, MINIMAL.
+   *
+   * Stacked above the prose there is a single line's worth of room, and the block has four things competing for it:
+   * identity, stats, the two pickers, and their labels. The first version let all of it wrap, which produced a header
+   * four rows tall eating half the viewport on a small screen (`img_33.png`).
+   *
+   * So at this width it keeps what a reader needs to ORIENT — the name, the state, and the two numbers that change a
+   * decision — and the pickers stay on one line beside them, without their labels: the controls are self-describing
+   * (`deepseek-ai/…` and `high`), and the labels are the first thing that can go when there is no room. Everything
+   * dropped is one click away in the Session panel.
+   */
   .transcript-header .session-header {
     width: 100%;
     max-width: none;
     flex-direction: row;
     flex-wrap: wrap;
     align-items: center;
+    gap: var(--sp-2) var(--sp-3);
     padding: var(--sp-2) 18px;
     background: var(--panel);
     border: none;
     border-bottom: 1px solid var(--line);
     border-radius: 0;
   }
+  /* The identity keeps one line: the name truncates, the chips stay. */
+  .transcript-header .session-header .title { flex: 1 1 12ch; min-width: 0; }
+  .transcript-header .session-header .where { display: none; }
+  /* Labels go, controls stay. `display: none` rather than `visibility`: a hidden label must not reserve a column. */
+  .transcript-header .picker-label { display: none; }
+  .transcript-header .picker-grid { flex-direction: row; align-items: center; gap: var(--sp-2); margin-left: auto; }
+  .transcript-header .picker-controls { flex-direction: row; align-items: center; gap: var(--sp-2); }
+  .transcript-header .picker { flex-direction: row; align-items: center; gap: var(--sp-2); }
+  /* Neither picker may stretch: two selects side by side have to share the line with the name. */
+  .transcript-header .picker-field { flex: 0 1 auto; min-width: 0; }
+  .transcript-header .picker-select { width: auto; max-width: 22ch; }
+  .transcript-header .header-stats { flex: none; }
   /* The reading column takes the rest, and still centres itself. */
   .transcript-main { flex: 1 1 auto; margin-inline: auto; }
 }

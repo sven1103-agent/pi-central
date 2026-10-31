@@ -1748,8 +1748,8 @@ test("the narrow-viewport query collapses the rail track for a hidden panel too"
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(
     css,
-    /\.panes,\s*\n\s*\.panes\.is-collapsed\s*\{\s*grid-template-columns:\s*1fr/,
-    "the ≤1023px query must list `.panes.is-collapsed` as well as `.panes`",
+    /\.panes,\s*\n\s*\.panes\.is-collapsed\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "the ≤1023px query must list `.panes.is-collapsed` as well as `.panes`, and let the track shrink",
   );
 });
 
@@ -2376,4 +2376,68 @@ test("the text cursor belongs to the header's name only", () => {
   assert.equal(rules.length, 1, "one rule for .session-name, or source order decides");
   assert.match(rules[0], /cursor:\s*text/, "the header's name is a rename target");
   assert.ok(!/\.rail-row-main \.name[^{]*\{[^}]*cursor:\s*text/.test(css), "the rail's name is not");
+});
+
+// --- The narrow fallback is a working layout, not a hidden one --------------------------------
+
+test("the rail is reachable below the drawer breakpoint", () => {
+  /*
+   * The reported defect (`img_33.png`): at a narrow width the transcript was pushed off-screen, the rail was clipped
+   * at both edges, and there was no way to reach the session list at all — the stylesheet hid `.rail` and styled
+   * `.rail.open` for a class nothing ever set.
+   *
+   * Two faults, and both are guarded:
+   *
+   *   1. the grid's middle track was `1fr` = `minmax(auto, 1fr)`, whose minimum is the content's MIN-CONTENT width, so
+   *      a long command made the column wider than the window and no narrower rule could ever apply;
+   *   2. the hidden rail needed a control, and a rule that actually works.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  assert.match(
+    css,
+    /grid-template-columns:\s*288px minmax\(0,\s*1fr\)/,
+    "the workspace track must be allowed to shrink below its content's min-content width",
+  );
+
+  // A drawer that is never opened is `display: none` with extra steps.
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /rail-toggle/, "a control must open the drawer");
+  assert.match(app, /aria-expanded=\{railOpen\}/, "…and state whether it is open");
+  assert.match(app, /rail-backdrop/, "a backdrop must close it");
+  assert.match(app, /setRailOpen\(false\)/, "Escape, the backdrop and a selection all close it");
+
+  // The two numbers that have to agree: the media query and the JavaScript breakpoint.
+  const jsBreakpoint = Number(/RAIL_DRAWER_MAX_WIDTH = (\d+)/.exec(app)?.[1]);
+  const cssBreakpoint = Number(/@media \(max-width: (\d+)px\)/.exec(css)?.[1]);
+  assert.ok(Number.isFinite(jsBreakpoint), "App.tsx must declare the breakpoint");
+  assert.equal(
+    jsBreakpoint,
+    cssBreakpoint + 1,
+    `the button and the layout must flip at the same width: JS ${jsBreakpoint}, CSS ≤${cssBreakpoint}`,
+  );
+});
+
+test("the narrow companion keeps what orients the reader and drops the labels", () => {
+  /*
+   * "More minimalistic, because not everything can fit."
+   *
+   * Stacked above the prose there is one line's worth of room and four things competing for it. The first version let
+   * everything wrap, producing a header four rows tall that ate half a small viewport.
+   *
+   * The rule is a priority order, not a list of things to hide: identity and the two decision-changing numbers stay,
+   * the pickers stay WITHOUT their labels because the controls are self-describing, and what is dropped is reachable
+   * in the Session panel.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const narrow = /@container transcript \(max-width: 1080px\)\s*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+  assert.match(narrow, /\.picker-label\s*\{\s*display:\s*none/, "the picker labels are the first thing to go");
+  assert.match(narrow, /\.picker-grid\s*\{[^}]*flex-direction:\s*row/, "the pickers stay, on one line");
+  assert.match(narrow, /\.picker-select\s*\{[^}]*max-width:\s*\d+ch/, "…and are capped so two fit beside the name");
+  assert.ok(!/\.header-stats\s*\{\s*display:\s*none/.test(narrow), "the meter and cost are NOT dropped");
 });

@@ -41,6 +41,8 @@ export function SessionRail({
   onOpenDirectory,
   home,
   historyTotal,
+  openAsDrawer = false,
+  onCloseDrawer,
 }: {
   /**
    * The roster, with activity joined in (issue #89).
@@ -82,6 +84,16 @@ export function SessionRail({
   home: string | undefined;
   /** Total sessions on disk, which may exceed the number loaded. */
   historyTotal: number;
+  /**
+   * Whether the rail is showing as an overlay drawer.
+   *
+   * Below the drawer breakpoint the columns cannot all fit, so the rail leaves the grid. The state lives in `App`
+   * because the BUTTON that toggles it is in the topbar — a control inside the thing it opens would be unreachable
+   * exactly when the thing is closed.
+   */
+  openAsDrawer?: boolean;
+  /** Close the drawer. Called after choosing a session, so a selection does not leave the overlay covering it. */
+  onCloseDrawer?: (() => void) | undefined;
 }) {
   const [filter, setFilter] = useState("");
 
@@ -99,7 +111,11 @@ export function SessionRail({
   const sections = useMemo(() => groupRows(filtered), [filtered]);
 
   return (
-    <nav className="rail" aria-label="Sessions">
+    <nav
+      id="session-rail"
+      className={`rail${openAsDrawer ? " open" : ""}`}
+      aria-label="Sessions"
+    >
       <div className="rail-start">
         {/* The PRIMARY action, first in the rail, with no path field anywhere near it (US-1). */}
         <button type="button" className="btn-primary" onClick={onStartSession}>
