@@ -211,7 +211,15 @@ export class Supervisor extends EventEmitter {
       id,
       cwd: existing.cwd,
       mode: existing.mode,
-      name: existing.name,
+      /*
+       * No `--name` when the session already has a file.
+       *
+       * `resume` makes the same choice for the same reason: the session carries its own name, and re-applying
+       * one appends a redundant `session_info` record to a file we did not create. A retry of a session that
+       * already wrote records is exactly that case. When there is no file yet the name is still needed, so it
+       * is passed only then.
+       */
+      ...(existing.sessionFile === undefined ? { name: existing.name } : {}),
       sessionPath: existing.sessionFile,
       previousError: existing.error ?? existing.previousError,
       // `enable` and `env` are not part of `LiveSession`, so a retry cannot reproduce logins granted per
