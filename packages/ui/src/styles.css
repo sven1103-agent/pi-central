@@ -315,13 +315,30 @@ button { font: inherit; color: inherit; }
 .rail-start { padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); }
 
 /* The primary action. Full width, first in the rail, no path field anywhere near it (US-1). */
+/*
+ * New session stays the ONE primary action, and is quieter than it was.
+ *
+ * It was a full-width filled blue card at the top of the rail — the brightest surface in the window, competing
+ * with the conversation and reading as the main thing to do in an app whose main job is supervising work already
+ * running. A tinted fill with the accent edge keeps it unmistakable without making it the focal point.
+ */
 .btn-primary {
   width: 100%;
-  background: var(--accent);
-  color: #05131f;
-  border: none;
+  /*
+   * A tint and an accent edge, not a saturated slab. The action must still be unmistakable — it is the only
+   * primary on this surface and the fastest way into the product — but a filled blue card at the top of the rail
+   * was the brightest thing in the window, which made "start over" the loudest idea on a screen whose job is
+   * supervising work already running.
+   *
+   * `--accent-text` on `--accent-tint` rather than dark-on-`--accent`: it is the measured pairing this project
+   * uses for text on a tinted chip (8.1:1), and it keeps one rule for tinted surfaces instead of a second,
+   * inverted one that nobody re-measures.
+   */
+  background: var(--accent-tint);
+  color: var(--accent-text);
+  border: 1px solid var(--accent);
   border-radius: var(--r-2);
-  padding: 9px 12px;
+  padding: 8px 12px;
   font-weight: 600;
   font-size: var(--fs-base);
   cursor: pointer;
@@ -330,7 +347,7 @@ button { font: inherit; color: inherit; }
   flex-direction: column;
   gap: 1px;
 }
-.btn-primary:hover { filter: brightness(1.08); }
+.btn-primary:hover { border-color: var(--accent-text); background: var(--panel-2); }
 .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
 .btn-primary small { font-weight: 400; font-size: var(--fs-xs); opacity: 0.8; }
 
@@ -398,8 +415,27 @@ button { font: inherit; color: inherit; }
   cursor: pointer;
   color: var(--dim);
 }
-.rail-row:hover { background: var(--panel-2); }
-.rail-row[aria-current="true"] { background: var(--panel-2); color: var(--text); }
+/* Hover and SELECTION are different states and must look different.
+ *
+ * They were the same `--panel-2` fill, so the selected session was only distinguishable from whatever the mouse
+ * happened to be over — and a review could not tell which session the workspace was showing by looking at the
+ * rail. Selection is now a persistent fill AND the state-coloured left edge, which is the shape the eye already
+ * reads as "this one"; hover stays a light wash with no edge.
+ *
+ * The words stay full-strength either way: selection is not the only signal, `aria-current` carries it to
+ * assistive tech, and the left border does not depend on colour vision alone because it is a shape change. */
+.rail-row:hover { background: var(--panel-3); }
+.rail-row.is-focused,
+.rail-row[aria-current="true"] {
+  background: var(--panel-2);
+  color: var(--text);
+  /* The rail row's left border is the STATE stripe; selection thickens it rather than recolouring it, so the two
+     facts stay on separate channels. */
+  border-left-width: 4px;
+}
+.rail-row.is-focused .name { color: var(--text); }
+.rail-row.is-focused .r2,
+.rail-row.is-focused .r3 { color: var(--text); opacity: 0.85; }
 .rail-row .r1 { display: flex; align-items: center; gap: var(--sp-2); }
 .rail-row .name {
   color: var(--text);
@@ -524,6 +560,9 @@ button { font: inherit; color: inherit; }
 .chip-stopped { color: var(--dim); background: var(--panel-2); }
 .chip-scratch { color: var(--accent-text); background: var(--accent-tint); }
 .chip-no-isolation { color: var(--warn-text); background: var(--warn-tint); }
+/* Work waiting to run. `--warn-text` on its tint, like every other chip: the pairing this project measured
+   (6.3:1), not a new one invented for one more state. */
+.chip-pending { color: var(--warn-text); background: var(--warn-tint); }
 
 /* ------------------------------------------------------------------ column */
 
@@ -535,14 +574,29 @@ button { font: inherit; color: inherit; }
   min-width: 0;
 }
 
+/*
+ * The focused session's ONE header, where there used to be three full-width strips.
+ *
+ * The workspace opened with this header, a `metrics` strip (`ctx · tokens · cost · msgs`) and a `legend` row
+ * explaining tool frames — each defensible alone, together a stack of control panels above a conversation that
+ * had been squeezed into a narrow column. A review found the regions used three different widths and read as
+ * assembled rather than composed.
+ *
+ * So: identity and state left, configuration right, telemetry behind a disclosure on one line. `align-items:
+ * center` because the row is a single band now, and `flex-wrap` so a narrow window moves the model block to its
+ * own line instead of clipping the name or painting over a neighbour (issue #96).
+ */
 .session-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-3) 18px var(--sp-2);
+  padding: var(--sp-2) 18px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
+  flex-wrap: wrap;
+  row-gap: var(--sp-2);
 }
+.session-header h2 { display: flex; align-items: center; gap: var(--sp-2); margin: 0; min-width: 0; }
 .session-header .title {
   display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1;
   /* The name yields to the controls. A clipped CONTROL label (`hinking`) is a defect; a truncated
@@ -659,6 +713,34 @@ button { font: inherit; color: inherit; }
  * The original complaint is more likely about text SIZE than alignment — 72ch at 15px is small on a 27"
  * display — and that is a one-line change to `--fs-md` or to the number here, without moving anything.
  */
+/*
+ * THE READING LANE.
+ *
+ * One declared width, used by BOTH the conversation and the composer, so reading and writing line up. This is
+ * the "three different widths" finding: the transcript was narrow and left-aligned, the composer spanned almost
+ * the whole workspace with Send at the far edge, and the model controls sat at the opposite corner — elements of
+ * one activity that looked like they belonged to three different ones.
+ *
+ * `--reading-measure` is the reader's own setting (issue #134) and `ch` resolves in the element that uses it, so
+ * every consumer sets the SAME font size first: `.lane` pins `--fs-base`, which is what `.measure` inherits on
+ * `<article class="turn">`, and children restore their own size. Two `ch` values then agree by construction
+ * rather than by a hand-maintained ratio (the mistake #140 documents).
+ *
+ * LEFT-ALIGNED, and that is deliberate. Centring this column was tried in #92 and reverted: it made the
+ * emptiness MORE obvious on a wide display and produced five defects (a marker that was capped but not centred,
+ * so tools made the transcript flicker between two alignments; three left edges in the composer; two inset
+ * mismatches). The lane is therefore bounded and anchored at the same left edge as everything else in the
+ * column, and the room to its right is where a tool step's actions sit.
+ */
+.lane {
+  /* The size `.measure` inherits, so this element's `ch` and the prose's are the same number. */
+  font-size: var(--fs-base);
+  max-width: var(--reading-measure);
+  /* Never wider than the column, and it never stretches by accident: `100%` would make the cap meaningless when
+     the reader chose `fill`. */
+  width: 100%;
+}
+
 .measure { max-width: var(--reading-measure); }
 
 .turn { margin-bottom: var(--sp-4); }
@@ -908,6 +990,17 @@ button { font: inherit; color: inherit; }
 
 /* ------------------------------------------------------------------ composer */
 
+/*
+ * The composer sits in the SAME lane as the prose.
+ *
+ * It used to span the whole column with Send pushed to the far edge, while the conversation it belongs to
+ * stopped at 72ch — so the writing surface and the reading surface did not look like the same conversation
+ * (the "three different widths" finding). The border-top still spans the column, because that rule separates
+ * REGIONS; the lane is about where the text lives.
+ *
+ * `font-size: var(--fs-base)` is load-bearing: `.lane`'s `ch` cap has to resolve in the same font the transcript
+ * caps against, or the two `72ch` values are different widths (#140).
+ */
 .composer {
   border-top: 1px solid var(--line);
   background: var(--panel);
@@ -915,7 +1008,9 @@ button { font: inherit; color: inherit; }
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
+  font-size: var(--fs-base);
 }
+.composer > * { max-width: var(--reading-measure); width: 100%; }
 
 .mode-strip {
   display: flex;
@@ -1766,6 +1861,74 @@ select.btn { font-family: var(--sans); }
 /* A call whose result was never recorded: worth noticing, not worth alarming. */
 .trace-row.unfinished { border-left-color: var(--warn); }
 .trace-row.unfinished .t-status { color: var(--warn-text); }
+
+/* --- the focused session's header ------------------------------------------------------------- */
+
+/*
+ * ONE header, where there used to be three full-width strips.
+ *
+ * The workspace opened with a session header, a `metrics` strip (`ctx · tokens · cost · msgs`) and a `legend`
+ * row explaining tool frames — each defensible alone, together a stack of control panels above a conversation
+ * that had been squeezed into a narrow column. The review's finding was that the regions used "three different
+ * widths" and read as assembled rather than composed.
+ *
+ * So: identity and state left, configuration right, telemetry behind a disclosure on one line. The session name
+ * is the only thing that may truncate — everything else wraps as a group rather than being cut.
+ */
+/*
+ * Both are used ALONE on a `<button>`, so each declares its own face — a grouped selector is not a base rule, and
+ * without these they inherit the platform's LIGHT button chrome on a dark page (issue #100). The audit in
+ * `contrast.test.mjs` holds every alone-used class to this.
+ */
+.header-usage {
+  flex: none;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--fs-xs);
+  padding: 2px var(--sp-2);
+  cursor: pointer;
+}
+.header-usage:hover { color: var(--text); border-color: var(--line-strong); }
+/* It composes with `.header-usage` for its face, so it re-declares both rather than relying on the group — the
+   audit holds every ALONE class to naming its own appearance, and a grouped selector is not a base rule. */
+.header-pressure {
+  flex: none;
+  background: var(--warn-tint);
+  border: 1px solid var(--warn);
+  border-radius: var(--r-2);
+  color: var(--warn-text);
+  font: inherit;
+  font-size: var(--fs-xs);
+  padding: 2px var(--sp-2);
+  cursor: pointer;
+}
+.header-pressure:hover { border-color: var(--warn-text); }
+/* The strip, restored on demand: one line, the same numbers, the same formatters. */
+.header-usage-line {
+  flex-basis: 100%;
+  display: flex;
+  gap: var(--sp-3);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  padding: 2px 0;
+}
+.header-usage-line .warn { color: var(--warn-text); }
+
+/* The transcript's own top edge: the follow control belongs to the scroller it governs. */
+.transcript-tools {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  flex: none;
+}
+/* The provenance sentence, beside the trace it is about rather than in a row of its own. */
+.trace-legend { color: var(--dim); font-size: var(--fs-2xs); }
 
 /* --- The model picker (issue #1) -------------------------------------------------------------
    A native <select>, so keyboard and screen-reader correctness come for free. Styled towards

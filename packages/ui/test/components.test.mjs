@@ -157,18 +157,24 @@ test("the rail states the TRUE total on disk, not the number loaded", () => {
   assert.ok(!html.includes("500 sessions"), "the page size must not be shown as the total");
 });
 
-test("a long model name does not swallow the rail's metrics line", () => {
-  // The screenshot showed `deepseek-ai/DeepSeek-V4.1-Flash  high  ct…` -- context and cost cut
-  // off entirely, which is worse than a shortened model because those are the scanned values.
+test("a row carries what changes the decision, and not the header's whole metric set", () => {
+  /*
+   * The rail's third line used to carry `model · thinking · ctx · cost` on every row — four values the workspace
+   * header already states for the session being looked at, repeated down the list. A review found that dense
+   * without making selection clearer.
+   *
+   * The defect this test was written for still matters, though, and is the reason it is not simply deleted: a
+   * long model name used to eat the line (`deepseek-ai/DeepSeek-V4.1-Flash  high  ct…`), cutting off the values a
+   * reader scans for. Dropping the model from the row fixes the cause rather than shortening the symptom — so the
+   * assertion is that the SCANNED values survive and the per-row duplicate of the header does not appear.
+   */
   const html = renderToString(createElement(SessionRail, {
-    // contextPercent and cost are set deliberately: the point is that THEY survive the model.
     rows: rowsOf([session({ model: "deepseek-ai/DeepSeek-V4.1-Flash", contextPercent: 62, cost: 0.0142 })]),
     focusedId: "s7", onFocusRow() {}, onForgetRow() {}, onRetryRow() {}, retryAvailable: true, onStartSession() {}, onOpenDirectory() {}, home: "/Users/x", historyTotal: 0,
   }));
-  assert.ok(!html.includes("deepseek-ai/DeepSeek-V4.1-Flash"), "the raw model name must be shortened");
-  assert.match(html, /…/, "the shortening should be visible");
-  assert.match(html, /ctx 62%/, "the context value must survive");
-  assert.match(html, /\$0\.0142/, "the cost must survive");
+  assert.ok(!html.includes("deepseek-ai/DeepSeek-V4.1-Flash"), "no per-row copy of the model in the rail");
+  assert.match(html, /ctx 62%/, "pressure, which changes what the reader should do, stays");
+  assert.ok(!/\$0\.0142/.test(html), "cost is a lookup, not a decision: it lives in the header and panel");
 });
 
 test("the rail abbreviates HOME, so rows are scannable", () => {

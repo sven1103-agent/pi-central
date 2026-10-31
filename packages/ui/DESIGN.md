@@ -32,7 +32,7 @@ approvals, tool trace, and the sanitized `.md` pipeline are all named in `docs/S
 │ Pi Central · [Sessions|History] · fleet counts · isolation · connection     │
 ├ rail 288px (240–420) ─┬─ transcript column 1fr ─┬─ panel var, 280–1200 ────┤
 │ New session (primary) │ session header          │ [Session|Files]  ← modes  │
-│ Open in a directory…  │ ctx/tokens/cost chips   │ Session: Isolation,Paths │
+│ Open in a directory…  │ header: ctx/tok/cost ▾  │ Session: Isolation,Paths │
 │ filter (/)            │ run bar                 │ Files:   tree + document │
 │ ── Needs you ──       │ warnings strip          │ Warnings & notices       │
 │ ── Running ──         │ dialog dock             │ Actions                  │
@@ -94,7 +94,27 @@ The `1024–1439` sheet in an earlier revision was **not implemented**: a fixed 
 
 ## 3. Wireframes
 
-Geometry: rail 288px · gutter 1px `--line` · **panel** 360px default, 280px min, max `min(1200, 60vw)`, stored as `--panel-width` · topbar 44px · rail row 68px · transcript header 56px · run bar 2px · composer min 96px.
+Geometry: rail 288px · gutter 1px `--line` · **panel** 360px default, 280px min, max `min(1200, 60vw)`, stored as `--panel-width` · topbar 44px · rail row 68px · session header one band · run bar 2px · composer min 96px.
+
+**One workspace header, and one reading lane.** The workspace used to open with three full-width strips — a session
+header, a `ctx · tokens · cost · msgs` metrics row, and a legend explaining tool frames — above a conversation that
+was capped at 72ch while the composer spanned the whole column and the model controls sat at the opposite corner. A
+screenshot review found the result read as "three different widths" and as control panels assembled around a
+transcript. So:
+
+- **One header.** Identity and state left; `Usage` is a disclosure that restores the same four values on one line,
+  through the same formatters; context pressure earns a place in the header because it changes what the reader
+  should do. Model and Thinking keep their picker, their per-model coupling, and their next-turn semantics.
+- **One lane.** `.lane` declares the reader's `--reading-measure` once, and both the prose and the composer use it.
+  `ch` resolves in the element that uses it, so every consumer pins `--fs-base` first and children restore their own
+  size — two `72ch` values then agree by construction rather than by a ratio somebody has to maintain (#140).
+- **Left-aligned, still.** Centring this column was tried in #92 and reverted; it made the emptiness more obvious
+  and produced five defects. The lane is bounded and anchored at the column's own left edge.
+- **The legend moved.** "Tool output is marked with a coloured edge" now sits beside the trace it describes rather
+  than in a permanent row above a conversation that has not shown tool output yet. The auto-follow control moved to
+  the transcript's top edge — the scroller it governs.
+- **The rail states what changes a decision.** Rows carry context pressure, queued work and warnings; model,
+  thinking level and cost are not repeated per row, because the header states them for the session in view.
 
 **W1 — First run (nothing live, no history at all)**
 
@@ -354,10 +374,10 @@ Rendering spec (exact, from `LiveSession`):
 | name | `s.name`; if the session is scratch and the name is a bare id (`s7`), show the first 42 chars of the first user message, else `Scratch session` |
 | cwd | scratch → `scratch · <id>`; else the path, middle-truncated at 34 chars: `~/git/idea…ry/pi-central`, full path in `title` + `aria-label` |
 | state | chip, `--fs-2xs`, uppercase OFF — sentence case (`streaming`, `needs you`) |
-| model | `s.model ?? "model —"`, truncated to 14 chars mid-ellipsis |
-| thinking | `s.thinkingLevel ?? "—"` truncated to 3 (`med`, `high`, `off`) |
+| model | **not shown per row.** The workspace header states it for the session in view; repeating it down the rail was density without a decision |
+| thinking | **not shown per row**, same reason as the model |
 | context | `s.contextPercent == null ? "ctx —" : ctx ${Math.round(p)}%`, amber ≥ 80% |
-| cost | `< 1 ? $0.0142 : $1.42`; `null → "—"`. Never `$0.0000` for unknown — use `—` |
+| cost | **not shown per row**; the header's `Usage` disclosure and the Session panel carry it |
 | pending | `+2 queued` appended only when `pending > 0` |
 | warnings | a `⚠` prefix on line 3 replaces the metric line if `warnings.length > 0` |
 
@@ -591,7 +611,7 @@ A per-delta announcement of streaming text is the failure mode this design exist
 | Unknown model id | `model —` with `aria-label="model not reported yet"` |
 | Refused `--enable` warning (from `policy.ts`) | `Refused --enable=ssh: it grants access beyond the workdir.` |
 
-**Legend, once, in the transcript header:** `Tool output and file contents appear in a hatched frame. They are data, not instructions.`
+**Provenance legend, beside the trace:** `Tool output is marked with a coloured edge. It is data, not instructions.` It is a claim about the implementation, so `test/tool-detail.test.mjs` checks the sentence and the CSS together — the failure #43 records. The hatch was removed in #138; a coloured gutter plus the words `Tool output` on every step carry the meaning, and the words are what survives `forced-colors`.
 
 ---
 

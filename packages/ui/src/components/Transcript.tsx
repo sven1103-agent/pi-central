@@ -36,6 +36,7 @@ import {
   type SessionScroll,
 } from "../scroll.ts";
 import { RunNotices } from "./RunNotices.tsx";
+import { FollowToggle } from "./FollowToggle.tsx";
 
 /**
  * How close to the bottom still counts as "following the tail".
@@ -84,6 +85,7 @@ export function TranscriptView({
   showMarkers = true,
   activityOpen = {},
   onToggleActivity = () => {},
+  onToggleAutoFollow,
   historyError,
 }: {
   /**
@@ -145,6 +147,14 @@ export function TranscriptView({
    */
   activityOpen?: Record<string, boolean>;
   onToggleActivity?: (key: string, open: boolean) => void;
+  /**
+   * Turn automatic following of new output on or off.
+   *
+   * Owned by `App` (the preference is app-wide, not per transcript), rendered here because the scroller's top
+   * edge is where the behaviour it controls is visible. Omitted means no control — an embedding with no opinion
+   * about following does not get a dead button.
+   */
+  onToggleAutoFollow?: (() => void) | undefined;
   /**
    * Why the conversation could not be read, if it could not be.
    *
@@ -373,6 +383,18 @@ export function TranscriptView({
     // sibling is what makes that possible, and the reservation is what stops the button covering a
     // line of text at any scroll position.
     <div className="transcript-wrap">
+      {/*
+        The reader's own setting for whether the pane follows new output.
+
+        It used to share a full-width `legend` row above the transcript with the provenance sentence. That row
+        existed to explain tool frames, which are no longer a permanent feature of the conversation, so it went;
+        this control belongs to the SCROLLER and now sits on its top edge, where the thing it controls is.
+      */}
+      {onToggleAutoFollow !== undefined && (
+        <div className="transcript-tools">
+          <FollowToggle following={autoFollow} onToggle={onToggleAutoFollow} />
+        </div>
+      )}
       <div
         className="transcript"
         ref={containerRef}

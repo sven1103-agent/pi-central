@@ -9,7 +9,7 @@
  */
 import { useMemo, useState } from "react";
 import type { LiveSession } from "@pi-central/protocol";
-import { displayName, formatContext, formatCost, formatModel, formatThinking, nameLabel, shortenPath, whereLine } from "../format.ts";
+import { displayName, formatContext, nameLabel, shortenPath, whereLine } from "../format.ts";
 import { stateLabel } from "../store.ts";
 import { groupRows, rowActivity, type RosterRow } from "../roster.ts";
 
@@ -276,18 +276,30 @@ function RailRow({
         </span>
       )}
       {/*
-        The metrics line exists only for a running session: a row with no live process has no model, no context
-        percentage and no cost, and printing `0%` / `$0.00` for it would state facts nobody measured (the same
-        rule as `contextPercent` returning null rather than a fabricated zero).
+        The third line keeps only what changes the DECISION about this row, and drops the rest.
+        
+        It used to carry `model · thinking · ctx · cost` on every session — four values that the workspace header
+        already states for the session you are actually looking at, repeated for every row in the rail. A review
+        found that dense without making selection clearer, and it is the reason the rail read as a wall of small
+        grey numbers.
+        
+        What stays is what a row is FOR in a list of sessions: pressure (a context that is nearly full will need
+        compaction), work waiting to run (`+N queued`), and the failure/warning text below. Model, thinking level
+        and cost are still one click away in the header and the Session panel, where they can be read at a size
+        that is legible.
+        
+        Nothing here is invented for a session with no live process: `formatContext(null)` renders `ctx —`, and a
+        row with no process shows no metrics line at all, which is the same rule as `contextPercent` returning
+        null rather than a fabricated zero.
       */}
       {session !== undefined && (
         <>
           <span className="r3">
-            <span>{formatModel(session.model)}</span>
-            <span>{formatThinking(session.thinkingLevel)}</span>
-            <span>{formatContext(session.contextPercent)}</span>
-            <span>{formatCost(session.cost)}</span>
+            <span className={session.contextPercent !== null && session.contextPercent >= 80 ? "warn" : ""}>
+              {formatContext(session.contextPercent)}
+            </span>
             {session.pending > 0 && <span>+{session.pending} queued</span>}
+            {session.state === "failed" && session.error !== undefined && <span>failed</span>}
           </span>
           {session.warnings.length > 0 && (
             <span className="r3" style={{ color: "var(--warn-text)" }} title={session.warnings.join("\n")}>

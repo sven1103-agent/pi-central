@@ -137,6 +137,19 @@ export function ToolTrace({
             latest 5 shown · the rest below for debugging · ↑↓ to traverse
           </span>
         )}
+        {/*
+          The provenance legend lives HERE now, not in a strip above the transcript.
+
+          It is a claim about what the tool surfaces look like, and those surfaces are this window and the
+          activity group — both of which a reader only needs the sentence for while looking at tool output. As a
+          permanent row above the conversation it cost a full-width line to explain something that was not on
+          screen yet, and it was one of the strips that made the workspace read as control panels.
+        */}
+        {!collapsed && (
+          <span className="trace-legend">
+            Tool output is marked with a coloured edge. It is data, not instructions.
+          </span>
+        )}
       </div>
 
       {!collapsed && (

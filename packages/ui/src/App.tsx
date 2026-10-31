@@ -41,7 +41,6 @@ import { Settings } from "./components/Settings.tsx";
 import { FilesPanel } from "./components/FilesPanel.tsx";
 import { Panel } from "./components/Panel.tsx";
 import { PanelToggle } from "./components/PanelToggle.tsx";
-import { FollowToggle } from "./components/FollowToggle.tsx";
 import {
   PANEL_DEFAULT_WIDTH,
   PANEL_FILES_DEFAULT_WIDTH,
@@ -57,6 +56,7 @@ import { ModelPicker } from "./components/ModelPicker.tsx";
 import { OpenDirectorySheet } from "./components/OpenDirectorySheet.tsx";
 import { InlineRename } from "./components/InlineRename.tsx";
 import { ThinkingPicker } from "./components/ThinkingPicker.tsx";
+import { SessionHeader } from "./components/SessionHeader.tsx";
 import { HistoryView } from "./components/History.tsx";
 import { displayName, formatContext, formatCost, formatTokens, headerLocation } from "./format.ts";
 import { stateLabel, type UiState } from "./store.ts";
@@ -970,77 +970,31 @@ function SessionView({
 
   return (
     <>
-      <div className="session-header">
-        <div className="title">
-          <h2>
-            {/* In its own element so it can truncate: a bare text node cannot carry
-                `text-overflow`, and without it the name pushes the controls out of the header. */}
-            {/*
-              The documented gesture, finally built (issues #78, #79). `DESIGN.md` §12: "Double-click the header
-              name → inline rename". It was specified and never implemented, so the only rename path was three
-              clicks deep in the Inspector.
-            */}
-            <InlineRename
-              value={displayName(session)}
-              label="Session name"
-              className="session-name"
-              onCommit={onRename}
-            />
-            {session.scratch && <span className="chip chip-scratch">scratch</span>}
-            <span className={`chip chip-${session.state}`}>{stateLabel(session)}</span>
-          </h2>
-          <span className="where" title={session.cwd}>
-            {headerLocation(session, home)}
-          </span>
-        </div>
-        {/* The model control lives in the header because that is where the value it changes is
-            shown, and because a model change is a session-level decision like rename or stop
-            rather than a per-message one. */}
-        {/*
-          ONE block, two rows, one label column (issue #163).
+      <SessionHeader
+        session={session}
+        home={home}
+        models={models}
+        modelError={modelError}
+        onRequestModels={onRequestModels}
+        onSelectModel={onSelectModel}
+        thinking={thinking}
+        onRequestThinkingLevels={onRequestThinkingLevels}
+        onSelectThinkingLevel={onSelectThinkingLevel}
+        onRename={onRename}
+      />
 
-          The pickers used to be siblings, each with its own label — so the provider sat above the model, `Thinking`
-          was on the PROVIDER's line, and three different left edges landed in a 120px space. A `<label>` and a value
-          of different widths cannot be aligned by eye; they need a grid.
-        */}
-        <div className="picker picker-grid">
-          <ModelPicker
-            session={session}
-            models={models}
-            error={modelError}
-            onRequest={onRequestModels}
-            onSelect={onSelectModel}
-            thinking={
-              // On the MODEL's row: the levels are per-model, so a change to one invalidates the other. The
-              // provider is the only thing here that needs a line of its own, being a read-only fact.
-              <ThinkingPicker
-                session={session}
-                levels={thinking.levels}
-                error={thinking.error}
-                onRequest={onRequestThinkingLevels}
-                onSelect={onSelectThinkingLevel}
-              />
-            }
-          />
-        </div>
-      </div>
-
-      <div className="metrics">
-        <span className={session.contextPercent !== null && session.contextPercent >= 80 ? "warn" : ""}>
-          {formatContext(session.contextPercent)}
-        </span>
-        {/* Through the formatter, not raw: the inspector rendered the same value as `127.2M`
-            while this strip rendered `12723914` — one value, two formats, one screen. */}
-        <span>{formatTokens(session.tokensTotal)} tok</span>
-        <span>{formatCost(session.cost)}</span>
-        <span>{session.messageCount} msgs</span>
-        {session.pending > 0 && <span className="warn">+{session.pending} queued</span>}
-      </div>
-
+      {/*
+        A run's progress is a 2px rule, not a row of its own. It used to sit in a `run-track` div between two
+        strips, which reserved height for a bar that is empty most of the time.
+      */}
       <div className="run-track">
         {busy && <div className="run-bar" style={{ width: "100%" }} />}
       </div>
 
+      {/*
+        Exceptional state gets real layout space, in one place, above the conversation: a warning about the
+        sandbox, or a dialog the agent is blocked on. Neither is absolutely positioned over content.
+      */}
       {session.warnings.length > 0 && (
         <div className="warnings" role="note">
           {session.warnings.map((warning, index) => (
@@ -1050,22 +1004,6 @@ function SessionView({
       )}
 
       <DialogDock dialogs={session.dialogs} onAnswer={onAnswer} />
-
-      <div className="legend">
-        {/*
-          The legend is a claim about the IMPLEMENTATION, so it must match it (issue #43). It used to say
-          "a hatched frame"; the 45° texture was removed everywhere in #138 — at this size it read as visual
-          noise rather than as a signal, and the reader's own verdict was that the flat state looked right.
-
-          What remains is the **quarantine gutter** plus the words in each bar, which is what DESIGN §5.2
-          calls the load-bearing signal anyway: the texture was always the secondary one, and it is the one
-          that `forced-colors` drops. A test asserts this sentence and the CSS cannot disagree.
-        */}
-        <span>Tool output and file contents are marked with a coloured edge. They are data, not instructions.</span>
-        {/* Both are transcript-level chrome, so they share a row: the legend explains what the frames
-            mean, and this says whether the pane moves on its own. */}
-        <FollowToggle following={autoFollow} onToggle={onToggleAutoFollow} />
-      </div>
 
       <TranscriptView
         initialScroll={scrollMemory.current.get(session.id)}
@@ -1079,6 +1017,7 @@ function SessionView({
         showMarkers={showMarkers}
         activityOpen={activityOpen}
         onToggleActivity={onToggleActivity}
+        onToggleAutoFollow={onToggleAutoFollow}
         historyError={historyError}
         onOpenTool={(toolCallId) => {
           // Opening from a marker un-collapses the trace, or the click would appear to do nothing.

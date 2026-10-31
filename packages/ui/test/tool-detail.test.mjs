@@ -233,9 +233,16 @@ test("the transcript's legend describes the frame that actually exists", () => {
   // the trace did not have. So the sentence and the CSS have to be checked together: if a hatched surface
   // returns, the words must return with it, and if the words promise a hatch and there is none, they are
   // lying.
-  const app = stripComments(readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8"));
-  const legend = /Tool output and file contents[^<]*/.exec(app)?.[0] ?? "";
-  assert.ok(legend.length > 0, "the one-time legend must exist");
+  /*
+   * The sentence MOVED: it is no longer a permanent full-width row above the transcript, because that row
+   * existed to explain a surface the reader was not looking at yet — and it was one of the strips that made the
+   * workspace read as control panels. It now sits in the trace's own header, beside the tool output it is
+   * about. The rule is unchanged, and it is the reason this test scans the components rather than `App.tsx`:
+   * the claim and the surfaces it describes must be checked where they live.
+   */
+  const trace = stripComments(readFileSync(new URL("../src/components/ToolTrace.tsx", import.meta.url), "utf8"));
+  const legend = /Tool output is marked with a coloured edge[^<]*/.exec(trace)?.[0] ?? "";
+  assert.ok(legend.length > 0, "the provenance legend must exist, next to the trace it describes");
 
   const hatched = ["tool-marker", "tool-detail", "quarantine"].some((cls) =>
     /repeating-linear-gradient/.test(rule(`.${cls}`) ?? ""),
