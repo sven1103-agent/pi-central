@@ -82,9 +82,23 @@ export function SessionHeader({
           <span className={`chip chip-${session.state}`}>{stateLabel(session)}</span>
           {session.pending > 0 && <span className="chip chip-pending">+{session.pending} queued</span>}
         </h2>
-        <span className="where" title={session.cwd}>
-          {headerLocation(session, home)}
-        </span>
+        {/*
+          The LOCATION line is gone from the header.
+          
+          It read `scratch · s1 · ~/.local/share/pi-central/workspaces/s1` — the same information the rail row
+          carries, on a second line of the header, where it pushed the stats and the pickers into the same band.
+          A reader who needs to know where a session works has the rail (which shows it per row) and the Session
+          panel (which shows it in full, with a copy button for the path). Removing it buys the header a single row
+          at every width, which is what let the meter and the cost sit on the same line as the name.
+        */}
+        {session.scratch === false && session.cwd !== undefined && (
+          // A PROJECT session keeps a shortened path, because "which of my directories is this" is not in the
+          // session's name and is genuinely ambiguous across rows. A scratch session's location is its id, which
+          // the rail already states as `scratch · s1`.
+          <span className="where" title={session.cwd}>
+            {headerLocation(session, home)}
+          </span>
+        )}
       </div>
 
       {/*

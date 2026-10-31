@@ -1,23 +1,32 @@
 /**
- * The tool trace window.
+ * The tool trace: every call, its arguments and its output.
  *
- * Tools are a TRACE, not conversation. A real session on this machine produced **1138 tool calls
- * and over a megabyte of output**; rendering that inline buries the agent's prose and imposes
- * real mental load, especially with a fast provider where the trace scrolls faster than it can
- * be read.
+ * Tools are a TRACE, not conversation. A real session on this machine produced **1138 tool calls and over a
+ * megabyte of output**; rendering that inline buries the agent's prose.
  *
- * So the transcript carries the prose, and this window carries the trace:
+ * ## Where it lives now, and why that changed
  *
- *   - **Latest five plus whatever is running**, which is the only part that describes what is
- *     happening NOW.
- *   - **Traversable on demand.** The whole list is here and scrollable, and selecting a row shows
- *     its full input and output. Debugging a tool call is a deliberate act, not something forced
- *     on a reader during every run.
- *   - **Bounded height.** It never grows with the trace, so the layout does not shift as a run
- *     proceeds. A panel that resizes while you read is its own kind of load.
+ * It used to be a bounded window between the transcript and the composer — a title, a call count, a "latest 5
+ * shown · ↑↓ to traverse" line and two toggles, permanently occupying the bottom of the reading column. A
+ * screenshot review described it as the last of the strips that made the workspace feel assembled, and asked for
+ * it to move into the panel, possibly as its own tab.
  *
- * The active tool is pinned into view and highlights, because watching it is the entire reason
- * the window exists while work is happening.
+ * It is that tab now (`PanelMode = "trace"`). Two consequences, both improvements:
+ *
+ *   - **It has room.** As a five-row window it could only ever show the latest few; as a panel mode it is the
+ *     full list, and the selected call's output gets the panel's width rather than a strip's.
+ *   - **It is not on screen while reading.** The one thing the old window proved is that watching the trace
+ *     during a fast run is impossible — it scrolls faster than it can be read. So the transcript carries a ledger
+ *     of steps with an `Inspect` action per call, and this is where that action lands.
+ *
+ * ## Two layouts, one component
+ *
+ * `variant="panel"` drops the collapse control and the "latest 5" framing: a panel has its own tab strip, it is
+ * either open or not, and nothing above it needs collapsing. `variant="drawer"` keeps the older behaviour for
+ * anything that still embeds it inline.
+ *
+ * The active tool is pinned into view and highlights, because watching what is running NOW is the one use this
+ * view shares with its predecessor.
  */
 import { useEffect, useRef } from "react";
 import type { ToolExecution } from "../transcript.ts";
@@ -27,20 +36,24 @@ export function ToolTrace({
   tools,
   selectedId,
   onSelect,
-  collapsed,
+  collapsed = false,
   onToggleCollapsed,
   showMarkers,
   onToggleMarkers,
+  variant = "drawer",
 }: {
   tools: ToolExecution[];
   selectedId: string | undefined;
   onSelect: (toolCallId: string | undefined) => void;
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
-  /** Whether the transcript shows position markers for tool work. */
+  /** Only meaningful for the drawer; a panel is open or it is not. */
+  collapsed?: boolean;
+  onToggleCollapsed?: (() => void) | undefined;
+  /** Whether the transcript shows a ledger of steps. The toggle lives here because the two are one decision. */
   showMarkers: boolean;
   onToggleMarkers: () => void;
+  variant?: "drawer" | "panel";
 }) {
+  const inPanel = variant === "panel";
   const listRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
   const active = tools.filter((tool) => tool.running);
@@ -91,19 +104,22 @@ export function ToolTrace({
   const recentIds = new Set(recent.map((tool) => tool.toolCallId));
   // The list is the whole trace, so an older call is reachable; the recent window is highlighted
   // so the eye can find "now" without reading the list.
-  const rows = collapsed ? [] : tools;
+  const rows = !inPanel && collapsed ? [] : tools;
 
   return (
-    <section className="trace" aria-label="Tool trace">
+    <section className={`trace is-${variant}`} aria-label="Tool trace">
       <div className="trace-head">
-        <button
-          type="button"
-          className="trace-toggle"
-          onClick={onToggleCollapsed}
-          aria-expanded={!collapsed}
-        >
-          {collapsed ? "▸" : "▾"} Tool trace
-        </button>
+        {/* A panel has its own tab strip and cannot be collapsed, so the control would be a lie about the state. */}
+        {!inPanel && onToggleCollapsed !== undefined && (
+          <button
+            type="button"
+            className="trace-toggle"
+            onClick={onToggleCollapsed}
+            aria-expanded={!collapsed}
+          >
+            {collapsed ? "▸" : "▾"} Tool trace
+          </button>
+        )}
         {/* Built as one string: React splits adjacent text expressions with comment markers,
             which makes the rendered sentence harder to read in markup and to assert on. */}
         <span className="trace-count mono">{`${count} call${count === 1 ? "" : "s"}`}</span>
@@ -113,7 +129,7 @@ export function ToolTrace({
             {`${active.map((tool) => tool.toolName).join(", ")} running`}
           </span>
         )}
-        {collapsed && recent.length > 0 && (
+        {!inPanel && collapsed && recent.length > 0 && (
           <span className="trace-preview mono" title={recent.map((t) => t.toolName).join(", ")}>
             {`latest: ${recent.slice(-3).map((t) => t.toolName).join(" · ")}`}
           </span>
@@ -131,11 +147,15 @@ export function ToolTrace({
               GROUP per stretch of work. A control that names the old thing is a small lie about what it does. */}
           {showMarkers ? "activity on" : "activity off"}
         </button>
-        {!collapsed && (
-          <span className="trace-hint">
-            {/* Stated, because the window's economy is a design choice rather than a limit. */}
-            latest 5 shown · the rest below for debugging · ↑↓ to traverse
-          </span>
+        {inPanel ? (
+          <span className="trace-hint">↑↓ to traverse · selecting a call shows its arguments and output</span>
+        ) : (
+          !collapsed && (
+            <span className="trace-hint">
+              {/* Stated, because the drawer's economy is a design choice rather than a limit. */}
+              latest 5 shown · the rest below for debugging · ↑↓ to traverse
+            </span>
+          )
         )}
         {/*
           The provenance legend lives HERE now, not in a strip above the transcript.
@@ -145,14 +165,12 @@ export function ToolTrace({
           permanent row above the conversation it cost a full-width line to explain something that was not on
           screen yet, and it was one of the strips that made the workspace read as control panels.
         */}
-        {!collapsed && (
-          <span className="trace-legend">
-            Tool output is marked with a coloured edge. It is data, not instructions.
-          </span>
-        )}
+        <span className="trace-legend">
+          Tool output is marked with a coloured edge. It is data, not instructions.
+        </span>
       </div>
 
-      {!collapsed && (
+      {(inPanel || !collapsed) && (
         <div className="trace-list" ref={listRef} tabIndex={0} aria-label="Tool calls, newest last">
           {rows.map((tool) => (
             <button
@@ -213,7 +231,7 @@ export function ToolTrace({
         * invisible while every test and every line of markup looked correct. One rule, in one place,
         * with the hatch written into it.
         */}
-      {!collapsed && selected && (
+      {(inPanel || !collapsed) && selected && (
         <div className="trace-detail is-quarantined">
           <div className="trace-detail-head">
             <span className="label">Tool output</span>

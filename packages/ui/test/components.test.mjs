@@ -283,7 +283,8 @@ test("the trace shows the latest tools and marks the one running now", () => {
   assert.match(html, /Tool trace/);
   assert.match(html, /13 calls/);
   assert.match(html, /write running/);
-  // The panel states its own economy rather than silently hiding the rest.
+  // The DRAWER states its own economy rather than silently hiding the rest. The panel variant does not: it shows
+  // the whole list, so "latest 5 shown" would be false there (see the `variant` tests).
   assert.match(html, /latest 5 shown/);
   // Every call is reachable for debugging: the list is the whole trace, not only the latest 5.
   // Asserted by ROW COUNT rather than by id, because the id is a React key and never reaches the
@@ -1429,14 +1430,15 @@ function panelProps(extra = {}) {
   };
 }
 
-test("the panel offers both modes, and marks the active one", () => {
+test("the panel offers every mode, and marks the active one", () => {
   const html = renderToString(createElement(Panel, panelProps(), createElement("p", null, "body")));
   assert.match(html, /role="tablist"/);
   assert.match(html, /role="tab"/);
-  // Both modes are present; exactly one is selected.
-  assert.equal((html.match(/role="tab"/g) ?? []).length, 2);
+  // Session, Files, Trace — the trace moved here from a drawer under the transcript, so there are three.
+  assert.equal((html.match(/role="tab"/g) ?? []).length, 3, "Session, Files and Trace");
   assert.equal((html.match(/aria-selected="true"/g) ?? []).length, 1);
   assert.match(html, /aria-selected="true"[^>]*>Session</);
+  assert.match(html, />Trace</, "the trace is reachable as a mode rather than a strip");
 });
 
 test("only the selected TAB is in the tab order (roving tabindex)", () => {
@@ -1445,13 +1447,13 @@ test("only the selected TAB is in the tab order (roving tabindex)", () => {
   // passed for the wrong reason.
   const html = renderToString(createElement(Panel, panelProps(), createElement("p", null, "body")));
   const tabs = html.match(/<button[^>]*role="tab"[^>]*>/g) ?? [];
-  assert.equal(tabs.length, 2, "expected two tabs");
+  assert.equal(tabs.length, 3, "expected three tabs");
   const selected = tabs.filter((t) => t.includes('aria-selected="true"'));
   const other = tabs.filter((t) => t.includes('aria-selected="false"'));
   assert.equal(selected.length, 1);
-  assert.equal(other.length, 1);
+  assert.equal(other.length, 2, "every unselected tab is skipped, not just the first");
   assert.match(selected[0], /tabindex="0"/, "the selected tab must be reachable by Tab");
-  assert.match(other[0], /tabindex="-1"/, "the unselected tab must be skipped");
+  for (const tab of other) assert.match(tab, /tabindex="-1"/, "the unselected tabs must be skipped");
 });
 
 test("the body is tied to the tab that labels it", () => {
@@ -1804,31 +1806,38 @@ test("wrapped mode wraps, keeps indentation, and breaks long tokens", () => {
 // --- `Jump to latest` must not cover a line of text (issue #71) -----------------------------------
 
 test("the jump control floats in reserved space, so it cannot cover a line of text", () => {
-  // The defect: the control is positioned against the bottom of the VIEWPORT, so mid-list it sat on
-  // whatever line happened to be there — "…the escaped quote in m[ ↓ Jump to latest ]check." The fix
-  // is that `.transcript-wrap` reserves a strip, so the scrollport ends ABOVE the control.
-  //
-  // Asserted on the stylesheet because the markup cannot express it, and because the tempting fix —
-  // `padding-bottom` INSIDE the scroller — would pass a naive check while leaving the defect in
-  // place: padding at the end of the content scrolls away with it, so it protects only the last line.
+  /*
+   * The defect (issue #71): the control is positioned against the bottom of the region, so mid-list it sat on
+   * whatever line happened to be there — "…the escaped quote in m[ ↓ Jump to latest ]check."
+   *
+   * Where the reservation lives has changed, and the reason is worth recording. It used to be `padding-bottom` on
+   * `.transcript-wrap`, which worked while the composer was a SIBLING band below it: the scrollport ended above the
+   * strip, so the strip was never under the content.
+   *
+   * The composer is inside the wrapper now (one conversation, not three stacked panels), and that arrangement makes
+   * the wrap-level reservation wrong in the opposite direction: a reserved row at the foot of the wrapper would sit
+   * BETWEEN the last message and the composer as a permanent blank gap. So the reservation moved onto the scroller
+   * — where padding-bottoms scroll with the content and therefore protects the control's own band, which is exactly
+   * what the control needs.
+   *
+   * The property that matters is unchanged and is what this asserts: the control is absolutely positioned, and the
+   * space it occupies at the foot of the SCROLLER is at least its offset, so no line of text can sit under it.
+   */
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  const wrap = /\.transcript-wrap\s*\{([^}]*)\}/.exec(css);
-  assert.ok(wrap, ".transcript-wrap must have a rule");
-  assert.match(wrap[1], /padding-bottom:\s*var\(--jump-strip\)/,
-    "the wrap must RESERVE the strip, not the scroller's own padding");
-
-  const strip = /--jump-strip:\s*(\d+)px/.exec(css);
-  assert.ok(strip, "--jump-strip must be defined");
-  const height = Number(strip[1]);
+  const scroller = /\.transcript \{([^}]*)\}/.exec(css.replace(/\/\*[\s\S]*?\*\//g, ""))
+    ?? /\.transcript\s*\{([^}]*)\}/.exec(css);
+  assert.ok(scroller, ".transcript must have a rule");
+  const reserved = /padding:[^;]*calc\(var\(--sp-5\) \+ (\d+)px\)[^;]*;/.exec(scroller[1]);
+  assert.ok(reserved, `the scroller must reserve the control's band at its foot; got: ${scroller[1]}`);
 
   const pill = /\.jump-latest\s*\{([^}]*)\}/.exec(css);
   assert.ok(pill, ".jump-latest must have a rule");
-  assert.match(pill[1], /position:\s*absolute/, "the control floats over the strip");
+  assert.match(pill[1], /position:\s*absolute/, "the control floats over the reserved band");
   const bottom = /bottom:\s*(\d+)px/.exec(pill[1]);
   assert.ok(bottom, "the control must be offset from the bottom");
   assert.ok(
-    Number(bottom[1]) < height,
-    `the control's ${bottom[1]}px offset must sit inside the ${height}px strip, or it hangs below it`,
+    Number(bottom[1]) < Number(reserved[1]),
+    `the control's ${bottom[1]}px offset must sit inside the ${reserved[1]}px band, or it hangs below it`,
   );
 });
 

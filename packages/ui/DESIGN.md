@@ -46,7 +46,7 @@ approvals, tool trace, and the sanitized `.md` pipeline are all named in `docs/S
 |---|---|---|
 | Rail | Live sessions, ordered by *attention*; the two start actions; filter | On-disk history (40 dead rows under live ones was the spike's worst rail mistake) |
 | Transcript column | One focused session: header, metrics, run state, dialogs, transcript, composer | Session list, cross-session stats |
-| Inspector | The auditable facts about the focused session: isolation, exact argv, paths, usage, warnings | Anything actionable mid-run except `Rename`, `Stop`, and copy affordances |
+| Panel | The auditable facts about the focused session (Session), its working directory (Files), or every call it made (Trace) | Anything actionable mid-run except `Rename`, `Stop`, and copy affordances |
 | Topbar | Fleet counts + mode tabs + connection | Per-session controls |
 
 **Primary:** the focused session, its approvals, its composer. **Secondary:** history, rename, stop, model/thinking pickers. **Absent:** any directory field on the primary path; any "move this session"; any per-session isolation toggle.
@@ -113,9 +113,14 @@ transcript. So:
   size — two `72ch` values then agree by construction rather than by a ratio somebody has to maintain (#140).
 - **Left-aligned, still.** Centring this column was tried in #92 and reverted; it made the emptiness more obvious
   and produced five defects. The lane is bounded and anchored at the column's own left edge.
-- **The legend moved.** "Tool output is marked with a coloured edge" now sits beside the trace it describes rather
-  than in a permanent row above a conversation that has not shown tool output yet. The auto-follow control moved to
-  the transcript's top edge — the scroller it governs.
+- **The composer is the transcript's foot.** Not a sibling band with its own border, padding and width — one region:
+  the prose scrolls, the composer sits at the foot of it, and both take the lane's left edge and width from one
+  declaration. The auto-follow control sits in that foot too, beside the writing controls.
+- **The trace is a panel mode, not a strip.** It was a bounded five-row window between the transcript and the
+  composer, with its own title, count, hint and two toggles. It is `Trace` in the panel now: the full list with room
+  for a call's arguments and output. The transcript carries a ledger of numbered steps and an `Inspect` action that
+  opens the panel at that call. "Tool output is marked with a coloured edge" is stated in the trace's own header,
+  where the output it describes actually is.
 - **The rail states what changes a decision.** Rows carry context pressure, queued work and warnings; model,
   thinking level and cost are not repeated per row, because the header states them for the session in view.
 

@@ -215,10 +215,15 @@ test("the rail labels its numbers truthfully, via the derived fleet counts", () 
 
 test("the header does not append the path to a line that already contains it", () => {
   // The screenshot showed the working directory twice. `headerLocation` owns this decision.
-  const app = sources.find(({ file }) => file === "/App.tsx")!;
-  assert.ok(app.text.includes("headerLocation"), "the header should use the shared helper");
+  //
+  // The check follows the responsibility: the location line moved from `App.tsx` into `SessionHeader.tsx`, and a
+  // guard aimed at the old file would have silently stopped protecting anything — the failure mode this file's own
+  // header records for `ToolFrame.tsx`.
+  const header = sources.find(({ file }) => file === "/components/SessionHeader.tsx");
+  assert.ok(header, "SessionHeader.tsx must exist — it owns the location line");
+  assert.ok(header.text.includes("headerLocation"), "the header should use the shared helper");
   assert.ok(
-    !/whereLine\([^)]*\)\}\s*·\s*\{shortenPath/.test(app.text),
+    !/whereLine\([^)]*\)\}\s*·\s*\{shortenPath/.test(header.text),
     "appending shortenPath() to whereLine() duplicates the path for project sessions",
   );
 });

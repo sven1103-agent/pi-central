@@ -86,6 +86,7 @@ export function TranscriptView({
   activityOpen = {},
   onToggleActivity = () => {},
   onToggleAutoFollow,
+  footer,
   historyError,
 }: {
   /**
@@ -155,6 +156,13 @@ export function TranscriptView({
    * about following does not get a dead button.
    */
   onToggleAutoFollow?: (() => void) | undefined;
+  /**
+   * The composer (or the dialog dock that replaces it), rendered at the foot of the transcript.
+   *
+   * A slot rather than the component itself: this pane is about reading and scrolling, and it should not know
+   * about prompts, queues or steering. `App` decides what occupies the Foot.
+   */
+  footer?: React.ReactNode;
   /**
    * Why the conversation could not be read, if it could not be.
    *
@@ -383,18 +391,6 @@ export function TranscriptView({
     // sibling is what makes that possible, and the reservation is what stops the button covering a
     // line of text at any scroll position.
     <div className="transcript-wrap">
-      {/*
-        The reader's own setting for whether the pane follows new output.
-
-        It used to share a full-width `legend` row above the transcript with the provenance sentence. That row
-        existed to explain tool frames, which are no longer a permanent feature of the conversation, so it went;
-        this control belongs to the SCROLLER and now sits on its top edge, where the thing it controls is.
-      */}
-      {onToggleAutoFollow !== undefined && (
-        <div className="transcript-tools">
-          <FollowToggle following={autoFollow} onToggle={onToggleAutoFollow} />
-        </div>
-      )}
       <div
         className="transcript"
         ref={containerRef}
@@ -478,6 +474,29 @@ export function TranscriptView({
               assistive tech rather than read out as "downwards arrow". */}
           <span aria-hidden="true">↓</span> Jump to latest
         </button>
+      )}
+      {/*
+        THE COMPOSER LIVES HERE.
+
+        It used to be a separate band below the transcript: its own top border, its own padding, its own width. A
+        review called the horizontal and vertical separation the biggest problem — the conversation, the writing
+        surface and the trace each occupied a different strip, so the workspace read as three panels stacked rather
+        than one conversation.
+
+        As the transcript's own bottom edge it is one region: the prose scrolls, the composer sits at the foot of it,
+        and both share the lane's left edge and width without a second container re-deriving them. `autoFollow`
+        joins it here too, because the control belongs with the scroller it governs rather than on a row of its own
+        above the conversation.
+      */}
+      {footer !== undefined && (
+        <div className="transcript-footer">
+          {onToggleAutoFollow !== undefined && (
+            <div className="transcript-tools">
+              <FollowToggle following={autoFollow} onToggle={onToggleAutoFollow} />
+            </div>
+          )}
+          {footer}
+        </div>
       )}
     </div>
   );

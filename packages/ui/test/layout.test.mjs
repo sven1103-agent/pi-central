@@ -93,6 +93,12 @@ test("the transcript keeps its own horizontal padding", () => {
   const transcript = rule(".transcript");
   assert.ok(transcript, ".transcript must have a rule");
   // The declaration is normalised by the helper (whitespace collapsed), so the assertion reads the same shape.
-  assert.match(transcript, /padding:\s*var\(--sp-4\) 18px var\(--sp-5\) calc\(18px \+ var\(--lane-inset\)\)/,
-    `18px on the right, and 18px + the lane inset on the left; got: ${transcript}`);
+  // The BOTTOM now also reserves the band the `Jump to latest` control floats in, because the composer moved inside
+  // the transcript wrapper and a reserved row at the wrapper's foot would have become a permanent blank gap between
+  // the last message and the input.
+  assert.match(
+    transcript,
+    /padding:\s*var\(--sp-4\) 18px calc\(var\(--sp-5\) \+ \d+px\) calc\(18px \+ var\(--lane-inset\)\)/,
+    `18px on the right, 18px + the lane inset on the left, and the jump band at the foot; got: ${transcript}`,
+  );
 });

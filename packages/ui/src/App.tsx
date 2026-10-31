@@ -118,9 +118,6 @@ export function App() {
   // Read through an initialiser so a corrupt value cannot throw during the first render — the same rule
   // `parsePanelPrefs` follows, and for the same reason: `localStorage` outlives upgrades and is shared
   // with whatever else runs on this origin.
-  const [traceCollapsedBySession, setTraceCollapsedBySession] = useState<Record<string, boolean>>(
-    () => readTracePrefs().collapsed,
-  );
   const [showMarkersBySession, setShowMarkersBySession] = useState<Record<string, boolean>>(
     () => readTracePrefs().markers,
   );
@@ -132,6 +129,13 @@ export function App() {
   // session. Not persisted — a group key names a block in one transcript, and remembering "open" across a
   // browser restart would either be stale or, worse, apply to an unrelated group after a session was rewritten.
   const [activityOpen, setActivityOpen] = useState<Record<string, Record<string, boolean>>>({});
+  //
+  // Which tool call is selected in the panel's Trace view, per session.
+  //
+  // HERE rather than in `SessionView`, for the reason #108 records: that component remounts on every switch, so a
+  // selection held inside it would be lost exactly when the reader comes back to look at it. The trace is a panel
+  // now, so the selection has to outlive both a session switch and the panel being closed and reopened.
+  const [openToolBySession, setOpenToolBySession] = useState<Record<string, string | undefined>>({});
 
 
   // The right panel's geometry and mode, restored from the last visit (issue #8; #15 generalises
@@ -161,8 +165,8 @@ export function App() {
 
   // Persisted on change, not on every render: the maps only change when a toggle is pressed.
   useEffect(() => {
-    writeTracePrefs({ collapsed: traceCollapsedBySession, markers: showMarkersBySession });
-  }, [traceCollapsedBySession, showMarkersBySession]);
+    writeTracePrefs({ collapsed: {}, markers: showMarkersBySession });
+  }, [showMarkersBySession]);
 
   const setPanelWidth = useCallback((width: number, userSized: boolean) => {
     setPanel((current) => ({ ...current, width, userSized }));
@@ -700,14 +704,16 @@ export function App() {
             <SessionView
               key={focused?.id}
               session={focused}
-              traceCollapsed={focused ? traceCollapsedBySession[focused.id] === true : false}
               showMarkers={focused ? showMarkersBySession[focused.id] !== false : true}
               activityOpen={focused ? activityOpen[focused.id] ?? {} : {}}
               onToggleActivity={toggleActivity}
-              onToggleTraceCollapsed={(collapsed) =>
-                focused &&
-                setTraceCollapsedBySession((current) => ({ ...current, [focused.id]: collapsed }))
-              }
+              onInspectTool={(toolCallId) => {
+                if (focused === undefined) return;
+                setOpenToolBySession((current) => ({ ...current, [focused.id]: toolCallId }));
+                // Opening the panel's Trace tab IS the action: an action that selected a call in a view nobody
+                // could see would look like a no-op, which is the mistake the old marker made in reverse.
+                setPanel((current) => ({ ...current, collapsed: false, mode: "trace" }));
+              }}
               onToggleMarkers={() =>
                 focused &&
                 setShowMarkersBySession((current) => ({
@@ -797,7 +803,28 @@ export function App() {
           viewportWidth={viewportWidth}
           onCommit={persistPanel}
         >
-          {panel.mode === "session" ? (
+          {panel.mode === "trace" ? (
+            focused ? (
+              <ToolTrace
+                tools={transcript.tools}
+                selectedId={openToolBySession[focused.id]}
+                onSelect={(toolCallId) =>
+                  setOpenToolBySession((current) => ({ ...current, [focused.id]: toolCallId }))
+                }
+                showMarkers={showMarkersBySession[focused.id] !== false}
+                onToggleMarkers={() =>
+                  setShowMarkersBySession((current) => ({
+                    ...current,
+                    [focused.id]: current[focused.id] === false,
+                  }))
+                }
+                variant="panel"
+              />
+            ) : (
+              // No session, no trace. Said rather than showing an empty list, which would claim nothing ran.
+              <p className="panel-empty">Select a session to see what it ran.</p>
+            )
+          ) : panel.mode === "session" ? (
             <Inspector
               session={tab === "sessions" ? focused : undefined}
               home={home}
@@ -888,11 +915,10 @@ function SessionView({
   onClearQueueAndStop,
   followToken,
   autoFollow,
-  traceCollapsed,
   showMarkers,
   activityOpen,
   onToggleActivity,
-  onToggleTraceCollapsed,
+  onInspectTool,
   onToggleMarkers,
   onToggleAutoFollow,
   scrollMemory,
@@ -927,12 +953,12 @@ function SessionView({
    * Passed in rather than held here: this component remounts on every session switch, so local state
    * would reset — which is the reported bug.
    */
-  traceCollapsed: boolean;
   showMarkers: boolean;
   /** Which activity groups this session has open, keyed by group key (see the state in `App`). */
   activityOpen: Record<string, boolean>;
   onToggleActivity: (key: string, open: boolean) => void;
-  onToggleTraceCollapsed: (collapsed: boolean) => void;
+  /** Open this call in the panel's Trace view. */
+  onInspectTool: (toolCallId: string) => void;
   onToggleMarkers: () => void;
   onToggleAutoFollow: () => void;
   scrollMemory: React.MutableRefObject<Map<string, SessionScroll>>;
@@ -959,12 +985,6 @@ function SessionView({
       </div>
     );
   }
-
-  // Which tool call is open in the trace window, and whether that window is collapsed. Scoped to
-  // the session view so a selection cannot leak into another session's trace.
-  const [openTool, setOpenTool] = useState<string | undefined>(undefined);
-  // Markers on by default: they are how you tell WHERE the agent did something, which the trace
-  // window cannot express. One click hides them for pure reading.
 
   const busy = session.state === "streaming";
 
@@ -1019,40 +1039,35 @@ function SessionView({
         onToggleActivity={onToggleActivity}
         onToggleAutoFollow={onToggleAutoFollow}
         historyError={historyError}
-        onOpenTool={(toolCallId) => {
-          // Opening from a marker un-collapses the trace, or the click would appear to do nothing.
-          onToggleTraceCollapsed(false);
-          setOpenTool(toolCallId);
-        }}
+        onOpenTool={(toolCallId) => onInspectTool(toolCallId)}
+        footer={
+          pendingDialogCount({ ...initialState(), live: [session] }) > 0 ? undefined : (
+            <Composer
+              session={session}
+              state={state}
+              unavailableReason={composerMode(session).reason}
+              onSend={onSend}
+              onClearQueueAndStop={onClearQueueAndStop}
+              restored={restored}
+              onRestored={onRestored}
+              draft={draft}
+              onDraftChange={onDraftChange}
+            />
+          )
+        }
       />
 
-      {/* The trace sits between the conversation and the composer: both live surfaces adjacent,
-          so watching the agent and watching what it is running are one glance apart. */}
-      {openTool !== undefined || transcript.tools.length > 0 ? (
-        <ToolTrace
-          tools={transcript.tools}
-          selectedId={openTool}
-          onSelect={setOpenTool}
-          collapsed={traceCollapsed}
-          onToggleCollapsed={() => onToggleTraceCollapsed(!traceCollapsed)}
-          showMarkers={showMarkers}
-          onToggleMarkers={onToggleMarkers}
-        />
-      ) : null}
+      {/*
+        The trace DRAWER is gone (see `ToolTrace`'s header): it was a permanently-present strip between the
+        conversation and the composer, and it is now a panel mode with room to read a call properly. The transcript
+        keeps the ledger of steps, and `Inspect` on a step opens the panel's Trace view at that call.
+      */}
 
-      {pendingDialogCount({ ...initialState(), live: [session] }) > 0 ? null : (
-        <Composer
-          session={session}
-          state={state}
-          unavailableReason={composerMode(session).reason}
-          onSend={onSend}
-          onClearQueueAndStop={onClearQueueAndStop}
-          restored={restored}
-          onRestored={onRestored}
-          draft={draft}
-          onDraftChange={onDraftChange}
-        />
-      )}
+      {/*
+        The composer is handed to the transcript as its footer, not rendered as a sibling band.
+        The dialog dock still REPLACES it while the agent waits: answering is the only thing that can move the
+        session forward, so offering a prompt beside it would invite typing into a run that cannot accept it.
+      */}
     </>
   );
 }

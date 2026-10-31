@@ -707,8 +707,12 @@ button { font: inherit; color: inherit; }
   overflow-y: auto;
   /* The left side carries the lane inset, so the prose starts where the composer does. The right side keeps its
      own small padding: it is next to the scrollbar, and an inset there would move the scrollbar away from the
-     column's edge, which is where a reader expects to find it. */
-  padding: var(--sp-4) 18px var(--sp-5) calc(18px + var(--lane-inset));
+     column's edge, which is where a reader expects to find it.
+
+     The BOTTOM reserves the band the "Jump to latest" control floats in (#71), so the control can never cover the
+     last line. It lives here because the composer is inside the wrapper now: the reservation has to be part of what
+     scrolls, not a blank row under it. */
+  padding: var(--sp-4) 18px calc(var(--sp-5) + 40px) calc(18px + var(--lane-inset));
   min-height: 0;
   /*
    * NO `scroll-behavior: smooth`, and that is a correctness fix rather than a taste one (issue #86).
@@ -1036,13 +1040,17 @@ button { font: inherit; color: inherit; }
  * caps against, or the two `72ch` values are different widths (#140).
  */
 .composer {
-  border-top: 1px solid var(--line);
-  background: var(--panel);
-  padding: var(--sp-3) 18px;
+  /* No border and no background of its own: `.transcript-footer` supplies the one rule and the fill, because the
+     composer is the foot of the transcript rather than a separate panel. Two borders here would draw the line the
+     review objected to twice. */
+  padding: var(--sp-2) 0 var(--sp-3);
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
   font-size: var(--fs-base);
+  /* Same inset the prose uses, so the input starts at the conversation's left edge. */
+  padding-left: calc(18px + var(--lane-inset));
+  padding-right: 18px;
 }
 /*
  * Every child is capped to the lane, INCLUDING the row that holds the textarea and Send.
@@ -2193,10 +2201,34 @@ select.btn { font-family: var(--sans); }
    The cost is a `--jump-strip`-tall band below the transcript even while the control is hidden. A
    small permanent gap is the price of never covering a line; stated here rather than discovered
    later. */
+/*
+ * The transcript region: the scroll port AND the composer, as one container.
+ *
+ * The composer used to be a sibling band with its own top border, padding and width. A review called that
+ * separation the biggest problem in the layout — conversation, writing surface and trace each occupied a different
+ * strip, so the workspace read as three panels stacked rather than one conversation.
+ *
+ * `--jump-strip` is the band the "Jump to latest" control floats in. It is reserved on the SCROLLER rather than on
+ * this wrapper now, because the composer no longer sits below it: the gap has to be inside the scroll region, or it
+ * becomes a permanent blank row between the last message and the composer.
+ */
 .transcript-wrap {
   position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0;
-  --jump-strip: 40px;
-  padding-bottom: var(--jump-strip);
+}
+
+/*
+ * The foot of the transcript: the follow control, then the composer.
+ *
+ * One border separates reading from writing — the only horizontal rule between them, where there used to be three
+ * (the old `legend` row, the composer's own top border, and the trace's top border).
+ */
+.transcript-footer {
+  flex: none;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /* Shown only while the reader is scrolled away from the bottom, where it has a job to do. The
