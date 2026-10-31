@@ -36,15 +36,23 @@ import { useEffect, useRef, useState } from "react";
 
 export function InlineRename({
   value,
-  display,
   onCommit,
   label,
   className,
 }: {
-  /** The current name, as shown. */
+  /**
+   * The name **as displayed**, which is what the field edits.
+   *
+   * Reported from use: a scratch session showed `Scratch session` in the row but opened `s1` in the field,
+   * because the caller passed the raw `session.name` and a separate display value. Two values for one name is the
+   * defect — the reader was shown one thing and invited to edit another.
+   *
+   * Passing the display value has a consequence worth stating, because it is the reason this is safe: an
+   * UNCHANGED commit compares against what is on screen, so accepting `Scratch session` unchanged sends nothing.
+   * That keeps #78's decision intact — a default label cannot be silently promoted into a real name, which would
+   * give every scratch session the same literal title again.
+   */
   value: string;
-  /** What to render when not editing. Defaults to the value itself. */
-  display?: React.ReactNode;
   /** Receives the trimmed name, only when it differs from `value`. */
   onCommit: (name: string) => void;
   /** The accessible name of the input while editing. */
@@ -115,7 +123,7 @@ export function InlineRename({
       }}
       title="Double-click to rename"
     >
-      {display ?? value}
+      {value}
     </span>
   );
 }

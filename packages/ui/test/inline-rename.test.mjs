@@ -147,3 +147,23 @@ test("an EMPTY or UNCHANGED name never reaches the orchestrator", () => {
   second.key("Enter");
   assert.deepEqual(committed, [], "an unchanged name is not a rename");
 });
+
+test("the field opens with the name AS DISPLAYED, not the stored one", () => {
+  // Reported from use: a scratch session's row read `Scratch session`, but double-clicking opened `s1` — the
+  // stored name. The reader was shown one thing and invited to edit another. The component takes ONE value now,
+  // the displayed one, so this cannot happen again: there is no second name to pass.
+  const committed = [];
+  const ui = mount({ value: "Scratch session", label: "Session name", onCommit: (name) => committed.push(name) });
+  ui.doubleClick();
+  assert.equal(ui.input().value, "Scratch session", "the field shows what the row shows");
+});
+
+test("accepting a DEFAULT label unchanged renames nothing", () => {
+  // The other half of that fix, and the reason it is safe: if `Scratch session` were sent as a rename, every
+  // scratch session would acquire the same literal name and #78's indistinguishability would come straight back.
+  const committed = [];
+  const ui = mount({ value: "Scratch session", label: "Session name", onCommit: (name) => committed.push(name) });
+  ui.doubleClick();
+  ui.key("Enter");
+  assert.deepEqual(committed, [], "a label that was not changed is not a rename");
+});

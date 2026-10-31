@@ -457,6 +457,12 @@ They are kept because each one is the reason a constraint or an invariant test e
   *looks chosen*, which removes the nudge to ever name anything, and `brisk-otter` is no more findable tomorrow
   than `s7`. The fix for indistinguishable sessions is cheap renaming, not invented names.
 
+  **The field opens with the name as DISPLAYED**, not the stored one. Reported from use: a scratch session's row
+  read `Scratch session`, but double-clicking opened `s1`. The component takes one value now — the displayed one —
+  so there is no second name to pass; and because the unchanged check compares against what is on screen,
+  accepting `Scratch session` unchanged sends nothing. That keeps the decision above intact: a default label can
+  never be silently promoted into a literal name, which would give every scratch session the same title again.
+
   Only a live session is renameable, in the rail as well as the header: Pi performs the rename over RPC
   (`set_session_name`), so a row whose process is gone has nobody to ask. It shows plain text rather than a field
   that could not work.

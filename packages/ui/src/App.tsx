@@ -953,8 +953,7 @@ function SessionView({
               clicks deep in the Inspector.
             */}
             <InlineRename
-              value={session.name}
-              display={displayName(session)}
+              value={displayName(session)}
               label="Session name"
               className="session-name"
               onCommit={onRename}
