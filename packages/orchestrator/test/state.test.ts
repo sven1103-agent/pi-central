@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { LiveSession, PiRecord } from "@pi-central/protocol";
 import { blockingDialogMethods, fireAndForgetUiMethods, interpretRecord } from "../src/state.ts";
-import { clearQueueVia, describeExitFailure } from "../src/supervisor.ts";
+import { boundedTail, clearQueueVia, describeExitFailure, exitReason } from "../src/supervisor.ts";
 
 const session = (over: Partial<LiveSession> = {}): LiveSession => ({
   id: "s1",
@@ -292,4 +292,43 @@ test("compaction and retry records do NOT move the session out of streaming", ()
       assert.equal(effect.refreshStats, undefined, `${record.type} must not trigger a stats refresh`);
     }
   }
+});
+
+// --- A failure names what killed it, and does not bury it (reported from a window) ---------------
+
+test("a shell-style 128+n exit is named as the signal it was", () => {
+  // Reported: killing the session's process produced `pi exited (code=137, signal=-)` and nothing else. 137 is
+  // 128 + 9, because the wrapper exited rather than the signal propagating — so the ONE word that explains the
+  // failure was missing. The numbers are kept: they are the evidence.
+  const killed = exitReason(137, null);
+  assert.match(killed, /killed by SIGKILL/, killed);
+  assert.match(killed, /code=137/, "the raw code must survive — it is what the log says");
+
+  assert.match(exitReason(143, null), /killed by SIGTERM/);
+  // A propagated signal is already named, and must not be decoded twice.
+  assert.match(exitReason(null, "SIGKILL"), /killed by SIGKILL/);
+  // An ordinary exit is not a signal.
+  assert.ok(!/killed by/.test(exitReason(1, null)));
+  assert.ok(!/killed by/.test(exitReason(0, null)));
+  // A number outside the signal range is left alone rather than mislabelled.
+  assert.ok(!/killed by/.test(exitReason(200, null)));
+});
+
+test("the failure is not buried under startup chatter", () => {
+  // The reported screen: the LiteLLM and nvim-tmux banner lines, then `Killed: 9` on the last line of a
+  // screenful. The cause is at the END of stderr — a process writes its banner as it starts and the fatal line
+  // as it dies — so the tail is bounded from the top.
+  const noise = Array.from({ length: 40 }, (_, i) => `[LiteLLM] startup notice ${i}`).join("\n");
+  const message = describeExitFailure(137, null, `${noise}\nKilled: 9`);
+  assert.match(message, /killed by SIGKILL/, "the reason comes first");
+  assert.match(message, /Killed: 9/, "and the decisive line survives");
+  assert.ok(message.split("\n").length < 20, `bounded, got ${message.split("\n").length} lines`);
+  assert.match(message, /earlier lines of output omitted/, "and says what it dropped, rather than trimming silently");
+});
+
+test("short stderr is left exactly as it was", () => {
+  // No truncation notice when nothing was truncated — a banner that always says "omitted" is noise.
+  assert.equal(boundedTail("Error: cannot find module 'pi'"), "Error: cannot find module 'pi'");
+  assert.equal(boundedTail(""), "");
+  assert.equal(boundedTail("trailing newlines\n\n"), "trailing newlines");
 });

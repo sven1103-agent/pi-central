@@ -35,6 +35,8 @@ export function SessionRail({
   focusedId,
   onFocusRow,
   onForgetRow,
+  onRetryRow,
+  retryAvailable,
   onStartSession,
   onOpenDirectory,
   home,
@@ -58,6 +60,23 @@ export function SessionRail({
    * is a different action with its own confirmation.
    */
   onForgetRow: (row: RosterRow) => void;
+  /**
+   * Retry a FAILED session (issue #11).
+   *
+   * The affordance `DESIGN.md` promised and never had: its composer text says "Retry it from the rail", and
+   * the rail had no such control.
+   */
+  onRetryRow: (row: RosterRow) => void;
+  /**
+   * Whether the CONNECTED orchestrator understands `retry` (issue #11).
+   *
+   * False when the two halves are on different protocol versions — which happens in a checkout without any
+   * mistake: the UI is served as files, so `npm run ui:build` reaches a running orchestrator at once, while
+   * the orchestrator's own module stays in memory from when it started. Offering Retry then produces
+   * `bad control: unknown kind 'retry'` — a symptom, not a reason. So the control is not offered, and the row
+   * says what to do instead.
+   */
+  retryAvailable: boolean;
   onStartSession: () => void;
   onOpenDirectory: () => void;
   home: string | undefined;
@@ -125,6 +144,8 @@ export function SessionRail({
                   focused={rowKey(row) === focusedId}
                   onFocus={() => onFocusRow(row)}
                   onForget={() => onForgetRow(row)}
+                  onRetry={() => onRetryRow(row)}
+                  retryAvailable={retryAvailable}
                   home={home}
                 />
               ))}
@@ -173,6 +194,11 @@ function rowName(row: RosterRow): string {
   return nameLabel(row.entry.name, row.entry.scratch === true, filenameOf(row.entry.path));
 }
 
+/** The first line of a message — the reason, as opposed to everything the process printed. */
+function firstLine(text: string): string {
+  return text.split("\n")[0] ?? text;
+}
+
 /** The file's name without its extension, as a last-resort label. */
 function filenameOf(path: string): string {
   const segment = path.split("/").filter((part) => part.length > 0).pop() ?? path;
@@ -184,12 +210,16 @@ function RailRow({
   focused,
   onFocus,
   onForget,
+  onRetry,
+  retryAvailable,
   home,
 }: {
   row: RosterRow;
   focused: boolean;
   onFocus: () => void;
   onForget: () => void;
+  onRetry: () => void;
+  retryAvailable: boolean;
   home: string | undefined;
 }) {
   const session = row.session;
@@ -255,6 +285,57 @@ function RailRow({
         </>
       )}
       </button>
+      {/*
+        Retry appears only on a FAILED session, and only a failed one can be retried (#11). It is explicit —
+        nothing restarts on its own — because a silent restart is how a crash loop hides itself.
+
+        The previous failure is shown beneath it once a retry has happened: the second attempt clears `error`
+        (the composer becomes usable again), and erasing the evidence would leave a reader unable to compare
+        attempts.
+      */}
+      {session?.state === "failed" && (
+        <span className="rail-row-actions">
+          {retryAvailable ? (
+            <button
+              type="button"
+              className="rail-row-retry"
+              onClick={onRetry}
+              /*
+                A STATIC sentence. It used to be `session.error`, which put the whole multi-line stderr into a
+                native tooltip — the same mistake as the thinking block's `title` (issue #143): a wall of text
+                appearing on a stray hover, with no way to keep it open or dismiss it. Hovering a control should
+                say what the control DOES; the reason lives in one place, the Session panel.
+              */
+              title="Try this session again in the same directory"
+            >
+              Retry
+            </button>
+          ) : (
+            /*
+              The control is withheld rather than shown-and-broken, and the reason is stated. A disabled button
+              would still be a promise; a sentence that says what to do is the honest version.
+            */
+            <span className="rail-row-earlier">
+              restart the orchestrator to retry (it speaks an older protocol)
+            </span>
+          )}
+        </span>
+      )}
+      {/*
+        The earlier failure, whenever there IS one — NOT only while the session is failed.
+
+        The first version rendered this inside the failed-only block above, so it appeared exactly when it was
+        redundant (the current `error` already says what went wrong) and disappeared exactly when it mattered
+        (after a retry cleared `error`). A test for the acceptance criterion caught it.
+      */}
+      {session?.previousError !== undefined && (
+        /*
+          One line, and no `title`. The stored value is the whole stderr, and a rail row is not the place for
+          it: `title` would surface all of it on hover, which is exactly what hovering a row should not do.
+          `firstLine` is the same rule the error strip follows, so the two agree about what "the reason" is.
+        */
+        <span className="rail-row-earlier">last failure: {firstLine(session.previousError)}</span>
+      )}
       {session === undefined && (
         <button
           type="button"

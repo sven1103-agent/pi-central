@@ -24,6 +24,7 @@ import { join } from "node:path";
 import type { Command, HistoricalSession, LiveSession, ModelOption, PiRecord } from "@pi-central/protocol";
 import { composePolicy, describe, type LaunchMode, type SessionSpec } from "./policy.ts";
 import { RpcProcess, type LaunchSpec } from "./rpc.ts";
+import { retryRefusal } from "./retry.ts";
 import { checkResumable } from "./resume.ts";
 import { isScratch, scratchDirFor, type Config } from "./config.ts";
 import { agentRoutingEnv } from "./env.ts";
@@ -170,6 +171,63 @@ export class Supervisor extends EventEmitter {
     return undefined;
   }
 
+  /**
+   * Re-spawn a session that failed, in the directory it already had (issue #11).
+   *
+   * ## Why this is not "stop, then start"
+   *
+   * The reader is asking for THIS session to try again. A client-side stop+start would put a second row in
+   * the rail beside the failed one, and the roster (keyed by session file) would then have two live entries
+   * pointing at one conversation. Reusing the id keeps the row where the reader put it.
+   *
+   * ## Refusals, all before anything is spawned
+   *
+   * - **Not failed** → refused. A silent restart is how a crash loop hides itself, and a running session is
+   *   not broken.
+   * - **Directory gone or unreadable** → refused with the reason, for the same purpose `resume` refuses: RPC
+   *   Pi exits 1 on a missing directory rather than prompting (C2), so re-spawning would produce a second
+   *   failure that says less than the first.
+   *
+   * ## What is preserved
+   *
+   * `previousError` holds the last failure. Clearing `error` is what makes the retry a retry — the composer
+   * becomes usable again — but erasing the evidence would leave a reader unable to compare attempts.
+   */
+  async retry(id: string): Promise<StartResult | StartFailure> {
+    const existing = this.#sessions.get(id);
+    if (existing === undefined) return { ok: false, message: `no such session: ${id}` };
+    const refusal = retryRefusal(existing);
+    if (refusal !== undefined) return { ok: false, message: refusal };
+
+    // Dispose the old process before spawning a replacement under the same id, so the map cannot end up
+    // holding a dead RpcProcess while a new one runs.
+    const previous = this.#processes.get(id);
+    this.#processes.delete(id);
+    // `stop()` on a process that already exited is the cheap case; awaiting it means the replacement cannot
+    // race the old one for the same session file.
+    await previous?.stop().catch(() => undefined);
+
+    return this.#spawn({
+      id,
+      cwd: existing.cwd,
+      mode: existing.mode,
+      /*
+       * No `--name` when the session already has a file.
+       *
+       * `resume` makes the same choice for the same reason: the session carries its own name, and re-applying
+       * one appends a redundant `session_info` record to a file we did not create. A retry of a session that
+       * already wrote records is exactly that case. When there is no file yet the name is still needed, so it
+       * is passed only then.
+       */
+      ...(existing.sessionFile === undefined ? { name: existing.name } : {}),
+      sessionPath: existing.sessionFile,
+      previousError: existing.error ?? existing.previousError,
+      // `enable` and `env` are not part of `LiveSession`, so a retry cannot reproduce logins granted per
+      // spawn. Stated here rather than silently lost: a retried session may come back with fewer
+      // capabilities than the original, which is visible in the composer when a credential is missing.
+    });
+  }
+
   #spawn(input: {
     id: string;
     cwd: string;
@@ -178,6 +236,7 @@ export class Supervisor extends EventEmitter {
     enable?: string[] | undefined;
     env?: Record<string, string> | undefined;
     sessionPath?: string | undefined;
+    previousError?: string | undefined;
   }): StartResult | StartFailure {
     // A resumed session must reopen its file; a new one gets a fresh name.
     //
@@ -282,6 +341,7 @@ export class Supervisor extends EventEmitter {
       ],
       startedAt: Date.now(),
       ...(input.sessionPath ? { sessionFile: input.sessionPath } : {}),
+      ...(input.previousError ? { previousError: input.previousError } : {}),
     };
     this.#sessions.set(session.id, session);
 
@@ -734,7 +794,23 @@ export function describeExitFailure(
   signal: string | null,
   stderr: string,
 ): string {
-  const base = `pi exited (code=${code ?? "-"}, signal=${signal ?? "-"})${stderr ? `\n${stderr}` : ""}`;
+  /*
+   * ## Two defects fixed here, both reported from a window
+   *
+   * **1. `code=137, signal=-` does not say what happened.** A shell reports a child killed by a signal as
+   * `128 + n` with no signal name, because the wrapper exited rather than the signal propagating. So the most
+   * likely deliberate action — someone killing the session's process — produced a message that named a number
+   * and nothing else. The signal is decoded from the code, because that is what the reader needs.
+   *
+   * **2. The cause was buried under startup chatter.** The stderr tail used to be the WHOLE tail, so a session
+   * that started fine and ran for a while reported its failure after every extension's banner line — the
+   * LiteLLM and nvim-tmux notices, in the case that was reported. `Killed: 9` arrived on the last line of a
+   * screenful. The summary now names the reason, and the tail is bounded to its last lines with a count of
+   * what was left out, so the evidence survives without the wall.
+   */
+  const reason = exitReason(code, signal);
+  const tail = boundedTail(stderr);
+  const base = `${reason}${tail ? `\n${tail}` : ""}`;
   if (!/sandbox_apply|Operation not permitted/i.test(stderr)) return base;
   return (
     `${base}\n\n` +
@@ -742,6 +818,59 @@ export function describeExitFailure(
     "terminal, not inside another sandbox, editor task, or agent harness -- because `safehouse` " +
     "applies its policy with `sandbox-exec`, and that cannot run inside an existing sandbox."
   );
+}
+
+/** How many stderr lines survive into the message. */
+const STDERR_TAIL_LINES = 12;
+
+/**
+ * The first line of a failure message: what ended the process.
+ *
+ * `code` is the exit status and `signal` the terminating signal, and they are rarely both populated: a shell
+ * wrapping a killed child exits `128 + n`, so nobody sees `SIGKILL` — only `137`. Decoding it is the difference
+ * between a number and a sentence. The raw numbers are kept, because they are the evidence.
+ */
+export function exitReason(code: number | null, signal: string | null): string {
+  const raw = `pi exited (code=${code ?? "-"}, signal=${signal ?? "-"})`;
+  if (signal) return `${raw} — killed by ${signal}`;
+  // `128 + n` is how a SHELL reports a signalled child. Naming it is a reading of the number, not a guess about
+  // intent: a kill and an OOM kill both land here, which is why the number is kept alongside the name.
+  if (code !== null && code > 128 && code <= 128 + 64) {
+    const name = signame(code - 128);
+    if (name !== undefined) return `${raw} — killed by ${name}`;
+  }
+  return raw;
+}
+
+/** The conventional short name for a signal number, for the ones a session plausibly dies from. */
+function signame(number: number): string | undefined {
+  const names: Record<number, string> = {
+    1: "SIGHUP",
+    2: "SIGINT",
+    3: "SIGQUIT",
+    6: "SIGABRT",
+    9: "SIGKILL",
+    11: "SIGSEGV",
+    13: "SIGPIPE",
+    15: "SIGTERM",
+  };
+  return names[number];
+}
+
+/**
+ * The last lines of stderr, with a count of what was dropped.
+ *
+ * Trimmed from the TOP rather than the bottom because the cause is at the end: a process writes its banner as it
+ * starts and the fatal line as it dies.
+ */
+export function boundedTail(stderr: string): string {
+  const text = stderr.replace(/\s+$/, "");
+  if (text === "") return "";
+  const lines = text.split("\n");
+  if (lines.length <= STDERR_TAIL_LINES) return text;
+  const kept = lines.slice(-STDERR_TAIL_LINES);
+  const omitted = lines.length - STDERR_TAIL_LINES;
+  return `… ${omitted} earlier line${omitted === 1 ? "" : "s"} of output omitted\n${kept.join("\n")}`;
 }
 
 /** Only used so a display name is never a bare id. */
@@ -797,3 +926,4 @@ export async function clearQueueVia(
   if (andStop) await send({ type: "abort" }, 30_000);
   return result;
 }
+

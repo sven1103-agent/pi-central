@@ -35,6 +35,19 @@ class FakeSupervisor extends EventEmitter {
     return { ok: true as const, session };
   }
 
+  /**
+   * Recorded so a test can prove the transport FORWARDS `retry` rather than rejecting it at the allowlist.
+   *
+   * Its absence is what the reported bug looked like from the outside: the allowlist rejected the kind before
+   * the switch was ever reached, so this method being called at all is the assertion.
+   */
+  retry(id: string) {
+    this.calls.push({ method: "retry", args: [id] });
+    const session = this.sessions.find((candidate) => candidate.id === id);
+    if (session === undefined) return { ok: false as const, message: `no such session: ${id}` };
+    return { ok: true as const, session };
+  }
+
   resume(session: { path: string; cwd: string }, options: { mode?: string }) {
     this.calls.push({ method: "resume", args: [session, options] });
     const live = makeSession(`s${++this.#next}`, session.cwd);
@@ -969,6 +982,41 @@ test("an emptied queue is broadcast as empty, not omitted", async () => {
     const event = await client.next("queue");
     assert.deepEqual(event.kind === "queue" && event.steering, []);
     assert.deepEqual(event.kind === "queue" && event.followUp, []);
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+
+// --- A implemented control must not be rejected by the allowlist (issue #11) ----------------------
+
+test("retry reaches the supervisor instead of being rejected as an unknown kind", async () => {
+  // Reported from a window, on a branch that had implemented retry: `bad control: unknown kind 'retry'`.
+  //
+  // The switch had a `retry` case; a hardcoded allowlist ABOVE the switch did not, and `Set<Control["kind"]>`
+  // does not require every member — so the feature was dead on arrival and every test passed. The allowlist is
+  // now derived from an exhaustively-typed `Record`, which makes a new kind a compile error; this is the
+  // runtime half, driving the socket the way the browser does.
+  const supervisor = new FakeSupervisor();
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+
+    // A live session to retry, so the transport has something to forward.
+    const created = supervisor.start({ cwd: "/tmp/retry-test" });
+    assert.ok(created.ok);
+
+    client.send({ kind: "retry", sessionId: created.session.id });
+    const event = await client.next("session");
+    assert.equal(event.kind, "session", "the retried session is broadcast back");
+
+    assert.ok(
+      supervisor.calls.some((call) => call.method === "retry"),
+      `the supervisor must receive retry, got: ${JSON.stringify(supervisor.calls.map((c) => c.method))}`,
+    );
     client.close();
   } finally {
     await transport.close();

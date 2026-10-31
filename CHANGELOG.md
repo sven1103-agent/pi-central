@@ -313,6 +313,92 @@ They are kept because each one is the reason a constraint or an invariant test e
   no `.package-lock.json` under the global prefix, and no `_integrity` in the installed manifest. Printing
   one would mean inventing it.
 
+### Added
+
+- **A failed session can be retried from the rail** (issue #11).
+
+  `DESIGN.md` promised this and it did not exist: the composer says *"Retry it from the rail"*, and the rail had
+  no such control. A failed session offered only "Stop session".
+
+  A `retry` control re-spawns the session in **the same directory and mode**, reusing its id so the row stays
+  where the reader put it — a client-side stop-then-start would leave the failed row beside its replacement.
+  `PROTOCOL_VERSION` 3 → 4, because a v3 orchestrator would ignore the control and the button would silently do
+  nothing.
+
+  **Every refusal happens before anything is spawned**, and each is a different message:
+
+  | state | answer |
+  |---|---|
+  | starting / streaming / awaiting-approval | *"still running. Stop it before retrying."* |
+  | idle / registered / stopped | *"Only a failed session can be retried."* |
+  | directory gone | *"no longer exists"* + the path |
+  | directory unreadable | *"not readable by this process"* — **not** "no longer exists" |
+
+  That last distinction is the bug `checkResumable` already had: a bare `catch` called every failure "no longer
+  exists", including an `EACCES` on an ancestor whose path was present and fine.
+
+  **Nothing restarts on its own.** A silent restart is how a crash loop hides itself, which is why a running
+  session is refused rather than restarted.
+
+  **The previous failure stays visible.** A retry clears `error` — that is what makes the composer usable again —
+  so the earlier message moves to `previousError` and is rendered on the row as `last failure: …`. Kept as a
+  separate field because the two answer different questions: *"is it broken now"* and *"how did it break last
+  time"*.
+
+  **The error now appears in exactly one durable place.** Reported after dismissal: *"the error is everywhere
+  and when users hover over retry, they also see the error. That does not make sense."* It was in four:
+
+  | where | before | now |
+  |---|---|---|
+  | the strip | 9 lines of stderr | the reason + a count of what it is not showing |
+  | the rail's Retry tooltip | the whole stderr | a static sentence about the button |
+  | the `last failure:` row line | the whole stored stderr | its first line, no tooltip |
+  | under the composer | the whole stderr | *"This session failed to start. Retry it from the rail."* |
+  | the Session panel | full text | full text — **the one place detail belongs** |
+
+  The tooltip is the same mistake as the thinking block's `title` (issue #143): a wall of text on a stray
+  hover, with no way to keep it open or dismiss it. A control's tooltip says what the control does.
+
+  An existing test had to be **reversed** rather than fixed: it required the composer to surface
+  `session.error`. That was not wrong in isolation — it was wrong four times over. It now asserts the
+  documented sentence *and* keeps the other half of the contract: the session still carries `error`, so the
+  Session panel can show it.
+
+  **Dismiss actually dismissed, and the strip stopped pasting stderr.** Two defects reported together from a
+  window. Dismiss dispatched `{ kind: "error", message: "" }`, which *prepends an empty string* rather than
+  removing anything — so the strip stayed on screen and the button looked broken. It is now a `dismissError`
+  action that drops exactly the error being shown, so a second error is revealed rather than silently cleared.
+
+  And the strip carried the whole multi-line message: the reason on line one, then pi's startup chatter — the
+  LiteLLM model notices and an nvim-tmux hint. `role="alert"` read all nine lines aloud. It now shows the
+  reason and how many lines it is not showing; the full text stays on the session and in the Session panel,
+  where someone looking for detail already goes.
+
+  **A control the orchestrator implements must not be rejected by its own allowlist.** the first
+  push of this slice had a `retry` case in the switch but not in `KNOWN_CONTROL_KINDS`, the hardcoded list
+  checked *above* the switch — so every press still answered `bad control: unknown kind 'retry'` on a branch
+  that had implemented it, and every test passed. `Set<Control["kind"]>` does not require every member. The list
+  is now derived from a `Record<Control["kind"], true>`, which makes a new kind a compile error, and a transport
+  test drives `retry` over a real socket so the runtime half is covered too.
+
+  **The control is not offered when the connected orchestrator is too old.** A red banner reading
+  `bad control: unknown kind 'retry'` was reported from a window — reachable without any mistake in a checkout,
+  because the UI is served as **files** (so `npm run ui:build` reaches a running orchestrator immediately) while
+  the orchestrator's own module stays in memory from when it started. `supportsRetry(protocol)` gates the
+  button, and the row says *"restart the orchestrator to retry"* instead. Offering an action the other half
+  cannot perform is the same failure as a disabled control that promises something.
+
+  **A failure now names what killed it, and does not bury it.** Killing a session's process produced
+  `pi exited (code=137, signal=-)` with nothing else — 137 is `128 + 9`, because the wrapper exits rather than
+  the signal propagating, so the one word that explains the failure was missing. And the stderr tail was the
+  *whole* tail: the LiteLLM and nvim-tmux banner lines, then `Killed: 9` on the last line of a screenful. The
+  reason now leads, `128 + n` is decoded to a signal name (keeping the raw numbers as evidence), and the tail is
+  bounded to its last lines with a count of what was dropped.
+
+  The refusals live in `retry.ts` rather than inside `Supervisor.retry`: a retry needs a real spawn to exercise
+  end to end, which no test here can do (C1: the sandbox does not nest). Extracting the decisions makes all four
+  criteria checkable.
+
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.4.1] — 2026-10-29

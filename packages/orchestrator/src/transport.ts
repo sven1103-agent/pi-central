@@ -61,24 +61,39 @@ export interface TransportAddress {
   url: string;
 }
 
-/** Every control kind the orchestrator understands, for the runtime check in `#onMessage`. */
-const KNOWN_CONTROL_KINDS: ReadonlySet<string> = new Set<Control["kind"]>([
-  "list",
-  "start",
-  "prompt",
-  "clearQueue",
-  "abort",
-  "stop",
-  "rename",
-  "setModel",
-  "listModels",
-  "setThinkingLevel",
-  "listThinkingLevels",
-  "answerDialog",
-  "resume",
-  "listFiles",
-  "readFile",
-]);
+/**
+ * Every control kind the orchestrator understands, for the runtime check in `#onMessage`.
+ *
+ * ## Why this is a `Record` and not a `Set` literal
+ *
+ * It was `new Set<Control["kind"]>([...])`, and `Set<Control["kind"]>` does **not** require every member: a
+ * missing kind compiles cleanly. So issue #11 added `retry` to the `Control` union and to the `switch`, and the
+ * allowlist above the switch went on rejecting it — every press answered `bad control: unknown kind 'retry'`
+ * on a branch that had implemented it. The feature was dead on arrival and nothing failed.
+ *
+ * A `Record<Control["kind"], true>` IS exhaustive: adding a member to the union makes this object stop
+ * compiling until it is added here. The set is derived from it, so there is one list rather than two.
+ */
+const CONTROL_KINDS: Record<Control["kind"], true> = {
+  list: true,
+  start: true,
+  prompt: true,
+  clearQueue: true,
+  abort: true,
+  stop: true,
+  rename: true,
+  setModel: true,
+  listModels: true,
+  setThinkingLevel: true,
+  listThinkingLevels: true,
+  answerDialog: true,
+  resume: true,
+  retry: true,
+  listFiles: true,
+  readFile: true,
+};
+
+const KNOWN_CONTROL_KINDS: ReadonlySet<string> = new Set(Object.keys(CONTROL_KINDS));
 
 /** Reject a malformed envelope with a reason, rather than closing silently. */
 export function parseControl(raw: string): Control | { error: string } {
@@ -349,6 +364,23 @@ export class Transport {
           return;
         }
         const result = this.#supervisor.resume(target, control.mode ? { mode: control.mode } : {});
+        if (!result.ok) {
+          this.#broadcast({ kind: "error", message: result.message });
+          return;
+        }
+        this.#broadcast({ kind: "session", session: result.session });
+        return;
+      }
+      case "retry": {
+        /*
+         * Re-spawn a failed session (issue #11).
+         *
+         * A dedicated control rather than stop-then-start: the reader wants THIS session to try again, and a
+         * client-side sequence would leave the failed row beside its replacement. The failure is broadcast
+         * like every other refusal — with the reason, never a silent no-op, because a button that does
+         * nothing is indistinguishable from one that is broken.
+         */
+        const result = await this.#supervisor.retry(control.sessionId);
         if (!result.ok) {
           this.#broadcast({ kind: "error", message: result.message });
           return;

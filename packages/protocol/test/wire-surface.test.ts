@@ -36,7 +36,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PROTOCOL_VERSION } from "../src/envelopes.ts";
+import { PROTOCOL_VERSION, RETRY_SINCE_PROTOCOL, supportsRetry } from "../src/envelopes.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const envelopes = readFileSync(resolve(here, "..", "src", "envelopes.ts"), "utf8");
@@ -134,4 +134,16 @@ test("the two unions are actually found, so a rename cannot make this vacuous", 
   assert.ok(recorded.event.length > 10, "the event union should not be nearly empty");
   assert.ok(kindsOf("Control").includes("listFiles"), "issue #8's kinds must be in the surface");
   assert.ok(kindsOf("Event").includes("fileError"), "issue #8's kinds must be in the surface");
+});
+
+test("supportsRetry gates on the version that introduced it, not on equality", () => {
+  // Equality would be wrong in both directions: an older orchestrator must not be asked, and a NEWER one must
+  // not be blocked just because the numbers differ.
+  assert.equal(supportsRetry(3), false, "v3 has no retry control");
+  assert.equal(supportsRetry(4), true, "v4 introduced it");
+  assert.equal(supportsRetry(5), true, "a later version still has it");
+  // Unknown is "the handshake has not finished", not "old" — hiding the control during every load would be a
+  // flicker for the common case.
+  assert.equal(supportsRetry(undefined), true);
+  assert.equal(RETRY_SINCE_PROTOCOL, 4);
 });
