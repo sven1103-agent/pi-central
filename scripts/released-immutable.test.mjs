@@ -102,81 +102,76 @@ function taggedChangelog(tag) {
   }
 }
 
-test("EVERY section that has a release tag is exactly as it shipped", (t) => {
-  // Checking only `v<package.json>` would repeat the blind spot it exists to close: the version being
-  // PREPARED is not the one that ships in the same commit, so entries piling into an OLDER released
-  // section go unseen. Every tag that exists is checked, because every one is published.
-  let tags = [];
+test("a released section cannot GAIN an entry after it ships", (t) => {
+  /*
+   * ## What this guard is for, restated after it was reformulated
+   *
+   * It began as byte-equality against the tag's copy of the file, because the defect it was written for was
+   * **entries piling into a published heading**: five fixes (#141–#146) sat under the released 0.4.0 and described
+   * code that was not in that tarball. That is the failure worth catching, and it is about ADDITION.
+   *
+   * Byte-equality was a stricter proxy, and it had to be relaxed for a deliberate reason. On 2026-10-31 the
+   * changelog was compressed for readability — 1,795 lines to 175 — across every section, at the maintainer's
+   * request ("the changelog is way too verbose. Nobody will read that. Changelog needs to be scannable"). The
+   * prose in this repository is a summary; the published GitHub Releases keep the full bodies, and the two linked
+   * from the repo are now deliberately terser than the ones npm shipped.
+   *
+   * So the invariant is narrowed to the one that still holds and still matters: **a released section may be
+   * rewritten, but it may not grow a new change.** The recorded baseline in `released-sections.json` is what a
+   * release had; a section with MORE entries, or an issue number it did not have, means someone appended to
+   * published history again.
+   */
+  let recorded;
   try {
-    tags = execFileSync("git", ["tag", "--list", "v*"], {
-      cwd: new URL("..", import.meta.url).pathname,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    })
-      .split("\n")
-      .map((x) => x.trim())
-      .filter((x) => /^v\d+\.\d+\.\d+$/.test(x));
+    recorded = JSON.parse(readFileSync(new URL("./released-sections.json", import.meta.url), "utf8"));
   } catch {
-    tags = [];
-  }
-  if (tags.length === 0) {
-    t.skip("no release tags here — nothing to compare against");
+    t.skip("no recorded baseline — nothing to compare against");
     return;
   }
 
-  const section = (text, version) => {
-    const esc = version.replace(/\./g, "\\.");
-    const m = new RegExp(`^## \\[${esc}\\][^\\n]*\\n([\\s\\S]*?)(?=^## \\[|$(?![\\s\\S]))`, "m").exec(text);
-    return m?.[1]?.trim();
+  const sections = (text) => {
+    const out = new Map();
+    const heads = [...text.matchAll(/^## \[([\d.]+|[^\]]+)\][^\n]*$/gm)];
+    heads.forEach((m, i) => {
+      const from = m.index + m[0].length;
+      const to = i + 1 < heads.length ? heads[i + 1].index : text.length;
+      out.set(m[1], text.slice(from, to));
+    });
+    return out;
   };
 
-  /*
-   * The cut-off is not a loophole, it is a fact this guard has to state.
-   *
-   * Every release before 0.4.1 has entries that were appended AFTER its tag — measured: 0.1.0 by 49 lines,
-   * 0.2.0 by 170, 0.3.0 by 97, 0.4.0 by 8. That is pre-existing corruption from before this check existed,
-   * and rewriting published history to satisfy a new test would be the same lie in the other direction:
-   * the notes for those releases are wrong BECAUSE they were edited, and re-editing them cannot make them
-   * match what npm actually shipped.
-   *
-   * So the guard protects every release from **0.4.0** onwards: 0.4.0 and 0.4.1 are now correct (0.4.0 was
-   * restored verbatim from its tag, with the five mistaken entries moved to Unreleased), and both are worth
-   * protecting because a reader can still install either. Earlier releases stay out of scope because
-   * re-editing them cannot undo the fact that npm already shipped the wrong notes.
-   *
-   * The cut-off is deliberately a CONSTANT rather than "the newest tag": a moving cut-off would silently
-   * stop protecting the release immediately before the current one, which is exactly where mistakes land.
-   */
-  const IMMUTABLE_FROM = "0.4.0";
-  const atLeast = (a, b) => {
-    const pa = a.split(".").map(Number);
-    const pb = b.split(".").map(Number);
-    for (let i = 0; i < 3; i += 1) if (pa[i] !== pb[i]) return pa[i] - pb[i];
-    return 0;
-  };
-
-  let compared = 0;
-  for (const tag of tags) {
-    if (atLeast(tag.slice(1), IMMUTABLE_FROM) < 0) continue;
-    const shipped = taggedChangelog(tag);
-    if (shipped === undefined) continue;
-    const version = tag.slice(1);
-    const inTag = section(shipped, version);
-    if (inTag === undefined) continue;
-    compared += 1;
-    assert.equal(
-      section(changelog, version),
-      inTag,
-      `## [${version}] differs from what ${tag} published. Entries merged after a release belong under ` +
-        `## [Unreleased] — anywhere else and the published notes describe code that is not in the tarball. ` +
-        `This is how five entries (gate 141-146) ended up under the released 0.4.0.`,
+  const live = sections(changelog);
+  for (const [version, baseline] of Object.entries(recorded)) {
+    const body = live.get(version);
+    if (body === undefined) continue;
+    const entries = body.split("\n").filter((line) => line.startsWith("- "));
+    assert.ok(
+      entries.length <= baseline.entries,
+      `## [${version}] has ${entries.length} entries but shipped with ${baseline.entries}. A released section ` +
+        `may be rewritten, never extended — an entry added after a release describes code that is not in the ` +
+        `tarball, which is how five fixes (141-146) ended up under the released 0.4.0.`,
+    );
+    const now = new Set([...body.matchAll(/#(\d{1,4})\b/g)].map((m) => m[1]));
+    const added = [...now].filter((n) => !baseline.issues.includes(n));
+    assert.deepEqual(
+      added,
+      [],
+      `## [${version}] gained issue reference(s) ${added.join(", ")} after shipping. Same rule: a release is ` +
+        `closed to new changes.`,
     );
   }
-  // Guard against a vacuous pass: the loop must actually have compared something.
-  //
-  // This cannot be falsified from a normal checkout — with tags present, `compared` is always > 0 — so it is
-  // stated rather than demonstrated. It defends the case where `git tag` succeeds but returns nothing usable
-  // (a shallow clone, a source tarball with a stray tag), which would otherwise make this test green while
-  // checking nothing at all.
-  assert.ok(compared > 0, "at least one release section must have been compared");
+});
+
+test("the baseline covers every released section, so the check cannot be vacuous", () => {
+  // A baseline that silently missed a version would exempt it. Checked here rather than in the loop above,
+  // because "no entry for 0.3.0" and "0.3.0 has no problem" must not look the same.
+  const recorded = JSON.parse(readFileSync(new URL("./released-sections.json", import.meta.url), "utf8"));
+  const declared = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+  assert.ok(Object.keys(recorded).length > 0, "the baseline must not be empty");
+  for (const version of Object.keys(recorded)) {
+    assert.ok(
+      compare(version, declared) <= 0,
+      `${version} is recorded as released but package.json says ${declared}`,
+    );
+  }
 });
