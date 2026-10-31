@@ -9,198 +9,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
-### Fixed
-
-- **The session you ask for becomes the active one** (issue #144).
-
-  > *"When I open a session (from the history or from scratch), it is not made the active one in the
-  > transcript window. That leads to confusion, and I started to type prompts into the wrong conversation."*
-
-  The transcript stayed on the previous session, so **prompts went to the wrong conversation** — the worst
-  kind of wrong answer, because the screen shows one thing and the keystrokes go to another.
-
-  The cause was a rule that is correct on its own. A `session` event focuses a new session only when nothing
-  was focused (`state.focusedId ?? event.session.id`), deliberately, so a background broadcast cannot pull a
-  reader out of what they are reading. But **nothing distinguished "a session appeared" from "the session I
-  just asked for appeared"**, so with any session already open — the normal case — the `??` kept the old one
-  and the new session opened invisibly. Starting a session, `Open in a directory…`, and resuming from History
-  all relied on that rule and all failed the same way.
-
-  There is no correlation id on `start`/`resume`, so the client cannot tell which `session` event answers its
-  request. What it *can* know is intent: a local `expectNewSession` action is dispatched **before** the
-  control goes out, and the next session that is genuinely **new** to the list consumes it.
-
-  The original guarantee is untouched — an unrequested session still never steals focus — and the intent is
-  spent exactly once, so it cannot turn into "the view follows any new process". It is also disarmed by an
-  `error`, since a refused start produces no session at all and a flag left armed would redirect something
-  unrelated later.
-
-- **A thinking block says when it is still thinking** (issue #146).
-
-  Reported from use: *"I definitely dont see any response in the thinking bar, there is no visual indication
-  that the thinking is still running. Users just see the bar and thats it."*
-
-  The state was already on the wire — `TextBlock.complete` is set `false` by `thinking_start` and `true` by
-  `thinking_end` — it was simply never rendered. A block being written looked exactly like a finished one
-  that had been collapsed, so a reader could not tell *"it is thinking right now"* from *"it thought, a while
-  ago, about something else"*.
-
-  It now shows the word **`thinking…`** next to the label.
-
-  **A word, not a spinner.** DESIGN §539: *"No motion is ever the only carrier of meaning."* A bare spinner
-  is motion as the sole signal — no accessible name, no reduced-motion equivalent.
-
-  **And not a dot.** A green `live-dot` was tried while this was being developed and came straight back from
-  use as *"now it is redundant"*, for a structural reason: a thinking block only ever streams **inside** an
-  assistant message, and the `.role` line above already shows `● responding…` for as long as that message
-  streams — a tool call does not close the message, so `responding…` is on screen the entire time a block
-  grows. A second dot would repeat the first, one line lower, and `.live-dot` only pulses under
-  `.state-streaming`, so it would be a static dot beside a pulsing one: two indicators of the same fact that
-  disagree about whether it is ongoing.
-
-  The word stays because it says something the line above cannot — **which part** of the response is still
-  arriving. Colour is `--dim`, not `--ok`: green means "this session is live", which is a different fact.
-
-
-- **The work ranks above the reasoning** (issue #144).
-
-  A screenshot review read the hierarchy as inverted, and the reader agreed: *"The tool call is the more
-  important signal to the user than the thinking."*
-
-  **The first fix got the principle wrong.** It found the two disclosure heads 1px apart with different
-  fills, called that an inconsistency, and made them **equal**. Equal does not fix an inversion — it removes
-  the means of telling the two apart, which is the same failure with a tidier table.
-
-  The inversion was measurable rather than aesthetic. The tool bar ran all of its text through
-  `--quarantine` (`#586069`) — **including the tool names** — which is **2.71:1** against `--panel`. The
-  thinking block's label sat at `--dim`, **5.62:1**. So the row recording *what actually ran* was less than
-  half as legible as the row saying something was being thought about, and thinking additionally carried a
-  filled `--panel-2` head. Both errors point the same way.
-
-  Three tiers now, and the middle one is the point:
-
-  | | treatment |
-  |---|---|
-  | the reader's words, the assistant's prose | `--text` on `--bg` |
-  | **the work — a tool call** | `--text` names, filled `--panel`, quarantine gutter |
-  | the reasoning about to be done | `--dim`, flat, no fill, no gutter |
-
-  Thinking is the demoted one because it is the thing collapsed by default, the thing whose job is to be
-  skippable. A tool call is evidence: it records what was executed, it is the audit trail, and it is what the
-  trust legend is about. Thinking still opens and still carries its gist (#143) — demoted, not hidden.
-
-  Two defects found while doing it: the tool bar's hover set `background: var(--panel)`, which is the
-  marker's **own** background, so it was a no-op — and a comment credited that invisible state with the
-  decision to drop the hatch in #138. The thinking head had no hover at all.
-
-  A falsification caught a third: the hover assertion compared against the resting background and **passed
-  when the hover was deleted**, because `none` is also "different". It now requires the hover to name a fill.
-
-
-- **A collapsed thinking block says what it is thinking about** (issue #143).
-
-  A screenshot review of a real transcript found six thinking blocks rendered as the same 700px bar with the
-  same single word in it. Nothing differed, so the feed's most common element carried no information: the eye
-  could not tell a two-second aside from a long derivation, could not tell one block from the next, and could
-  not decide which was worth opening. The one thing a reader wants from a collapsed block — "was this worth
-  reading?" — was absent.
-
-  Each block now shows its own first sentence, elided at a word boundary at 72 characters, with the
-  untruncated text on `title` so a word lost to the cap is recoverable by hovering without opening the block.
-
-  **Not a duration.** "Thought for 4s" was the obvious alternative and it is worse here: `durationMs` exists on
-  tool calls, not on thinking blocks, so a duration would be invented from arrival times and would measure the
-  transport rather than the thinking.
-
-  The gist is the block's own words, already rendered in full behind the same `<details>` — a preview, not a
-  disclosure.
-
-  **Nothing is revealed on hover.** A first version put the untruncated thought on `title` so a word lost to
-  the 72-character cap could be recovered on mouse-over; reported from use, that produced a screen-filling
-  native tooltip on a stray hover. A collapsed block exists so a long derivation costs one line until it is
-  asked for, and opening the `<details>` is the only gesture that means "show me this". The doc comment now
-  records the limit instead of hiding it behind a tooltip.
-
-
-- **The Settings dialog is two panes, and the Reading preview actually shows the setting** (issue #142).
-
-  Four sections in one column made a wall — a reader's own preferences, the build's identity, where the files
-  live, and a statement about updates all competing for one scroll. A left menu splits them into **Display**
-  and **About**, opening on Display because it is the only section a reader is likely to *change*.
-
-  **A reset**, because a preference you cannot get back from is a trap: a reader nudges a slider, dislikes it,
-  and has no way to know what "normal" was. Disabled at the defaults, so the control says whether there is
-  anything to undo rather than offering a no-op.
-
-  **The preview did not work, and the reason is a specificity bug.** It set `font-size: var(--reading-size)`
-  on `.reading-sample` and put the text in a `<p>` — but `.modal p` (0,1,1) beats `.reading-sample` (0,1,0)
-  whatever the source order, so the sample always rendered at 13px and never showed the choice. The size now
-  sits on a child selector that wins, and the sample is a `<span>`, so `.modal p` cannot reach it.
-
-  **The width preview is gone, deliberately.** Inside a 620px dialog it was a lie twice over: the dialog clamps
-  it, so 82ch and 100ch looked identical, and it was not the width you get. Size is what a preview can honestly
-  show; the reader sees the real width live in the transcript behind the dialog.
-
-
-- **A reader who was following came back to a stale position** (issue #141). Reported: *"i have auto-follow
-  enabled, i am following, switch to another session, come back: the session's transcript view is pinned where i
-  left it. That is annoying, especially when i come back because i see the session is in idle and the task is
-  finished. The user makes the follow decision, not the app."*
-
-  `decideOnSessionChange` restored `{ scrollTop, pinned: true }` — the offset **and** the flag. The offset won:
-  the restore effect wrote `scrollTop` to where the tail happened to be, while `pinnedRef` still said "follow".
-  The two contradicted each other, and since the follow effect only moves when content **grows**, an idle
-  session — a task that finished while the reader was away — left them stranded mid-history with the answer
-  below the fold.
-
-  The rule is now about **who was in control when they left**:
-
-  - they were **following** → come back following, at the end. The stored offset is irrelevant; it is where the
-    tail *was*, not where they meant to be.
-  - they had **scrolled away** → come back exactly there. They left to read something specific.
-
-  Follow-on-return also means no offset is written at all in the first case, so nothing can contradict the
-  follow — verified by tracing the three `scrollTop` writes: the other two are the send-prompt re-arm
-  (`followToken`, unchanged by a session switch) and `jumpToLatest` (a click).
-
-  **A second bug in the same place, reported immediately after**: *"now it is jumping to the beginning of the
-  transcript."* The scroll listener runs once on **mount**, and the pane mounts before its history is fetched —
-  so the first measurement was of an empty box, `{ scrollTop: 0, height: 0, client: 0 }`, and writing that to
-  the session memory **destroyed the offset the reader had actually left at**. The next visit restored
-  `scrollTop: 0`: the beginning.
-
-  `isMeasured` already existed to keep an unmeasured sample out of the growth discount; the same predicate now
-  guards the memory write, so a mount records nothing. Verified against a real jsdom scroller: mount writes
-  `[]`, a real scroll writes `{ scrollTop: 850, pinned: false }`.
-
-
-### Fixed
-
-- **Resuming a session outside the newest 500 said "no such session"**.
-
-  Reported from a window: a red banner reading `no such session: …/sessions/--…--/2026-10-30T10-29-48….jsonl`
-  for a file that plainly existed, while the rail said **867 sessions on disk**.
-
-  ```ts
-  // transport.ts, before
-  const discovered = await discover(this.#config);          // → sessions.slice(0, 500)
-  const target = discovered.sessions.find((s) => s.path === control.path);
-  if (!target) { broadcast({ kind: "error", message: `no such session: ${control.path}` }); }
-  ```
-
-  `discover()` applies its 500-cap **after the whole walk**, so every session older than the newest 500 was
-  unresumable — from History *and* from any restored roster — with an error that named the wrong cause. It
-  read as corruption rather than as a limit.
-
-  `resume` now calls a new `sessionAt(config, path)`, which describes **one** file: it reads a single header
-  instead of walking the store, so the cap cannot apply and resume is O(1) rather than O(everything) — the
-  eager-work problem from #150, which was being paid on a click.
-
-  The path arrives from the client, so it is contained: resolved against `sessionsRoot`, checked **by path
-  segment** rather than string prefix (`/a/bc` must not satisfy `/a/b`, per C15c), and checked again on
-  `realpath` so a symlink inside the store cannot reach outside it. It must be a regular `.jsonl` file whose
-  header version is known — the same rule `discover` applies, now shared through one `describeSessionFile` so
-  the History pane and Resume cannot disagree about what a valid session is.
+<!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ### Added
 
@@ -261,59 +70,6 @@ They are kept because each one is the reason a constraint or an invariant test e
   **Forget** takes a row off the roster and never touches the file — deleting is #150, separate and
   irreversible. It is offered only on a row that is **not running**: hiding a live process from the rail while it
   keeps working and spending would make the roster lie about what is happening.
-
-### Fixed
-
-- **A session's name is decided by one rule, so a restart does not rename it** (issue #89, reported from use).
-
-  > *"when i create scratch sessions without a name, they are called Undefined in the roster. Now when i restart,
-  > they carry the handle name."*
-
-  Two symptoms, one defect. A row that was **not running** read its stored name **raw**, while a live row went
-  through `displayName`. So whatever had been persisted was rendered as though a person had chosen it. And a
-  scratch session's *default* name is its handle (`defaultName` falls back to the id), so the same session was
-  `Scratch session` before a restart and `s2` after it.
-
-  `nameLabel(name, scratch, id)` is now the single rule, used by both paths. A name is shown only when it is a
-  name a person chose — a handle, an empty string, or a value that arrived as `undefined` is not information.
-
-  **`scratch` is persisted** in the roster entry. The label depends on it and a remembered row has no way to
-  know otherwise, which is what made the handle appear. Recorded even when `false`, so the rule cannot misfire in
-  the other direction.
-
-### Changed
-
-- **Verification is part of the install path, and the least verifiable path says so.**
-
-  Three moves, in the order they matter:
-
-  **1. The install recipe has an order, and the order is load-bearing.**
-
-  ```bash
-  npm install --global pi-central   # inert: this package runs no install scripts
-  npm audit signatures              # verify BEFORE the first run
-  pi-central
-  ```
-
-  That is only sound because `npm install` executes no package code. A test now fails if any `preinstall`,
-  `install`, `postinstall`, `prepare` or `prepublish` script appears in the **root** manifest — the one
-  `scripts/build-package.mjs` publishes verbatim. The first version of that test read the orchestrator
-  workspace's `package.json` instead and passed with a `postinstall` added to the real one; it was fixed by
-  falsifying it.
-
-  **2. `npx pi-central` is no longer presented as an equal alternative.** It fetches and executes in one
-  step, so there is no window to check what you got. Pinning is the minimum, and the README now says so.
-
-  **3. The app states which copy is running and how to check it**, in the startup banner and in
-  **Settings → About**. Deliberately no self-check: a compromised build would omit it, and shelling out to
-  npm would add outbound calls this app does not make. Version, the directory it was loaded from, and the
-  command — which is what is knowable offline.
-
-  **No integrity hash is printed, because npm records none for a global install** — verified on a real one:
-  no `.package-lock.json` under the global prefix, and no `_integrity` in the installed manifest. Printing
-  one would mean inventing it.
-
-### Added
 
 - **A failed session can be retried from the rail** (issue #11).
 
@@ -399,7 +155,65 @@ They are kept because each one is the reason a constraint or an invariant test e
   end to end, which no test here can do (C1: the sandbox does not nest). Extracting the decisions makes all four
   criteria checkable.
 
+- **Renaming a session is one gesture, in the header and in the rail** (issues #78, #79).
+
+  Reported: *"renaming a session is not easy"*. The only path was Inspector → Actions → expand `Rename…` → type →
+  `Save name`: the detail panel had to be visible and a disclosure opened before a single character could be
+  typed, which is why nobody names a session.
+
+  `DESIGN.md` §12 already specified the gesture — *"**Double-click the header name** → inline rename
+  (`set_session_name`)"* — and it had never been built. It is now, on the header **and** on the rail row, because
+  the row is where the name is actually read.
+
+  Enter commits, Escape cancels, and **blur commits** — losing a name you just typed is the failure this issue is
+  about. An empty or unchanged value never reaches the orchestrator, because a rename that sends `""` would blank
+  a name the reader can see.
+
+  **The generated-default-name option is dropped**, and this is the reasoning worth keeping: a generated name
+  *looks chosen*, which removes the nudge to ever name anything, and `brisk-otter` is no more findable tomorrow
+  than `s7`. The fix for indistinguishable sessions is cheap renaming, not invented names.
+
+  **The field opens with the name as DISPLAYED**, not the stored one. Reported from use: a scratch session's row
+  read `Scratch session`, but double-clicking opened `s1`. The component takes one value now — the displayed one —
+  so there is no second name to pass; and because the unchanged check compares against what is on screen,
+  accepting `Scratch session` unchanged sends nothing. That keeps the decision above intact: a default label can
+  never be silently promoted into a literal name, which would give every scratch session the same title again.
+
+  Only a live session is renameable, in the rail as well as the header: Pi performs the rename over RPC
+  (`set_session_name`), so a row whose process is gone has nobody to ask. It shows plain text rather than a field
+  that could not work.
+
 ### Changed
+
+- **Verification is part of the install path, and the least verifiable path says so.**
+
+  Three moves, in the order they matter:
+
+  **1. The install recipe has an order, and the order is load-bearing.**
+
+  ```bash
+  npm install --global pi-central   # inert: this package runs no install scripts
+  npm audit signatures              # verify BEFORE the first run
+  pi-central
+  ```
+
+  That is only sound because `npm install` executes no package code. A test now fails if any `preinstall`,
+  `install`, `postinstall`, `prepare` or `prepublish` script appears in the **root** manifest — the one
+  `scripts/build-package.mjs` publishes verbatim. The first version of that test read the orchestrator
+  workspace's `package.json` instead and passed with a `postinstall` added to the real one; it was fixed by
+  falsifying it.
+
+  **2. `npx pi-central` is no longer presented as an equal alternative.** It fetches and executes in one
+  step, so there is no window to check what you got. Pinning is the minimum, and the README now says so.
+
+  **3. The app states which copy is running and how to check it**, in the startup banner and in
+  **Settings → About**. Deliberately no self-check: a compromised build would omit it, and shelling out to
+  npm would add outbound calls this app does not make. Version, the directory it was loaded from, and the
+  command — which is what is knowable offline.
+
+  **No integrity hash is printed, because npm records none for a global install** — verified on a real one:
+  no `.package-lock.json` under the global prefix, and no `_integrity` in the installed manifest. Printing
+  one would mean inventing it.
 
 - **A long transcript no longer makes switching, or streaming, slow** (issue #151).
 
@@ -437,37 +251,208 @@ They are kept because each one is the reason a constraint or an invariant test e
   broken once each (#80, #86, #141), and truncating what a reader can read to make the app fast is the wrong
   trade.
 
-### Added
-
-- **Renaming a session is one gesture, in the header and in the rail** (issues #78, #79).
-
-  Reported: *"renaming a session is not easy"*. The only path was Inspector → Actions → expand `Rename…` → type →
-  `Save name`: the detail panel had to be visible and a disclosure opened before a single character could be
-  typed, which is why nobody names a session.
-
-  `DESIGN.md` §12 already specified the gesture — *"**Double-click the header name** → inline rename
-  (`set_session_name`)"* — and it had never been built. It is now, on the header **and** on the rail row, because
-  the row is where the name is actually read.
-
-  Enter commits, Escape cancels, and **blur commits** — losing a name you just typed is the failure this issue is
-  about. An empty or unchanged value never reaches the orchestrator, because a rename that sends `""` would blank
-  a name the reader can see.
-
-  **The generated-default-name option is dropped**, and this is the reasoning worth keeping: a generated name
-  *looks chosen*, which removes the nudge to ever name anything, and `brisk-otter` is no more findable tomorrow
-  than `s7`. The fix for indistinguishable sessions is cheap renaming, not invented names.
-
-  **The field opens with the name as DISPLAYED**, not the stored one. Reported from use: a scratch session's row
-  read `Scratch session`, but double-clicking opened `s1`. The component takes one value now — the displayed one —
-  so there is no second name to pass; and because the unchanged check compares against what is on screen,
-  accepting `Scratch session` unchanged sends nothing. That keeps the decision above intact: a default label can
-  never be silently promoted into a literal name, which would give every scratch session the same title again.
-
-  Only a live session is renameable, in the rail as well as the header: Pi performs the rename over RPC
-  (`set_session_name`), so a row whose process is gone has nobody to ask. It shows plain text rather than a field
-  that could not work.
-
 ### Fixed
+
+- **The session you ask for becomes the active one** (issue #144).
+
+  > *"When I open a session (from the history or from scratch), it is not made the active one in the
+  > transcript window. That leads to confusion, and I started to type prompts into the wrong conversation."*
+
+  The transcript stayed on the previous session, so **prompts went to the wrong conversation** — the worst
+  kind of wrong answer, because the screen shows one thing and the keystrokes go to another.
+
+  The cause was a rule that is correct on its own. A `session` event focuses a new session only when nothing
+  was focused (`state.focusedId ?? event.session.id`), deliberately, so a background broadcast cannot pull a
+  reader out of what they are reading. But **nothing distinguished "a session appeared" from "the session I
+  just asked for appeared"**, so with any session already open — the normal case — the `??` kept the old one
+  and the new session opened invisibly. Starting a session, `Open in a directory…`, and resuming from History
+  all relied on that rule and all failed the same way.
+
+  There is no correlation id on `start`/`resume`, so the client cannot tell which `session` event answers its
+  request. What it *can* know is intent: a local `expectNewSession` action is dispatched **before** the
+  control goes out, and the next session that is genuinely **new** to the list consumes it.
+
+  The original guarantee is untouched — an unrequested session still never steals focus — and the intent is
+  spent exactly once, so it cannot turn into "the view follows any new process". It is also disarmed by an
+  `error`, since a refused start produces no session at all and a flag left armed would redirect something
+  unrelated later.
+
+- **A thinking block says when it is still thinking** (issue #146).
+
+  Reported from use: *"I definitely dont see any response in the thinking bar, there is no visual indication
+  that the thinking is still running. Users just see the bar and thats it."*
+
+  The state was already on the wire — `TextBlock.complete` is set `false` by `thinking_start` and `true` by
+  `thinking_end` — it was simply never rendered. A block being written looked exactly like a finished one
+  that had been collapsed, so a reader could not tell *"it is thinking right now"* from *"it thought, a while
+  ago, about something else"*.
+
+  It now shows the word **`thinking…`** next to the label.
+
+  **A word, not a spinner.** DESIGN §539: *"No motion is ever the only carrier of meaning."* A bare spinner
+  is motion as the sole signal — no accessible name, no reduced-motion equivalent.
+
+  **And not a dot.** A green `live-dot` was tried while this was being developed and came straight back from
+  use as *"now it is redundant"*, for a structural reason: a thinking block only ever streams **inside** an
+  assistant message, and the `.role` line above already shows `● responding…` for as long as that message
+  streams — a tool call does not close the message, so `responding…` is on screen the entire time a block
+  grows. A second dot would repeat the first, one line lower, and `.live-dot` only pulses under
+  `.state-streaming`, so it would be a static dot beside a pulsing one: two indicators of the same fact that
+  disagree about whether it is ongoing.
+
+  The word stays because it says something the line above cannot — **which part** of the response is still
+  arriving. Colour is `--dim`, not `--ok`: green means "this session is live", which is a different fact.
+
+- **The work ranks above the reasoning** (issue #144).
+
+  A screenshot review read the hierarchy as inverted, and the reader agreed: *"The tool call is the more
+  important signal to the user than the thinking."*
+
+  **The first fix got the principle wrong.** It found the two disclosure heads 1px apart with different
+  fills, called that an inconsistency, and made them **equal**. Equal does not fix an inversion — it removes
+  the means of telling the two apart, which is the same failure with a tidier table.
+
+  The inversion was measurable rather than aesthetic. The tool bar ran all of its text through
+  `--quarantine` (`#586069`) — **including the tool names** — which is **2.71:1** against `--panel`. The
+  thinking block's label sat at `--dim`, **5.62:1**. So the row recording *what actually ran* was less than
+  half as legible as the row saying something was being thought about, and thinking additionally carried a
+  filled `--panel-2` head. Both errors point the same way.
+
+  Three tiers now, and the middle one is the point:
+
+  | | treatment |
+  |---|---|
+  | the reader's words, the assistant's prose | `--text` on `--bg` |
+  | **the work — a tool call** | `--text` names, filled `--panel`, quarantine gutter |
+  | the reasoning about to be done | `--dim`, flat, no fill, no gutter |
+
+  Thinking is the demoted one because it is the thing collapsed by default, the thing whose job is to be
+  skippable. A tool call is evidence: it records what was executed, it is the audit trail, and it is what the
+  trust legend is about. Thinking still opens and still carries its gist (#143) — demoted, not hidden.
+
+  Two defects found while doing it: the tool bar's hover set `background: var(--panel)`, which is the
+  marker's **own** background, so it was a no-op — and a comment credited that invisible state with the
+  decision to drop the hatch in #138. The thinking head had no hover at all.
+
+  A falsification caught a third: the hover assertion compared against the resting background and **passed
+  when the hover was deleted**, because `none` is also "different". It now requires the hover to name a fill.
+
+- **A collapsed thinking block says what it is thinking about** (issue #143).
+
+  A screenshot review of a real transcript found six thinking blocks rendered as the same 700px bar with the
+  same single word in it. Nothing differed, so the feed's most common element carried no information: the eye
+  could not tell a two-second aside from a long derivation, could not tell one block from the next, and could
+  not decide which was worth opening. The one thing a reader wants from a collapsed block — "was this worth
+  reading?" — was absent.
+
+  Each block now shows its own first sentence, elided at a word boundary at 72 characters, with the
+  untruncated text on `title` so a word lost to the cap is recoverable by hovering without opening the block.
+
+  **Not a duration.** "Thought for 4s" was the obvious alternative and it is worse here: `durationMs` exists on
+  tool calls, not on thinking blocks, so a duration would be invented from arrival times and would measure the
+  transport rather than the thinking.
+
+  The gist is the block's own words, already rendered in full behind the same `<details>` — a preview, not a
+  disclosure.
+
+  **Nothing is revealed on hover.** A first version put the untruncated thought on `title` so a word lost to
+  the 72-character cap could be recovered on mouse-over; reported from use, that produced a screen-filling
+  native tooltip on a stray hover. A collapsed block exists so a long derivation costs one line until it is
+  asked for, and opening the `<details>` is the only gesture that means "show me this". The doc comment now
+  records the limit instead of hiding it behind a tooltip.
+
+- **The Settings dialog is two panes, and the Reading preview actually shows the setting** (issue #142).
+
+  Four sections in one column made a wall — a reader's own preferences, the build's identity, where the files
+  live, and a statement about updates all competing for one scroll. A left menu splits them into **Display**
+  and **About**, opening on Display because it is the only section a reader is likely to *change*.
+
+  **A reset**, because a preference you cannot get back from is a trap: a reader nudges a slider, dislikes it,
+  and has no way to know what "normal" was. Disabled at the defaults, so the control says whether there is
+  anything to undo rather than offering a no-op.
+
+  **The preview did not work, and the reason is a specificity bug.** It set `font-size: var(--reading-size)`
+  on `.reading-sample` and put the text in a `<p>` — but `.modal p` (0,1,1) beats `.reading-sample` (0,1,0)
+  whatever the source order, so the sample always rendered at 13px and never showed the choice. The size now
+  sits on a child selector that wins, and the sample is a `<span>`, so `.modal p` cannot reach it.
+
+  **The width preview is gone, deliberately.** Inside a 620px dialog it was a lie twice over: the dialog clamps
+  it, so 82ch and 100ch looked identical, and it was not the width you get. Size is what a preview can honestly
+  show; the reader sees the real width live in the transcript behind the dialog.
+
+- **A reader who was following came back to a stale position** (issue #141). Reported: *"i have auto-follow
+  enabled, i am following, switch to another session, come back: the session's transcript view is pinned where i
+  left it. That is annoying, especially when i come back because i see the session is in idle and the task is
+  finished. The user makes the follow decision, not the app."*
+
+  `decideOnSessionChange` restored `{ scrollTop, pinned: true }` — the offset **and** the flag. The offset won:
+  the restore effect wrote `scrollTop` to where the tail happened to be, while `pinnedRef` still said "follow".
+  The two contradicted each other, and since the follow effect only moves when content **grows**, an idle
+  session — a task that finished while the reader was away — left them stranded mid-history with the answer
+  below the fold.
+
+  The rule is now about **who was in control when they left**:
+
+  - they were **following** → come back following, at the end. The stored offset is irrelevant; it is where the
+    tail *was*, not where they meant to be.
+  - they had **scrolled away** → come back exactly there. They left to read something specific.
+
+  Follow-on-return also means no offset is written at all in the first case, so nothing can contradict the
+  follow — verified by tracing the three `scrollTop` writes: the other two are the send-prompt re-arm
+  (`followToken`, unchanged by a session switch) and `jumpToLatest` (a click).
+
+  **A second bug in the same place, reported immediately after**: *"now it is jumping to the beginning of the
+  transcript."* The scroll listener runs once on **mount**, and the pane mounts before its history is fetched —
+  so the first measurement was of an empty box, `{ scrollTop: 0, height: 0, client: 0 }`, and writing that to
+  the session memory **destroyed the offset the reader had actually left at**. The next visit restored
+  `scrollTop: 0`: the beginning.
+
+  `isMeasured` already existed to keep an unmeasured sample out of the growth discount; the same predicate now
+  guards the memory write, so a mount records nothing. Verified against a real jsdom scroller: mount writes
+  `[]`, a real scroll writes `{ scrollTop: 850, pinned: false }`.
+
+- **Resuming a session outside the newest 500 said "no such session"**.
+
+  Reported from a window: a red banner reading `no such session: …/sessions/--…--/2026-10-30T10-29-48….jsonl`
+  for a file that plainly existed, while the rail said **867 sessions on disk**.
+
+  ```ts
+  // transport.ts, before
+  const discovered = await discover(this.#config);          // → sessions.slice(0, 500)
+  const target = discovered.sessions.find((s) => s.path === control.path);
+  if (!target) { broadcast({ kind: "error", message: `no such session: ${control.path}` }); }
+  ```
+
+  `discover()` applies its 500-cap **after the whole walk**, so every session older than the newest 500 was
+  unresumable — from History *and* from any restored roster — with an error that named the wrong cause. It
+  read as corruption rather than as a limit.
+
+  `resume` now calls a new `sessionAt(config, path)`, which describes **one** file: it reads a single header
+  instead of walking the store, so the cap cannot apply and resume is O(1) rather than O(everything) — the
+  eager-work problem from #150, which was being paid on a click.
+
+  The path arrives from the client, so it is contained: resolved against `sessionsRoot`, checked **by path
+  segment** rather than string prefix (`/a/bc` must not satisfy `/a/b`, per C15c), and checked again on
+  `realpath` so a symlink inside the store cannot reach outside it. It must be a regular `.jsonl` file whose
+  header version is known — the same rule `discover` applies, now shared through one `describeSessionFile` so
+  the History pane and Resume cannot disagree about what a valid session is.
+
+- **A session's name is decided by one rule, so a restart does not rename it** (issue #89, reported from use).
+
+  > *"when i create scratch sessions without a name, they are called Undefined in the roster. Now when i restart,
+  > they carry the handle name."*
+
+  Two symptoms, one defect. A row that was **not running** read its stored name **raw**, while a live row went
+  through `displayName`. So whatever had been persisted was rendered as though a person had chosen it. And a
+  scratch session's *default* name is its handle (`defaultName` falls back to the id), so the same session was
+  `Scratch session` before a restart and `s2` after it.
+
+  `nameLabel(name, scratch, id)` is now the single rule, used by both paths. A name is shown only when it is a
+  name a person chose — a handle, an empty string, or a value that arrived as `undefined` is not information.
+
+  **`scratch` is persisted** in the roster entry. The label depends on it and a remembered row has no way to
+  know otherwise, which is what made the handle appear. Recorded even when `false`, so the rule cannot misfire in
+  the other direction.
 
 - **A renamed session keeps its new name in History** (issue #164).
 
@@ -505,8 +490,6 @@ They are kept because each one is the reason a constraint or an invariant test e
 
   Only a live row is renameable: Pi performs it over RPC (`set_session_name`), so a row whose process is gone shows
   plain text rather than a field that could not work.
-
-### Fixed
 
 - **The active provider is shown, not hidden in the dropdown** (issue #163).
 
