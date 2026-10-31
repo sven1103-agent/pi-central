@@ -17,7 +17,7 @@
  *    utterances per turn.
  * 2. **`aria-busy` while streaming**, so assistive tech does not read a half-written subtree.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Transcript as TranscriptModel } from "../transcript.ts";
 import { assistantText, hasProse, planTranscript, thinkingGist, toolRunSummary, type ToolExecution, type TranscriptMessage } from "../transcript.ts";
 import { MessageBody } from "./MessageBody.tsx";
@@ -339,7 +339,14 @@ export function TranscriptView({
   // An error is not "still loading": the attempt is over.
   const awaitingHistory = isEmpty && expectedCount > 0 && historyError === undefined;
   const failed = isEmpty && historyError !== undefined;
-  const entries = planTranscript(transcript);
+  /*
+   * Memoized on the TRANSCRIPT reference (issue #151).
+   *
+   * `transcript` comes from the store, which replaces the object only when that session's records change — so
+   * this recomputes when the session is written to and not when unrelated state (panel width, a toast, another
+   * session's streaming) re-renders the tree. It was a plain call, so the plan was rebuilt on every render.
+   */
+  const entries = useMemo(() => planTranscript(transcript), [transcript]);
 
   return (
     // The scroller and the control are SIBLINGS rather than parent and child, and that is
@@ -520,7 +527,15 @@ function ToolMarker({ tools }: { tools: ToolExecution[] }) {
   );
 }
 
-function Turn({ message }: { message: TranscriptMessage }) {
+/**
+ * One turn, memoized (issue #151).
+ *
+ * Without this, a delta in the LAST message re-rendered every turn above it — with streaming that is dozens of
+ * times a second, over the whole conversation. `message` is replaced only for the message being written to, so
+ * reference equality is the right comparison. There is no custom `areEqual`: the props are the message and
+ * nothing else, and a hand-written comparison is how memoization silently stops working.
+ */
+const Turn = memo(function Turn({ message }: { message: TranscriptMessage }) {
   const label = message.role === "user" ? "You" : message.role === "assistant" ? "Assistant" : message.role;
   const text = assistantText(message);
   const thinking = message.blocks.filter((block) => block.kind === "thinking");
@@ -613,4 +628,4 @@ function Turn({ message }: { message: TranscriptMessage }) {
       {text.length > 0 && <MessageBody text={text} streaming={message.streaming} />}
     </article>
   );
-}
+});

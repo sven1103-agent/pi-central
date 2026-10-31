@@ -869,6 +869,24 @@ export function assistantText(message: TranscriptMessage): string {
 //   - the full list stays available for debugging, traversable on demand.
 
 /** Tools that ran immediately after the message at `messageIndex` (0-based). */
+/**
+ * Tools grouped by the message they followed, built in ONE pass.
+ *
+ * The value of this over `toolsAfter` is the exponent: `toolsAfter` scans the whole array per call, and
+ * `planTranscript` calls it once per message (issue #151).
+ */
+export function groupToolsByAfterMessage(
+  tools: readonly ToolExecution[],
+): Map<number, ToolExecution[]> {
+  const grouped = new Map<number, ToolExecution[]>();
+  for (const tool of tools) {
+    const existing = grouped.get(tool.afterMessage);
+    if (existing === undefined) grouped.set(tool.afterMessage, [tool]);
+    else existing.push(tool);
+  }
+  return grouped;
+}
+
 export function toolsAfter(transcript: Transcript, messageIndex: number): ToolExecution[] {
   const position = messageIndex + 1;
   return transcript.tools.filter((tool) => tool.afterMessage === position);
@@ -1069,12 +1087,27 @@ export function noticeIsOpen(notice: RunNotice): boolean {
 
 export function planTranscript(transcript: Transcript): TranscriptEntry[] {
   const entries: TranscriptEntry[] = [];
-  const leading = leadingTools(transcript);
+
+  /*
+   * ONE pass over the tools, not one per message (issue #151).
+   *
+   * This used to call `toolsAfter(transcript, index)` inside the message loop, and that is
+   * `transcript.tools.filter(...)` — so every message scanned the whole tool array. Measured on a synthetic
+   * transcript: 50 messages and 50 tools caused 2,550 element reads, 400 and 400 caused 160,400. Quadratic, and
+   * paid on EVERY RENDER — which for a session that is streaming means on every delta, not once per switch.
+   *
+   * The fix is the index the loop actually needs: a map from `afterMessage` to the tools that ran after it.
+   * Insertion order within a key is preserved, so the entries come out in exactly the same order as before —
+   * this is a performance change only, which the equivalence tests assert.
+   */
+  const byAfterMessage = groupToolsByAfterMessage(transcript.tools);
+
+  const leading = byAfterMessage.get(0) ?? [];
   if (leading.length > 0) entries.push({ kind: "tools", tools: leading });
 
   let pending: ToolExecution[] = [];
   transcript.messages.forEach((message, index) => {
-    const tools = toolsAfter(transcript, index);
+    const tools = byAfterMessage.get(index + 1) ?? [];
     if (hasProse(message)) {
       // Whatever ran before this readable turn is announced first, then the turn itself.
       if (pending.length > 0) {

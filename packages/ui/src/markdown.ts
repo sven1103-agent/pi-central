@@ -99,8 +99,83 @@ const md = new MarkdownIt({
  * string deliberately: the caller must make the single `dangerouslySetInnerHTML` insertion,
  * which keeps that decision visible at the call site rather than hidden in a component.
  */
+/*
+ * A bounded cache in FRONT of the parse (issue #151).
+ *
+ * `Prose` memoizes on the text, but a session switch unmounts the whole subtree — `SessionView` carries
+ * `key={focused?.id}`, deliberately, so each session gets a clean scroll state (#80/#86/#141) — and that throws
+ * every one of those memos away. So switching to a long session re-parsed and re-sanitized every message in it,
+ * every time. Measured with `renderMarkdown` alone: 232 ms for 1000 messages, before React touches the DOM.
+ *
+ * The cache is the layer the remount cannot reach, because it is module state rather than component state. It is
+ * bounded twice: by entry count, and by refusing sources long enough that caching them would hold more than a
+ * large message's worth of HTML. Both bounds exist because the input is a transcript, and a transcript is
+ * unbounded by design (#149: many sessions, long histories).
+ */
+/**
+ * A budget in CHARACTERS, not entries.
+ *
+ * The first version capped the map at 200 entries, which measured as useless: a 1000-message transcript evicted
+ * its own earlier messages before the second pass reached them, so a session switch saved almost nothing (238 ms
+ * against 306 ms cold). The working set on a switch is *one session*, so the bound has to be big enough to hold
+ * a long one, and sized in characters because "200 entries" says nothing about how much memory that is.
+ *
+ * 4M characters is roughly 8 MB as UTF-16 — a few hundred KB of source and the HTML derived from it, for a
+ * transcript of a thousand messages. That is a deliberate ceiling, not an accident: the input is unbounded by
+ * design (#149: many sessions, long histories), so the cache must evict rather than grow.
+ */
+const CACHE_MAX_CHARS = 4_000_000;
+/** Above this a single message is not cached: streaming changes its text every delta, so it would only churn. */
+const CACHE_MAX_SOURCE = 20_000;
+const cache = new Map<string, string>();
+let cachedChars = 0;
+let hits = 0;
+let misses = 0;
+
+/**
+ * Counters for the parse cache.
+ *
+ * Exported because the alternative is a test that cannot fail: with the cache removed, `renderMarkdown(x)`
+ * still returns the same string twice, so asserting equality proved nothing — a falsification passed and
+ * revealed it. A hit count is the observable difference between "cached" and "not cached", and it is also the
+ * number the performance claim in #151 is about.
+ */
+export function markdownCacheStats(): { hits: number; misses: number; chars: number; entries: number } {
+  return { hits, misses, chars: cachedChars, entries: cache.size };
+}
+
 export function renderMarkdown(source: string): string {
   if (!source) return "";
+  const cacheable = source.length <= CACHE_MAX_SOURCE;
+  if (cacheable) {
+    const hit = cache.get(source);
+    if (hit !== undefined) {
+      // Refresh recency: a Map iterates in insertion order, so re-inserting moves it to the end, which is what
+      // makes eviction below least-recently-used rather than oldest-inserted.
+      cache.delete(source);
+      cache.set(source, hit);
+      hits += 1;
+      return hit;
+    }
+  }
+  const html = parseMarkdown(source);
+  if (cacheable) {
+    misses += 1;
+    cache.set(source, html);
+    cachedChars += source.length + html.length;
+    while (cachedChars > CACHE_MAX_CHARS) {
+      const oldest = cache.keys().next();
+      if (oldest.done === true) break;
+      const evicted = cache.get(oldest.value) ?? "";
+      cachedChars -= oldest.value.length + evicted.length;
+      cache.delete(oldest.value);
+    }
+  }
+  return html;
+}
+
+/** The parse and sanitize itself. Never called directly by components — see `renderMarkdown`. */
+function parseMarkdown(source: string): string {
   return getPurifier().sanitize(md.render(source), {
     // Allow the tags Markdown actually emits, plus the table/footnote set. Anything absent
     // here cannot survive sanitization even if a future markdown-it plugin emits it.
