@@ -442,6 +442,28 @@ export type FileErrorReason =
  */
 export const PROTOCOL_VERSION = 4 as const;
 
+/**
+ * The first protocol version that understands the `retry` control (issue #11).
+ *
+ * A separate constant from `PROTOCOL_VERSION` because it answers a different question. The version says
+ * "these halves match"; this says "this particular control exists". Without it, a UI one version ahead of its
+ * orchestrator draws a **Retry** button, the reader presses it, and they get
+ * `bad control: unknown kind 'retry'` — a symptom rather than a reason, from a connection that had already
+ * detected the skew.
+ *
+ * Observed exactly that way: the orchestrator was still running the pre-#11 module while `packages/ui/dist`
+ * on disk had been rebuilt from the new branch. The UI is served as FILES, so a rebuild reaches a running
+ * orchestrator immediately — the module in memory does not.
+ */
+export const RETRY_SINCE_PROTOCOL = 4;
+
+/** Whether a peer speaking `protocol` can be asked to retry a session. */
+export function supportsRetry(protocol: number | undefined): boolean {
+  // `undefined` is "not reported yet", not "old": the snapshot carries this, so an unknown answer means the
+  // handshake has not finished. Assuming otherwise would hide the control during every load.
+  return protocol === undefined ? true : protocol >= RETRY_SINCE_PROTOCOL;
+}
+
 export interface Hello {
   kind: "hello";
   protocol: typeof PROTOCOL_VERSION;

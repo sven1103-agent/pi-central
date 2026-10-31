@@ -345,6 +345,13 @@ They are kept because each one is the reason a constraint or an invariant test e
   separate field because the two answer different questions: *"is it broken now"* and *"how did it break last
   time"*.
 
+  **The control is not offered when the connected orchestrator is too old.** A red banner reading
+  `bad control: unknown kind 'retry'` was reported from a window — reachable without any mistake in a checkout,
+  because the UI is served as **files** (so `npm run ui:build` reaches a running orchestrator immediately) while
+  the orchestrator's own module stays in memory from when it started. `supportsRetry(protocol)` gates the
+  button, and the row says *"restart the orchestrator to retry"* instead. Offering an action the other half
+  cannot perform is the same failure as a disabled control that promises something.
+
   The refusals live in `retry.ts` rather than inside `Supervisor.retry`: a retry needs a real spawn to exercise
   end to end, which no test here can do (C1: the sandbox does not nest). Extracting the decisions makes all four
   criteria checkable.

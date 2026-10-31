@@ -9,7 +9,7 @@
  * rather than inferring "streaming" from having seen a delta (C8).
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import type { Control, HistoricalSession, LiveSession, ModelOption } from "@pi-central/protocol";
+import { supportsRetry, type Control, type HistoricalSession, type LiveSession, type ModelOption } from "@pi-central/protocol";
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
 import logoIcon from "./assets/logo-icon.svg";
 import { readTracePrefs, writeTracePrefs, type SessionScroll } from "./scroll.ts";
@@ -624,6 +624,7 @@ export function App() {
             setTab("sessions");
           }}
           onForgetRow={(row) => dispatch({ kind: "forget", path: row.entry.path })}
+          retryAvailable={supportsRetry(state.install?.protocol)}
           onRetryRow={(row) => {
             // Only a live session has a handle to retry with; a row that is not running has no process to
             // restart, so it resumes through the composer instead (resume-on-send, #89).

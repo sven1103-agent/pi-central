@@ -36,6 +36,7 @@ export function SessionRail({
   onFocusRow,
   onForgetRow,
   onRetryRow,
+  retryAvailable,
   onStartSession,
   onOpenDirectory,
   home,
@@ -66,6 +67,16 @@ export function SessionRail({
    * the rail had no such control.
    */
   onRetryRow: (row: RosterRow) => void;
+  /**
+   * Whether the CONNECTED orchestrator understands `retry` (issue #11).
+   *
+   * False when the two halves are on different protocol versions — which happens in a checkout without any
+   * mistake: the UI is served as files, so `npm run ui:build` reaches a running orchestrator at once, while
+   * the orchestrator's own module stays in memory from when it started. Offering Retry then produces
+   * `bad control: unknown kind 'retry'` — a symptom, not a reason. So the control is not offered, and the row
+   * says what to do instead.
+   */
+  retryAvailable: boolean;
   onStartSession: () => void;
   onOpenDirectory: () => void;
   home: string | undefined;
@@ -134,6 +145,7 @@ export function SessionRail({
                   onFocus={() => onFocusRow(row)}
                   onForget={() => onForgetRow(row)}
                   onRetry={() => onRetryRow(row)}
+                  retryAvailable={retryAvailable}
                   home={home}
                 />
               ))}
@@ -194,6 +206,7 @@ function RailRow({
   onFocus,
   onForget,
   onRetry,
+  retryAvailable,
   home,
 }: {
   row: RosterRow;
@@ -201,6 +214,7 @@ function RailRow({
   onFocus: () => void;
   onForget: () => void;
   onRetry: () => void;
+  retryAvailable: boolean;
   home: string | undefined;
 }) {
   const session = row.session;
@@ -276,14 +290,24 @@ function RailRow({
       */}
       {session?.state === "failed" && (
         <span className="rail-row-actions">
-          <button
-            type="button"
-            className="rail-row-retry"
-            onClick={onRetry}
-            title={session.error ?? "Try this session again in the same directory"}
-          >
-            Retry
-          </button>
+          {retryAvailable ? (
+            <button
+              type="button"
+              className="rail-row-retry"
+              onClick={onRetry}
+              title={session.error ?? "Try this session again in the same directory"}
+            >
+              Retry
+            </button>
+          ) : (
+            /*
+              The control is withheld rather than shown-and-broken, and the reason is stated. A disabled button
+              would still be a promise; a sentence that says what to do is the honest version.
+            */
+            <span className="rail-row-earlier">
+              restart the orchestrator to retry (it speaks an older protocol)
+            </span>
+          )}
         </span>
       )}
       {/*
