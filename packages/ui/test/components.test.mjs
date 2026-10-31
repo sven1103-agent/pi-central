@@ -1898,7 +1898,10 @@ test("a collapsed thinking block shows a gist, so four blocks are not four ident
   const html = renderToString(createElement(TranscriptView, {
     transcript: { messages: [msg], tools: [] }, busy: false, sessionLabel: "Demo",
   }));
-  const gists = [...html.matchAll(/class="quarantine-gist"[^>]*>([^<]*)/g)].map((m) => m[1]);
+  // The gists now live inside the activity group (`ActivityGroup`), one row per thinking block, rather than
+  // in top-level bars. The property is unchanged: each block names itself, so a run of them is not a stack
+  // of identical lines.
+  const gists = [...html.matchAll(/class="activity-thought-gist"[^>]*>([^<]*)/g)].map((m) => m[1]);
   assert.equal(gists.length, 2, `each thinking block gets a gist: ${html}`);
   assert.notEqual(gists[0], gists[1], "…and they differ from each other, which is the whole fix");
   assert.match(gists[0], /reproduce it first/);
@@ -1912,8 +1915,11 @@ test("a thinking block with no words still renders the label, and no empty gist"
   const html = renderToString(createElement(TranscriptView, {
     transcript: { messages: [msg], tools: [] }, busy: false, sessionLabel: "Demo",
   }));
-  assert.match(html, /Thinking/, "the block is still announced");
-  assert.ok(!html.includes("quarantine-gist"), "but no empty gist element is emitted");
+  // An empty FINISHED block is not announced at all any more: it used to render a bar that opened to nothing,
+  // which is the noise this rework removes. Only the prose the message actually carries remains.
+  assert.ok(!html.includes("activity-thought"), `an empty finished block gets no row: ${html}`);
+  assert.ok(!html.includes("activity-thought-gist"), "and no empty gist");
+  assert.match(html, /Done\./, "the prose the message does carry still renders");
 });
 
 test("a collapsed thinking block does NOT reveal its text on hover", () => {
@@ -1933,7 +1939,7 @@ test("a collapsed thinking block does NOT reveal its text on hover", () => {
     transcript: { messages: [msg], tools: [] }, busy: false, sessionLabel: "Demo",
   }));
 
-  const gistTag = /<span class="quarantine-gist"[^>]*>/.exec(html)?.[0];
+  const gistTag = /<span class="activity-thought-gist"[^>]*>/.exec(html)?.[0];
   assert.ok(gistTag !== undefined, `the gist must exist: ${html}`);
   assert.ok(!/title=/.test(gistTag), `the gist must carry no tooltip: ${gistTag}`);
 
@@ -1941,11 +1947,23 @@ test("a collapsed thinking block does NOT reveal its text on hover", () => {
   // one line. Asserting "does not contain the full text" was the first attempt and it was wrong twice — the
   // thought is 500 characters so any preview "fails" to contain it trivially, and the repeated padding words
   // made the phrase check pass on the gist itself. Bounding the summary is the property that actually holds.
-  const summary = /<summary class="quarantine-head"[^>]*>([\s\S]*?)<\/summary>/.exec(html)?.[1] ?? "";
+  const summary = /<summary class="activity-thought-head"[^>]*>([\s\S]*?)<\/summary>/.exec(html)?.[1] ?? "";
   assert.ok(summary.length > 0, "the summary must exist");
+  /*
+   * The bound, restated after the row gained structure. The property is that the row cannot carry the thought;
+   * the old `< 200` was a proxy for "one line" at 72 characters of gist. The row now also carries its index and
+   * its kind (`1`, `Thinking`), so the bound is: the GIST is elided (asserted below) and the row's own text —
+   * excluding those two fixed labels — stays far short of the 500-character thought.
+   */
+  const gist = /<span class="activity-thought-gist">([\s\S]*?)<\/span>/.exec(summary)?.[1] ?? "";
+  assert.ok(gist.length > 0, "the row carries a gist");
+  assert.ok(gist.length < 120, `the gist must be elided, got ${gist.length} chars: ${gist}`);
+  // The rendered row is markup, not text: tags and attributes are not characters the reader sees. Measured on the
+  // VISIBLE text, which is the thing "one line" is a claim about.
+  const visible = summary.replace(/<[^>]*>/g, "").trim();
   assert.ok(
-    summary.length < 200,
-    `a collapsed summary must stay one line, not carry the thought (${summary.length} chars): ${summary}`,
+    visible.length < 140,
+    `a collapsed row must stay one line, not carry the thought ("${visible}" = ${visible.length} chars)`,
   );
   assert.match(summary, /\u2026/, "the gist is elided, so no title is needed to shorten it");
   assert.ok(!/title=/.test(summary), `nothing in the summary may pop a tooltip: ${summary}`);
@@ -1974,7 +1992,7 @@ test("an in-progress thinking block says so, and a finished one does not", () =>
     transcript: { messages: [msg], tools: [] }, busy: true, sessionLabel: "Demo",
   }));
 
-  const summaries = [...html.matchAll(/<summary class="quarantine-head">([\s\S]*?)<\/summary>/g)].map((m) => m[1]);
+  const summaries = [...html.matchAll(/<summary class="activity-thought-head">([\s\S]*?)<\/summary>/g)].map((m) => m[1]);
   assert.equal(summaries.length, 2, "both blocks render");
   assert.match(summaries[0], /thinking\u2026/, "the in-progress block says so");
   assert.ok(!/thinking\u2026/.test(summaries[1]), "the finished block must NOT — or the state means nothing");
@@ -1997,7 +2015,7 @@ test("the thinking state is a WORD, and does not repeat the message's own dot", 
   const html = renderToString(createElement(TranscriptView, {
     transcript: { messages: [msg], tools: [] }, busy: true, sessionLabel: "Demo",
   }));
-  const summary = /<summary class="quarantine-head">([\s\S]*?)<\/summary>/.exec(html)?.[1] ?? "";
+  const summary = /<summary class="activity-thought-head">([\s\S]*?)<\/summary>/.exec(html)?.[1] ?? "";
   assert.match(summary, /thinking\u2026/, `the word must be present: ${summary}`);
   assert.ok(!/live-dot/.test(summary), `no dot may repeat the message's own indicator: ${summary}`);
 
@@ -2016,7 +2034,7 @@ test("a thinking block with no text yet still shows it is running", () => {
     transcript: { messages: [msg], tools: [] }, busy: true, sessionLabel: "Demo",
   }));
   assert.match(html, /thinking\u2026/, "an empty in-progress block still announces itself");
-  assert.ok(!html.includes("quarantine-gist"), "…but has no gist, which would be empty");
+  assert.ok(!html.includes("activity-thought-gist"), "…but has no gist, which would be empty");
 });
 
 // --- A row that is not running is still in the rail (issue #89) ----------------------------------

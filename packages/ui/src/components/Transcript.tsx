@@ -1,15 +1,18 @@
 /**
  * The transcript pane.
  *
- * **Prose first.** The conversation is what a reader follows; tools are a trace and belong in
- * `ToolTrace`. The previous version rendered every tool call AFTER every message, so a real
- * session put 1138 frames below the conversation and the agent's actual output became
- * unfindable. That was a bug, not a layout preference: tools happen *between* messages, and
- * appending them destroys the only ordering that makes them readable.
+ * **Prose first, then the work as ONE group.** The conversation is what a reader follows; tools are
+ * evidence. The version before last rendered every tool call AFTER every message, so a real session put
+ * 1138 frames below the conversation and the agent's actual output became unfindable. The version before
+ * THIS one grouped tools but still gave every `thinking` block its own top-level bar and every
+ * thinking-only message its own `Assistant` heading, so a run of internal steps rendered as
+ * `Assistant · [Thinking] · 1 tool · Assistant · [Thinking] · …` with every row already collapsed
+ * (`img_18.png`).
  *
- * So each message is followed by at most ONE compact marker per run of tools, which keeps the
- * position — "something happened here" — while refusing to spend a screenful on it. Clicking a
- * marker opens that call in the trace window, which is the bridge from reading to debugging.
+ * So the unit is now ACTIVITY, planned in `activity.ts`: a contiguous stretch of thinking and tool work
+ * between two spans of real prose is one disclosure, and the host owns whether it is open so the answer
+ * survives a session switch. Opening it shows the recorded steps in order, each tool call with its
+ * arguments, capped output and full result behind a second disclosure.
  *
  * Two accessibility rules, both deliberate:
  *
@@ -19,8 +22,10 @@
  */
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Transcript as TranscriptModel } from "../transcript.ts";
-import { assistantText, hasProse, planTranscript, thinkingGist, toolRunSummary, type ToolExecution, type TranscriptMessage } from "../transcript.ts";
+import type { TranscriptMessage } from "../transcript.ts";
+import { messageTexts, planEntries, showActivity, type PlannedEntry } from "../activity.ts";
 import { MessageBody } from "./MessageBody.tsx";
+import { ActivityGroup } from "./ActivityGroup.tsx";
 import {
   decideOnSessionChange,
   hasScrollableContent,
@@ -31,8 +36,6 @@ import {
   type SessionScroll,
 } from "../scroll.ts";
 import { RunNotices } from "./RunNotices.tsx";
-import { ToolDetail } from "./ToolDetail.tsx";
-import { formatBytes } from "../format.ts";
 
 /**
  * How close to the bottom still counts as "following the tail".
@@ -79,6 +82,8 @@ export function TranscriptView({
   loading = false,
   onOpenTool,
   showMarkers = true,
+  activityOpen = {},
+  onToggleActivity = () => {},
   historyError,
 }: {
   /**
@@ -122,14 +127,24 @@ export function TranscriptView({
   loading?: boolean;
   onOpenTool?: (toolCallId: string) => void;
   /**
-   * Whether to show position markers for tool work.
+   * Whether activity groups are shown at all.
    *
-   * A marker preserves WHERE the agent did something, which the trace window alone cannot. But a
-   * real session alternates prose and tools almost one-for-one, so markers are numerous by nature.
-   * Making them optional means a reader can have pure prose when they want to read and position
-   * when they want to understand — rather than one of the two being imposed.
+   * The old control was `showMarkers` — "position markers for tool work", which is still what this
+   * means: OFF is pure reading, and the trace panel remains the way to reach what ran. It is NOT a way
+   * to hide failures: an activity group carrying a failed call, or one still running, is always
+   * rendered, because the one line that needs attention cannot be behind a preference.
    */
   showMarkers?: boolean;
+  /**
+   * Which activity groups the reader has opened, by group key.
+   *
+   * Owned by the HOST, not by this pane: `SessionView` remounts per session (`key={focused?.id}`), so a
+   * store here would be destroyed exactly when the reader comes back — the defect #108 reported for the
+   * trace window, one level down. A group's key is derived from its first recorded part, so it is stable
+   * across deltas, tool arrivals and streaming.
+   */
+  activityOpen?: Record<string, boolean>;
+  onToggleActivity?: (key: string, open: boolean) => void;
   /**
    * Why the conversation could not be read, if it could not be.
    *
@@ -346,7 +361,7 @@ export function TranscriptView({
    * this recomputes when the session is written to and not when unrelated state (panel width, a toast, another
    * session's streaming) re-renders the tree. It was a plain call, so the plan was rebuilt on every render.
    */
-  const entries = useMemo(() => planTranscript(transcript), [transcript]);
+  const entries = useMemo(() => planEntries(transcript), [transcript]);
 
   return (
     // The scroller and the control are SIBLINGS rather than parent and child, and that is
@@ -393,13 +408,23 @@ export function TranscriptView({
         </div>
       ) : (
         <>
-          {/* Planned as prose turns interleaved with ONE marker per stretch of tool work, so a
-              burst of calls collapses to a single line instead of one line per call. */}
-          {entries.map((entry, index) =>
-            entry.kind === "tools" ? (
-              showMarkers ? <ToolMarker key={`tools-${index}`} tools={entry.tools} /> : null
+          {/* Planned as conversation interleaved with ONE activity group per stretch of internal work, so a
+              run of thinking and tool calls costs one line instead of one line per step (#170). */}
+          {entries.map((entry) =>
+            entry.kind === "activity" ? (
+              showActivity(entry.parts, transcript.tools, showMarkers) ? (
+                <ActivityGroup
+                  key={entry.key}
+                  parts={entry.parts}
+                  tools={transcript.tools}
+                  live={busy}
+                  onOpenTool={onOpenTool}
+                  open={activityOpen[entry.key] ?? false}
+                  onToggle={(open) => onToggleActivity(entry.key, open)}
+                />
+              ) : null
             ) : (
-              <Turn key={entry.message.id} message={entry.message} />
+              <Turn key={entry.key} entry={entry} />
             ),
           )}
         </>
@@ -437,97 +462,6 @@ export function TranscriptView({
 }
 
 /**
- * One line standing in for a run of tool calls.
- *
- * Compact by design: a reader must be able to see that the agent did something here without
- * reading what it did. The names are enough to orient, and the click is there for when they are
- * not.
- */
-/**
- * One run of tool work, inline in the transcript (issue #131).
- *
- * ## What changed, and why
- *
- * A marker used to be a button that opened the trace panel at the bottom of the window. Reported: *"I
- * expected the tool output to open inline the transcript in this case."* The expectation is right — a
- * marker is a bookmark in the conversation, so the answer belongs where the question was asked.
- *
- * So the marker is now a **`<details>`**: the summary line is unchanged (the count, the names, the state),
- * and opening it reveals each call's arguments and a capped preview of its output, in place. The trace
- * panel is still there and still reachable, because the header of this file records what happens when tool
- * output grows without a bound: *"1138 frames below the conversation and the agent's actual output became
- * unfindable."* The remainder of a long result is a disclosure, and the **trace panel below the transcript**
- * is where the full view lives — every row in it is selectable, so no button is needed on this surface
- * (issue #139).
- *
- * `<details>` rather than `useState`: the browser owns the open/closed state, so it survives a re-render —
- * which is the bug #108 was about — and keyboard behaviour comes for free.
- */
-function ToolMarker({ tools }: { tools: ToolExecution[] }) {
-  if (tools.length === 0) return null;
-  const summary = toolRunSummary(tools);
-  const last = tools[tools.length - 1]!;
-  const running = tools.some((tool) => tool.running);
-
-  return (
-    <details className={`tool-marker${summary.failed > 0 ? " has-error" : ""}${running ? " running" : ""}`}>
-      <summary
-        className="tool-marker-summary"
-        // Said plainly, because the summary is a disclosure now rather than a jump.
-        title="Show this call's arguments and output here"
-      >
-        <span className="m-glyph" aria-hidden="true">
-          {running ? "●" : summary.failed > 0 ? "✕" : "⌁"}
-        </span>
-        <span className="m-count">
-          {summary.count} tool{summary.count === 1 ? "" : "s"}
-        </span>
-        <span className="m-names mono">{summary.names.join(" · ")}</span>
-        {summary.failed > 0 && <span className="m-failed">{summary.failed} failed</span>}
-        {running && <span className="m-running">running</span>}
-        <span className="spacer" />
-        {/* Size only. The `Open in trace` button that used to sit here was removed (issue #139): it is a
-            second control on a surface the reader is already reading, and the trace panel below the
-            transcript already reaches every call — every row in it is selectable. */}
-        <span className="tool-detail-meta">{formatBytes(last.result.length)}</span>
-        {/* The expander marker is NOT `aria-hidden`: it is the only signal that this line opens. */}
-        <span className="m-open" aria-hidden="true">
-          ⌄
-        </span>
-      </summary>
-
-      {tools.map((tool, index) => (
-        <ToolDetail
-          key={tool.toolCallId}
-          tool={tool}
-          /*
-           * ONE bar per call (issue #136).
-           *
-           * The first call needs none: the `<summary>` above is its bar, carrying the tool name, the
-           * state and the open/closed affordance. That is what lets the reader keep the mouse where they
-           * clicked and close again — a second header bar meant moving to it.
-           *
-           * A LATER call in the same run does need one, because it is not the summary and would
-           * otherwise be an unlabelled block. It names the call and its size, nothing more.
-           */
-          header={
-            index === 0 ? undefined : (
-              <div className="tool-detail-head">
-                <span className="mono">{tool.toolName}</span>
-                {tool.isError && <span className="err">failed</span>}
-                {tool.running && <span className="m-running">running</span>}
-                <span className="spacer" />
-                <span className="tool-detail-meta">{formatBytes(tool.result.length)}</span>
-              </div>
-            )
-          }
-        />
-      ))}
-    </details>
-  );
-}
-
-/**
  * One turn, memoized (issue #151).
  *
  * Without this, a delta in the LAST message re-rendered every turn above it — with streaming that is dozens of
@@ -535,13 +469,21 @@ function ToolMarker({ tools }: { tools: ToolExecution[] }) {
  * reference equality is the right comparison. There is no custom `areEqual`: the props are the message and
  * nothing else, and a hand-written comparison is how memoization silently stops working.
  */
-const Turn = memo(function Turn({ message }: { message: TranscriptMessage }) {
+const Turn = memo(function Turn({ entry }: { entry: Extract<PlannedEntry, { kind: "message" }> }) {
+  const { message } = entry;
   const label = message.role === "user" ? "You" : message.role === "assistant" ? "Assistant" : message.role;
-  const text = assistantText(message);
-  const thinking = message.blocks.filter((block) => block.kind === "thinking");
+  /*
+   * ONLY the prose spans this entry owns.
+   *
+   * Thinking blocks are planned into an activity group above or below, so rendering "all the text of the
+   * message" here would move prose that was recorded AFTER a thought above it. The indexes come from the
+   * planner, which is the only place that ordering rule is written down.
+   */
+  const texts = messageTexts(message, entry.textIndexes);
 
-  // Guarded as well as filtered by `planTranscript`: a turn heading above nothing is pure noise.
-  if (!hasProse(message)) return null;
+  // The planner never emits an empty message entry; this keeps a heading above nothing impossible even if
+  // a future caller builds one by hand.
+  if (texts.length === 0) return null;
 
   return (
     // The ROLE is a class, so the two kinds of turn can be told apart by looking (issue #88). Before
@@ -559,73 +501,16 @@ const Turn = memo(function Turn({ message }: { message: TranscriptMessage }) {
         )}
       </div>
 
-      {thinking.map((block, i) => {
-        // The gist, so four collapsed blocks are not four identical bars (issue #143). It is the block's
-        // own first sentence, which is content already present behind this `<details>` — a preview, not a
-        // disclosure. `thinkingGist` explains why it is not a duration.
-        const gist = block.kind === "thinking" ? thinkingGist(block.text) : "";
-        return (
-          <details key={i} className="quarantine" style={{ marginBottom: 8 }}>
-            <summary className="quarantine-head">
-              <span className="label">Thinking</span>
-              {/*
-                That this block is STILL BEING WRITTEN (issue #146).
-
-                Reported from use: "I definitely dont see any response in the thinking bar, there is no visual
-                indication that the thinking is still running. Users just see the bar and thats it."
-
-                The state was already on the wire — `TextBlock.complete` is set false by `thinking_start` and
-                true by `thinking_end` — it was simply not rendered. A block that is still growing looked
-                exactly like a finished one that had been collapsed, so a reader could not tell "it is
-                thinking right now" from "it thought, a while ago, about something else".
-
-                NO DOT. The first version put a green `live-dot` here beside the word, and the reader's verdict
-                was immediate: "i think now it is redundant". They were right, and the reason is structural —
-                a thinking block is only ever streamed INSIDE an assistant message, and the `.role` line above
-                already carries `● responding…` for as long as that message streams. A tool call does not
-                close the message (only `message_end` does), so `responding…` is on screen the whole time a
-                block is growing. The second dot therefore repeated the first, one line lower, with the same
-                colour.
-
-                It was also worse than merely redundant: `.live-dot` only pulses under `.state-streaming`, so
-                this was a STATIC green dot next to a pulsing one — two indicators of the same fact that did
-                not even agree on whether the fact was ongoing.
-
-                The word stays, because it is the part that says something the line above does not: WHICH part
-                of the response is still arriving. And the word was always the carrier — DESIGN §539, "no
-                motion is ever the only carrier of meaning" — so removing the decoration costs nothing.
-              */}
-              {block.kind === "thinking" && !block.complete && (
-                <span className="quarantine-state">thinking…</span>
-              )}
-              {gist.length > 0 && (
-                <>
-                  <span className="spacer" />
-                  {/*
-                    The words, so the block says what it is about; the label already says what KIND of
-                    block it is, so this does not repeat it.
-
-                    NO `title`, and that is the whole point of a collapsed block (issue #143). A first
-                    version put the untruncated text on `title` so a word lost to the cap could be
-                    recovered by hovering — which handed the reader a screen-filling native tooltip
-                    carrying the ENTIRE thought. Collapsing exists so a long derivation costs one line
-                    until you ask for it; revealing it on a stray mouse-over undoes that, and it does so
-                    without a click, without focus and without a way to keep it open. Opening the
-                    `<details>` is the one gesture that says "show me this".
-                  */}
-                  <span className="quarantine-gist">{gist}</span>
-                </>
-              )}
-            </summary>
-            <pre className="quarantine-body">{block.kind === "thinking" ? block.text : ""}</pre>
-          </details>
-        );
-      })}
-
       {/* Through MessageBody rather than Prose directly: prose still goes to the one sanitized
           insertion site, while a fenced code block becomes React elements and contributes no HTML
           to sanitize (issue #4). A message with no code takes the Prose path unchanged. */}
-      {text.length > 0 && <MessageBody text={text} streaming={message.streaming} />}
+      {texts.map((text, index) => (
+        <MessageBody
+          key={`${entry.key}:${entry.textIndexes[index] ?? index}`}
+          text={text}
+          streaming={message.streaming && index === texts.length - 1}
+        />
+      ))}
     </article>
   );
 });

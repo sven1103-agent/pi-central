@@ -124,6 +124,14 @@ export function App() {
   const [showMarkersBySession, setShowMarkersBySession] = useState<Record<string, boolean>>(
     () => readTracePrefs().markers,
   );
+  //
+  // Which activity groups the reader has opened, keyed by `sessionId` and then by the group's own key.
+  //
+  // HERE, for the same reason as the trace maps above: `SessionView` carries `key={focused?.id}` and remounts
+  // on every switch, so a disclosure opened inside it would snap shut the moment the reader looked at another
+  // session. Not persisted — a group key names a block in one transcript, and remembering "open" across a
+  // browser restart would either be stale or, worse, apply to an unrelated group after a session was rewritten.
+  const [activityOpen, setActivityOpen] = useState<Record<string, Record<string, boolean>>>({});
 
 
   // The right panel's geometry and mode, restored from the last visit (issue #8; #15 generalises
@@ -298,6 +306,25 @@ export function App() {
   }, []);
 
   const focused = focusedSession(state);
+
+  /**
+   * Remember that a group was opened or closed, for the focused session.
+   *
+   * Structural rather than behavioural: the open state must outlive `SessionView`'s remount, and the group key
+   * already identifies the transcript content, so no extra guard is needed here.
+   */
+  const toggleActivity = useCallback(
+    (key: string, open: boolean) => {
+      if (!focused) return;
+      const sessionId = focused.id;
+      setActivityOpen((current) => ({
+        ...current,
+        [sessionId]: { ...(current[sessionId] ?? {}), [key]: open },
+      }));
+    },
+    [focused],
+  );
+
 
   // --- file browsing (issue #8) -----------------------------------------------------------
 
@@ -675,6 +702,8 @@ export function App() {
               session={focused}
               traceCollapsed={focused ? traceCollapsedBySession[focused.id] === true : false}
               showMarkers={focused ? showMarkersBySession[focused.id] !== false : true}
+              activityOpen={focused ? activityOpen[focused.id] ?? {} : {}}
+              onToggleActivity={toggleActivity}
               onToggleTraceCollapsed={(collapsed) =>
                 focused &&
                 setTraceCollapsedBySession((current) => ({ ...current, [focused.id]: collapsed }))
@@ -861,6 +890,8 @@ function SessionView({
   autoFollow,
   traceCollapsed,
   showMarkers,
+  activityOpen,
+  onToggleActivity,
   onToggleTraceCollapsed,
   onToggleMarkers,
   onToggleAutoFollow,
@@ -898,6 +929,9 @@ function SessionView({
    */
   traceCollapsed: boolean;
   showMarkers: boolean;
+  /** Which activity groups this session has open, keyed by group key (see the state in `App`). */
+  activityOpen: Record<string, boolean>;
+  onToggleActivity: (key: string, open: boolean) => void;
   onToggleTraceCollapsed: (collapsed: boolean) => void;
   onToggleMarkers: () => void;
   onToggleAutoFollow: () => void;
@@ -1043,6 +1077,8 @@ function SessionView({
         sessionLabel={displayName(session)}
         expectedCount={session.messageCount}
         showMarkers={showMarkers}
+        activityOpen={activityOpen}
+        onToggleActivity={onToggleActivity}
         historyError={historyError}
         onOpenTool={(toolCallId) => {
           // Opening from a marker un-collapses the trace, or the click would appear to do nothing.

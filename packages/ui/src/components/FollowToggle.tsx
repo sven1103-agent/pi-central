@@ -18,7 +18,7 @@
  * let me move".
  *
  * The label states the state (`auto-follow on` / `auto-follow off`) with `aria-pressed` carrying it to
- * assistive tech, matching the `markers on` toggle beside it in the same visual language.
+ * assistive tech, matching the `activity on` toggle beside it in the same visual language.
  */
 export function FollowToggle({ following, onToggle }: { following: boolean; onToggle: () => void }) {
   return (

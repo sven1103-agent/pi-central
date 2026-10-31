@@ -230,7 +230,7 @@ test("auto-follow off means the transcript never moves on its own", () => {
 });
 
 test("the toggle is a real control, and its label carries the state", () => {
-  // Same visual language as `markers on` beside it in the trace, and the state is in the WORDS as
+  // Same visual language as `activity on` beside it in the trace, and the state is in the WORDS as
   // well as `aria-pressed`, so nothing depends on the tint alone.
   const toggle = source("../src/components/FollowToggle.tsx");
   assert.match(toggle, /aria-pressed=\{following\}/, "assistive tech must hear the state");

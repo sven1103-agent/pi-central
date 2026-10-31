@@ -137,12 +137,16 @@ test("the transcript does NOT append the whole tool list after the conversation"
     "the transcript must not render every tool; that is the trace window's job",
   );
   // It must still show WHERE tools ran, or the prose would look like an uninterrupted monologue.
-  // The marker grouping lives in `planTranscript` (transcript.ts), which is where the "one marker
-  // per stretch of work" rule is tested — so the invariant checks the transcript USES that plan
-  // rather than re-deriving positions itself.
-  assert.ok(view.text.includes("planTranscript"), "the transcript should render a planned sequence");
-  assert.ok(view.text.includes("ToolMarker"), "the transcript should render a compact tool marker");
-  assert.ok(view.text.includes("showMarkers"), "markers must be optional, for pure reading");
+  // The grouping rule lives in `src/activity.ts` — where "one group per stretch of work" and the
+  // "no empty turn for a thinking-only message" rule are tested — so the invariant checks the transcript
+  // USES that plan rather than re-deriving positions itself.
+  assert.ok(view.text.includes("planEntries"), "the transcript should render a planned sequence");
+  assert.ok(view.text.includes("ActivityGroup"), "the transcript should render one activity group per stretch of work");
+  assert.ok(view.text.includes("showMarkers"), "activity must be optional, for pure reading");
+  // The old per-run marker and the top-level thinking bar are GONE. If either returns, the transcript is back
+  // to one row per internal step — the defect this grouping exists to remove.
+  assert.ok(!view.text.includes("ToolMarker"), "no per-run tool marker: activity is one group per stretch");
+  assert.ok(!view.text.includes("planTranscript"), "there must be ONE plan, not two competing ones");
 });
 
 // --- No live region on the streaming tail -----------------------------------------------------

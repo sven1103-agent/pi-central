@@ -46,8 +46,10 @@ test("the tool names are more legible than the thinking label", () => {
   // This is the inversion, measured. The tool names inherited `--quarantine` at 2.71:1 while the thinking
   // label sat at `--dim`, 5.62:1 — so the row showing WHAT RAN was less than half as legible as the row
   // saying something was being thought about. A pixel comparison would not have caught this; contrast does.
-  const names = prop(".tool-marker .m-names", "color");
-  const thinkingLabel = prop(".quarantine-head", "color");
+  // The two tiers now live inside one group: the summary line names the work, and a thinking block's row is
+  // the demoted tier beneath it. The names moved from `.tool-marker .m-names` to `.activity-summary`.
+  const names = prop(".activity-summary", "color");
+  const thinkingLabel = prop(".activity-thought-head .label", "color");
   assert.ok(names && thinkingLabel, `both must declare a colour: ${names} / ${thinkingLabel}`);
 
   const resolve = (v) => token(/^var\(--([a-z0-9-]+)\)$/.exec(v)?.[1] ?? "");
@@ -66,17 +68,17 @@ test("the tool names are more legible than the thinking label", () => {
 test("only the work carries a resting fill", () => {
   // The "big filled container" the review saw was on the THINKING block — content the reader is usually
   // skipping. A fill is what makes a row read as a record; it belongs to the row that records something.
-  const thinkingBg = prop(".quarantine-head", "background");
+  const thinkingBg = prop(".activity-thought-head", "background");
   assert.equal(thinkingBg, "none", `the thinking head must be flat, got ${thinkingBg}`);
-  assert.ok(prop(".tool-marker", "background"), "the tool marker keeps its fill");
+  assert.ok(prop(".activity", "background"), "the activity group keeps its fill");
 });
 
 test("both are still disclosures, and both answer the mouse", () => {
   // Demotion is not removal. Thinking still opens, still carries its gist (#143), and must still show that
   // it is operable — otherwise the fix trades an inverted hierarchy for a hidden control.
   const hover = (sel) => rule(`${sel}:hover`);
-  assert.ok(hover(".tool-marker-summary"), "the tool bar shows its affordance");
-  assert.ok(hover(".quarantine-head"), "the thinking head is a disclosure too");
+  assert.ok(hover(".activity-summary"), "the group's bar shows its affordance");
+  assert.ok(hover(".activity-thought-head"), "the thinking head is a disclosure too");
 
   // Each hover must CHANGE the background relative to its own resting state. The original bug was
   // `background: var(--panel)` on a marker already on `--panel` — an invisible hover, credited in a comment
@@ -89,8 +91,8 @@ test("both are still disclosures, and both answer the mouse", () => {
   const hoverBg = (sel) => prop(`${sel}:hover`, "background");
   const restBg = (sel) => prop(sel, "background") ?? "none";
   for (const [hover, rest, label] of [
-    [".quarantine-head", ".quarantine-head", "thinking"],
-    [".tool-marker-summary", ".tool-marker", "tool"],
+    [".activity-thought-head", ".activity-thought-head", "thinking"],
+    [".activity-summary", ".activity", "activity"],
   ]) {
     const bg = hoverBg(hover);
     assert.ok(bg && bg !== "none", `${label} hover must name a fill, got ${bg}`);

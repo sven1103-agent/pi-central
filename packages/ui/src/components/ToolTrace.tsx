@@ -127,7 +127,9 @@ export function ToolTrace({
           onClick={onToggleMarkers}
           aria-pressed={showMarkers}
         >
-          {showMarkers ? "markers on" : "markers off"}
+          {/* "activity", not "markers": the transcript no longer shows one marker per run of tools — it shows one
+              GROUP per stretch of work. A control that names the old thing is a small lie about what it does. */}
+          {showMarkers ? "activity on" : "activity off"}
         </button>
         {!collapsed && (
           <span className="trace-hint">
