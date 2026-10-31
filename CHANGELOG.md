@@ -457,6 +457,12 @@ They are kept because each one is the reason a constraint or an invariant test e
   *looks chosen*, which removes the nudge to ever name anything, and `brisk-otter` is no more findable tomorrow
   than `s7`. The fix for indistinguishable sessions is cheap renaming, not invented names.
 
+  **The rail is for selection; renaming belongs to the session you are looking at.** Reported from use: *"users
+  can now also rename a session from the left session roster. The mouse changes on mouse over of the small card
+  session title, which i find weird. Maybe just use the roster for selection of a session, and leave the renaming
+  to the active session rail."* A row is a 12px navigation target, and an edit target inside it competes with the
+  row's own click — so the rail keeps its text cursor to itself and the header owns renaming.
+
   **The field opens with the name as DISPLAYED**, not the stored one. Reported from use: a scratch session's row
   read `Scratch session`, but double-clicking opened `s1`. The component takes one value now — the displayed one —
   so there is no second name to pass; and because the unchanged check compares against what is on screen,

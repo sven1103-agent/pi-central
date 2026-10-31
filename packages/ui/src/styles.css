@@ -435,10 +435,6 @@ button { font: inherit; color: inherit; }
   width: 100%;
 }
 .rail-row-main:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--r-1); }
-/* The rail's rename field replaces the row's button while editing, so it fills the row rather than floating in it. */
-.rail-row-rename { width: 100%; font-size: inherit; }
-/* The rail's rename field replaces the row's button while editing, so it fills the row rather than floating in it. */
-.rail-row-rename { width: 100%; font-size: inherit; }
 /*
  * Forget is deliberately quiet: it is housekeeping, not a primary act. Never red — the session is not being
  * deleted, only taken off the rail, and a danger colour would promise a consequence that does not happen.
@@ -471,9 +467,6 @@ button { font: inherit; color: inherit; }
   max-width: 100%;
 }
 .inline-rename:focus { outline: none; box-shadow: var(--focus); }
-/* The name is a rename target, so say so without adding chrome: a text cursor on the text itself. */
-.session-name, .rail-row-main .name { cursor: text; }
-
 /*
  * Retry, and the previous failure beneath it (issue #11).
  *
@@ -557,7 +550,19 @@ button { font: inherit; color: inherit; }
      inspector. */
   overflow: hidden;
 }
-.session-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/*
+ * The header's name: truncates, and is the ONLY rename target (issues #78, #79).
+ *
+ * One rule, not two. The cursor was briefly its own `.session-name` block, which broke a guard that reads the
+ * FIRST matching rule — the trap this file already documents at `.tool-marker .m-names`: two rules for one
+ * selector and source order decides silently.
+ *
+ * The rail row had the text cursor too, and reported from use: *"the mouse changes on mouse over of the small card
+ * session title, which i find weird. Maybe just use the roster for selection of a session, and leave the renaming
+ * to the active session rail."* A cursor promising an edit on a 12px navigation target competes with the row's own
+ * click for no benefit.
+ */
+.session-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; cursor: text; }
 .session-header h2 {
   margin: 0;
   font-size: var(--fs-md);

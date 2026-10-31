@@ -641,12 +641,6 @@ export function App() {
           }}
           onForgetRow={(row) => dispatch({ kind: "forget", path: row.entry.path })}
           retryAvailable={supportsRetry(state.install?.protocol)}
-          onRenameRow={(row, name) => {
-            // Only a live session has a process to rename (Pi does it over RPC), which is also why the rail only
-            // makes the name editable for one.
-            if (row.session === undefined) return;
-            send({ kind: "rename", sessionId: row.session.id, name });
-          }}
           onRetryRow={(row) => {
             // Only a live session has a handle to retry with; a row that is not running has no process to
             // restart, so it resumes through the composer instead (resume-on-send, #89).
