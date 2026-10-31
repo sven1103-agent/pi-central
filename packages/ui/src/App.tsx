@@ -55,6 +55,7 @@ import {
 } from "./panel.ts";
 import { ModelPicker } from "./components/ModelPicker.tsx";
 import { OpenDirectorySheet } from "./components/OpenDirectorySheet.tsx";
+import { InlineRename } from "./components/InlineRename.tsx";
 import { ThinkingPicker } from "./components/ThinkingPicker.tsx";
 import { HistoryView } from "./components/History.tsx";
 import { displayName, formatContext, formatCost, formatTokens, headerLocation } from "./format.ts";
@@ -478,6 +479,21 @@ export function App() {
     setFollowToken((n) => n + 1);
   }, [state.pendingPrompt, state.live, send]);
 
+  /**
+   * Rename the focused session (issues #78, #79).
+   *
+   * One function for the header, the rail row and the Inspector, so the three cannot disagree about what a
+   * rename does. Only a LIVE session can be renamed: Pi performs it over RPC (`set_session_name`), so a row whose
+   * process is gone has no one to ask — the control is not offered there rather than offered and refused.
+   */
+  const renameFocused = useCallback(
+    (name: string) => {
+      if (!focused) return;
+      send({ kind: "rename", sessionId: focused.id, name });
+    },
+    [focused, send],
+  );
+
   const onStartSession = useCallback(() => {
     // Ask for focus BEFORE the control goes out: the orchestrator answers `start` with the new `session`
     // event synchronously, so the intent has to be in the store when that event lands (issue #144).
@@ -625,6 +641,12 @@ export function App() {
           }}
           onForgetRow={(row) => dispatch({ kind: "forget", path: row.entry.path })}
           retryAvailable={supportsRetry(state.install?.protocol)}
+          onRenameRow={(row, name) => {
+            // Only a live session has a process to rename (Pi does it over RPC), which is also why the rail only
+            // makes the name editable for one.
+            if (row.session === undefined) return;
+            send({ kind: "rename", sessionId: row.session.id, name });
+          }}
           onRetryRow={(row) => {
             // Only a live session has a handle to retry with; a row that is not running has no process to
             // restart, so it resumes through the composer instead (resume-on-send, #89).
@@ -679,6 +701,7 @@ export function App() {
               scrollMemory={scrollMemory}
               models={focused ? state.models[focused.id] : undefined}
               modelError={focused ? state.modelErrors[focused.id] : undefined}
+              onRename={renameFocused}
               onAnswer={onAnswer}
               onRequestModels={() => {
                 if (focused) send({ kind: "listModels", sessionId: focused.id });
@@ -756,7 +779,7 @@ export function App() {
               session={tab === "sessions" ? focused : undefined}
               home={home}
               onStop={() => focused && setConfirmStop(focused)}
-              onRename={(name) => focused && send({ kind: "rename", sessionId: focused.id, name })}
+              onRename={renameFocused}
             />
           ) : focused ? (
             <FilesPanel
@@ -832,6 +855,7 @@ function SessionView({
   models,
   modelError,
   onAnswer,
+  onRename,
   onRequestModels,
   onSelectModel,
   thinking,
@@ -860,6 +884,8 @@ function SessionView({
   models: ModelOption[] | undefined;
   modelError: string | undefined;
   onAnswer: (dialogId: string, answer: DialogAnswer) => void;
+  /** Rename this session (issues #78, #79). */
+  onRename: (name: string) => void;
   onRequestModels: () => void;
   onSelectModel: (provider: string, modelId: string) => void;
   thinking: { levels: string[] | undefined; error: string | undefined };
@@ -921,7 +947,18 @@ function SessionView({
           <h2>
             {/* In its own element so it can truncate: a bare text node cannot carry
                 `text-overflow`, and without it the name pushes the controls out of the header. */}
-            <span className="session-name">{displayName(session)}</span>
+            {/*
+              The documented gesture, finally built (issues #78, #79). `DESIGN.md` §12: "Double-click the header
+              name → inline rename". It was specified and never implemented, so the only rename path was three
+              clicks deep in the Inspector.
+            */}
+            <InlineRename
+              value={session.name}
+              display={displayName(session)}
+              label="Session name"
+              className="session-name"
+              onCommit={onRename}
+            />
             {session.scratch && <span className="chip chip-scratch">scratch</span>}
             <span className={`chip chip-${session.state}`}>{stateLabel(session)}</span>
           </h2>

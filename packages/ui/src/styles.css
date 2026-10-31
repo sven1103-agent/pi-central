@@ -450,6 +450,27 @@ button { font: inherit; color: inherit; }
 .rail-row-forget:focus-visible { outline: none; box-shadow: var(--focus); opacity: 1; }
 
 /*
+ * The inline rename field (issues #78, #79).
+ *
+ * Sized and coloured to sit where the name was, so entering edit mode does not reflow the header or the row.
+ * `font: inherit` matters: the header name and the rail name are different sizes, and one shared class must not
+ * flatten them.
+ */
+.inline-rename {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-1);
+  padding: 0 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+.inline-rename:focus { outline: none; box-shadow: var(--focus); }
+/* The name is a rename target, so say so without adding chrome: a text cursor on the text itself. */
+.session-name, .rail-row-main .name { cursor: text; }
+
+/*
  * Retry, and the previous failure beneath it (issue #11).
  *
  * Retry is ALWAYS visible, unlike Forget: a failed session is the row that needs a human, and hiding the only
