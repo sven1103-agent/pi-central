@@ -523,6 +523,13 @@ They are kept because each one is the reason a constraint or an invariant test e
   presenting it as a control would offer a change that cannot happen. The model label is the model alone, and the
   placeholder `<option>` no longer repeats the provider either.
 
+  **One block, two rows, one label column.** A first version stacked the provider above the model and left the
+  Thinking picker as a sibling, which a screenshot showed as three different left edges in a 120px space: the
+  provider above and to the right, `Thinking` on the *provider's* line, `Model` hanging below. Each picker had its
+  own label, and a `<label>` and a value of different widths cannot be aligned by eye. The header is now a grid
+  whose label column is sized by its own widest label, `Provider` and `Model` labels share a left edge, and
+  **Thinking sits on the model's row** — the two are coupled, so a change to one invalidates the other.
+
   An unknown provider is an **em dash**, never a blank, for the same reason the metrics strip uses one: a session
   can be shown before `get_state` reports it, and blank reads as "there is none".
 

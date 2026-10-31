@@ -1200,7 +1200,9 @@ test("the provider is shown as its own field, not hidden in the dropdown (issue 
     session: session({ model: "gpt-5", provider: "litellm" }),
     models: undefined, error: undefined, onRequest() {}, onSelect() {},
   }));
-  assert.match(html, /class="picker-label">Provider</, "it has its own label");
+  // The label now carries `data-picker-row` so the grid can place it; matching the exact old attribute string
+  // would fail on the added attribute rather than on anything about the provider.
+  assert.match(html, /class="picker-label"[^>]*>Provider</, "it has its own label");
   assert.match(html, /class="picker-provider mono"[^>]*>litellm</, "and its own value, in mono like the model id");
   // The VISIBLE text of the model line must not repeat it. `title` attributes and the placeholder `<option>` still
   // carry `provider/id`, and both are legitimate: the option is what a `<select>` needs to display a value it has no
@@ -2244,4 +2246,37 @@ test("nothing on the rail puts the error in a hover tooltip", () => {
   assert.ok(!/nvim-tmux|LiteLLM/.test(html), `no stderr text on the row at all: ${html}`);
   // React separates the label from the value with `<!-- -->`; asserting the sentence means normalising first.
   assert.match(html.replace(/<!-- -->/g, ""), /last failure: earlier failure/, "and its first line is still shown");
+});
+
+test("Provider and Model share ONE label column, and Thinking is on the model's row", async () => {
+  // From a screenshot: the provider sat above and to the right of the model, `Thinking` was on the PROVIDER's
+  // line, and `Model` hung below on its own — three left edges in a 120px block. Each picker was a sibling with
+  // its own label, and a `<label>` and a value of different widths cannot be aligned by eye, so alignment has to
+  // belong to the container.
+  //
+  // Asserted with a DOM rather than a regex: the contract is PLACEMENT, and React decides attribute order. A
+  // first version matched `data-picker-row="provider" data-picker-label=""` as adjacent and failed on markup that
+  // was exactly right, because `class` is rendered first.
+  const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  const html = renderToString(createElement(ModelPicker, {
+    session: session({ model: "gpt-5", provider: "litellm" }),
+    models: undefined, error: undefined, onRequest() {}, onSelect() {},
+    thinking: createElement("span", { className: "thinking-probe" }, "high"),
+  }));
+  const doc = new JSDOM(`<body>${html}</body>`).window.document;
+
+  for (const row of ["provider", "model"]) {
+    assert.ok(
+      doc.querySelector(`[data-picker-row="${row}"][data-picker-label]`),
+      `the ${row} label is placed by the grid`,
+    );
+  }
+  // Both labels are in a label column and both values in the control column, whatever their content.
+  assert.equal(doc.querySelectorAll("[data-picker-label]").length, 2, "exactly one label per row");
+
+  // Thinking lives INSIDE the model's control cell, so it shares that row.
+  const modelCell = doc.querySelector('.picker-controls[data-picker-row="model"]');
+  assert.ok(modelCell, "the model row is a control cell");
+  assert.ok(modelCell.querySelector(".thinking-probe"), "Thinking shares the model's row");
+  assert.ok(modelCell.querySelector(".picker-field"), "…alongside the model field itself");
 });

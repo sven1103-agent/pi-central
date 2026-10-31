@@ -968,22 +968,33 @@ function SessionView({
         {/* The model control lives in the header because that is where the value it changes is
             shown, and because a model change is a session-level decision like rename or stop
             rather than a per-message one. */}
-        <ModelPicker
-          session={session}
-          models={models}
-          error={modelError}
-          onRequest={onRequestModels}
-          onSelect={onSelectModel}
-        />
-        {/* Beside the model, because the two are coupled: the levels are per-model, so a change to
-            one invalidates the other. */}
-        <ThinkingPicker
-          session={session}
-          levels={thinking.levels}
-          error={thinking.error}
-          onRequest={onRequestThinkingLevels}
-          onSelect={onSelectThinkingLevel}
-        />
+        {/*
+          ONE block, two rows, one label column (issue #163).
+
+          The pickers used to be siblings, each with its own label — so the provider sat above the model, `Thinking`
+          was on the PROVIDER's line, and three different left edges landed in a 120px space. A `<label>` and a value
+          of different widths cannot be aligned by eye; they need a grid.
+        */}
+        <div className="picker picker-grid">
+          <ModelPicker
+            session={session}
+            models={models}
+            error={modelError}
+            onRequest={onRequestModels}
+            onSelect={onSelectModel}
+            thinking={
+              // On the MODEL's row: the levels are per-model, so a change to one invalidates the other. The
+              // provider is the only thing here that needs a line of its own, being a read-only fact.
+              <ThinkingPicker
+                session={session}
+                levels={thinking.levels}
+                error={thinking.error}
+                onRequest={onRequestThinkingLevels}
+                onSelect={onSelectThinkingLevel}
+              />
+            }
+          />
+        </div>
       </div>
 
       <div className="metrics">
