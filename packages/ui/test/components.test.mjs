@@ -535,9 +535,17 @@ test("an empty catalogue IS shown as empty, because that is a real answer", asyn
   assert.match(html, /no models available/);
 });
 
-test("while streaming, the picker says the change applies to the next turn", async () => {
-  // A model change takes effect for the next turn, so a control that looked immediate would claim
-  // something false.
+test("the picker does NOT carry a standing note about when a change applies", async () => {
+  // REVERSED deliberately. The original asserted a note under the picker, "Applies to the next turn; this run is
+  // already using the current model", on the reasoning that a change is not immediate and a control that looked
+  // immediate would claim something false.
+  //
+  // That reasoning still holds — the note was TRUE. It was also on screen permanently for any streaming session,
+  // which someone using the app described as distracting: the header is scanned, and a sentence that never
+  // changes stops being read and starts being noise.
+  //
+  // What replaces it: the composer already refuses a model change mid-run in the only way that matters, and the
+  // popup closes on selection. A fact that is always true does not need saying every second.
   const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
   const html = renderToString(createElement(ModelPicker, {
     session: session({ state: "streaming", model: "gpt-5", provider: "openai" }),
@@ -546,7 +554,11 @@ test("while streaming, the picker says the change applies to the next turn", asy
     onRequest() {},
     onSelect() {},
   }));
-  assert.match(text(html), /Applies to the next turn/);
+  assert.ok(
+    !/Applies to the next turn/.test(html),
+    `no standing note: ${html}`,
+  );
+  assert.ok(!/picker-note/.test(html), "and no other standing note either");
 });
 
 test("a stopping or failed session's picker is disabled rather than silently inert", async () => {
