@@ -345,6 +345,16 @@ They are kept because each one is the reason a constraint or an invariant test e
   separate field because the two answer different questions: *"is it broken now"* and *"how did it break last
   time"*.
 
+  **Dismiss actually dismissed, and the strip stopped pasting stderr.** Two defects reported together from a
+  window. Dismiss dispatched `{ kind: "error", message: "" }`, which *prepends an empty string* rather than
+  removing anything — so the strip stayed on screen and the button looked broken. It is now a `dismissError`
+  action that drops exactly the error being shown, so a second error is revealed rather than silently cleared.
+
+  And the strip carried the whole multi-line message: the reason on line one, then pi's startup chatter — the
+  LiteLLM model notices and an nvim-tmux hint. `role="alert"` read all nine lines aloud. It now shows the
+  reason and how many lines it is not showing; the full text stays on the session and in the Session panel,
+  where someone looking for detail already goes.
+
   **A control the orchestrator implements must not be rejected by its own allowlist.** the first
   push of this slice had a `retry` case in the switch but not in `KNOWN_CONTROL_KINDS`, the hardcoded list
   checked *above* the switch — so every press still answered `bad control: unknown kind 'retry'` on a branch

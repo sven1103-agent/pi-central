@@ -598,7 +598,7 @@ export function App() {
       {state.errors.length > 0 && (
         <ErrorStrip
           message={state.errors[0]!}
-          onDismiss={() => dispatch({ kind: "error", message: "" })}
+          onDismiss={() => dispatch({ kind: "dismissError" })}
         />
       )}
 
@@ -1041,10 +1041,30 @@ function SessionView({
   );
 }
 
-function ErrorStrip({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+/**
+ * The strip carries the REASON, not the transcript of stderr.
+ *
+ * Reported from a window: killing a session showed a red box whose first line was the reason and whose
+ * remaining eight lines were pi's startup chatter — LiteLLM model notices and an nvim-tmux hint. The reason was
+ * correct and invisible under the noise, and `role="alert"` read all of it aloud.
+ *
+ * So the strip shows the first line, which is the one the orchestrator writes as the cause, and says how much
+ * more there is. The full text stays on the session (`error`) and is rendered in the Session panel, where a
+ * reader looking for detail already goes.
+ */
+export function ErrorStrip({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  const [reason, ...detail] = message.split("\n");
   return (
     <div className="error-card" role="alert">
-      <p>{message}</p>
+      <p>
+        {reason}
+        {detail.length > 0 && (
+          <span className="error-more">
+            {" "}
+            (+{detail.length} more line{detail.length === 1 ? "" : "s"} — see the Session panel)
+          </span>
+        )}
+      </p>
       <div className="actions">
         <button type="button" className="btn" onClick={onDismiss}>
           Dismiss

@@ -795,3 +795,32 @@ test("an update to ANOTHER existing session must not consume the intent", () => 
   state = reduce(state, { kind: "session", session: live({ id: "s3" }) });
   assert.equal(state.focusedId, "s3");
 });
+
+// --- Dismiss actually dismisses (reported from a window) ------------------------------------------
+
+test("dismissing the error removes it, rather than prepending an empty one", () => {
+  // Reported: "after clicking dismiss, it remains open". Dismiss dispatched `{ kind: "error", message: "" }`,
+  // which prepends an empty string — so the list stayed non-empty and the strip stayed on screen. A button
+  // that appears to do nothing is worse than no button.
+  let state = reduce(initialState(), { kind: "error", message: "pi exited (code=137, signal=-)" });
+  assert.equal(state.errors.length, 1);
+
+  state = reduce(state, { kind: "dismissError" });
+  assert.deepEqual(state.errors, [], "the error is gone");
+});
+
+test("dismissing reveals the next error instead of clearing them all", () => {
+  // The strip shows one error at a time. A second error must not be silently discarded by a click aimed at the
+  // first — that would hide the very information the reader is trying to triage.
+  let state = reduce(initialState(), { kind: "error", message: "first" });
+  state = reduce(state, { kind: "error", message: "second" });
+  assert.deepEqual(state.errors, ["second", "first"], "newest first");
+
+  state = reduce(state, { kind: "dismissError" });
+  assert.deepEqual(state.errors, ["first"], "one dismissal, one error");
+});
+
+test("dismissing with nothing to dismiss is a no-op on the same object", () => {
+  const state = initialState();
+  assert.equal(reduce(state, { kind: "dismissError" }), state, "no re-render for a no-op");
+});

@@ -29,7 +29,7 @@ globalThis.document = dom.window.document;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 
 let server;
-let SessionRail, ToolTrace, DialogDock, TranscriptView, HistoryView, Composer, FileTree, FilePane, Panel, PanelToggle, FilesPanel, Settings, initialState;
+let ErrorStrip, SessionRail, ToolTrace, DialogDock, TranscriptView, HistoryView, Composer, FileTree, FilePane, Panel, PanelToggle, FilesPanel, Settings, initialState;
 
 before(async () => {
   // `root` must be the UI package, not the process CWD: Vite resolves the `/src/...` specifiers
@@ -40,6 +40,7 @@ before(async () => {
     appType: "custom",
     logLevel: "error",
   });
+  ({ ErrorStrip } = await server.ssrLoadModule("/src/App.tsx"));
   ({ SessionRail } = await server.ssrLoadModule("/src/components/SessionRail.tsx"));
   ({ ToolTrace } = await server.ssrLoadModule("/src/components/ToolTrace.tsx"));
   ({ DialogDock } = await server.ssrLoadModule("/src/components/DialogDock.tsx"));
@@ -2155,4 +2156,26 @@ test("Retry is NOT offered when the orchestrator speaks an older protocol", () =
   }));
   assert.ok(!/rail-row-retry/.test(html), `no button that cannot work: ${html}`);
   assert.match(html, /restart the orchestrator/, "and the row says what to do instead");
+});
+
+test("the error strip shows the reason, not a screenful of stderr", () => {
+  // Reported from a window: the first line was the reason, the next eight were pi's startup chatter — LiteLLM
+  // model notices and an nvim-tmux hint. `role="alert"` read all nine lines aloud.
+  const html = renderToString(createElement(ErrorStrip, {
+    message:
+      "pi exited (code=137, signal=-) — killed by SIGKILL\n[LiteLLM] skipped a model\n[nvim-tmux] not in tmux",
+    onDismiss() {},
+  }));
+  assert.match(html, /killed by SIGKILL/, "the reason is shown");
+  assert.ok(!/LiteLLM|nvim-tmux/.test(html), `startup chatter must not reach the strip: ${html}`);
+  // React separates adjacent text expressions with `<!-- -->`, so the rendered markup is `+<!-- -->2…`.
+  // Stripping the markers is the difference between asserting the sentence and asserting React's output shape.
+  const text = html.replace(/<!-- -->/g, "");
+  assert.match(text, /\+2 more lines/, "and it says how much it is not showing");
+});
+
+test("a single-line error gets no 'more lines' note", () => {
+  const html = renderToString(createElement(ErrorStrip, { message: "no such session: s1", onDismiss() {} }));
+  assert.match(html, /no such session/);
+  assert.ok(!/more line/.test(html), `nothing was withheld, so nothing may be claimed: ${html}`);
 });

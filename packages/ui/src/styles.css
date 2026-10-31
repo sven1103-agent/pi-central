@@ -468,6 +468,9 @@ button { font: inherit; color: inherit; }
  * The earlier failure, kept after a retry. One dim line, truncated: it is evidence to compare against the next
  * attempt, not something to read in full on a rail row — the full text is on the row's `title`.
  */
+/* The count of detail lines the strip is not showing. Dim, because it is an aside, not part of the reason. */
+.error-more { color: var(--dim); font-weight: 400; }
+
 .rail-row-earlier {
   font-size: var(--fs-2xs); color: var(--dim);
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

@@ -182,6 +182,15 @@ const MAX_ERRORS = 20;
 export type LocalAction =
   | { kind: "queueRestored"; sessionId: string }
   /**
+   * Clear the error currently shown (issue #11, reported from a window).
+   *
+   * Dismiss used to dispatch `{ kind: "error", message: "" }`, which PREPENDS an empty string to the list
+   * rather than removing anything — so `errors.length > 0` stayed true, the strip stayed on screen, and the
+   * button looked broken. A local action, because this is the reader dismissing something, not the
+   * orchestrator reporting it.
+   */
+  | { kind: "dismissError" }
+  /**
    * Move the focus to another session. **A view change, not a data change.**
    *
    * This exists because there was no way to switch sessions at all. The rail dispatched a `session`
@@ -235,6 +244,12 @@ export function reduce(
   if (event.kind === "expectNewSession") {
     // A flag, not an id: the id does not exist yet. Consumed by the next new `session` event.
     return state.focusNextNewSession ? state : { ...state, focusNextNewSession: true };
+  }
+  if (event.kind === "dismissError") {
+    // The strip shows `errors[0]`, so dismissing removes exactly that one and reveals the next — which is the
+    // difference between "dismiss" and "clear everything", and keeps a second error from being hidden by a
+    // click aimed at the first.
+    return state.errors.length === 0 ? state : { ...state, errors: state.errors.slice(1) };
   }
   if (event.kind === "loadRoster") {
     return { ...state, roster: event.entries };
