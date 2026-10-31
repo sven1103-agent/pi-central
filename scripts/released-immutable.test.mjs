@@ -142,6 +142,9 @@ test("a released section cannot GAIN an entry after it ships", (t) => {
 
   const live = sections(changelog);
   for (const [version, baseline] of Object.entries(recorded)) {
+    // The file also carries `_kinds` (what each cited number is) and may gain other underscore-prefixed metadata.
+    // Iterating those as releases is how this guard failed on its own bookkeeping rather than on the changelog.
+    if (version.startsWith("_")) continue;
     const body = live.get(version);
     if (body === undefined) continue;
     const entries = body.split("\n").filter((line) => line.startsWith("- "));
@@ -167,8 +170,9 @@ test("the baseline covers every released section, so the check cannot be vacuous
   // because "no entry for 0.3.0" and "0.3.0 has no problem" must not look the same.
   const recorded = JSON.parse(readFileSync(new URL("./released-sections.json", import.meta.url), "utf8"));
   const declared = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
-  assert.ok(Object.keys(recorded).length > 0, "the baseline must not be empty");
-  for (const version of Object.keys(recorded)) {
+  const versions = Object.keys(recorded).filter((key) => !key.startsWith("_"));
+  assert.ok(versions.length > 0, "the baseline must not be empty");
+  for (const version of versions) {
     assert.ok(
       compare(version, declared) <= 0,
       `${version} is recorded as released but package.json says ${declared}`,

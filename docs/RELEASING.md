@@ -283,7 +283,14 @@ So the honest summary: provenance makes a **tampered** tarball detectable. It ca
 
 ## The changelog is a summary, not a transcript
 
-Sections are **one line per change, with the issue number**. No rationale.
+Sections are **one line per change, with a linked issue number**. No rationale.
+
+`[#164]`, reference-style, with the URLs in one block at the end — not `[#164](https://…)` inline. Inline links
+pushed the longest entry to 325 characters and 50 of 83 over 120, which is the unreadability the compression
+existed to remove; reference-style keeps the prose near 100 and the URLs together. `scripts/changelog-links.test.mjs`
+asserts that no bare `#N` creeps back, that every definition is used, and that a reference points at the **kind** the
+number actually is — ten of them were PRs cited as issues, and `/issues/N` resolves for a PR too, so clicking would
+not have revealed it.
 
 That rule arrived late and cost real rework: the Unreleased section had grown to 1,795 lines for 68 changes —
 1,915 characters per entry — because every PR appended its reasoning to the changelog instead of leaving it in the
