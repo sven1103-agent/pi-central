@@ -167,3 +167,95 @@ test("accepting a DEFAULT label unchanged renames nothing", () => {
   ui.key("Enter");
   assert.deepEqual(committed, [], "a label that was not changed is not a rename");
 });
+
+// --- The RAIL is a rename target too (the half of #162 that was claimed and never wired) ----------
+
+let SessionRail;
+
+test("a LIVE rail row is a rename target; a row that is not running is not", async () => {
+  // This is the guard that was missing. #162's description said "in the header and in the rail row", the rail got
+  // `onRenameRow` threaded through — and never rendered a field: the name stayed plain text, and every rename test
+  // passed because they all drove `InlineRename` directly.
+  if (SessionRail === undefined) ({ SessionRail } = await server.ssrLoadModule("/src/components/SessionRail.tsx"));
+  const { renderToString } = await import("react-dom/server");
+  const props = {
+    focusedId: undefined, onFocusRow() {}, onForgetRow() {}, onRetryRow() {}, onRenameRow() {},
+    retryAvailable: true, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
+  };
+  const liveSession = {
+    id: "s1", name: "s1", cwd: "/tmp/a", state: "idle", mode: "sandboxed", isolation: "x", command: "pi",
+    scratch: false, messageCount: 0, pending: 0, contextPercent: null, tokensTotal: null, cost: null,
+    dialogs: [], warnings: [], sessionFile: "/s/a/one.jsonl",
+  };
+  const live = renderToString(
+    React.createElement(SessionRail, {
+      ...props,
+      rows: [{ entry: { path: "/s/a/one.jsonl" }, session: liveSession }],
+    }),
+  );
+  assert.match(live, /title="Double-click to rename"/, "a live row's name is editable");
+
+  const stopped = renderToString(
+    React.createElement(SessionRail, {
+      ...props,
+      rows: [{ entry: { path: "/s/b/two.jsonl", name: "not running" }, session: undefined }],
+    }),
+  );
+  assert.ok(!/Double-click to rename/.test(stopped), "a row with no process must not offer a rename");
+});
+
+test("double-clicking a rail row's name opens a field, and Enter commits", async () => {
+  // The interaction, not just the marker: the row's button is REPLACED by the field while editing, because an
+  // `<input>` inside a `<button>` is invalid HTML that browsers resolve by breaking the row.
+  if (SessionRail === undefined) ({ SessionRail } = await server.ssrLoadModule("/src/components/SessionRail.tsx"));
+  const committed = [];
+  const liveSession = {
+    id: "s1", name: "s1", cwd: "/tmp/a", state: "idle", mode: "sandboxed", isolation: "x", command: "pi",
+    scratch: false, messageCount: 0, pending: 0, contextPercent: null, tokensTotal: null, cost: null,
+    dialogs: [], warnings: [], sessionFile: "/s/a/one.jsonl",
+  };
+
+  container = document.createElement("div");
+  document.body.append(container);
+  root = ReactDOMClient.createRoot(container);
+  act(() => {
+    root.render(
+      React.createElement(SessionRail, {
+        rows: [{ entry: { path: "/s/a/one.jsonl" }, session: liveSession }],
+        focusedId: undefined, onFocusRow() {}, onForgetRow() {}, onRetryRow() {},
+        onRenameRow: (_row, name) => committed.push(name),
+        retryAvailable: true, onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
+      }),
+    );
+  });
+
+  const name = container.querySelector('[title="Double-click to rename"]');
+  assert.ok(name, "the name is a rename target");
+  act(() => {
+    name.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true }));
+  });
+
+  // NOT `querySelector("input")`: the rail's Filter box is also an input and comes first in the DOM. Selecting it
+  // made this test pass a value into a field nobody was editing, and the real one was never touched.
+  const input = container.querySelector(".rail-row-rename");
+  assert.ok(input, "the row becomes a field");
+  assert.equal(container.querySelector(".rail-row-main"), null, "the button is replaced, not nested");
+
+  // React tracks an input's previous value so it can tell a real edit from a re-render. Setting `.value` through the
+  // native setter leaves that tracker holding the OLD value, so React sees no change and no onChange fires — the
+  // field looks typed-in to a human and untouched to React. Resetting the tracker first is what makes this an edit.
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+  act(() => {
+    input._valueTracker?.setValue("s1");
+    setter.call(input, "Increment 4");
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+  });
+  act(() => {
+    container.querySelector(".rail-row-rename").dispatchEvent(
+      new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+  });
+
+  assert.deepEqual(committed, ["Increment 4"], "the row's rename reaches the caller");
+  assert.equal(container.querySelector(".rail-row-rename"), null, "and the row comes back");
+});

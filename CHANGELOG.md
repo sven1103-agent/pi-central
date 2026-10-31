@@ -492,6 +492,20 @@ They are kept because each one is the reason a constraint or an invariant test e
   A test that pinned the old limitation — *"a name beyond the head window is not detected -- a documented
   limitation"* — was **reversed**, not deleted: measuring decided that it was a defect rather than a trade-off.
 
+- **Renaming works from the rail row, not only the header** (issues #78, #79 — completing #162).
+
+  #162's description said *"in the header and in the rail row"*. The header was wired; the rail received
+  `onRenameRow` and `onRename` and **never rendered a field**, so its name stayed plain text. Every rename test
+  passed, because they all drove `InlineRename` directly and no test asked whether the rail used it.
+
+  The row's content lives inside a `<button>`, and an `<input>` inside a button is invalid HTML that browsers
+  resolve by breaking the row — so while editing, the row **is** the field instead of the button. That is why the
+  behaviour moved out of the header's component into `useRenameEditor`: one state machine, two shapes, so the two
+  affordances cannot drift.
+
+  Only a live row is renameable: Pi performs it over RPC (`set_session_name`), so a row whose process is gone shows
+  plain text rather than a field that could not work.
+
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.4.1] — 2026-10-29

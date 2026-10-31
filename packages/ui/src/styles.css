@@ -435,6 +435,10 @@ button { font: inherit; color: inherit; }
   width: 100%;
 }
 .rail-row-main:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--r-1); }
+/* The rail's rename field replaces the row's button while editing, so it fills the row rather than floating in it. */
+.rail-row-rename { width: 100%; font-size: inherit; }
+/* The rail's rename field replaces the row's button while editing, so it fills the row rather than floating in it. */
+.rail-row-rename { width: 100%; font-size: inherit; }
 /*
  * Forget is deliberately quiet: it is housekeeping, not a primary act. Never red — the session is not being
  * deleted, only taken off the rail, and a danger colour would promise a consequence that does not happen.
