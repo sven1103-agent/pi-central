@@ -59,6 +59,7 @@ import { ThinkingPicker } from "./components/ThinkingPicker.tsx";
 import { HistoryView } from "./components/History.tsx";
 import { displayName, formatContext, formatCost, formatTokens, headerLocation } from "./format.ts";
 import { stateLabel, type UiState } from "./store.ts";
+import { rosterEntryFor, rosterRows } from "./roster.ts";
 
 type Tab = "sessions" | "history";
 
@@ -535,16 +536,25 @@ export function App() {
         style={{ "--panel-width": `${panel.width}px` } as React.CSSProperties}
       >
         <SessionRail
-          sessions={state.live}
+          /*
+           * ONE list of rows, seeded from what is running (issue #89).
+           *
+           * This slice changes the SHAPE, not the behaviour: nothing is persisted yet, so the roster is exactly
+           * `state.live` and the rail looks as it did. What changes is that a row is now `{entry, session?}` —
+           * the shape a persisted roster needs, where `session === undefined` means the row is `stopped`.
+           *
+           * The persistence slice fills `entries` from `localStorage` instead; the rail will not change.
+           */
+          rows={rosterRows(
+            state.live.map((session) => rosterEntryFor(session)).filter((entry) => entry !== undefined),
+            state.live,
+          )}
           focusedId={state.focusedId}
-          onFocus={(id) => {
-            // Focus is local: switching sessions is a focus change between live processes, not a
-            // restart (C2). Nothing is sent to the orchestrator.
-            //
-            // A DEDICATED action, not a `session` event. Dispatching the session's own data to
-            // switch to it was the bug: that event's focus rule is "never steal focus from a session
-            // the user is reading", so it always kept the current one and the rail did nothing.
-            dispatch({ kind: "focusSession", sessionId: id });
+          onFocusRow={(row) => {
+            // A row with no live session has no handle to focus yet; that arrives with resume-on-send.
+            if (row.session === undefined) return;
+            // Focus is local: switching sessions is a focus change between live processes, not a restart (C2).
+            dispatch({ kind: "focusSession", sessionId: row.session.id });
             setTab("sessions");
           }}
           onStartSession={onStartSession}

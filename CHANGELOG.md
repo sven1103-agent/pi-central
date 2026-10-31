@@ -204,6 +204,24 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Added
 
+- **The rail takes a roster, and keeps its sections** (issue #89, slice 2 of 4).
+
+  The rail now renders `RosterRow[]` — `{ entry, session }` — instead of `LiveSession[]`. `session === undefined`
+  means the session is not running, and it lands under the existing **Stopped** heading. No new section, no new
+  noun: `stopped` is already in `LiveState`.
+
+  **Behaviour is unchanged in this slice** — nothing is persisted yet, so the roster is exactly `state.live`. What
+  changes is the shape, which is the shape a persisted roster needs.
+
+  **The sections stay**, settled on #68: *"i now see directly when sth has finished without scrolling"*. Grouping
+  is doing real work a chip on a stable list would not, and `DESIGN.md` §47 already said "ordered by attention",
+  so the document and the behaviour agree. The classification moved to `roster.ts#groupOf` so it is testable
+  without a DOM and there is one answer to "where does a row that is not running go".
+
+  A row with no live session prints **no metrics**. No model, no context percentage, no cost — printing `0%` or
+  `$0.00` would state facts nobody measured, the same rule as `contextPercent` returning null rather than a
+  fabricated zero.
+
 - **How to verify what you installed, and what that check cannot tell you.**
 
   Every release already carried a provenance attestation; nothing told a *user* to check it, and
