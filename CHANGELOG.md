@@ -43,6 +43,14 @@ newer orchestrator has, and vice versa.
 
 ## [Unreleased]
 
+### Fixed
+
+- The model picker no longer shows a standing note about when a change applies — it was true and unhelpful, and
+  it sat in the header permanently for any streaming session.
+- Choosing a model the first time shows the whole list instead of one placeholder entry. A native `<select>`
+  builds its popup at mousedown and never re-renders it, so fetching then produced an empty list and the
+  catalogue landed in the closed control; the picker now asks first and opens once there is something to show.
+
 ### Changed
 
 - The README leads with what it does and who it is for, states its requirements, and puts Quick start above

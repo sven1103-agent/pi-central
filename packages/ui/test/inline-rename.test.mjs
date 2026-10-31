@@ -20,6 +20,13 @@ Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, co
 
 let React, ReactDOMClient, act, InlineRename, server, container, root;
 
+/** A live session with only the fields ModelPicker reads. */
+const pickerSession = {
+  id: "s1", name: "s1", cwd: "/tmp/a", state: "idle", mode: "sandboxed", isolation: "x", command: "pi",
+  scratch: false, messageCount: 0, pending: 0, contextPercent: null, tokensTotal: null, cost: null,
+  dialogs: [], warnings: [], model: "gpt-5", provider: "openai",
+};
+
 before(async () => {
   server = await createServer({
     root: new URL("..", import.meta.url).pathname,
@@ -166,4 +173,64 @@ test("accepting a DEFAULT label unchanged renames nothing", () => {
   ui.doubleClick();
   ui.key("Enter");
   assert.deepEqual(committed, [], "a label that was not changed is not a rename");
+});
+
+test("the first click on the model control does not open an EMPTY list", async () => {
+  // Reported from use: "when selecting a model from the first time, i cant see all available models, i need to
+  // reopen it."
+  //
+  // A native `<select>` builds its popup at the moment it opens — mousedown — and never re-renders it while it is
+  // up. So fetching on mousedown inevitably produced a popup with only the placeholder option, and the catalogue
+  // that arrived a moment later was drawn into the closed control. The second click worked because the data was
+  // already there.
+  //
+  // The contract: while the catalogue is unknown, mousedown is PREVENTED (no empty popup) and a request is made.
+  // Once the list exists, the browser's own open is left alone.
+  const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  const requested = [];
+  container = document.createElement("div");
+  document.body.append(container);
+  root = ReactDOMClient.createRoot(container);
+  act(() => {
+    root.render(React.createElement(ModelPicker, {
+      session: pickerSession,
+      models: undefined,
+      error: undefined,
+      onRequest: () => requested.push("asked"),
+      onSelect() {},
+    }));
+  });
+
+  const select = container.querySelector("select");
+  assert.ok(select, "the control is a select");
+  const event = new window.MouseEvent("mousedown", { bubbles: true, cancelable: true });
+  act(() => {
+    select.dispatchEvent(event);
+  });
+  assert.equal(event.defaultPrevented, true, "the empty popup is suppressed");
+  assert.deepEqual(requested, ["asked"], "and the catalogue is requested");
+});
+
+test("once the catalogue exists, the control opens normally", async () => {
+  // The other half: the suppression must not become permanent, or the picker would stop opening at all — which
+  // would be a worse bug than the one being fixed.
+  const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  container = document.createElement("div");
+  document.body.append(container);
+  root = ReactDOMClient.createRoot(container);
+  act(() => {
+    root.render(React.createElement(ModelPicker, {
+      session: pickerSession,
+      models: [{ provider: "openai", id: "gpt-5" }, { provider: "openai", id: "gpt-5-mini" }],
+      error: undefined,
+      onRequest() {},
+      onSelect() {},
+    }));
+  });
+  const select = container.querySelector("select");
+  const event = new window.MouseEvent("mousedown", { bubbles: true, cancelable: true });
+  act(() => {
+    select.dispatchEvent(event);
+  });
+  assert.equal(event.defaultPrevented, false, "the browser opens it itself");
 });

@@ -23,9 +23,9 @@
  * popover is a cosmetic follow-up rather than a behavioural one.
  */
 import type { LiveSession, ModelOption } from "@pi-central/protocol";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { truncateMiddle } from "../format.ts";
-import { isCurrentModel, modelChangeTiming, modelsByProvider } from "../store.ts";
+import { isCurrentModel, modelsByProvider } from "../store.ts";
 
 /**
  * How many characters the closed control shows before the middle is elided.
@@ -62,6 +62,38 @@ export interface ModelPickerProps {
 }
 
 export function ModelPicker({ session, models, error, onRequest, onSelect, thinking }: ModelPickerProps) {
+  const selectRef = useRef<HTMLSelectElement | null>(null);
+  /**
+   * A click that arrived before the catalogue did, waiting for it.
+   *
+   * Held in a ref rather than state because it is a pending INTENT, not something to render — and a re-render
+   * is exactly what must not happen here: the open has to occur in the same task that observes the data.
+   */
+  const pendingOpen = useRef(false);
+
+  /**
+   * Open the popup as soon as there is something to show.
+   *
+   * `showPicker()` requires a user gesture, so it cannot be called from an effect once `models` arrives — the
+   * gesture is gone by then. Instead this waits for the next render, when the options exist, and opens. The
+   * alternative the browser offers is reopening: which is precisely the bug being fixed.
+   */
+  const waitForCatalogue = (): void => {
+    pendingOpen.current = true;
+  };
+
+  useEffect(() => {
+    if (!pendingOpen.current || models === undefined) return;
+    pendingOpen.current = false;
+    // `showPicker` throws if there is no user activation or the element is not visible; both are possible and
+    // neither is worth an error boundary — the control still works on the next click.
+    try {
+      selectRef.current?.showPicker();
+    } catch {
+      /* Leave it to the next click. */
+    }
+  }, [models]);
+
   // Whether THIS mount has already asked. `onFocus` fires repeatedly (every focus, every click),
   // so without this each focus would send another request. The guard lives here rather than in the
   // parent so that "Retry" can deliberately bypass it — a retry that were also guarded would be a
@@ -75,7 +107,6 @@ export function ModelPicker({ session, models, error, onRequest, onSelect, think
   // `starting` and `stopped`/`failed` have no live Pi process to ask or command, so the control is
   // disabled with a reason. A disabled control with no explanation is worse than no control.
   const usable = session.state !== "starting" && session.state !== "stopped" && session.state !== "failed";
-  const timing = modelChangeTiming(session);
   // "Loading" is derived here rather than passed in: it means "this control asked and has no answer
   // and no failure yet", which is a fact only this component knows.
   const loading = requested && models === undefined && error === undefined;
@@ -174,16 +205,43 @@ export function ModelPicker({ session, models, error, onRequest, onSelect, think
           </span>
           <select
             id={`model-${session.id}`}
+            ref={selectRef}
             className="picker-select"
             title={fullLabel}
             // Controlled by the session, not by local state: the shown value is Pi's, so a refused change leaves
             // the select exactly where it was instead of showing the requested value.
             value={models === undefined ? "" : currentKey(session, models)}
             disabled={!usable}
-            // Opening fetches on demand, so the catalogue is never stale-by-default and the list is read at the
-            // moment it is about to be shown.
+            /*
+              Fetch on the FIRST interaction, and open only once there is something to show (issue reported from
+              use: "when selecting a model from the first time, i cant see all available models, i need to reopen
+              it").
+
+              A native `<select>` builds its popup at the moment it opens — `mousedown` — and never re-renders it
+              while it is up. So `onMouseDown={ask}` inevitably produced a popup containing only the placeholder
+              option, and the catalogue that arrived 200 ms later was drawn into the closed control. The second
+              click worked because the data was already there. No amount of re-rendering fixes that; the open has
+              to wait.
+
+              `preventDefault` on mousedown suppresses the default open, the click still lands, and `showPicker()`
+              is called once the answer is in. `showPicker` needs a user gesture — which is why this runs from the
+              handler rather than from an effect when `models` arrives.
+            */
+            onMouseDown={(event) => {
+              if (models !== undefined) return; // known already: let the browser open it
+              event.preventDefault();
+              ask();
+              waitForCatalogue();
+            }}
+            // Keyboard users never fire mousedown: Enter/Space on a focused select opens it directly.
+            onKeyDown={(event) => {
+              if (models !== undefined) return;
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              ask();
+              waitForCatalogue();
+            }}
             onFocus={ask}
-            onMouseDown={ask}
             onChange={(event) => {
               const [provider, ...rest] = event.target.value.split("/");
               if (provider !== undefined && rest.length > 0) onSelect(provider, rest.join("/"));
@@ -222,11 +280,6 @@ export function ModelPicker({ session, models, error, onRequest, onSelect, think
       {loading && (
         <span className="picker-note" data-picker-row="note" data-picker-label="">
           reading the model list…
-        </span>
-      )}
-      {timing !== "" && (
-        <span className="picker-note" data-picker-row="note" data-picker-label="">
-          {timing}
         </span>
       )}
     </>
