@@ -121,8 +121,10 @@ script, and a test asserts that stays true. So there is a window between "the by
 "anything has run" in which you can check what you got.
 
 `npx pi-central` has no such window: it fetches and executes in one step. It is convenient and it is the
-least verifiable way to run this. If you use it, pin the version (`npx pi-central@0.4.1`) so you at
-least know which artifact you asked for.
+least verifiable way to run this. If you use it, **pin an exact version** (`npx pi-central@<version>`, where
+`<version>` is what `pi-central --version` reports for the copy you mean) so you at least know which artifact
+you asked for. The number is not written here on purpose: a README that restates a version goes stale the
+moment the next release ships, and `scripts/check-version.mjs` refuses to let one.
 
 Once it is running, [install it as an app](#install-it-as-an-app) and you will not need the terminal
 again until the next reboot.

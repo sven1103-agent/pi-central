@@ -7,9 +7,14 @@ This project's early history was a research spike plus a hard look at what the s
 several entries below record **defects that shipped and were fixed** rather than only features.
 They are kept because each one is the reason a constraint or an invariant test exists.
 
-## [Unreleased]
 
-<!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
+## [0.5.0] — 2026-10-31
+
+Increment 4, and the first release with a session roster that survives a restart.
+
+**One protocol change.** `PROTOCOL_VERSION` 3 → 4. A UI and an orchestrator on different versions now refuse
+cleanly instead of misbehaving, so **reload the page after upgrading** — an older UI will not offer actions the
+newer orchestrator has, and vice versa.
 
 ### Added
 
@@ -35,6 +40,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 - Session names follow one rule, so a restart does not rename them ([#89]).
 - History shows a rename immediately, including for sessions over 256 KB ([#164]).
 - The active provider is shown beside the model, not hidden in the dropdown ([#163]).
+
+## [Unreleased]
+
+<!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.4.1] — 2026-10-29
 
