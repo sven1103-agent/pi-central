@@ -14,7 +14,10 @@ import {
   emptyTranscript,
   hasProse,
   noticeIsOpen,
+  groupToolsByAfterMessage,
+  leadingTools,
   planTranscript,
+  toolsAfter,
   seedTranscript,
   type RunNotice,
   type Transcript,
@@ -869,4 +872,83 @@ test("a transcript made before notices existed still reads as having none", () =
   // `notices` defaults rather than being optional, so a reader never has to distinguish "absent"
   // from "empty" — and an old transcript cannot be mistaken for one full of notices.
   assert.deepEqual(emptyTranscript().notices, []);
+});
+
+// --- Planning a transcript is linear, not quadratic (issue #151) ---------------------------------
+
+/**
+ * Build a transcript whose `tools` array counts how many elements are read.
+ *
+ * Deterministic where a stopwatch is not: it measures the thing that was wrong — one scan of the tool array per
+ * message — rather than a duration that depends on the machine.
+ */
+function countingTranscript(messageCount: number, toolCount: number) {
+  const tools = Array.from({ length: toolCount }, (_, i) => ({
+    toolCallId: `t${i}`,
+    toolName: "bash",
+    afterMessage: Math.floor(i / 2),
+    result: "x",
+    running: false,
+    isError: false,
+  })) as unknown as Transcript["tools"];
+  let reads = 0;
+  const counted = new Proxy(tools as unknown as unknown[], {
+    get(target, prop, receiver) {
+      if (typeof prop === "string" && /^\d+$/.test(prop)) reads += 1;
+      return Reflect.get(target, prop, receiver);
+    },
+  }) as unknown as Transcript["tools"];
+  const messages = Array.from({ length: messageCount }, (_, i) => ({
+    id: `m${i}`,
+    role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+    blocks: [{ kind: "text" as const, text: `message ${i}`, complete: true }],
+    complete: true,
+    streaming: false,
+  }));
+  return { transcript: { messages, tools: counted } as Transcript, reads: () => reads };
+}
+
+test("planning reads each tool once, not once per message", () => {
+  // The defect: `toolsAfter` scanned the whole array for every message, so 400 messages and 400 tools caused
+  // 160,400 element reads — quadratic, and paid on every render, which during streaming means every delta.
+  for (const [messages, tools] of [[50, 50], [200, 200], [400, 400]] as const) {
+    const { transcript, reads } = countingTranscript(messages, tools);
+    planTranscript(transcript);
+    assert.equal(
+      reads(),
+      tools,
+      `${messages} messages / ${tools} tools should read each tool once, read ${reads()}`,
+    );
+  }
+});
+
+test("the single pass groups tools exactly as the per-message scan did", () => {
+  // The equivalence that makes this a performance change and nothing else. `toolsAfter` is kept as the
+  // reference: if the two ever disagree, one of them is wrong and the visible order of the transcript changes.
+  const transcript = {
+    messages: Array.from({ length: 6 }, (_, i) => ({
+      id: `m${i}`,
+      role: "assistant" as const,
+      blocks: [{ kind: "text" as const, text: `message ${i}`, complete: true }],
+      complete: true,
+      streaming: false,
+    })),
+    tools: [
+      { toolCallId: "a", toolName: "bash", afterMessage: 0, result: "", running: false, isError: false },
+      { toolCallId: "b", toolName: "bash", afterMessage: 2, result: "", running: false, isError: false },
+      { toolCallId: "c", toolName: "read", afterMessage: 2, result: "", running: false, isError: false },
+      { toolCallId: "d", toolName: "bash", afterMessage: 6, result: "", running: false, isError: false },
+    ],
+  } as unknown as Transcript;
+
+  const grouped = groupToolsByAfterMessage(transcript.tools);
+  for (let index = -1; index < transcript.messages.length; index += 1) {
+    const expected = index === -1 ? leadingTools(transcript) : toolsAfter(transcript, index);
+    const actual = grouped.get(index + 1) ?? [];
+    assert.deepEqual(
+      actual.map((tool) => tool.toolCallId),
+      expected.map((tool) => tool.toolCallId),
+      `after message ${index + 1}`,
+    );
+  }
 });

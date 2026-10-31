@@ -399,6 +399,44 @@ They are kept because each one is the reason a constraint or an invariant test e
   end to end, which no test here can do (C1: the sandbox does not nest). Extracting the decisions makes all four
   criteria checkable.
 
+### Changed
+
+- **A long transcript no longer makes switching, or streaming, slow** (issue #151).
+
+  Reported: *"the app becomes less responsive when switching to a session with a long history."* Measured, not
+  assumed — the numbers below are reproducible from the repository.
+
+  **`planTranscript` was quadratic.** It called `toolsAfter(...)` per message, and that is
+  `transcript.tools.filter(...)`, so every message scanned the whole tool array. Measured by counting element
+  reads: 50 messages with 50 tools read 2,550 elements; 400 with 400 read **160,400**. Worse, the call was
+  unmemoized, so this was paid **per render** — and during streaming, per delta.
+
+  | | before | after |
+  |---|---|---|
+  | tool-array reads, 400/400 | 160,400 | **400** |
+  | `planTranscript`, 400/400 | 15 ms | **0.3 ms** |
+
+  It now builds one `Map<afterMessage, ToolExecution[]>` and reads each tool once. Insertion order within a key
+  is preserved, so the plan is byte-identical — asserted against `toolsAfter` itself rather than against a
+  reimplementation of it.
+
+  **`Turn` is memoized, and `planTranscript` is memoized on the transcript reference**, so a delta in the last
+  message no longer re-plans and re-renders every turn above it.
+
+  **The markdown parse survives a session switch.** `SessionView` carries `key={focused?.id}` — deliberately,
+  for a clean scroll state (#80/#86/#141) — so switching unmounts every `Prose` and throws away every
+  component-level memo. A bounded cache in `renderMarkdown` is the layer the remount cannot reach:
+  **1000 messages, 326 ms cold → 0 ms on a switch.**
+
+  The cache is bounded **in characters, not entries**: the first version capped 200 entries, which measured as
+  useless (238 ms against 306 ms for 1000 messages) because one session's working set did not fit. 4M characters
+  is a few hundred KB of source and its HTML — a ceiling, not an unbounded map, because transcripts are
+  unbounded by design (#149).
+
+  Deliberately **not** virtualization, and **not** capping history: the scroll invariants here have already been
+  broken once each (#80, #86, #141), and truncating what a reader can read to make the app fast is the wrong
+  trade.
+
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.4.1] — 2026-10-29

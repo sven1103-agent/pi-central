@@ -26,7 +26,7 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https
 (globalThis as Record<string, unknown>)["window"] = dom.window;
 (globalThis as Record<string, unknown>)["document"] = dom.window.document;
 
-const { looksLikeMarkdown, renderMarkdown, renderPlain, isNavigable } = await import("../src/markdown.ts");
+const { looksLikeMarkdown, markdownCacheStats, renderMarkdown, renderPlain, isNavigable } = await import("../src/markdown.ts");
 
 test("raw HTML in Markdown is escaped, not interpreted", () => {
   // The first line of defence. A README with a script tag must render as visible source.
@@ -166,4 +166,85 @@ test("a lone U+2028 inside a code block survives (framing edge case, C7)", () =>
   // The same character that breaks readline-based framing must not break rendering.
   const out = renderMarkdown("```\nconst s = '\u2028';\n```");
   assert.ok(out.includes("\u2028"), out);
+});
+
+// --- The parse cache survives a remount (issue #151) ---------------------------------------------
+
+test("rendering the same text twice gives identical html, from the cache", () => {
+  // The cache must be invisible: same input, same output. A cache that changes what is rendered would be a
+  // security regression, since this is the sanitized insertion path (ADR-0006).
+  const source = "**bold** and `code` and [a link](https://example.test)";
+  const first = renderMarkdown(source);
+  const second = renderMarkdown(source);
+  assert.equal(second, first);
+  assert.match(first, /<strong>bold<\/strong>/);
+});
+
+test("a message too large to cache still renders, and renders correctly", () => {
+  // The size cutoff exists so a huge message does not sit in the cache while streaming rewrites it every delta.
+  // It must be a CACHE policy, never a rendering one.
+  const huge = `# heading\n\n${"a paragraph. ".repeat(4000)}`;
+  assert.ok(huge.length > 20_000, "fixture must exceed the cache cutoff");
+  const html = renderMarkdown(huge);
+  assert.equal(renderMarkdown(huge), html, "identical with and without caching");
+  assert.match(html, /<h1>heading<\/h1>/);
+});
+
+test("the cache is bounded, so a long session cannot grow it without limit", () => {
+  // Measured reason for the bound: the input is a transcript, and transcripts are unbounded by design (#149).
+  // Filling well past the budget must not throw and must keep rendering.
+  for (let i = 0; i < 400; i += 1) {
+    renderMarkdown(`message ${i}\n\n${"filler text ".repeat(200)}`);
+  }
+  const html = renderMarkdown("# still works");
+  assert.match(html, /<h1>still works<\/h1>/);
+});
+
+// --- The parse cache survives a remount (issue #151) ---------------------------------------------
+
+test("a second render of the same text is a CACHE HIT, not a reparse", () => {
+  // The guard has to observe the cache, not just the output: with the cache removed, `renderMarkdown(x)` still
+  // returns the same string twice, so an equality assertion passes either way. A falsification proved that.
+  //
+  // This is the property a session switch depends on. `SessionView` carries `key={focused?.id}` (deliberately,
+  // for scroll state), so switching unmounts every `Prose` and throws away every component-level memo — the
+  // module cache is the layer the remount cannot reach.
+  const source = `cache-hit-probe-${Math.random()}\n\n**bold**`;
+  const before = markdownCacheStats();
+  const first = renderMarkdown(source);
+  const afterFirst = markdownCacheStats();
+  const second = renderMarkdown(source);
+  const afterSecond = markdownCacheStats();
+
+  assert.equal(afterFirst.misses, before.misses + 1, "the first render parses");
+  assert.equal(afterSecond.hits, afterFirst.hits + 1, "the second is a hit");
+  assert.equal(afterSecond.misses, afterFirst.misses, "and does not parse again");
+  assert.equal(second, first, "a cached render is the same render");
+});
+
+test("a message above the cutoff is not cached, and is still rendered correctly", () => {
+  // The cutoff exists so a huge message does not sit in the cache while streaming rewrites it every delta. It is
+  // a CACHE policy, never a rendering one — so the assertions are about the counter and the output together.
+  const huge = `# heading\n\n${"a paragraph. ".repeat(4000)}`;
+  assert.ok(huge.length > 20_000, "fixture must exceed the cutoff");
+  const before = markdownCacheStats();
+  const html = renderMarkdown(huge);
+  const after = markdownCacheStats();
+  assert.equal(after.misses, before.misses, "not counted as a cached parse");
+  assert.match(html, /<h1>heading<\/h1>/);
+  renderMarkdown(huge);
+  assert.equal(markdownCacheStats().hits, after.hits, "an uncacheable message never hits either");
+});
+
+test("the cache budget is enforced, so a long session cannot grow it without limit", () => {
+  // Sized in characters, not entries: the first version capped 200 entries, which measured as useless for a
+  // 1000-message transcript (238 ms against 306 ms cold) because the working set did not fit.
+  for (let i = 0; i < 400; i += 1) {
+    renderMarkdown(`budget-filler-${i}\n\n${"filler text ".repeat(200)}`);
+  }
+  assert.ok(
+    markdownCacheStats().chars <= 4_000_000,
+    `the budget must hold, got ${markdownCacheStats().chars} characters`,
+  );
+  assert.match(renderMarkdown("# still works"), /<h1>still works<\/h1>/);
 });
