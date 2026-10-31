@@ -415,6 +415,14 @@ export function TranscriptView({
         drift again. This wrapper is an ordinary block with an explicit width, centred by its parent.
       */}
       <div className="transcript-main">
+      {/*
+        The viewport: the scroller plus its floating control.
+        
+        A wrapper exists so the `Jump to latest` pill has something to be positioned against that is NOT the whole
+        reading column. Anchored to the column it sat under the composer — 44px from a bottom edge that is below the
+        input — so the control meant for the conversation appeared over the thing you type into.
+      */}
+      <div className="transcript-viewport">
       <div
         className="transcript"
         ref={containerRef}
@@ -484,7 +492,6 @@ export function TranscriptView({
         {/* The end sentinel stays INSIDE the scroller and outside the lane: it is a scroll anchor, not content. */}
         <div ref={endRef} />
       </div>
-      </div>
 
       {/*
         * Appears only while the reader is unpinned from the bottom, which is the only moment it
@@ -508,6 +515,8 @@ export function TranscriptView({
           <span aria-hidden="true">↓</span> Jump to latest
         </button>
       )}
+      </div>
+
       {/*
         THE COMPOSER LIVES HERE.
 
@@ -545,6 +554,10 @@ export function TranscriptView({
           </div>
         </div>
       )}
+      {/* The reading column closes here, AFTER the composer: the column is scroller + composer, and a close before
+          the footer made the composer a THIRD flex child of the row — which put it in its own column on the right
+          (`img_31.png`). */}
+      </div>
     </div>
   );
 }

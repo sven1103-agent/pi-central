@@ -1820,57 +1820,50 @@ test("wrapped mode wraps, keeps indentation, and breaks long tokens", () => {
 
 // --- `Jump to latest` must not cover a line of text (issue #71) -----------------------------------
 
-test("the jump control cannot cover a line of text", () => {
+test("the jump control floats in a band, anchored to the scroller", () => {
   /*
-   * The defect (issue #71): the control is positioned against the bottom of the region, so mid-list it sat on
-   * whatever line happened to be there — "…the escaped quote in m[ ↓ Jump to latest ]check."
+   * Issue #71: the control is positioned against the bottom of its region, so mid-list it sat on whatever line
+   * happened to be there — "…the escaped quote in m[ ↓ Jump to latest ]check."
    *
-   * The control now floats in a band the SCROLLER reserves as bottom padding, which is the arrangement that
-   * survived three revisions. Two others were tried and are worth recording, because each looked right:
+   * Where the reservation and the anchor live has moved three times, and each move was a real defect rather than a
+   * tidy-up:
    *
-   *   - a band reserved on `.transcript-wrap` — correct while the composer was a sibling below it, wrong once the
-   *     composer moved INSIDE the wrapper, where a reserved row became a permanent gap above the input;
-   *   - reserving nothing and floating the composer too — wrong because the dock's height varies, so the two
-   *     overlays overlapped the last message instead of each other.
+   *   1. `padding-bottom` on `.transcript-wrap` — correct while the composer was a sibling below it, wrong once the
+   *      composer moved inside the wrapper, where the reserved row became a permanent gap above the input;
+   *   2. anchored to the reading COLUMN — `bottom: 44px` measured from an edge below the composer, so the pill meant
+   *      for the conversation appeared over the input (`img_31.png`);
+   *   3. this: a `.transcript-viewport` that wraps ONLY the scroller and the pill, reserves the band, and is the
+   *      pill's positioned ancestor.
    *
-   * The property that matters is the one asserted: the space reserved at the scroller's foot is at least the
-   * control's own offset, so no line of text can sit under it.
+   * The property is what is asserted, not the selector: the pill is absolutely positioned, its offset is measured
+   * from the same element that reserves at least that much space at its foot, and therefore nothing can sit under it.
    */
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  const scroller = /\.transcript\s*\{([^}]*)\}/.exec(css.replace(/\/\*[\s\S]*?\*\//g, ""));
-  assert.ok(scroller, ".transcript must have a rule");
-  const pill = /\.jump-latest\s*\{([^}]*)\}/.exec(css);
-  assert.ok(pill, ".jump-latest must have a rule");
-  assert.match(pill[1], /position:\s*absolute/, "the control floats");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const viewport = /(?:^|\n)\.transcript-viewport\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.ok(viewport, ".transcript-viewport must exist — it is the pill's anchor");
+  assert.match(viewport, /position:\s*relative/, "it is the positioned ancestor");
+  assert.match(viewport, /padding-bottom:\s*var\(--jump-strip\)/, "…and it reserves the band");
 
-  /*
-   * The offset is now `calc(var(--jump-strip) + 4px)` rather than a bare `4px`, and that change is the fix for a
-   * real defect: the pill was anchored to `.transcript-wrap`'s bottom, which stopped being the transcript's bottom
-   * when the composer moved inside the wrapper — so it rendered BELOW the composer, at the very foot of the window
-   * (`img_26.png`). Anchoring it a strip's height up puts it in the reserved band, directly above the composer.
-   */
-  const bottomExpr = /\.jump-latest\s*\{[^}]*bottom:\s*([^;]+);/.exec(css)?.[1] ?? "";
+  const pill = /(?:^|\n)\.jump-latest\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(pill, /position:\s*absolute/, "the control floats");
+  const bottom = /bottom:\s*([^;]+);/.exec(pill)?.[1] ?? "";
   assert.match(
-    bottomExpr,
+    bottom,
     /var\(--jump-strip\)/,
-    `the control must sit a jump-strip above the foot, or it lands under the composer; got ${bottomExpr}`,
+    `the offset must be measured inside the reserved band, got ${bottom}`,
   );
-  const bottom = Number(/\+\s*(\d+)px/.exec(bottomExpr)?.[1] ?? "0");
 
-  // The wrapper reserves the control's band; the scroller ends above it, so nothing can sit under the pill.
-  const wrap = /\.transcript-wrap\s*\{([^}]*)\}/.exec(css.replace(/\/\*[\s\S]*?\*\//g, ""));
-  assert.ok(wrap, ".transcript-wrap must have a rule");
-  const reserved = /--jump-strip:\s*(\d+)px/.exec(css);
-  assert.ok(reserved, "--jump-strip must be defined, or the reservation is a guess");
-  assert.match(
-    wrap[1],
-    /padding-bottom:\s*var\(--jump-strip\)/,
-    "the wrap reserves the pill's band, so the scrollport ends ABOVE the control",
-  );
-  assert.ok(
-    bottom < Number(reserved[1]),
-    `the control's ${bottom}px offset must sit inside the ${reserved[1]}px band, or it hangs below it`,
-  );
+  const strip = Number(/--jump-strip:\s*(\d+)px/.exec(css)?.[1]);
+  assert.ok(Number.isFinite(strip), "--jump-strip must be a number, or the reservation is a guess");
+
+  // And structurally: the pill must be a child of the viewport, not of the column that also holds the composer.
+  const source = readFileSync(new URL("../src/components/Transcript.tsx", import.meta.url), "utf8");
+  const view = /<div className="transcript-viewport">([\s\S]*?)\{\/\*\s*\n\s*THE COMPOSER LIVES HERE/.exec(source)?.[1] ?? "";
+  assert.match(view, /jump-latest/, "the pill is rendered inside the viewport");
+  assert.ok(!/transcript-footer/.test(view), "…and the composer is NOT, or the anchor would include it");
 });
 
 // --- The Reading panel's reset, and a preview that can show the setting (issue #142) ----------------

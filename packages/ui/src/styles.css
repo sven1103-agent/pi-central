@@ -706,6 +706,25 @@ button { font: inherit; color: inherit; }
 
 /* ------------------------------------------------------------------ transcript */
 
+/*
+ * The transcript VIEWPORT: the scroller and the floating control, as one box.
+ *
+ * It is the pill's positioned ancestor, which is the whole reason it exists. Anchored to the reading column instead,
+ * the pill landed under the composer (`bottom: 44px` from an edge below the input), so a control belonging to the
+ * conversation appeared over the thing you type into.
+ *
+ * It reserves `--jump-strip` at its foot — the band the pill floats in (#71). Reserving inside the scroller would
+ * protect only the LAST line, because padding at the end of the content scrolls away with it.
+ */
+.transcript-viewport {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding-bottom: var(--jump-strip);
+}
+
 .transcript {
   flex: 1;
   overflow-y: auto;
@@ -2318,7 +2337,6 @@ select.btn { font-family: var(--sans); }
 .transcript-wrap {
   position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0;
   --jump-strip: 40px;
-  padding-bottom: var(--jump-strip);
   container-type: inline-size;
   container-name: transcript;
 }
@@ -2485,9 +2503,6 @@ select.btn { font-family: var(--sans); }
   max-width: var(--reading-measure);
   min-width: 0;
   min-height: 0;
-  /* The scroller inside reserves the jump band, so the column must too. */
-  padding-bottom: var(--jump-strip);
-  position: relative;
 }
 
 /*
