@@ -74,14 +74,11 @@ test("the composer spans the column instead of being individually centred", () =
   assert.ok(!/align-items:\s*stretch/.test(composer), "…and the patch for it is gone too, with the cap");
 });
 
-test("the send button does not shrink below its label", () => {
-  // Kept from #92, with a corrected reason: a flex item defaults to `flex: 0 1 auto` and could never grow,
-  // so this only prevents SHRINKING. It is harmless and mildly useful on a narrow window — it did not fix
-  // "cumbersome to hit", which was the composer spanning 1900px.
-  const button = rule(".composer-row .btn-send");
-  assert.ok(button, "the send button needs a rule");
-  assert.match(button, /flex:\s*none/, "`0 0 auto`: no shrinking, which is all this ever did");
-});
+/*
+ * "The send button does not shrink below its label" lived here. The button is gone — Enter submits — so the rule it
+ * guarded no longer exists, and a `skip` would have been a guard that silently stopped guarding. The DECISION (no
+ * button, Enter sends) is asserted in `components.test.mjs`, where the composer's markup is readable.
+ */
 
 test("the transcript keeps its own horizontal padding", () => {
   // Independent of the centring, and the only thing keeping text off the edges on a narrow window.
@@ -93,12 +90,11 @@ test("the transcript keeps its own horizontal padding", () => {
   const transcript = rule(".transcript");
   assert.ok(transcript, ".transcript must have a rule");
   // The declaration is normalised by the helper (whitespace collapsed), so the assertion reads the same shape.
-  // The BOTTOM now also reserves the band the `Jump to latest` control floats in, because the composer moved inside
-  // the transcript wrapper and a reserved row at the wrapper's foot would have become a permanent blank gap between
-  // the last message and the input.
+  // The jump control's band is reserved by `.transcript-wrap`, not by the scroller: the composer sits inside the
+  // wrapper, so a reserved row at the scroller's foot would have been a permanent gap above the input.
   assert.match(
     transcript,
-    /padding:\s*var\(--sp-4\) 18px calc\(var\(--sp-5\) \+ \d+px\) calc\(18px \+ var\(--lane-inset\)\)/,
-    `18px on the right, 18px + the lane inset on the left, and the jump band at the foot; got: ${transcript}`,
+    /padding:\s*var\(--sp-4\) 18px var\(--sp-4\) calc\(18px \+ var\(--lane-inset\)\)/,
+    `18px on the right and 18px + the lane inset on the left; got: ${transcript}`,
   );
 });

@@ -286,8 +286,16 @@ export function ModelPicker({ session, models, error, onRequest, onSelect, think
       </span>
       {/* The notes span the block rather than sitting inside a row, so a long message cannot widen the label
           column. `data-picker-row` places them across both columns. */}
+      {/*
+        `data-picker-label` must NOT be on the note.
+        
+        It was, which put the note in the LABEL column — a `auto`-width column sized by its widest label (`Provider`,
+        `Model`, `Thinking`). So "reading the model list…" was rendered into that narrow column, overflowed it, and
+        appeared as a clipped fragment at the far right of the header (`img_25`: the stray `read…` past `Thinking`).
+        The note spans both columns instead, which is what the comment below always intended.
+      */}
       {loading && (
-        <span className="picker-note" data-picker-row="note" data-picker-label="">
+        <span className="picker-note" data-picker-row="note">
           reading the model list…
         </span>
       )}

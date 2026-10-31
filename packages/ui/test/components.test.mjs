@@ -737,20 +737,35 @@ test("the interim 'steer is not available' copy is gone", async () => {
   assert.match(text(html), /Esc<\/kbd> stops the run and returns the queue to this box/);
 });
 
-test("the button label names the action the selected mode will take", async () => {
+test("the composer names the action the selected mode will take, and offers no button", async () => {
+  /** Rendered text without React's comment separators (which split adjacent text nodes). */
+  const plain = (html) => html.replace(/<!-- -->/g, "").replace(/<[^>]*>/g, "");
+
+  /*
+   * The Send button is gone: Enter submits, which is the natural way to send a prompt and already worked. A second
+   * affordance for the same action sat OUTSIDE the input's box and was what dragged the control's width away from
+   * the prose's.
+   *
+   * The distinction the button carried still matters, though — "Send", "Send steer" and "Queue follow-up" are
+   * different promises — so it is stated in the placeholder and the hint instead of being lost with the control.
+   */
   const steer = renderToString(createElement(Composer, {
     session: session({ state: "streaming" }), state: initialState(),
     unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
     onRestored() {}, draft: "hello", onDraftChange() {},
   }));
-  assert.match(steer, /Send steer/);
+  assert.match(steer, /Send steer/, "the steering consequence is still named");
+  assert.match(plain(steer), /Enter to steer/, "…and the hint says which key does it");
+  assert.ok(!/btn-send/.test(steer), "no submit button");
+  assert.ok(!/<button[^>]*>\s*Send/.test(steer), "…and no control that looks like one");
 
   const idle = renderToString(createElement(Composer, {
     session: session({ state: "idle" }), state: initialState(),
     unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
     onRestored() {}, draft: "hello", onDraftChange() {},
   }));
-  assert.match(idle, />Send</);
+  assert.match(plain(idle), /Enter to send/, "Enter is named as the way to send");
+  assert.ok(!/btn-send/.test(idle), "no submit button when idle either");
 });
 
 test("the queued texts are listed, and a read-only row has no removal control", async () => {
@@ -1805,51 +1820,45 @@ test("wrapped mode wraps, keeps indentation, and breaks long tokens", () => {
 
 // --- `Jump to latest` must not cover a line of text (issue #71) -----------------------------------
 
-test("the jump control floats in reserved space, so it cannot cover a line of text", () => {
+test("the jump control cannot cover a line of text", () => {
   /*
    * The defect (issue #71): the control is positioned against the bottom of the region, so mid-list it sat on
    * whatever line happened to be there — "…the escaped quote in m[ ↓ Jump to latest ]check."
    *
-   * Where the reservation lives has changed, and the reason is worth recording. It used to be `padding-bottom` on
-   * `.transcript-wrap`, which worked while the composer was a SIBLING band below it: the scrollport ended above the
-   * strip, so the strip was never under the content.
+   * The control now floats in a band the SCROLLER reserves as bottom padding, which is the arrangement that
+   * survived three revisions. Two others were tried and are worth recording, because each looked right:
    *
-   * The composer is inside the wrapper now (one conversation, not three stacked panels), and that arrangement makes
-   * the wrap-level reservation wrong in the opposite direction: a reserved row at the foot of the wrapper would sit
-   * BETWEEN the last message and the composer as a permanent blank gap. So the reservation moved onto the scroller
-   * — where padding-bottoms scroll with the content and therefore protects the control's own band, which is exactly
-   * what the control needs.
+   *   - a band reserved on `.transcript-wrap` — correct while the composer was a sibling below it, wrong once the
+   *     composer moved INSIDE the wrapper, where a reserved row became a permanent gap above the input;
+   *   - reserving nothing and floating the composer too — wrong because the dock's height varies, so the two
+   *     overlays overlapped the last message instead of each other.
    *
-   * The property that matters is unchanged and is what this asserts: the control is absolutely positioned, and the
-   * space it occupies at the foot of the SCROLLER is at least its offset, so no line of text can sit under it.
+   * The property that matters is the one asserted: the space reserved at the scroller's foot is at least the
+   * control's own offset, so no line of text can sit under it.
    */
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  const scroller = /\.transcript \{([^}]*)\}/.exec(css.replace(/\/\*[\s\S]*?\*\//g, ""))
-    ?? /\.transcript\s*\{([^}]*)\}/.exec(css);
+  const scroller = /\.transcript\s*\{([^}]*)\}/.exec(css.replace(/\/\*[\s\S]*?\*\//g, ""));
   assert.ok(scroller, ".transcript must have a rule");
-  const reserved = /padding:[^;]*calc\(var\(--sp-5\) \+ (\d+)px\)[^;]*;/.exec(scroller[1]);
-  assert.ok(reserved, `the scroller must reserve the control's band at its foot; got: ${scroller[1]}`);
-
   const pill = /\.jump-latest\s*\{([^}]*)\}/.exec(css);
   assert.ok(pill, ".jump-latest must have a rule");
-  assert.match(pill[1], /position:\s*absolute/, "the control floats over the reserved band");
-  const bottom = /bottom:\s*(\d+)px/.exec(pill[1]);
-  assert.ok(bottom, "the control must be offset from the bottom");
-  assert.ok(
-    Number(bottom[1]) < Number(reserved[1]),
-    `the control's ${bottom[1]}px offset must sit inside the ${reserved[1]}px band, or it hangs below it`,
-  );
-});
+  assert.match(pill[1], /position:\s*absolute/, "the control floats");
 
-test("the scroller is the only scrolling element in the transcript column", () => {
-  // The reservation above is only sound if the scroller does not also pad itself at the end — that
-  // would be the "protects only the last line" mistake, and it would double the gap.
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  const scroller = /\.transcript\s*\{([^}]*)\}/.exec(css);
-  assert.ok(scroller, ".transcript must have a rule");
+  const bottom = Number(/\.jump-latest\s*\{[^}]*bottom:\s*(\d+)px/.exec(css)?.[1]);
+  assert.ok(Number.isFinite(bottom), "the control must be offset from the bottom");
+
+  // The wrapper reserves the control's band; the scroller ends above it, so nothing can sit under the pill.
+  const wrap = /\.transcript-wrap\s*\{([^}]*)\}/.exec(css.replace(/\/\*[\s\S]*?\*\//g, ""));
+  assert.ok(wrap, ".transcript-wrap must have a rule");
+  const reserved = /--jump-strip:\s*(\d+)px/.exec(css);
+  assert.ok(reserved, "--jump-strip must be defined, or the reservation is a guess");
+  assert.match(
+    wrap[1],
+    /padding-bottom:\s*var\(--jump-strip\)/,
+    "the wrap reserves the pill's band, so the scrollport ends ABOVE the control",
+  );
   assert.ok(
-    !/padding-bottom/.test(scroller[1]),
-    ".transcript must not reserve space itself; the wrap does that",
+    bottom < Number(reserved[1]),
+    `the control's ${bottom}px offset must sit inside the ${reserved[1]}px band, or it hangs below it`,
   );
 });
 

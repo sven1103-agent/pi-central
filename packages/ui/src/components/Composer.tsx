@@ -216,26 +216,30 @@ export function Composer({
         </div>
       )}
 
-      <div className="composer-row">
-        <textarea
-          ref={textareaRef}
-          value={draft}
-          onChange={(event) => onDraftChange(event.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder={unavailable ? unavailableReason ?? "Unavailable" : "Send a prompt…"}
-          disabled={unavailable}
-          aria-label="Prompt"
-          rows={3}
-        />
-        <button
-          type="button"
-          className="btn-send"
-          onClick={submit}
-          disabled={unavailable || draft.trim().length === 0}
-        >
-          {unavailable ? "Send" : buttonLabel}
-        </button>
-      </div>
+      {/*
+        ONE SURFACE, NO BUTTON.
+
+        Enter sends — it is the natural way to submit a prompt, and it already worked. The button was a second
+        affordance for the same action, sitting outside the input's box and therefore dragging the control's width
+        away from the prose's. Removing it makes the input the whole composer: one rounded surface, one left edge,
+        one width, and nothing to misalign.
+
+        The button's LABEL still matters while streaming, because "Send", "Send steer" and "Queue follow-up" are
+        different promises — so the state is stated in the hint line below rather than lost with the button.
+      */}
+      <textarea
+        ref={textareaRef}
+        className="composer-input"
+        value={draft}
+        onChange={(event) => onDraftChange(event.target.value)}
+        onKeyDown={onKeyDown}
+        placeholder={
+          unavailable ? unavailableReason ?? "Unavailable" : streaming ? buttonLabel + "…" : "Send a prompt…"
+        }
+        disabled={unavailable}
+        aria-label="Prompt"
+        rows={2}
+      />
 
       <div className="hint">
         {streaming ? (

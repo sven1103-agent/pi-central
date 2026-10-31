@@ -712,7 +712,7 @@ button { font: inherit; color: inherit; }
      The BOTTOM reserves the band the "Jump to latest" control floats in (#71), so the control can never cover the
      last line. It lives here because the composer is inside the wrapper now: the reservation has to be part of what
      scrolls, not a blank row under it. */
-  padding: var(--sp-4) 18px calc(var(--sp-5) + 40px) calc(18px + var(--lane-inset));
+  padding: var(--sp-4) 18px var(--sp-4) calc(18px + var(--lane-inset));
   min-height: 0;
   /*
    * NO `scroll-behavior: smooth`, and that is a correctness fix rather than a taste one (issue #86).
@@ -1040,17 +1040,12 @@ button { font: inherit; color: inherit; }
  * caps against, or the two `72ch` values are different widths (#140).
  */
 .composer {
-  /* No border and no background of its own: `.transcript-footer` supplies the one rule and the fill, because the
-     composer is the foot of the transcript rather than a separate panel. Two borders here would draw the line the
-     review objected to twice. */
-  padding: var(--sp-2) 0 var(--sp-3);
+  /* No padding, border or background: the DOCK owns the geometry, and the input is the only visible surface. A
+     composer box inside a dock box would be two nested rounded rectangles for one control. */
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
   font-size: var(--fs-base);
-  /* Same inset the prose uses, so the input starts at the conversation's left edge. */
-  padding-left: calc(18px + var(--lane-inset));
-  padding-right: 18px;
 }
 /*
  * Every child is capped to the lane, INCLUDING the row that holds the textarea and Send.
@@ -1080,6 +1075,8 @@ button { font: inherit; color: inherit; }
   padding: 5px 9px;
 }
 
+/* Kept for the panels that still compose a row (the mode strip and queue render above the input), but the input no
+   longer shares a row with a button. */
 .composer-row { display: flex; gap: var(--sp-2); align-items: flex-end; }
 /* The textarea takes the room; the button keeps its own width.
  *
@@ -1087,47 +1084,40 @@ button { font: inherit; color: inherit; }
  * already never grow — this only stops it SHRINKING below its label on a narrow window. It did not fix
  * "cumbersome to hit": that was the composer spanning 1900px, which the row's `max-width` addressed and
  * which is now reverted. Kept because it is harmless and mildly useful, not because it solved anything. */
-.composer-row .btn-send { flex: none; }
-
+.composer-row /*
+ * The input IS the composer's surface.
+ *
+ * It used to sit in a row beside a Send button, so the visible control ended before the prose's right edge and the
+ * button sat outside it — the misalignment a review kept pointing at. It spans the dock's width now: one rounded
+ * box, the same left edge as the paragraph above it, and nothing beside it.
+ *
+ * `rows=2` and a 40vh cap: a prompt is usually a line or two, and a box that grows to most of the window while
+ * typing would push the conversation away exactly when the reader wants to look at it.
+ */
+.composer .composer-input,
 .composer textarea {
-  flex: 1;
-  min-height: 72px;
+  width: 100%;
+  min-height: 0;
   max-height: 40vh;
-  resize: vertical;
-  background: var(--bg);
+  resize: none;
+  background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: var(--r-2);
-  padding: 9px 11px;
+  border-radius: var(--r-3);
+  padding: 10px 12px;
   color: var(--text);
   font: var(--fs-md) / 1.5 var(--sans);
+  /* `resize: none`: the handle was a second, draggable dimension for a box that already grows with its content and
+     is capped. It also drew a pair of diagonal lines in the corner of a surface meant to look quiet. */
+  field-sizing: content;
 }
-.composer textarea:focus { border-color: var(--accent); }
+.composer textarea:focus { border-color: var(--accent); outline: none; }
 .composer textarea:disabled { opacity: 0.6; }
 
-.btn-send {
-  height: 34px;
-  padding: 0 var(--sp-4);
-  background: var(--accent);
-  color: #05131f;
-  border: none;
-  border-radius: var(--r-2);
-  /*
-   * The font, explicitly (issue #100). A `<button>` inherits NEITHER family nor size from its parent —
-   * the UA sets its own — so this rule's `font-weight` alone left the most-clicked control in the app
-   * rendering in the platform's typeface, at the platform's size, next to text that is not.
-   *
-   * Found by the audit rather than by looking: it is the same omission as the toggle chip, in a place
-   * nobody had thought to check.
-   */
-  font-family: inherit;
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.btn-send:disabled { opacity: 0.5; cursor: not-allowed; }
 
+
+/* The hint is the composer's own caption: dim, small, and directly under the input it describes. */
 .hint { font-size: var(--fs-xs); color: var(--dim); }
+.composer .hint { padding: 0 2px; }
 .hint kbd {
   font-family: var(--mono);
   background: var(--panel-2);
@@ -2153,7 +2143,9 @@ select.btn { font-family: var(--sans); }
 /* While the control cannot act, the overlay must look as inert as the select beneath it. A modifier
    class rather than `:has()`, which would make correctness depend on selector support. */
 .picker-display.is-disabled { opacity: 0.55; }
-.picker-note { font-size: var(--fs-xs); color: var(--dim); flex-basis: 100%; text-align: right; }
+/* Spans both columns (the row rule sets `grid-column: 1 / -1`) and reads as one line under the block rather than as
+   a widow in the label column. */
+.picker-note { font-size: var(--fs-xs); color: var(--dim); text-align: right; justify-self: end; }
 /* --warn-text, not --warn: the design's no-colour-alone rule means the text carries the meaning
    and the colour only reinforces it. */
 .picker-note.warn { color: var(--warn-text); }
@@ -2214,21 +2206,50 @@ select.btn { font-family: var(--sans); }
  */
 .transcript-wrap {
   position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0;
+  /* The band the `Jump to latest` pill floats in. Reserved HERE so the scrollport ends above it — see the test. */
+  --jump-strip: 40px;
+  padding-bottom: var(--jump-strip);
 }
 
 /*
- * The foot of the transcript: the follow control, then the composer.
+ * The composer's dock: it LOOKS like it floats, and takes real space.
  *
- * One border separates reading from writing — the only horizontal rule between them, where there used to be three
- * (the old `legend` row, the composer's own top border, and the trace's top border).
+ * NO BORDER, NO FILL, NO BAND. The previous version was a full-width strip with a top border and a `--panel`
+ * background, which drew a hard rule across the column and made the composer read as a separate panel — the
+ * separation a review called the biggest problem in the layout, twice.
+ *
+ * ## Why it is in the flow rather than `position: absolute`
+ *
+ * Floating it over the scroller would be the more literal reading of "resting on the conversation", and it was the
+ * first version of this change. It is the wrong trade: the dock's height VARIES — a mode strip appears while
+ * streaming, a queue strip when messages are waiting — so a fixed reservation under the scroller is wrong by
+ * 60–100px in exactly the states where the reader is most likely to be at the bottom, and the last message ends up
+ * permanently behind the input. A floating composer that hides the end of the conversation is the "Jump to latest
+ * covers a line" defect (#71) with a bigger control.
+ *
+ * So it occupies its own height and the effect is made with LIGHT rather than layering: a gradient from transparent
+ * to the page colour at the dock's top edge dissolves the transcript into it, so there is no line to see. The input
+ * itself is the only visible surface. Nothing is ever covered, and nothing shifts as the window resizes.
  */
 .transcript-footer {
   flex: none;
-  border-top: 1px solid var(--line);
-  background: var(--panel);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
+  /* The fade IS the separation: no border, no fill, no shadow. */
+  background: linear-gradient(to bottom, transparent, var(--bg) 12px);
+  /* Room for the hint line and the dock's own breathing space. */
+  padding: 0 0 var(--sp-2);
+}
+.composer-dock {
+  /*
+   * The dock sits in the SAME lane as the prose, and is centred nowhere: it starts at the prose's left edge and is
+   * capped to the prose's measure, so the input's left edge is the paragraph's left edge at every width.
+   *
+   * The same `max-width`, the same `--lane-inset`, inherited from `.column` — not a second computation of the same
+   * thing, which is the class of bug this file keeps recording.
+   */
+  max-width: var(--reading-measure);
+  width: 100%;
+  margin-left: calc(18px + var(--lane-inset));
+  padding: var(--sp-2) 0 0;
 }
 
 /* Shown only while the reader is scrolled away from the bottom, where it has a job to do. The

@@ -488,14 +488,28 @@ export function TranscriptView({
         joins it here too, because the control belongs with the scroller it governs rather than on a row of its own
         above the conversation.
       */}
+      {/*
+        THE COMPOSER IS THE TRANSCRIPT'S FOOT, AND HAS NO BAND OF ITS OWN.
+
+        It used to be a strip with a top border and a `--panel` fill, which drew a hard rule across the column and
+        made the composer read as a separate panel — the separation a review called the biggest problem in the
+        layout, twice. `.transcript-footer` now fades the transcript into it instead of ruling it off, so the
+        composer looks like it rests on the conversation while still occupying its own height.
+
+        In the flow, not overlaid: the dock grows by 60–100px when a mode strip or a queue appears, so an overlay
+        would need a reservation that is wrong in exactly the states where the reader is at the bottom, leaving the
+        last message permanently behind the input.
+      */}
       {footer !== undefined && (
         <div className="transcript-footer">
-          {onToggleAutoFollow !== undefined && (
-            <div className="transcript-tools">
-              <FollowToggle following={autoFollow} onToggle={onToggleAutoFollow} />
-            </div>
-          )}
-          {footer}
+          <div className="composer-dock">
+            {onToggleAutoFollow !== undefined && (
+              <div className="transcript-tools">
+                <FollowToggle following={autoFollow} onToggle={onToggleAutoFollow} />
+              </div>
+            )}
+            {footer}
+          </div>
         </div>
       )}
     </div>
