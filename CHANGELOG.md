@@ -345,6 +345,13 @@ They are kept because each one is the reason a constraint or an invariant test e
   separate field because the two answer different questions: *"is it broken now"* and *"how did it break last
   time"*.
 
+  **A control the orchestrator implements must not be rejected by its own allowlist.** the first
+  push of this slice had a `retry` case in the switch but not in `KNOWN_CONTROL_KINDS`, the hardcoded list
+  checked *above* the switch — so every press still answered `bad control: unknown kind 'retry'` on a branch
+  that had implemented it, and every test passed. `Set<Control["kind"]>` does not require every member. The list
+  is now derived from a `Record<Control["kind"], true>`, which makes a new kind a compile error, and a transport
+  test drives `retry` over a real socket so the runtime half is covered too.
+
   **The control is not offered when the connected orchestrator is too old.** A red banner reading
   `bad control: unknown kind 'retry'` was reported from a window — reachable without any mistake in a checkout,
   because the UI is served as **files** (so `npm run ui:build` reaches a running orchestrator immediately) while
