@@ -437,6 +437,36 @@ They are kept because each one is the reason a constraint or an invariant test e
   broken once each (#80, #86, #141), and truncating what a reader can read to make the app fast is the wrong
   trade.
 
+### Added
+
+- **Renaming a session is one gesture, in the header and in the rail** (issues #78, #79).
+
+  Reported: *"renaming a session is not easy"*. The only path was Inspector → Actions → expand `Rename…` → type →
+  `Save name`: the detail panel had to be visible and a disclosure opened before a single character could be
+  typed, which is why nobody names a session.
+
+  `DESIGN.md` §12 already specified the gesture — *"**Double-click the header name** → inline rename
+  (`set_session_name`)"* — and it had never been built. It is now, on the header **and** on the rail row, because
+  the row is where the name is actually read.
+
+  Enter commits, Escape cancels, and **blur commits** — losing a name you just typed is the failure this issue is
+  about. An empty or unchanged value never reaches the orchestrator, because a rename that sends `""` would blank
+  a name the reader can see.
+
+  **The generated-default-name option is dropped**, and this is the reasoning worth keeping: a generated name
+  *looks chosen*, which removes the nudge to ever name anything, and `brisk-otter` is no more findable tomorrow
+  than `s7`. The fix for indistinguishable sessions is cheap renaming, not invented names.
+
+  **The field opens with the name as DISPLAYED**, not the stored one. Reported from use: a scratch session's row
+  read `Scratch session`, but double-clicking opened `s1`. The component takes one value now — the displayed one —
+  so there is no second name to pass; and because the unchanged check compares against what is on screen,
+  accepting `Scratch session` unchanged sends nothing. That keeps the decision above intact: a default label can
+  never be silently promoted into a literal name, which would give every scratch session the same title again.
+
+  Only a live session is renameable, in the rail as well as the header: Pi performs the rename over RPC
+  (`set_session_name`), so a row whose process is gone has nobody to ask. It shows plain text rather than a field
+  that could not work.
+
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.4.1] — 2026-10-29

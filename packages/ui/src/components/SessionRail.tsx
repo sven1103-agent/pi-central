@@ -36,6 +36,7 @@ export function SessionRail({
   onFocusRow,
   onForgetRow,
   onRetryRow,
+  onRenameRow,
   retryAvailable,
   onStartSession,
   onOpenDirectory,
@@ -67,6 +68,13 @@ export function SessionRail({
    * the rail had no such control.
    */
   onRetryRow: (row: RosterRow) => void;
+  /**
+   * Rename a row (issues #78, #79).
+   *
+   * The rail is where the name is actually READ, so renaming belongs here as much as in the header. Offered only
+   * for a live session: Pi performs the rename over RPC, and a row whose process is gone has nobody to ask.
+   */
+  onRenameRow: (row: RosterRow, name: string) => void;
   /**
    * Whether the CONNECTED orchestrator understands `retry` (issue #11).
    *
@@ -145,6 +153,7 @@ export function SessionRail({
                   onFocus={() => onFocusRow(row)}
                   onForget={() => onForgetRow(row)}
                   onRetry={() => onRetryRow(row)}
+                  onRename={(name) => onRenameRow(row, name)}
                   retryAvailable={retryAvailable}
                   home={home}
                 />
@@ -211,6 +220,7 @@ function RailRow({
   onFocus,
   onForget,
   onRetry,
+  onRename,
   retryAvailable,
   home,
 }: {
@@ -219,6 +229,7 @@ function RailRow({
   onFocus: () => void;
   onForget: () => void;
   onRetry: () => void;
+  onRename: (name: string) => void;
   retryAvailable: boolean;
   home: string | undefined;
 }) {
