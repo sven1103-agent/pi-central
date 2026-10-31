@@ -90,11 +90,18 @@ test("the transcript keeps its own horizontal padding", () => {
   const transcript = rule(".transcript");
   assert.ok(transcript, ".transcript must have a rule");
   // The declaration is normalised by the helper (whitespace collapsed), so the assertion reads the same shape.
-  // The jump control's band is reserved by `.transcript-wrap`, not by the scroller: the composer sits inside the
-  // wrapper, so a reserved row at the scroller's foot would have been a permanent gap above the input.
+  /*
+   * The padding is declared in two parts now: a `padding-top` override inside the narrow-container query (where the
+   * header becomes a row and the scroller needs no reservation for it), and the base rule that carries the sides.
+   * The helper returns the LAST matching rule, so the guarded declaration is the one with the horizontal insets.
+   */
+  const sides = rule(".transcript") ?? "";
+  const base = /\.transcript\s*\{([^}]*)\}/.exec(
+    readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, ""),
+  )?.[1] ?? "";
   assert.match(
-    transcript,
+    base,
     /padding:\s*var\(--sp-4\) 18px var\(--sp-4\) calc\(18px \+ var\(--lane-inset\)\)/,
-    `18px on the right and 18px + the lane inset on the left; got: ${transcript}`,
+    `18px on the right and 18px + the lane inset on the left; got: ${base || sides}`,
   );
 });

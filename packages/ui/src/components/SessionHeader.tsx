@@ -52,6 +52,8 @@ export function SessionHeader({
   onRequestThinkingLevels,
   onSelectThinkingLevel,
   onRename,
+  busy = false,
+  warnings = [],
 }: {
   session: LiveSession;
   home: string | undefined;
@@ -63,9 +65,21 @@ export function SessionHeader({
   onRequestThinkingLevels: () => void;
   onSelectThinkingLevel: (level: string) => void;
   onRename: (name: string) => void;
+  /**
+   * Is a run in progress? The 2px progress rule lives here now.
+   *
+   * It used to be a `run-track` div between two full-width strips, which reserved height for a bar that is empty
+   * most of the time. As part of the header's own edge it costs nothing when idle and belongs to the thing it
+   * describes.
+   */
+  busy?: boolean;
+  /** Session warnings. They belong with the identity they qualify, not on a row of their own above the transcript. */
+  warnings?: readonly string[];
 }) {
   return (
     <header className="session-header">
+      {/* The run bar sits on the header's top edge, where "something is happening" is answered. */}
+      <div className="run-track">{busy && <div className="run-bar" style={{ width: "100%" }} />}</div>
       <div className="title">
         <h2>
           {/*
@@ -124,6 +138,14 @@ export function SessionHeader({
         ONE block, two rows, one label column (issue #163): a `<label>` and a value of different widths cannot be
         aligned by eye, which is what put three left edges in a 120px space before.
       */}
+      {warnings.length > 0 && (
+        <div className="warnings" role="note">
+          {warnings.map((warning, index) => (
+            <span key={index}>⚠ {warning}</span>
+          ))}
+        </div>
+      )}
+
       <div className="picker picker-grid">
         <ModelPicker
           session={session}

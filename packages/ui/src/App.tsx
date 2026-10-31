@@ -990,39 +990,6 @@ function SessionView({
 
   return (
     <>
-      <SessionHeader
-        session={session}
-        home={home}
-        models={models}
-        modelError={modelError}
-        onRequestModels={onRequestModels}
-        onSelectModel={onSelectModel}
-        thinking={thinking}
-        onRequestThinkingLevels={onRequestThinkingLevels}
-        onSelectThinkingLevel={onSelectThinkingLevel}
-        onRename={onRename}
-      />
-
-      {/*
-        A run's progress is a 2px rule, not a row of its own. It used to sit in a `run-track` div between two
-        strips, which reserved height for a bar that is empty most of the time.
-      */}
-      <div className="run-track">
-        {busy && <div className="run-bar" style={{ width: "100%" }} />}
-      </div>
-
-      {/*
-        Exceptional state gets real layout space, in one place, above the conversation: a warning about the
-        sandbox, or a dialog the agent is blocked on. Neither is absolutely positioned over content.
-      */}
-      {session.warnings.length > 0 && (
-        <div className="warnings" role="note">
-          {session.warnings.map((warning, index) => (
-            <span key={index}>⚠ {warning}</span>
-          ))}
-        </div>
-      )}
-
       <DialogDock dialogs={session.dialogs} onAnswer={onAnswer} />
 
       <TranscriptView
@@ -1040,6 +1007,31 @@ function SessionView({
         onToggleAutoFollow={onToggleAutoFollow}
         historyError={historyError}
         onOpenTool={(toolCallId) => onInspectTool(toolCallId)}
+        /*
+          The session header is handed to the transcript rather than rendered above it.
+
+          As a full-width band it read as chrome belonging to the WINDOW, not to the conversation — a review called
+          it "not clear that it belongs to the transcript". The transcript owns it now: on a wide window it floats at
+          the top RIGHT of the reading area as a companion, and when there is no room for that it flips to a compact
+          row above the scroller. The placement is the transcript's decision because the transcript knows how much
+          room it has (`container-type: inline-size`).
+        */
+        header={
+          <SessionHeader
+            session={session}
+            home={home}
+            models={models}
+            modelError={modelError}
+            onRequestModels={onRequestModels}
+            onSelectModel={onSelectModel}
+            thinking={thinking}
+            onRequestThinkingLevels={onRequestThinkingLevels}
+            onSelectThinkingLevel={onSelectThinkingLevel}
+            onRename={onRename}
+            busy={busy}
+            warnings={session.warnings}
+          />
+        }
         footer={
           pendingDialogCount({ ...initialState(), live: [session] }) > 0 ? undefined : (
             <Composer

@@ -595,26 +595,34 @@ button { font: inherit; color: inherit; }
  * center` because the row is a single band now, and `flex-wrap` so a narrow window moves the model block to its
  * own line instead of clipping the name or painting over a neighbour (issue #96).
  */
+/*
+ * The session header is a COMPANION to the conversation, not a band above it.
+ *
+ * As a full-width strip with a bottom border and a `--panel` fill it read as chrome belonging to the window — a
+ * review asked for it to be embedded in the transcript, floating at the top right where a desktop has room. So:
+ * no fill, no border, no full-width rule, and `nowrap` with a single line.
+ *
+ * The `nowrap` is deliberate and was earned: a freely-wrapping row was one extra element away from a four-row header
+ * with a stranded button (`img_23.png`). Only the identity block shrinks; the control groups keep their widths,
+ * because a clipped CONTROL label is a defect while a truncated session name is not (the full name is in the rail,
+ * in `title`, and in the panel). The narrow-container query below is the one place wrapping is reintroduced, and
+ * there it is the point.
+ */
 .session-header {
-  /*
-   * `nowrap`, and each group is `flex: none` or has an explicit basis.
-   *
-   * The version before this wrapped freely. Adding a disclosure row was enough to push the pickers onto two lines
-   * and leave the button stranded at the far right — a four-row header from one extra element (`img_23.png`).
-   * A row that is allowed to wrap at any point will eventually wrap badly; so the identity block is the only thing
-   * that shrinks, and the two control groups keep their own widths.
-   *
-   * The identity block shrinking (rather than the controls) is the same rule as before: a clipped CONTROL label is
-   * a defect, a truncated session name is not — the full name is in the rail, in `title`, and in the panel.
-   */
+  /* `relative` for the run bar, which is positioned against this block's edge. */
+  position: relative;
   display: flex;
   align-items: center;
-  gap: var(--sp-4);
-  padding: var(--sp-2) 18px;
-  border-bottom: 1px solid var(--line);
-  background: var(--panel);
+  gap: var(--sp-3);
   flex-wrap: nowrap;
   min-height: 44px;
+  /* A floating block: its own subtle surface and radius, so it reads as an object resting on the page rather than a
+     region of it. No border-bottom — that was the line that made it look like window chrome. */
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  padding: var(--sp-2) var(--sp-3);
+  max-width: 100%;
 }
 .session-header h2 { display: flex; align-items: center; gap: var(--sp-2); margin: 0; min-width: 0; }
 .session-header .title {
@@ -685,16 +693,34 @@ button { font: inherit; color: inherit; }
   margin: 0 10px;
 }
 
-/* The run bar: 2px rule whose width is elapsed progress. Motion is never the only signal. */
+/*
+ * The run bar: a 2px rule whose width is elapsed progress, now on the header's own top edge.
+ *
+ * It used to be a `run-track` div between two full-width strips, which reserved height for a bar that is empty most
+ * of the time. Inside the floating header it costs nothing when idle.
+ */
 .run-bar { height: 2px; background: var(--accent); transition: width 0.3s linear; }
-.run-track { height: 2px; background: var(--line); }
+.run-track {
+  height: 2px;
+  /* Hung just above the block's top edge rather than taking a row of its own. */
+  position: absolute;
+  top: 0;
+  left: var(--sp-3);
+  right: var(--sp-3);
+  background: var(--line);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
 
+/* Warnings belong with the identity they qualify, so they render inside the floating header rather than as a
+   full-width strip above the conversation. */
 .warnings {
-  border-bottom: 1px solid var(--line);
+  flex-basis: 100%;
   background: var(--warn-tint);
   color: var(--warn-text);
-  padding: 6px 18px;
-  font-size: var(--fs-sm);
+  border-radius: var(--r-2);
+  padding: 3px var(--sp-2);
+  font-size: var(--fs-xs);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1106,9 +1132,17 @@ button { font: inherit; color: inherit; }
   padding: 10px 12px;
   color: var(--text);
   font: var(--fs-md) / 1.5 var(--sans);
-  /* `resize: none`: the handle was a second, draggable dimension for a box that already grows with its content and
-     is capped. It also drew a pair of diagonal lines in the corner of a surface meant to look quiet. */
+  /*
+   * Three lines of room before it scrolls: `min-height` in `em` of the INPUT's own font, so it holds three lines at
+   * any reading size rather than three lines at one.
+   *
+   * `rows={3}` alone is a HINT the browser may override with `field-sizing: content`; the explicit floor is what
+   * makes the promise hold. `resize: none` because the box grows with its content and is capped — the handle was a
+   * second, draggable dimension that also drew diagonal lines in the corner of a surface meant to look quiet.
+   */
+  min-height: calc(1.5em * 3 + 20px);
   field-sizing: content;
+  resize: none;
 }
 .composer textarea:focus { border-color: var(--accent); outline: none; }
 .composer textarea:disabled { opacity: 0.6; }
@@ -2176,39 +2210,75 @@ select.btn { font-family: var(--sans); }
 
 /* --- Jump to latest (issue #6) ------------------------------------------------------------------ */
 
-/* The positioned ancestor for the control. The scroller itself must not be the containing block,
-   or an absolutely-positioned button scrolls away with the content.
-
-   It also RESERVES the strip the control floats in, and that detail is the whole fix (issue #71).
-   The control is positioned against the bottom of the VIEWPORT, so while the reader is mid-list it
-   sits over whatever line happens to be there — and with an opaque background it produced a sentence
-   with a hole in it: "…the escaped quote in m[ ↓ Jump to latest ]check."
-
-   Reserving space INSIDE the scroller would not have fixed that: padding at the end of the content
-   protects only the LAST line, because the padding scrolls with the content while the control does
-   not. Mid-list the control would still land on text. So the scrollport itself stops `--jump-strip`
-   short of the column's bottom and the control lives in the strip that is left, where it can overlap
-   nothing but its own reserved space at any scroll position.
-
-   The cost is a `--jump-strip`-tall band below the transcript even while the control is hidden. A
-   small permanent gap is the price of never covering a line; stated here rather than discovered
-   later. */
 /*
- * The transcript region: the scroll port AND the composer, as one container.
+ * The transcript region: the scroll port, its header, AND the composer, as one container.
  *
- * The composer used to be a sibling band with its own top border, padding and width. A review called that
+ * The composer used to be a sibling band below this with its own top border, padding and width. A review called that
  * separation the biggest problem in the layout — conversation, writing surface and trace each occupied a different
- * strip, so the workspace read as three panels stacked rather than one conversation.
+ * strip, so the workspace read as three panels stacked.
  *
- * `--jump-strip` is the band the "Jump to latest" control floats in. It is reserved on the SCROLLER rather than on
- * this wrapper now, because the composer no longer sits below it: the gap has to be inside the scroll region, or it
- * becomes a permanent blank row between the last message and the composer.
+ * `--jump-strip` is the band the "Jump to latest" control floats in, reserved at the wrapper's foot so the scrollport
+ * ends above it (issue #71). Reserving INSIDE the scroller would not work: padding at the end of the content protects
+ * only the LAST line, because it scrolls with the content while the control does not — mid-list the control would
+ * still land on text. The cost is a band below the scrollport even while the control is hidden, and that is the price
+ * of never covering a line.
+ *
+ * `container-type: inline-size` makes this the query container for the header's placement: the header floats beside
+ * the prose when the transcript is wide and becomes a compact row when it is not. Keying that off the VIEWPORT would
+ * be wrong — an open panel leaves a wide window with a narrow transcript.
  */
 .transcript-wrap {
   position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0;
-  /* The band the `Jump to latest` pill floats in. Reserved HERE so the scrollport ends above it — see the test. */
   --jump-strip: 40px;
   padding-bottom: var(--jump-strip);
+  container-type: inline-size;
+  container-name: transcript;
+}
+
+/*
+ * The session header, as a COMPANION to the conversation.
+ *
+ * It used to be a full-width band above everything, which read as chrome belonging to the window rather than to the
+ * session — a review asked for it to be embedded in the transcript instead, floating at the top right where there is
+ * demonstrably room on a desktop. That is what this is: the identity and the pickers sit in the empty right-hand
+ * region beside the prose's lane, so the conversation keeps its full height and the header is visibly part of it.
+ */
+.transcript-header {
+  /* Not a band: it takes no space of its own and lets the scroller sit under it. */
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: flex-end;
+  /* Only the floating block catches clicks, so text under the rest of the strip stays selectable. */
+  pointer-events: none;
+  padding: var(--sp-3) 18px 0;
+}
+.transcript-header > * { pointer-events: auto; }
+
+/* Room for the floating header, so the first message is never underneath it. */
+.transcript-wrap.has-header .transcript { padding-top: 96px; }
+
+/*
+ * Narrow transcript: flip to a compact row above the scroller.
+ *
+ * Below this width the right-hand region is the prose's own space, so a floating block would cover text. The header
+ * becomes an ordinary row in the flow, which is what the shell used to do — the difference is that it is now the
+ * transcript's decision, and it happens at the TRANSCRIPT's width rather than the window's.
+ */
+@container transcript (max-width: 760px) {
+  .transcript-header {
+    position: static;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    padding: var(--sp-2) 18px;
+    flex: none;
+  }
+  /* The band carries its own height, so the scroller needs no reservation. */
+  .transcript-wrap.has-header .transcript { padding-top: var(--sp-4); }
+  .session-header { flex-wrap: wrap; }
 }
 
 /*
@@ -2254,8 +2324,16 @@ select.btn { font-family: var(--sans); }
 
 /* Shown only while the reader is scrolled away from the bottom, where it has a job to do. The
    position is bottom-CENTRE rather than a corner so it does not cover the scrollbar. */
+/*
+ * The pill sits at the foot of the SCROLLER, not of the wrapper.
+ *
+ * It was positioned against `.transcript-wrap`, which is right only while the composer is outside that wrapper... and
+ * the composer is INSIDE it now. So `bottom: 4px` put the pill below the composer, at the very bottom of the window —
+ * exactly what a review caught (`img_26.png`). The wrapper reserves the band at its foot, so anchoring there is
+ * correct: the pill lands in the reserved strip, directly above the composer.
+ */
 .jump-latest {
-  position: absolute; left: 50%; transform: translateX(-50%); bottom: 4px;
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--jump-strip) + 4px);
   display: inline-flex; align-items: center; gap: 6px;
   padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line);
   background: var(--bg-raised, var(--bg)); color: inherit; font: inherit; cursor: pointer;

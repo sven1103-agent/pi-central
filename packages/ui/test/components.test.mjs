@@ -1843,8 +1843,19 @@ test("the jump control cannot cover a line of text", () => {
   assert.ok(pill, ".jump-latest must have a rule");
   assert.match(pill[1], /position:\s*absolute/, "the control floats");
 
-  const bottom = Number(/\.jump-latest\s*\{[^}]*bottom:\s*(\d+)px/.exec(css)?.[1]);
-  assert.ok(Number.isFinite(bottom), "the control must be offset from the bottom");
+  /*
+   * The offset is now `calc(var(--jump-strip) + 4px)` rather than a bare `4px`, and that change is the fix for a
+   * real defect: the pill was anchored to `.transcript-wrap`'s bottom, which stopped being the transcript's bottom
+   * when the composer moved inside the wrapper — so it rendered BELOW the composer, at the very foot of the window
+   * (`img_26.png`). Anchoring it a strip's height up puts it in the reserved band, directly above the composer.
+   */
+  const bottomExpr = /\.jump-latest\s*\{[^}]*bottom:\s*([^;]+);/.exec(css)?.[1] ?? "";
+  assert.match(
+    bottomExpr,
+    /var\(--jump-strip\)/,
+    `the control must sit a jump-strip above the foot, or it lands under the composer; got ${bottomExpr}`,
+  );
+  const bottom = Number(/\+\s*(\d+)px/.exec(bottomExpr)?.[1] ?? "0");
 
   // The wrapper reserves the control's band; the scroller ends above it, so nothing can sit under the pill.
   const wrap = /\.transcript-wrap\s*\{([^}]*)\}/.exec(css.replace(/\/\*[\s\S]*?\*\//g, ""));

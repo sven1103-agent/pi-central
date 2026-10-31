@@ -86,6 +86,7 @@ export function TranscriptView({
   activityOpen = {},
   onToggleActivity = () => {},
   onToggleAutoFollow,
+  header,
   footer,
   historyError,
 }: {
@@ -163,6 +164,19 @@ export function TranscriptView({
    * about prompts, queues or steering. `App` decides what occupies the Foot.
    */
   footer?: React.ReactNode;
+  /**
+   * The focused session's header.
+   *
+   * A SLOT, and placed by the transcript rather than by the shell, because the right placement depends on how much
+   * room the transcript has. On a wide column it floats at the top right of the reading area as a companion to the
+   * conversation — the review's point was that a full-width band above it reads as window chrome rather than as
+   * something belonging to the session. Narrow, there is no room beside the prose, so it becomes a compact row above
+   * the scroller.
+   *
+   * `container-type: inline-size` on this region is what makes that a container query rather than a guess about the
+   * window: the same window can hold a wide transcript or a narrow one, depending on the panel.
+   */
+  header?: React.ReactNode;
   /**
    * Why the conversation could not be read, if it could not be.
    *
@@ -390,7 +404,8 @@ export function TranscriptView({
     // The wrap also reserves the strip the button floats in (issue #71) — see the CSS. Being a
     // sibling is what makes that possible, and the reservation is what stops the button covering a
     // line of text at any scroll position.
-    <div className="transcript-wrap">
+    <div className={`transcript-wrap${header !== undefined ? " has-header" : ""}`}>
+      {header !== undefined && <div className="transcript-header">{header}</div>}
       <div
         className="transcript"
         ref={containerRef}

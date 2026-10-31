@@ -114,8 +114,12 @@ test("the header shows context and cost, and NOT the lookups", () => {
 
 test("the header cannot scatter into four rows", () => {
   // The defect: one extra element was enough to push the pickers onto two more lines and strand a button.
-  const header = rule(".session-header") ?? "";
-  assert.match(header, /flex-wrap:\s*nowrap/, "the row does not wrap freely; each group keeps its place");
+  //
+  // The header is now a floating COMPANION inside the transcript rather than a full-width band, and inside the
+  // narrow-container query it deliberately wraps — a compact row has to. `nowrap` is therefore the base rule, and
+  // the guarded property is that the CONTROL GROUPS never shrink into their own labels, which is what broke.
+  const header = /(?:^|\n)\.session-header\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(header, /flex-wrap:\s*nowrap/, "the row does not wrap freely in its wide, floating form");
   // Identity shrinks, the control groups do not — a clipped CONTROL label is a defect, a truncated name is not.
   const picker = rule(".picker-grid") ?? "";
   assert.match(picker, /flex:\s*none/, "the picker group never shrinks into its own label");

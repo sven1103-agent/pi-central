@@ -238,7 +238,14 @@ export function Composer({
         }
         disabled={unavailable}
         aria-label="Prompt"
-        rows={2}
+        /*
+         * THREE LINES before it scrolls.
+         *
+         * `rows={2}` plus `field-sizing: content` measured as roughly two lines of usable text in a real window — a
+         * review said the box was too small for the prompts people actually write, which are rarely one line. Three
+         * is the smallest height that shows a short paragraph in full.
+         */
+        rows={3}
       />
 
       <div className="hint">
