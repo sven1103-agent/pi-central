@@ -51,9 +51,17 @@ export interface ModelPickerProps {
   /** Ask the orchestrator for the catalogue. Called on open AND on an explicit retry. */
   onRequest: () => void;
   onSelect: (provider: string, modelId: string) => void;
+  /**
+   * The thinking-level control, rendered on the MODEL's row (issue #163).
+   *
+   * Passed in rather than imported: the two are coupled — the levels are per-model, so a change to one invalidates
+   * the other — and they must share a row and a label column. Accepting it as a slot keeps `ThinkingPicker` owning
+   * its own fetch/failure logic while the layout decides where it sits.
+   */
+  thinking?: React.ReactNode;
 }
 
-export function ModelPicker({ session, models, error, onRequest, onSelect }: ModelPickerProps) {
+export function ModelPicker({ session, models, error, onRequest, onSelect, thinking }: ModelPickerProps) {
   // Whether THIS mount has already asked. `onFocus` fires repeatedly (every focus, every click),
   // so without this each focus would send another request. The guard lives here rather than in the
   // parent so that "Retry" can deliberately bypass it — a retry that were also guarded would be a
@@ -108,75 +116,120 @@ export function ModelPicker({ session, models, error, onRequest, onSelect }: Mod
   // arrives the raw `provider/id` is all there is.
   const selected = models?.find((model) => isCurrentModel(session, model));
   const fullLabel = selected ? (selected.name ?? selected.id) : current;
-  const displayLabel = truncateMiddle(fullLabel, LABEL_MAX);
+  /*
+   * The MODEL on its own, and the provider moved out of the label (issue #163).
+   *
+   * `fullLabel` is the catalogue's name, which usually carries no provider — so in a setup with the same model
+   * configured on two providers, the header named the model and hid the half that decides cost and routing. And
+   * wherever the name IS absent, the fallback is `provider/id`, which repeated the provider on both lines.
+   *
+   * The provider is emitted as its own field with its own label, because it is a fact the user configured and gave
+   * a name to. `truncateMiddle` stays: a long model id must not push the controls out of the header.
+   */
+  const modelLabel = truncateMiddle(selected ? (selected.name ?? selected.id) : (session.model ?? "—"), LABEL_MAX);
 
+  /*
+   * TWO ROWS, ONE LABEL COLUMN, and only one control under each label.
+   *
+   * From a screenshot: the provider sat above and to the right of the model, `Thinking` was on the PROVIDER's
+   * line, and `Model` hung below on its own — three different left edges in one 120px block. The cause was that
+   * the pickers were siblings in the header row, each with its own label, so nothing lined up: a `<label>` and a
+   * value of different widths cannot be aligned by eye.
+   *
+   * So the header gets one block with a `grid-template-columns` label column, and this component emits ROWS of
+   * it. Thinking joins the model's row because the two are coupled — the levels are per-model — and because the
+   * provider is the only thing that needs its own line, being a read-only fact rather than a control.
+   *
+   * `data-picker-row` is what tells the shell where to place each row: two columns, so every label starts at the
+   * same x and every control starts at the same x, whatever their content.
+   */
   return (
-    <div className="picker">
-      <label className="picker-label" htmlFor={`model-${session.id}`}>
+    <>
+      <span className="picker-label" data-picker-row="provider" data-picker-label="">
+        Provider
+      </span>
+      <span className="picker-provider mono" data-picker-row="provider" title={session.provider ?? undefined}>
+        {session.provider ?? "—"}
+      </span>
+
+      <label className="picker-label" data-picker-row="model" data-picker-label="" htmlFor={`model-${session.id}`}>
         Model
       </label>
-      <div className="picker-field">
-        {/*
-          * The SHORTENED view, drawn over the select; the select beneath keeps full option text.
-          *
-          * A native `<select>` renders the selected option's text in its closed state, so "compact
-          * when closed, complete when open" is not expressible through option text alone — and both
-          * halves are required here: the header must stay identifying while the list must stay
-          * readable, because picking from truncated names is how you choose the wrong model.
-          *
-          * `aria-hidden` because it is a visual restatement of the select's own value: a screen
-          * reader should hear the FULL name once, from the select, rather than a shortened one
-          * twice. The `title` carries the full value for a pointer, so no one has to decode an
-          * elision to find out which model is in use.
-          */}
-        <span
-          className={`picker-display mono${usable ? "" : " is-disabled"}`}
-          aria-hidden="true"
-          title={fullLabel}
-        >
-          {displayLabel}
+      <span className="picker-controls" data-picker-row="model">
+        <span className="picker-field">
+          {/*
+            * The SHORTENED view, drawn over the select; the select beneath keeps full option text.
+            *
+            * A native `<select>` renders the selected option's text in its closed state, so "compact when closed,
+            * complete when open" is not expressible through option text alone — and both halves are required
+            * here: the header must stay identifying while the list must stay readable, because picking from
+            * truncated names is how you choose the wrong model.
+            *
+            * `aria-hidden` because it is a visual restatement of the select's own value: a screen reader should
+            * hear the FULL name once, from the select, rather than a shortened one twice. The `title` carries the
+            * full value for a pointer, so no one has to decode an elision to find out which model is in use.
+            */}
+          <span className={`picker-display mono${usable ? "" : " is-disabled"}`} aria-hidden="true" title={fullLabel}>
+            {modelLabel}
+          </span>
+          <select
+            id={`model-${session.id}`}
+            className="picker-select"
+            title={fullLabel}
+            // Controlled by the session, not by local state: the shown value is Pi's, so a refused change leaves
+            // the select exactly where it was instead of showing the requested value.
+            value={models === undefined ? "" : currentKey(session, models)}
+            disabled={!usable}
+            // Opening fetches on demand, so the catalogue is never stale-by-default and the list is read at the
+            // moment it is about to be shown.
+            onFocus={ask}
+            onMouseDown={ask}
+            onChange={(event) => {
+              const [provider, ...rest] = event.target.value.split("/");
+              if (provider !== undefined && rest.length > 0) onSelect(provider, rest.join("/"));
+            }}
+          >
+            {/*
+              The current value must exist as an option or the select cannot display it. When the catalogue has
+              not loaded, this is the only entry — which is why the select reads as the model rather than as empty.
+
+              The MODEL alone, not `provider/id` (issue #163): the provider is named on the line above, and repeating
+              it here put it on two lines. The full identity is on the overlay's and the select's `title`.
+            */}
+            {models === undefined && <option value="">{session.model ?? "—"}</option>}
+            {models !== undefined && models.length === 0 && <option value="">no models available</option>}
+            {/* Full names, deliberately: this list is where a model is chosen, and the overlay covers the closed
+                control only. Truncating here would put the elision where the decision is made. */}
+            {models !== undefined &&
+              modelsByProvider(models).map((group) => (
+                <optgroup key={group.provider} label={group.provider}>
+                  {group.models.map((model) => (
+                    <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>
+                      {model.name ?? model.id}
+                      {model.reasoning ? " · thinking" : ""}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+          </select>
         </span>
-        <select
-          id={`model-${session.id}`}
-          className="picker-select"
-          title={fullLabel}
-        // Controlled by the session, not by local state: the shown value is Pi's, so a refused
-        // change leaves the select exactly where it was instead of showing the requested value.
-        value={models === undefined ? "" : currentKey(session, models)}
-        disabled={!usable}
-        // Opening fetches on demand, so the catalogue is never stale-by-default and the list is
-        // read at the moment it is about to be shown.
-        onFocus={ask}
-        onMouseDown={ask}
-        onChange={(event) => {
-          const [provider, ...rest] = event.target.value.split("/");
-          if (provider !== undefined && rest.length > 0) onSelect(provider, rest.join("/"));
-        }}
-        >
-          {/* The current value must exist as an option or the select cannot display it. When the
-              catalogue has not loaded, this is the only entry — which is why the select reads as the
-              model rather than as empty. */}
-          {models === undefined && <option value="">{current}</option>}
-          {models !== undefined && models.length === 0 && <option value="">no models available</option>}
-          {/* Full names, deliberately: this list is where a model is chosen, and the overlay covers
-              the closed control only. Truncating here would put the elision where the decision is
-              made. */}
-          {models !== undefined &&
-            modelsByProvider(models).map((group) => (
-              <optgroup key={group.provider} label={group.provider}>
-                {group.models.map((model) => (
-                  <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>
-                    {model.name ?? model.id}
-                    {model.reasoning ? " · thinking" : ""}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-        </select>
-      </div>
-      {loading && <span className="picker-note">reading the model list…</span>}
-      {timing !== "" && <span className="picker-note">{timing}</span>}
-    </div>
+        {/* Thinking sits on the model's line: the levels are per-model, so a change to one invalidates the other,
+            and the provider is the only thing here that needs a line of its own. */}
+        {thinking}
+      </span>
+      {/* The notes span the block rather than sitting inside a row, so a long message cannot widen the label
+          column. `data-picker-row` places them across both columns. */}
+      {loading && (
+        <span className="picker-note" data-picker-row="note" data-picker-label="">
+          reading the model list…
+        </span>
+      )}
+      {timing !== "" && (
+        <span className="picker-note" data-picker-row="note" data-picker-label="">
+          {timing}
+        </span>
+      )}
+    </>
   );
 }
 

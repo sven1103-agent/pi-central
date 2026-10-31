@@ -506,6 +506,33 @@ They are kept because each one is the reason a constraint or an invariant test e
   Only a live row is renameable: Pi performs it over RPC (`set_session_name`), so a row whose process is gone shows
   plain text rather than a field that could not work.
 
+### Fixed
+
+- **The active provider is shown, not hidden in the dropdown** (issue #163).
+
+  > *"Pi Central does not help the user to see in a multi provider setup of Pi, which Provider is active and which
+  > model is running. The provider configuration is sth user configure explicit and give them labels they know. So
+  > show it to them and dont hide this info in a drop down."*
+
+  Two ways it was hidden. The model label was the catalogue's `name`, which usually carries no provider — so with
+  the same model on two providers, the header named the model and hid the half that decides cost and routing. And
+  wherever a name was absent, the fallback was `provider/id`, which put the provider on both lines.
+
+  The **provider is now its own field**, labelled as such, in mono like a model id: it is an identifier the user
+  configured and named, not a caption. Read rather than chosen — Pi has no per-session provider switch, so
+  presenting it as a control would offer a change that cannot happen. The model label is the model alone, and the
+  placeholder `<option>` no longer repeats the provider either.
+
+  **One block, two rows, one label column.** A first version stacked the provider above the model and left the
+  Thinking picker as a sibling, which a screenshot showed as three different left edges in a 120px space: the
+  provider above and to the right, `Thinking` on the *provider's* line, `Model` hanging below. Each picker had its
+  own label, and a `<label>` and a value of different widths cannot be aligned by eye. The header is now a grid
+  whose label column is sized by its own widest label, `Provider` and `Model` labels share a left edge, and
+  **Thinking sits on the model's row** — the two are coupled, so a change to one invalidates the other.
+
+  An unknown provider is an **em dash**, never a blank, for the same reason the metrics strip uses one: a session
+  can be shown before `get_state` reports it, and blank reads as "there is none".
+
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.4.1] — 2026-10-29

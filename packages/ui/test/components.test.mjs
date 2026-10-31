@@ -1122,7 +1122,12 @@ test("the full model name is always available, so an elision is never the only a
     models: undefined, error: undefined, onRequest() {}, onSelect() {},
   }));
   assert.match(html, /title="litellm\/deepseek-V4\.1-Flash"/, "the full name must be on the control");
-  assert.match(html, /<option value=""[^>]*>litellm\/deepseek-V4\.1-Flash</, "the option keeps the full name");
+  // NARROWED in issue #163. The option used to carry `provider/id` as well; it now carries the model alone,
+  // because the provider is its own field and repeating it there put it on two lines. The rule this guards — "an
+  // elision is never the only answer" — is still satisfied: the full identity is on `title`, and the provider is
+  // readable as text beside the field rather than only on hover.
+  assert.match(html, /<option value=""[^>]*>deepseek-V4\.1-Flash</, "the option still carries the model");
+  assert.match(html, /class="picker-provider mono"[^>]*>litellm</, "and the provider is visible, not hover-only");
 });
 
 test("the shortened overlay is hidden from assistive technology", async () => {
@@ -1173,14 +1178,56 @@ test("the label shortens with the shared helper, so surfaces cannot drift", asyn
   assert.equal(truncateMiddle("openai/gpt-5", 22), "openai/gpt-5", "a name that fits is untouched");
 });
 
-test("a short name is left alone rather than elided for no reason", async () => {
+test("a short model name is left alone rather than elided for no reason", async () => {
+  // NARROWED in issue #163, not deleted. The rule being guarded is "do not elide what fits"; the original asserted
+  // the text `openai/gpt-5` in the model field, which was the model and the provider concatenated. The provider is
+  // its own field now, so that string no longer exists — the rule is asserted against the field that remains.
   const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
   const html = renderToString(createElement(ModelPicker, {
     session: session({ model: "gpt-5", provider: "openai" }),
     models: undefined, error: undefined, onRequest() {}, onSelect() {},
   }));
-  assert.match(html, /class="picker-display[^"]*"[^>]*>openai\/gpt-5</);
-  assert.ok(!/openai\/gpt-5[^<]*…/.test(html), "a name that fits must not be elided");
+  assert.match(html, /class="picker-display[^"]*"[^>]*>gpt-5</, "the model alone, unelided");
+  assert.ok(!/gpt-5[^<]*…/.test(html), "a name that fits must not be elided");
+});
+
+test("the provider is shown as its own field, not hidden in the dropdown (issue #163)", async () => {
+  // The complaint: with the same model configured on two providers, the header named the model and hid the half
+  // that decides cost and routing. And wherever a catalogue name is absent the model label fell back to
+  // `provider/id`, which put the provider on both lines.
+  const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  const html = renderToString(createElement(ModelPicker, {
+    session: session({ model: "gpt-5", provider: "litellm" }),
+    models: undefined, error: undefined, onRequest() {}, onSelect() {},
+  }));
+  // The label now carries `data-picker-row` so the grid can place it; matching the exact old attribute string
+  // would fail on the added attribute rather than on anything about the provider.
+  assert.match(html, /class="picker-label"[^>]*>Provider</, "it has its own label");
+  assert.match(html, /class="picker-provider mono"[^>]*>litellm</, "and its own value, in mono like the model id");
+  // The VISIBLE text of the model line must not repeat it. `title` attributes and the placeholder `<option>` still
+  // carry `provider/id`, and both are legitimate: the option is what a `<select>` needs to display a value it has no
+  // catalogue entry for yet, and the title is the full identity for a pointer. Asserting a bare count would have
+  // failed on those, which is why this checks rendered text rather than occurrences.
+  const visible = html
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  assert.equal(
+    (visible.match(/litellm/g) ?? []).length,
+    1,
+    `the provider must appear once as visible text: ${visible}`,
+  );
+});
+
+test("an unknown provider is an em dash, never a blank or a guess", async () => {
+  // Pi reports the provider after `get_state`, so a session can be shown before it is known. A blank field reads as
+  // "there is no provider"; an em dash is the established way this UI says "not known" (see the metrics strip).
+  const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  const html = renderToString(createElement(ModelPicker, {
+    session: session({ model: "gpt-5", provider: undefined }),
+    models: undefined, error: undefined, onRequest() {}, onSelect() {},
+  }));
+  assert.match(html, /class="picker-provider mono"[^>]*>—</);
 });
 
 test("the disabled overlay is marked, so it does not look actionable when the select is not", async () => {
@@ -2199,4 +2246,37 @@ test("nothing on the rail puts the error in a hover tooltip", () => {
   assert.ok(!/nvim-tmux|LiteLLM/.test(html), `no stderr text on the row at all: ${html}`);
   // React separates the label from the value with `<!-- -->`; asserting the sentence means normalising first.
   assert.match(html.replace(/<!-- -->/g, ""), /last failure: earlier failure/, "and its first line is still shown");
+});
+
+test("Provider and Model share ONE label column, and Thinking is on the model's row", async () => {
+  // From a screenshot: the provider sat above and to the right of the model, `Thinking` was on the PROVIDER's
+  // line, and `Model` hung below on its own — three left edges in a 120px block. Each picker was a sibling with
+  // its own label, and a `<label>` and a value of different widths cannot be aligned by eye, so alignment has to
+  // belong to the container.
+  //
+  // Asserted with a DOM rather than a regex: the contract is PLACEMENT, and React decides attribute order. A
+  // first version matched `data-picker-row="provider" data-picker-label=""` as adjacent and failed on markup that
+  // was exactly right, because `class` is rendered first.
+  const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
+  const html = renderToString(createElement(ModelPicker, {
+    session: session({ model: "gpt-5", provider: "litellm" }),
+    models: undefined, error: undefined, onRequest() {}, onSelect() {},
+    thinking: createElement("span", { className: "thinking-probe" }, "high"),
+  }));
+  const doc = new JSDOM(`<body>${html}</body>`).window.document;
+
+  for (const row of ["provider", "model"]) {
+    assert.ok(
+      doc.querySelector(`[data-picker-row="${row}"][data-picker-label]`),
+      `the ${row} label is placed by the grid`,
+    );
+  }
+  // Both labels are in a label column and both values in the control column, whatever their content.
+  assert.equal(doc.querySelectorAll("[data-picker-label]").length, 2, "exactly one label per row");
+
+  // Thinking lives INSIDE the model's control cell, so it shares that row.
+  const modelCell = doc.querySelector('.picker-controls[data-picker-row="model"]');
+  assert.ok(modelCell, "the model row is a control cell");
+  assert.ok(modelCell.querySelector(".thinking-probe"), "Thinking shares the model's row");
+  assert.ok(modelCell.querySelector(".picker-field"), "…alongside the model field itself");
 });

@@ -1721,6 +1721,54 @@ select.btn { font-family: var(--sans); }
   color: var(--dim);
   text-transform: none;
 }
+
+/*
+ * Two lines: Provider above, Model below (issue #163).
+ *
+ * The provider is a fact the user configured and named, and it decides cost and routing — so it is shown rather
+ * than hidden in a dropdown that only reveals it while choosing. A single line could not hold both without
+ * pushing the session name out of the header (#96 happened that way), so it stacks and the pair reads as one
+ * control.
+ *
+ * `align-items: flex-end` keeps the right edge flush with the rest of the header controls: the header is a row of
+ * small right-aligned things, and a stacked pair that drifted left would read as a different group.
+ */
+/*
+ * A LABEL COLUMN AND A CONTROL COLUMN, built from the children's own `data-picker-row` (issue #163).
+ *
+ * From a screenshot: the provider sat above and to the right of the model, `Thinking` was on the PROVIDER's line,
+ * and `Model` hung below on its own — three left edges in a 120px block. The cause was that each picker was a
+ * sibling with its own label, and a `<label>` and a value of different widths cannot be aligned by eye.
+ *
+ * So the block is a grid with two columns, and each child names the row it belongs to. Every label starts at the
+ * same x and every control starts at the same x, whatever their content — which is the property that failed
+ * twice before (#92 centring, #96 the picker painting over its neighbour): alignment belongs to the CONTAINER.
+ *
+ * `auto auto` on the columns, so the label column is as wide as the widest label rather than a guessed width. A
+ * number here would be the same invented-ratio mistake #140 rejected for the transcript measure.
+ */
+.picker-grid {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  /* Row gap only: a column gap would push the labels away from their controls by a second, different amount. */
+  gap: 2px var(--sp-2);
+  justify-content: end;
+}
+.picker-grid [data-picker-row="provider"] { grid-row: 1; }
+.picker-grid [data-picker-row="model"] { grid-row: 2; }
+.picker-grid [data-picker-row="note"] { grid-row: 3; grid-column: 1 / -1; }
+/* The label column: one left edge, and right-aligned so no label drives the column wider than it needs. */
+.picker-grid [data-picker-label] { justify-self: end; }
+/* The control column: everything after a label starts at the same x. */
+.picker-grid [data-picker-row]:not([data-picker-label]) { justify-self: start; }
+/*
+ * Model and Thinking share a row and a baseline. `flex-wrap: wrap` because a narrow window must push Thinking to its
+ * own line rather than clip the model — the failure #96 produced when the picker overflowed instead.
+ */
+.picker-controls { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+/* The provider is an IDENTIFIER, so it takes the same mono treatment as a model id — not the dim label styling. */
+.picker-provider { font-size: var(--fs-xs); color: var(--text); }
 .picker-select {
   font-family: var(--mono);
   font-size: var(--fs-xs);
