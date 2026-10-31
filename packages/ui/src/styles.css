@@ -1721,6 +1721,22 @@ select.btn { font-family: var(--sans); }
   color: var(--dim);
   text-transform: none;
 }
+
+/*
+ * Two lines: Provider above, Model below (issue #163).
+ *
+ * The provider is a fact the user configured and named, and it decides cost and routing — so it is shown rather
+ * than hidden in a dropdown that only reveals it while choosing. A single line could not hold both without
+ * pushing the session name out of the header (#96 happened that way), so it stacks and the pair reads as one
+ * control.
+ *
+ * `align-items: flex-end` keeps the right edge flush with the rest of the header controls: the header is a row of
+ * small right-aligned things, and a stacked pair that drifted left would read as a different group.
+ */
+.picker-stacked { flex-direction: column; align-items: flex-end; gap: 2px; }
+.picker-row { display: flex; align-items: center; gap: var(--sp-2); }
+/* The provider is an IDENTIFIER, so it takes the same mono treatment as a model id — not the dim label styling. */
+.picker-provider { font-size: var(--fs-xs); color: var(--text); }
 .picker-select {
   font-family: var(--mono);
   font-size: var(--fs-xs);

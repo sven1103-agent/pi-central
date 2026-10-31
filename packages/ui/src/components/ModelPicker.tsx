@@ -108,10 +108,33 @@ export function ModelPicker({ session, models, error, onRequest, onSelect }: Mod
   // arrives the raw `provider/id` is all there is.
   const selected = models?.find((model) => isCurrentModel(session, model));
   const fullLabel = selected ? (selected.name ?? selected.id) : current;
-  const displayLabel = truncateMiddle(fullLabel, LABEL_MAX);
+  /*
+   * The MODEL on its own, and the provider moved out of the label (issue #163).
+   *
+   * `fullLabel` is the catalogue's name, which usually carries no provider — so in a setup with the same model
+   * configured on two providers, the header named the model and hid the half that decides cost and routing. And
+   * wherever the name IS absent, the fallback is `provider/id`, which repeated the provider on both lines.
+   *
+   * The provider is emitted as its own field with its own label, because it is a fact the user configured and gave
+   * a name to. `truncateMiddle` stays: a long model id must not push the controls out of the header.
+   */
+  const modelLabel = truncateMiddle(selected ? (selected.name ?? selected.id) : (session.model ?? "—"), LABEL_MAX);
 
   return (
-    <div className="picker">
+    <div className="picker picker-stacked">
+      <span className="picker-row">
+        {/*
+          The provider, READ rather than chosen. It is part of the session's identity — Pi has no per-session
+          provider switch, and a session keeps the provider it started on — so presenting it as a control would
+          offer a change that cannot happen. `title` carries the raw id for the case where two providers share a
+          friendly name.
+        */}
+        <span className="picker-label">Provider</span>
+        <span className="picker-provider mono" title={session.provider ?? undefined}>
+          {session.provider ?? "—"}
+        </span>
+      </span>
+      <span className="picker-row">
       <label className="picker-label" htmlFor={`model-${session.id}`}>
         Model
       </label>
@@ -134,7 +157,7 @@ export function ModelPicker({ session, models, error, onRequest, onSelect }: Mod
           aria-hidden="true"
           title={fullLabel}
         >
-          {displayLabel}
+          {modelLabel}
         </span>
         <select
           id={`model-${session.id}`}
@@ -153,10 +176,16 @@ export function ModelPicker({ session, models, error, onRequest, onSelect }: Mod
           if (provider !== undefined && rest.length > 0) onSelect(provider, rest.join("/"));
         }}
         >
-          {/* The current value must exist as an option or the select cannot display it. When the
-              catalogue has not loaded, this is the only entry — which is why the select reads as the
-              model rather than as empty. */}
-          {models === undefined && <option value="">{current}</option>}
+          {/*
+            The current value must exist as an option or the select cannot display it. When the catalogue has not
+            loaded, this is the only entry — which is why the select reads as the model rather than as empty.
+
+            The MODEL alone, not `current` (issue #163). `current` is `provider/id`, which repeated the provider on
+            the line just below the field that now names it. The full identity is still on the `title` attributes of
+            both the overlay and the select, so nothing is lost — and once the catalogue arrives the options carry
+            full names anyway.
+          */}
+          {models === undefined && <option value="">{session.model ?? "—"}</option>}
           {models !== undefined && models.length === 0 && <option value="">no models available</option>}
           {/* Full names, deliberately: this list is where a model is chosen, and the overlay covers
               the closed control only. Truncating here would put the elision where the decision is
@@ -174,6 +203,7 @@ export function ModelPicker({ session, models, error, onRequest, onSelect }: Mod
             ))}
         </select>
       </div>
+      </span>
       {loading && <span className="picker-note">reading the model list…</span>}
       {timing !== "" && <span className="picker-note">{timing}</span>}
     </div>
