@@ -35,16 +35,29 @@ function rule(selector) {
 }
 
 test("both inner scrollers carry their own scrollbar, not the platform default", () => {
-  // The signal: a thumb this column's other scrollbar does not have. `--line-strong` rather than the
-  // platform default, and wider, so the two are distinguishable at a glance.
+  /*
+   * The purpose of this test has CHANGED, and the change is worth recording.
+   *
+   * It used to require a 9px bar on the inner scrollers, so they would be visibly different from the transcript's own
+   * — which was then a wide platform-default trench. The transcript's bar is a slim overlay now, so "different from
+   * the outer one" is no longer the property worth having; the property is that EVERY scroller is styled by this
+   * stylesheet rather than by the platform, so no region shows the bright channel that a dark page makes so loud.
+   *
+   * Both halves are asserted: each inner scroller scrolls and declares a colour, and each is covered by the shared
+   * webkit rules that give it the inset pill thumb.
+   */
   for (const selector of [".trace-list", ".trace-detail"]) {
     const body = rule(selector);
     assert.ok(body, `${selector} must have a rule`);
     assert.match(body, /overflow-y:\s*auto/, `${selector} is a scroller`);
-    assert.match(body, /scrollbar-color:\s*var\(--line-strong\)/, `${selector} must tint its own scrollbar`);
     assert.ok(
-      new RegExp(`${selector.replace(/\./g, "\\.")}::-webkit-scrollbar\\s*\\{[^}]*width:\\s*9px`).test(css),
-      `${selector} must size its own scrollbar, or it matches the outer one`,
+      /scrollbar-color:\s*var\(--line-strong\)/.test(body) ||
+        new RegExp(`${selector.replace(/\./g, "\\.")}[^{]*\\{[^}]*scrollbar-color`).test(css),
+      `${selector} must tint its own scrollbar`,
+    );
+    assert.ok(
+      new RegExp(`${selector.replace(/\./g, "\\.")}::-webkit-scrollbar`).test(css),
+      `${selector} must size its own scrollbar, or it renders the platform default`,
     );
   }
 });

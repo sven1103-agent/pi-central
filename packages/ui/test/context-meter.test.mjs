@@ -126,8 +126,9 @@ test("the header cannot scatter into four rows", () => {
    * in the narrow-container form, and the box's own width is what bounds it in the wide form. What must hold in both
    * is that no group shrinks into its own label.
    */
-  const picker = rule(".picker-grid") ?? "";
-  assert.match(picker, /flex:\s*none|grid-template-columns/, "the picker group keeps its own width");
+  const picker = /(?:^|\n)\.picker-grid\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(picker, /flex:\s*none|grid-template-columns|flex-direction:\s*column/,
+    `the picker group keeps its own width; got ${picker}`);
   // Read with a direct regex rather than `rule()`: that helper stops at the first `}`, and this rule's doc comment
   // contains braces, so it returned a fragment. A guard that reads half a rule can pass for the wrong reason.
   const stats = /(?:^|\n)\.header-stats\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";

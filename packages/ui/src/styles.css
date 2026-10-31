@@ -753,6 +753,93 @@ button { font: inherit; color: inherit; }
    */
 }
 
+/*
+ * THE TRANSCRIPT'S SCROLLBAR: a slim overlay, not a trench.
+ *
+ * The platform default on macOS is a full-height track with a visible channel, which on a dark page reads as a bright
+ * vertical line down the right of the column — louder than the prose it sits beside. It also takes layout width, so
+ * the text inset had to compensate for it.
+ *
+ * `scrollbar-width: thin` covers Firefox and Chromium; the `::-webkit-scrollbar` rules cover the Chromium/Safari path
+ * where the platform's own styling would otherwise win. The thumb is `--line-strong` and inset by a transparent
+ * border, so it reads as a small floating marker rather than a filled channel, and the track is transparent — the
+ * page shows through, and there is no second vertical rule competing with the column's edge.
+ *
+ * The elapsed position is still visible: a thumb whose LENGTH is the visible fraction is the position indicator. That
+ * is the requirement — the requirement was never a wide channel.
+ */
+.transcript {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.transcript::-webkit-scrollbar { width: 10px; }
+.transcript::-webkit-scrollbar-track { background: transparent; }
+.transcript::-webkit-scrollbar-thumb {
+  /* An inset thumb: the border is transparent and `background-clip` paints only inside it, which is what makes a 12px
+     scrollbar show a 6px pill with air on both sides. */
+  background: var(--line-strong);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--r-pill);
+}
+.transcript::-webkit-scrollbar-thumb:hover { background: var(--dim); background-clip: padding-box; }
+/* The corner where both bars meet, if a horizontal one ever appears: never a filled square. */
+.transcript::-webkit-scrollbar-corner { background: transparent; }
+
+/*
+ * The same treatment for every OTHER scroll region, so they never look like different apps.
+ *
+ * The selectors are the elements that actually scroll: `.panel-body` is `overflow: hidden` (its children scroll), so
+ * styling it would have dressed nothing — which is the mistake `ToolFrame.tsx` once made for the invariant tests.
+ */
+.inspector,
+.files-tree,
+.files-doc,
+.history,
+.rail-list,
+.trace-list,
+.queue-strip {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.inspector::-webkit-scrollbar,
+.files-tree::-webkit-scrollbar,
+.files-doc::-webkit-scrollbar,
+.history::-webkit-scrollbar,
+.rail-list::-webkit-scrollbar,
+.trace-list::-webkit-scrollbar,
+.trace-detail::-webkit-scrollbar,
+.queue-strip::-webkit-scrollbar { width: 10px; height: 10px; }
+
+.inspector::-webkit-scrollbar-track,
+.files-tree::-webkit-scrollbar-track,
+.files-doc::-webkit-scrollbar-track,
+.history::-webkit-scrollbar-track,
+.rail-list::-webkit-scrollbar-track,
+.trace-list::-webkit-scrollbar-track,
+.trace-detail::-webkit-scrollbar-track,
+.queue-strip::-webkit-scrollbar-track { background: transparent; }
+
+.inspector::-webkit-scrollbar-thumb,
+.files-tree::-webkit-scrollbar-thumb,
+.files-doc::-webkit-scrollbar-thumb,
+.history::-webkit-scrollbar-thumb,
+.rail-list::-webkit-scrollbar-thumb,
+.trace-list::-webkit-scrollbar-thumb,
+.trace-detail::-webkit-scrollbar-thumb,
+.queue-strip::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--r-pill);
+}
+/* The corner where a horizontal and a vertical bar meet: never a filled square. */
+.inspector::-webkit-scrollbar-corner,
+.files-tree::-webkit-scrollbar-corner,
+.files-doc::-webkit-scrollbar-corner,
+.history::-webkit-scrollbar-corner,
+.trace-list::-webkit-scrollbar-corner { background: transparent; }
+
 /* Prose is capped so it stays readable on a wide display; tool output may use full width. */
 /*
  * Prose is capped so it stays readable on a wide display; tool output may use full width.
@@ -1560,12 +1647,7 @@ select.btn { font-family: var(--sans); }
   overflow-y: auto;
   padding: 2px 0;
   background: var(--bg);
-  scrollbar-width: thin;
-  scrollbar-color: var(--line-strong) transparent;
 }
-.trace-list::-webkit-scrollbar { width: 9px; }
-.trace-list::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 5px; }
-.trace-list::-webkit-scrollbar-track { background: transparent; }
 
 .trace-row {
   display: flex;
@@ -2273,8 +2355,8 @@ select.btn { font-family: var(--sans); }
   top: 0;
   align-self: start;
   display: flex;
-  justify-content: flex-end;
-  padding: var(--sp-4) 18px var(--sp-4) var(--sp-3);
+  justify-content: flex-start;
+  padding: var(--sp-4) 0;
   grid-column: 2;
   /* Spans the conversation AND the composer, so the box's height is not limited to the prose's row. */
   grid-row: 1 / -1;
@@ -2301,18 +2383,42 @@ select.btn { font-family: var(--sans); }
    column it became the gap that a screenshot showed between `idle` and `ctx 2%` (`img_27.png`). */
 .transcript-header .header-stats { margin-left: 0; }
 /* Same for the picker block: anchored left, under the stats, with its own label column intact. */
+/*
+ * The pickers STACK in the companion box: label above control, one control per row.
+ *
+ * The two-column label/control grid is right for a wide header — it lines up six values down one edge — but it needs
+ * horizontal room a 340px box does not have. Left as a grid with a wrapping flex row inside, the model select took the
+ * full width and pushed the thinking picker onto the next line INSIDE the same cell, so `Model` and `Thinking` ended up
+ * side by side above a select that belonged to neither (`img_28.png`).
+ *
+ * Stacking is the honest layout for this width: every label sits directly above the control it names, so there is no
+ * column for anything to fall out of alignment with.
+ */
 .transcript-header .picker-grid {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-2);
   margin-left: 0;
-  justify-content: start;
-  /* A 340px box cannot hold the model select beside its label on one line for a long id, so the controls wrap under
-     the label rather than overflowing the block. */
-  grid-template-columns: auto minmax(0, 1fr);
 }
-.transcript-header .picker-controls { flex-wrap: wrap; row-gap: 4px; }
-.transcript-header .picker-field,
-.transcript-header .picker-select { max-width: 100%; }
-/* The model id is capped by `LABEL_MAX` for the wide header; in the companion it gets the box's width instead, so the
-   elision is sized by the space that is actually there. */
+.transcript-header .picker-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-2);
+}
+/* The thinking picker is one of those rows: its own label, then its own select. */
+.transcript-header .picker {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  flex-wrap: nowrap;
+}
+.transcript-header .picker-label { text-align: left; justify-self: start; }
+.transcript-header .picker-field { max-width: 100%; }
+/* The model id gets the box's width instead of `LABEL_MAX`, so its elision is sized by the space that actually
+   exists here rather than by the cap chosen for the wide header. */
 .transcript-header .picker-select { width: 100%; max-width: none; }
 
 /*
@@ -2324,14 +2430,20 @@ select.btn { font-family: var(--sans); }
 .transcript-wrap.has-header {
   display: grid;
   /*
-   * Two columns, and TWO ROWS: the prose scrolls in row 1, the composer sits in row 2, and the companion spans both
-   * in column 2 — so it is beside the conversation and beside the input without either running under it.
+   * The prose lane is CAPPED at the reader's measure, and the companion follows immediately.
    *
-   * `1fr` for the prose row and `auto` for the composer: the scroller takes the remaining height, which is the same
-   * contract the flex column had.
+   * `minmax(0, 1fr)` for the first column was wrong: it took every spare pixel, so on a wide window the prose lane
+   * stretched far past its own text and the companion was pushed to the opposite edge with a void between them
+   * (`img_28.png`). Capping column 1 at `--reading-measure` and letting `justify-content: start` leave the remainder
+   * on the right is what keeps the box ADJACENT to the text it describes.
+   *
+   * The second column is `auto`, so the box is as wide as it declares, and `column-gap` is the whole distance between
+   * prose and box — one number, not a by-product of two other rules.
    */
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, var(--reading-measure)) auto;
   grid-template-rows: 1fr auto;
+  justify-content: start;
+  column-gap: var(--sp-5);
 }
 .transcript-wrap.has-header .transcript { grid-column: 1; grid-row: 1; }
 .transcript-wrap.has-header .transcript-footer { grid-column: 1; grid-row: 2; }
