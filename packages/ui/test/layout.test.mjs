@@ -85,7 +85,14 @@ test("the send button does not shrink below its label", () => {
 
 test("the transcript keeps its own horizontal padding", () => {
   // Independent of the centring, and the only thing keeping text off the edges on a narrow window.
+  //
+  // The LEFT side now adds `--lane-inset`, which grows with the window so a wide display gets a composed column
+  // instead of a strip pinned to the corner. The property this guards is unchanged and is asserted as a FLOOR:
+  // 18px is still the narrow-window inset, and the right side still keeps its own 18px so the scrollbar stays at
+  // the column's edge.
   const transcript = rule(".transcript");
   assert.ok(transcript, ".transcript must have a rule");
-  assert.match(transcript, /padding:\s*var\(--sp-4\) 18px/, "horizontal breathing room");
+  // The declaration is normalised by the helper (whitespace collapsed), so the assertion reads the same shape.
+  assert.match(transcript, /padding:\s*var\(--sp-4\) 18px var\(--sp-5\) calc\(18px \+ var\(--lane-inset\)\)/,
+    `18px on the right, and 18px + the lane inset on the left; got: ${transcript}`);
 });

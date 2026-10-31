@@ -572,6 +572,15 @@ button { font: inherit; color: inherit; }
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+  /*
+   * The lane's left inset, declared ONCE for the column so the prose and the composer cannot drift apart.
+   *
+   * Two separate `clamp()` expressions computing the same thing is the class of bug this file keeps recording:
+   * they agree until one is edited (#140's `ch` mismatch, #92's three left edges). It grows with the window up to
+   * 72px, so a wide display gets a composed column rather than a strip pinned to the corner, and a narrow one
+   * keeps the plain 18px.
+   */
+  --lane-inset: clamp(0px, calc((100% - var(--reading-measure)) * 0.18), 72px);
 }
 
 /*
@@ -685,7 +694,10 @@ button { font: inherit; color: inherit; }
 .transcript {
   flex: 1;
   overflow-y: auto;
-  padding: var(--sp-4) 18px var(--sp-5);
+  /* The left side carries the lane inset, so the prose starts where the composer does. The right side keeps its
+     own small padding: it is next to the scrollbar, and an inset there would move the scrollbar away from the
+     column's edge, which is where a reader expects to find it. */
+  padding: var(--sp-4) 18px var(--sp-5) calc(18px + var(--lane-inset));
   min-height: 0;
   /*
    * NO `scroll-behavior: smooth`, and that is a correctness fix rather than a taste one (issue #86).
@@ -726,11 +738,19 @@ button { font: inherit; color: inherit; }
  * `<article class="turn">`, and children restore their own size. Two `ch` values then agree by construction
  * rather than by a hand-maintained ratio (the mistake #140 documents).
  *
- * LEFT-ALIGNED, and that is deliberate. Centring this column was tried in #92 and reverted: it made the
- * emptiness MORE obvious on a wide display and produced five defects (a marker that was capped but not centred,
- * so tools made the transcript flicker between two alignments; three left edges in the composer; two inset
- * mismatches). The lane is therefore bounded and anchored at the same left edge as everything else in the
- * column, and the room to its right is where a tool step's actions sit.
+ * LEFT-ALIGNED, and that is deliberate. Centring the PROSE was tried in #92 and reverted: it made the emptiness
+ * more obvious on a wide display and produced five defects (a marker that was capped but not centred, so tools
+ * made the transcript flicker between two alignments; three left edges in the composer; two inset mismatches).
+ *
+ * A second review (`img_22.png`, ~2000px) showed the same complaint returning for a different reason: the lane
+ * was bounded but sat against the column's left edge with nothing but void to its right, so on a wide window the
+ * conversation read as a narrow strip in a corner of empty space.
+ *
+ * The answer is NOT to re-centre the prose. It is to make the lane an explicit COLUMN that owns its room: the
+ * prose stays left-aligned inside it, and the widest thing in it (a tool step's actions) defines the edge, so the
+ * column looks composed rather than abandoned. `--lane-gutter` grows with the window up to a limit, which is the
+ * part #92 never had — a fixed inset cannot adapt, and centring inside 1330px made the gap symmetric and
+ * therefore doubly visible.
  */
 .lane {
   /* The size `.measure` inherits, so this element's `ch` and the prose's are the same number. */
@@ -739,6 +759,9 @@ button { font: inherit; color: inherit; }
   /* Never wider than the column, and it never stretches by accident: `100%` would make the cap meaningless when
      the reader chose `fill`. */
   width: 100%;
+  /* A left inset that grows with the window, so the lane is not pinned to the column's edge on a wide display.
+     `clamp` rather than a media query: the transition should be continuous, and there is one number to tune. */
+  margin-left: clamp(0px, calc((100% - var(--reading-measure)) * 0.18), 72px);
 }
 
 .measure { max-width: var(--reading-measure); }
@@ -1010,7 +1033,21 @@ button { font: inherit; color: inherit; }
   gap: var(--sp-2);
   font-size: var(--fs-base);
 }
-.composer > * { max-width: var(--reading-measure); width: 100%; }
+/*
+ * Every child is capped to the lane, INCLUDING the row that holds the textarea and Send.
+ *
+ * The first version capped the children but let `.composer-row` keep Send outside the lane: the row was the
+ * lane's width and the button sat at its right end, so the input looked narrower than the prose and the button
+ * looked detached from it (`img_22.png`). The row is inside the lane, so the input and the button are one group
+ * of the same width as the conversation above them.
+ */
+.composer > * {
+  max-width: var(--reading-measure);
+  width: 100%;
+  /* The same inset the prose uses (see `--lane-inset` on `.column`), so reading and writing share a left edge at
+     every window width. */
+  margin-left: var(--lane-inset);
+}
 
 .mode-strip {
   display: flex;
@@ -1919,13 +1956,22 @@ select.btn { font-family: var(--sans); }
 .header-usage-line .warn { color: var(--warn-text); }
 
 /* The transcript's own top edge: the follow control belongs to the scroller it governs. */
+/*
+ * The follow control's row.
+ *
+ * It is `flex: none` in the column's flow, so it takes real height rather than floating over the scroller — the
+ * first version had no height of its own and the transcript started underneath it, so the pill appeared to
+ * overlap the first message (`img_22.png`).
+ */
 .transcript-tools {
   display: flex;
   justify-content: flex-end;
-  padding: 2px 18px;
+  align-items: center;
+  padding: 3px 18px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
   flex: none;
+  min-height: 26px;
 }
 /* The provenance sentence, beside the trace it is about rather than in a row of its own. */
 .trace-legend { color: var(--dim); font-size: var(--fs-2xs); }
@@ -2002,7 +2048,10 @@ select.btn { font-family: var(--sans); }
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 3px 6px;
-  max-width: 30ch;
+  /* Matches `ModelPicker`'s `LABEL_MAX` — a `max-width` smaller than the character cap clips an already-shortened
+     string, producing a trailing cut instead of the chosen elision (issue #42). Raised with it: the header is one
+     band now, so the pickers are no longer competing with a metrics strip for the same width. */
+  max-width: 44ch;
 }
 .picker-select:focus-visible { outline: none; box-shadow: var(--focus); border-color: var(--accent); }
 .picker-select:disabled { opacity: 0.55; cursor: not-allowed; }
@@ -2040,8 +2089,12 @@ select.btn { font-family: var(--sans); }
   position: relative;
   display: inline-flex;
   align-items: center;
+  /* `flex-shrink: 0` because a control that shrinks starts clipping its own label, and a clipped control label is
+     worse than a truncated session name (which is also in the rail). The wrapper must be at least as wide as the
+     control inside it, or the child paints over its neighbour — `hinking` for `Thinking`, with every test green
+     (issues #92, #96). */
   flex-shrink: 0;
-  max-width: 30ch;
+  max-width: 44ch;
 }
 .picker-display {
   position: absolute;

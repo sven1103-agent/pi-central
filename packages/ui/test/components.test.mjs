@@ -1113,7 +1113,12 @@ test("the closed model control shows a MIDDLE-elided name, not a trailing cut", 
   // of a model name carry identity — the provider says where it runs, the tail distinguishes variants
   // — so a trailing cut throws away the part a reader scans for.
   const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
-  const model = "litellm/deepseek-v4-flash-vision-exp";
+  // Long enough to be elided at the CURRENT cap. The cap has moved twice (22 → 30 → 44), and each time the old
+  // fixture stopped being elided at all — which made the assertions below pass vacuously rather than fail.
+  const cap = Number(/const LABEL_MAX = (\d+);/.exec(
+    readFileSync(new URL("../src/components/ModelPicker.tsx", import.meta.url), "utf8"))[1]);
+  const model = `litellm/${"deepseek-v4-flash-vision-".repeat(3)}experimental`;
+  assert.ok(model.length > cap, `the fixture must exceed the ${cap}ch cap, got ${model.length}`);
   const html = renderToString(createElement(ModelPicker, {
     session: session({ model, provider: "litellm" }),
     models: undefined, error: undefined, onRequest() {}, onSelect() {},
@@ -1122,8 +1127,6 @@ test("the closed model control shows a MIDDLE-elided name, not a trailing cut", 
   // Asserted as PROPERTIES, not as a literal: the cap moved once already (#74) and a hard-coded
   // string made a change of width look like a change of behaviour. What the test is about is that an
   // elision keeps both ends.
-  const cap = Number(/const LABEL_MAX = (\d+);/.exec(
-    readFileSync(new URL("../src/components/ModelPicker.tsx", import.meta.url), "utf8"))[1]);
   assert.ok(shown.startsWith("litellm/"), `the provider must survive (it says where it runs), got ${JSON.stringify(shown)}`);
   assert.ok(shown.endsWith(model.slice(-12)), `the variant tail must survive, got ${JSON.stringify(shown)}`);
   assert.ok(!shown.endsWith("-"), "a trailing cut is the bug: it loses the identifying tail");
@@ -1167,7 +1170,12 @@ test("the OPTIONS are never truncated, because that is where the choice is made"
   // Long enough to be elided at the CURRENT cap: at 22 characters the shorter name below was elided
   // for the wrong reason, and at 30 it would not be elided at all, leaving the second half of this
   // test asserting nothing.
-  const long = "DeepSeek V4 Flash Vision Experimental";
+  // Derived from the CURRENT cap, so raising it cannot silently make this test assert nothing — which it did when
+  // the cap moved from 30 to 44: the "long" name below was no longer long enough to be elided at all.
+  const cap = Number(/const LABEL_MAX = (\d+);/.exec(
+    readFileSync(new URL("../src/components/ModelPicker.tsx", import.meta.url), "utf8"))[1]);
+  const long = `${"DeepSeek V4 Flash ".repeat(3)}Vision Experimental`;
+  assert.ok(long.length > cap, `the fixture must exceed the ${cap}ch cap, got ${long.length}`);
   const html = renderToString(createElement(ModelPicker, {
     session: session({ model: "deepseek-v4-flash-vision-exp", provider: "litellm" }),
     models: [{ provider: "litellm", id: "deepseek-v4-flash-vision-exp", name: long }],
