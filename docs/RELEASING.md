@@ -281,6 +281,27 @@ need an exploit.
 So the honest summary: provenance makes a **tampered** tarball detectable. It cannot make a
 **genuinely malicious** release safe, and it is not checked unless someone asks.
 
+## The changelog is a summary, not a transcript
+
+Sections are **one line per change, with the issue number**. No rationale.
+
+That rule arrived late and cost real rework: the Unreleased section had grown to 1,795 lines for 68 changes —
+1,915 characters per entry — because every PR appended its reasoning to the changelog instead of leaving it in the
+PR. *"Nobody will read that. Changelog needs to be scannable."*
+
+The reasoning is not lost: it is in the commit messages, the PR bodies, and `DESIGN.md`. A changelog answers
+*"what changed between these versions"*, which is a different question from *"why is it like this"*.
+
+**A released section may be rewritten, but never extended.** `released-immutable.test.mjs` used to compare each
+section byte-for-byte against its tag; it now asserts that no released section gains an **entry** or an **issue
+reference**, with the shipped counts in `scripts/released-sections.json`. The narrower invariant is the one that
+still matters — an entry added after a release describes code that is not in that tarball — and it leaves room for
+the compression above, which rewrote published sections on purpose.
+
+Note what that means: the **published GitHub Releases keep the full bodies** (0.2.0 is 35,000 characters), so the
+timeline linked from this repository is now deliberately terser than what npm shipped. That is a documentation
+choice, recorded here so it reads as one.
+
 ## Rolling back
 
 Releases are append-only. `npm unpublish` is available only for a short window, breaks anyone who
