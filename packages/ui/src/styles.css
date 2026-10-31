@@ -2322,9 +2322,9 @@ select.btn { font-family: var(--sans); }
   container-type: inline-size;
   container-name: transcript;
 }
-/* With a companion the region becomes a two-column grid — see `.transcript-wrap.has-header`. */
-.transcript-wrap.has-header { flex: 1; min-height: 0; }
 
+/* Without a companion there is no second box: the column centres itself inside the wrapper. */
+.transcript-wrap:not(.has-header) .transcript-main { margin-inline: auto; flex: 1 1 auto; }
 /*
  * THE SESSION HEADER IS A STICKY COMPANION BESIDE THE CONVERSATION.
  *
@@ -2353,21 +2353,23 @@ select.btn { font-family: var(--sans); }
  */
 .transcript-header {
   /*
-   * Sticky, so it stays with the reader: the conversation scrolls past it and the identity, the state, the meter and
-   * the model remain in view. `align-self: start` is what makes `position: sticky` work inside a grid track — an
-   * item stretched to the row's height has no room to move.
+   * Sticky, so it stays with the reader: the conversation scrolls past it while the identity, state, meter and model
+   * remain in view.
+   *
+   * `align-self: flex-start` and `height: min-content` are what make `position: sticky` work as a flex item — an item
+   * stretched to the row's height has no room to move, and `sticky` silently behaves like `static`. Both are required;
+   * neither is decoration.
    */
   position: sticky;
   top: 0;
-  align-self: start;
+  align-self: flex-start;
+  height: min-content;
   display: flex;
   justify-content: flex-start;
   padding: var(--sp-4) 0;
-  grid-column: 2;
-  /* Spans the conversation AND the composer, so the box's height is not limited to the prose's row. */
-  grid-row: 1 / -1;
-  /* `sticky` needs the track to be the scroll container's height, which `align-self: start` provides. */
-  height: min-content;
+  /* Its own width, never shrunk into its own labels. */
+  flex: none;
+  width: 340px;
 }
 
 /* The block itself: a quiet raised surface, wide enough for the pickers on one line each. */
@@ -2433,31 +2435,60 @@ select.btn { font-family: var(--sans); }
  * `max-content` for the companion track, so the box is exactly as wide as it declares and the prose lane takes the
  * rest. `align-items: start` on the scroller would break the sticky child, so the row alignment is left alone.
  */
+/*
+ * THE WIDE LAYOUT: one centred row — [ reading column ] [ companion ].
+ *
+ * `display: flex` with `justify-content: center`, and the reading column given an explicit width. Not a grid with
+ * max-sized tracks: that version computed the right thing on paper and rendered pinned to the left edge on a real
+ * window (`img_30.png`), because whether `minmax(0, 72ch)` + `justify-content: center` centres anything depends on how
+ * the track resolves against the container's spare space. A layout whose centring has that many preconditions drifts
+ * again the next time anything nearby changes.
+ *
+ * Flex says what is meant: two boxes, centred as a pair.
+ */
 .transcript-wrap.has-header {
-  display: grid;
-  /*
-   * The prose lane is CAPPED at the reader's measure, and the companion follows immediately.
-   *
-   * `minmax(0, 1fr)` for the first column was wrong: it took every spare pixel, so on a wide window the prose lane
-   * stretched far past its own text and the companion was pushed to the opposite edge with a void between them
-   * (`img_28.png`). Capping column 1 at `--reading-measure` and letting `justify-content: start` leave the remainder
-   * on the right is what keeps the box ADJACENT to the text it describes.
-   *
-   * The second column is `auto`, so the box is as wide as it declares, and `column-gap` is the whole distance between
-   * prose and box — one number, not a by-product of two other rules.
-   */
-  grid-template-columns: minmax(0, var(--reading-measure)) auto;
-  grid-template-rows: 1fr auto;
-  /* The pair is CENTRED as a unit: the lane keeps its cap, the companion follows it, and the whole composition sits in
-     the middle of the column with equal room on both sides. `start` would pin it left, which is the state a review
-     called "pressed against the rail". */
+  display: flex;
+  /* A ROW that centres its two boxes. `flex-direction` must be said explicitly: the base `.transcript-wrap` is a
+     column, and a second rule that only changed `display` would leave the companion stacked under the prose. */
+  flex-direction: row;
   justify-content: center;
-  column-gap: var(--sp-5);
+  /* The gap between the prose and the box is this one number. */
+  gap: var(--sp-5);
+  /* Let the row shrink on a narrow window instead of overflowing it. */
+  min-width: 0;
+  flex: 1;
 }
-.transcript-wrap.has-header .transcript { grid-column: 1; grid-row: 1; }
-.transcript-wrap.has-header .transcript-footer { grid-column: 1; grid-row: 2; }
-/* The composer shares the prose's lane, so it never runs under the companion. */
-.transcript-wrap.has-header .composer-dock { max-width: var(--reading-measure); }
+
+/*
+ * The reading column: the scroller and the composer, stacked, at the reader's measure.
+ *
+ * `flex: 0 1 var(--reading-measure)` — grow 0, shrink 1, basis the measure. That is what makes it exactly the measure
+ * on a wide window and narrower (never overflowing) on a narrow one, without a `max-width` that would leave the flex
+ * line sizing to the content's wishes.
+ */
+.transcript-main {
+  display: flex;
+  flex-direction: column;
+  /*
+   * `width: 100%` + `max-width: var(--reading-measure)` — and NOT `width: var(--reading-measure)` or a
+   * `flex-basis` of it.
+   *
+   * Two reasons, both reachable:
+   *
+   *   - the reader's measure may be `none` (the `fill` setting), and `width: none` is invalid while `max-width: none`
+   *     means exactly what `fill` asks for;
+   *   - `width: 100%` capped by `max-width` is what lets the parent's `justify-content: center` actually centre it —
+   *     an item sized by its own basis leaves the free space to `justify-content` in a way that depended on the
+   *     track's resolution, which is how the previous grid version rendered pinned to the left edge (`img_30.png`).
+   */
+  width: 100%;
+  max-width: var(--reading-measure);
+  min-width: 0;
+  min-height: 0;
+  /* The scroller inside reserves the jump band, so the column must too. */
+  padding-bottom: var(--jump-strip);
+  position: relative;
+}
 
 /*
  * Narrow: flip to a compact row above the scroller.
@@ -2467,10 +2498,24 @@ select.btn { font-family: var(--sans); }
  * holding a narrow transcript, and the box would be squeezed into prose that has no room for it.
  */
 @container transcript (max-width: 1080px) {
+  /*
+   * The row becomes a COLUMN: companion on top, then the reading column.
+   *
+   * `flex-direction: column` on the wrapper is the whole change — the boxes keep their own rules, and nothing needs
+   * repositioning because flex places them in source order, which is already header then main.
+   */
+  .transcript-wrap.has-header {
+    flex-direction: column;
+    /* Centring would centre each child on its own width here, which is #92's defect: a full-width row and a capped
+       column would sit on different centres. A column of full-width children needs no horizontal centring. */
+    justify-content: flex-start;
+    gap: 0;
+  }
   .transcript-header {
     position: static;
-    grid-column: 1 / -1;
-    grid-row: 1;
+    /* Full width across the top, and no longer a floating box. */
+    width: 100%;
+    flex: none;
     padding: 0;
     display: block;
   }
@@ -2486,8 +2531,8 @@ select.btn { font-family: var(--sans); }
     border-bottom: 1px solid var(--line);
     border-radius: 0;
   }
-  .transcript-wrap.has-header .transcript { grid-row: 2; }
-  .transcript-wrap.has-header .transcript-footer { grid-row: 3; }
+  /* The reading column takes the rest, and still centres itself. */
+  .transcript-main { flex: 1 1 auto; margin-inline: auto; }
 }
 
 /*

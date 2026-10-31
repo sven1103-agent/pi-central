@@ -406,6 +406,15 @@ export function TranscriptView({
     // line of text at any scroll position.
     <div className={`transcript-wrap${header !== undefined ? " has-header" : ""}`}>
       {header !== undefined && <div className="transcript-header">{header}</div>}
+      {/*
+        The reading column: scroller + composer, as ONE box.
+        
+        It exists so the centring has a single thing to centre. Centring via grid track sizes was unreliable — a
+        `minmax(0, 72ch)` track plus `justify-content: center` left the pair pinned to the left edge on a wide window
+        (`img_30.png`), and a layout whose centring depends on how track max-sizing resolves is a layout that will
+        drift again. This wrapper is an ordinary block with an explicit width, centred by its parent.
+      */}
+      <div className="transcript-main">
       <div
         className="transcript"
         ref={containerRef}
@@ -475,6 +484,8 @@ export function TranscriptView({
         {/* The end sentinel stays INSIDE the scroller and outside the lane: it is a scroll anchor, not content. */}
         <div ref={endRef} />
       </div>
+      </div>
+
       {/*
         * Appears only while the reader is unpinned from the bottom, which is the only moment it
         * has a job. A control that is always present is noise; one that appears when it can do
