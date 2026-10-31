@@ -59,7 +59,15 @@ import { ThinkingPicker } from "./components/ThinkingPicker.tsx";
 import { HistoryView } from "./components/History.tsx";
 import { displayName, formatContext, formatCost, formatTokens, headerLocation } from "./format.ts";
 import { stateLabel, type UiState } from "./store.ts";
-import { rosterEntryFor, rosterRows } from "./roster.ts";
+import {
+  ROSTER_PREFS_KEY,
+  parseRoster,
+  rosterEntryFor,
+  rosterRows,
+  serializeRoster,
+  sessionForPendingPrompt,
+  type RosterRow,
+} from "./roster.ts";
 
 type Tab = "sessions" | "history";
 
@@ -407,6 +415,69 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [send]);
 
+  /*
+   * The roster, persisted (issue #89).
+   *
+   * Read ONCE on mount, then written whenever it changes. `localStorage` is the right home — `roster.ts`
+   * explains why this is a view preference rather than installation configuration — and it is read through
+   * `parseRoster` rather than trusted, for the reason `panel.ts` gives: it outlives upgrades and is shared with
+   * whatever else runs on this origin.
+   */
+  useEffect(() => {
+    dispatch({ kind: "loadRoster", entries: parseRoster(localStorage.getItem(ROSTER_PREFS_KEY)) });
+  }, []);
+
+  /*
+   * Everything this process is running belongs in the roster.
+   *
+   * Adding to the ONE list is correct and cannot duplicate: `addToRoster` matches by file and merges in place.
+   * (The bug that produced every session twice came from a SECOND list derived from `live`, not from this.)
+   *
+   * A session with no `sessionFile` yet is skipped — Pi reports it after `get_state`, and remembering a handle
+   * would point at a different session after the next restart.
+   */
+  useEffect(() => {
+    for (const session of state.live) {
+      const entry = rosterEntryFor(session);
+      if (entry !== undefined) dispatch({ kind: "remember", entry });
+    }
+  }, [state.live]);
+
+  // Persist whatever the rail is showing. One writer, so storage cannot drift from what is rendered.
+  useEffect(() => {
+    try {
+      localStorage.setItem(ROSTER_PREFS_KEY, serializeRoster(state.roster));
+    } catch {
+      // A full or disabled `localStorage` must not break the rail: the roster is a convenience, and an
+      // unwritable store degrades to "not remembered", which is the behaviour before this feature existed.
+    }
+  }, [state.roster]);
+
+  /*
+   * RESUME-ON-SEND (issue #89).
+   *
+   * A parked prompt waits for the session it belongs to. Resuming spawns a process that answers with a NEW
+   * handle, so the message is parked against the durable path and sent when a live session with that file
+   * appears — then focus moves to it, because the reader is now talking to that session.
+   *
+   * The prompt is consumed exactly once: `clearPendingPrompt` after the send, so a second `session` event for
+   * the same file cannot send it twice.
+   */
+  useEffect(() => {
+    const pending = state.pendingPrompt;
+    if (pending === undefined) return;
+    const session = sessionForPendingPrompt(pending, state.live);
+    if (session === undefined) return;
+    dispatch({ kind: "clearPendingPrompt" });
+    dispatch({ kind: "focusRow", key: session.id });
+    send(
+      session.state === "streaming" && pending.behavior !== undefined
+        ? { kind: "prompt", sessionId: session.id, message: pending.message, behavior: pending.behavior }
+        : { kind: "prompt", sessionId: session.id, message: pending.message },
+    );
+    setFollowToken((n) => n + 1);
+  }, [state.pendingPrompt, state.live, send]);
+
   const onStartSession = useCallback(() => {
     // Ask for focus BEFORE the control goes out: the orchestrator answers `start` with the new `session`
     // event synchronously, so the intent has to be in the store when that event lands (issue #144).
@@ -537,26 +608,22 @@ export function App() {
       >
         <SessionRail
           /*
-           * ONE list of rows, seeded from what is running (issue #89).
+           * ONE list of rows: the PERSISTED roster, with activity joined in (issue #89).
            *
-           * This slice changes the SHAPE, not the behaviour: nothing is persisted yet, so the roster is exactly
-           * `state.live` and the rail looks as it did. What changes is that a row is now `{entry, session?}` —
-           * the shape a persisted roster needs, where `session === undefined` means the row is `stopped`.
-           *
-           * The persistence slice fills `entries` from `localStorage` instead; the rail will not change.
+           * The roster comes from `localStorage`, so it survives a restart, an update and a crash; `live` only
+           * fills each row's activity. A row whose session is not running renders as `stopped` and stays where
+           * the reader left it — that is the whole point of the issue.
            */
-          rows={rosterRows(
-            state.live.map((session) => rosterEntryFor(session)).filter((entry) => entry !== undefined),
-            state.live,
-          )}
+          rows={rosterRows(state.roster, state.live)}
           focusedId={state.focusedId}
           onFocusRow={(row) => {
-            // A row with no live session has no handle to focus yet; that arrives with resume-on-send.
-            if (row.session === undefined) return;
-            // Focus is local: switching sessions is a focus change between live processes, not a restart (C2).
-            dispatch({ kind: "focusSession", sessionId: row.session.id });
+            // EVERY row is focusable, including one with no live session (issue #89). That is what makes the
+            // composer usable for it, and the composer is how resume-on-send starts the session again.
+            // Focus is local: a view change between rows, not a restart (C2).
+            dispatch({ kind: "focusRow", key: rowKeyOf(row) });
             setTab("sessions");
           }}
+          onForgetRow={(row) => dispatch({ kind: "forget", path: row.entry.path })}
           onStartSession={onStartSession}
           onOpenDirectory={() => setSheetOpen(true)}
           home={home}
@@ -737,6 +804,17 @@ export function App() {
       )}
     </div>
   );
+}
+
+/**
+ * The render/focus key for a roster row.
+ *
+ * A live session uses its handle; a session that is not running has only its file. Both are stable and a row can
+ * never be both, so the two namespaces cannot collide. Mirrors `SessionRail`'s own `rowKey`, which is why it is a
+ * one-liner used in two places rather than duplicated logic.
+ */
+function rowKeyOf(row: RosterRow): string {
+  return row.session?.id ?? row.entry.path;
 }
 
 function SessionView({

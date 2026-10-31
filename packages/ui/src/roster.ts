@@ -51,8 +51,22 @@ export interface RosterEntry {
   sessionId?: string | undefined;
   /** The directory it works in, so a row can render before discovery answers. */
   cwd?: string | undefined;
-  /** What to call it before anything else answers. */
+  /**
+   * What to call it before anything else answers.
+   *
+   * Stored RAW, not resolved: the label is decided by `nameLabel`, which needs `scratch` as well. Storing the
+   * resolved text was the bug — a scratch session's default name IS its handle, so a restart showed `s2` where
+   * the rail had said `Scratch session`, and a value that Pi reported as `undefined` was stored and shown as
+   * the word "Undefined".
+   */
   name?: string | undefined;
+  /**
+   * Whether this was a scratch session.
+   *
+   * Persisted because the LABEL depends on it: an unnamed scratch session must read `Scratch session` after a
+   * restart, not `s2` and not `Undefined`. Without this flag the row has no way to know.
+   */
+  scratch?: boolean | undefined;
 }
 
 export const ROSTER_PREFS_KEY = "pi-central.roster";
@@ -88,6 +102,7 @@ function withoutUndefined(entry: RosterEntry): Partial<RosterEntry> {
   if (entry.sessionId !== undefined) out.sessionId = entry.sessionId;
   if (entry.cwd !== undefined) out.cwd = entry.cwd;
   if (entry.name !== undefined) out.name = entry.name;
+  if (entry.scratch !== undefined) out.scratch = entry.scratch;
   return out;
 }
 
@@ -133,6 +148,7 @@ export function parseRoster(raw: string | null): RosterEntry[] {
     if (isPlausiblePath(record["cwd"])) entry.cwd = record["cwd"];
     const name = optionalText(record["name"], 200);
     if (name !== undefined) entry.name = name;
+    if (typeof record["scratch"] === "boolean") entry.scratch = record["scratch"];
     entries.push(entry);
   }
   return entries;
@@ -185,6 +201,8 @@ export function rosterEntryFor(session: LiveSession): RosterEntry | undefined {
   if (session.sessionId) entry.sessionId = session.sessionId;
   if (session.cwd) entry.cwd = session.cwd;
   if (session.name) entry.name = session.name;
+  // Recorded even when false, so a session that is NOT scratch is not mistaken for one after a restart.
+  entry.scratch = session.scratch;
   return entry;
 }
 
@@ -281,4 +299,27 @@ export function groupRows(rows: readonly RosterRow[]): { group: RailGroup; rows:
   return order
     .map((group) => ({ group, rows: rows.filter((row) => groupOf(row) === group) }))
     .filter((section) => section.rows.length > 0);
+}
+
+/**
+ * The live session a parked prompt is waiting for, if it has arrived (issue #89, resume-on-send).
+ *
+ * ## Why this is a function and not three lines inside an effect
+ *
+ * Resume-on-send is the only path where a message the reader typed crosses a restart of the session it belongs
+ * to. The interesting parts — "which session is this message for", "has it appeared yet", "must it be sent only
+ * once" — are exactly the parts that are invisible in a component test, because `renderToString` runs no
+ * effects. Pulling the decision out makes it testable; the effect keeps only the sending.
+ *
+ * ## Why the match is on the FILE
+ *
+ * Resuming spawns a process that reports a NEW handle (`s1` after a restart is a different session). The roster
+ * path is the only durable identity, so it is the only thing the parked message can be matched against.
+ */
+export function sessionForPendingPrompt(
+  pending: { path: string } | undefined,
+  live: readonly LiveSession[],
+): LiveSession | undefined {
+  if (pending === undefined) return undefined;
+  return live.find((session) => session.sessionFile === pending.path);
 }

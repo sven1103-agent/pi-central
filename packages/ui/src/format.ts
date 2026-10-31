@@ -109,13 +109,37 @@ export function formatModel(model: string | undefined, max = 14): string {
   return truncateMiddle(model, max);
 }
 
-/** A session's display name, falling back to something more useful than a bare id. */
+/**
+ * What to CALL a session: one rule, used by the rail for a live session and for a remembered one.
+ *
+ * ## The bug this exists to stop
+ *
+ * Reported from the rail, twice in one sentence: unnamed scratch sessions showed **"Undefined"**, and after a
+ * restart they showed **the handle** (`s2`) instead. Both were the same defect — the label was whatever had been
+ * stored, with no rule applied — and it appeared exactly where the two code paths diverged: a live row went
+ * through `displayName`, a row that was not running read `entry.name` raw.
+ *
+ * ## The rule
+ *
+ * A name is only shown when it is a name a person chose. A scratch session's default name is its handle
+ * (`defaultName` falls back to the id), and Pi may report an empty or `undefined`-ish value before anything is
+ * named — none of those are information, so they get a generic label instead of a fabricated title.
+ *
+ * `id` is the last resort for a non-scratch session, because a handle at least identifies the row.
+ */
+export function nameLabel(name: string | undefined, scratch: boolean, id: string): string {
+  const trimmed = name?.trim();
+  // The literals matter: a stored `"undefined"` is a value that reached storage, not a missing key, and it must
+  // not be rendered as though a person had typed it.
+  const isPlaceholder =
+    trimmed === undefined || trimmed.length === 0 || /^(undefined|null)$/i.test(trimmed) || /^s\d+$/.test(trimmed);
+  if (scratch) return isPlaceholder ? "Scratch session" : trimmed;
+  return isPlaceholder ? id : trimmed;
+}
+
+/** A live session's display name. A thin adapter, so there is exactly one labelling rule. */
 export function displayName(session: LiveSession): string {
-  const name = session.name?.trim();
-  // A scratch session named `s7` tells the reader nothing. It gets a generic label instead of
-  // a fabricated title, since the first message may not have arrived yet.
-  if (!name || (session.scratch && /^s\d+$/.test(name))) return session.scratch ? "Scratch session" : name ?? session.id;
-  return name;
+  return nameLabel(session.name, session.scratch, session.id);
 }
 
 /**

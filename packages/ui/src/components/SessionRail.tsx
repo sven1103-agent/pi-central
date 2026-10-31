@@ -9,7 +9,7 @@
  */
 import { useMemo, useState } from "react";
 import type { LiveSession } from "@pi-central/protocol";
-import { displayName, formatContext, formatCost, formatModel, formatThinking, shortenPath, whereLine } from "../format.ts";
+import { displayName, formatContext, formatCost, formatModel, formatThinking, nameLabel, shortenPath, whereLine } from "../format.ts";
 import { stateLabel } from "../store.ts";
 import { groupRows, rowActivity, type RosterRow } from "../roster.ts";
 
@@ -34,6 +34,7 @@ export function SessionRail({
   rows,
   focusedId,
   onFocusRow,
+  onForgetRow,
   onStartSession,
   onOpenDirectory,
   home,
@@ -50,6 +51,13 @@ export function SessionRail({
   focusedId: string | undefined;
   /** Focus a row. A row that is not running focuses too, so the composer can send and resume on send. */
   onFocusRow: (row: RosterRow) => void;
+  /**
+   * Take a row off the roster.
+   *
+   * A view change, not a deletion: the session FILE stays on disk. Deleting is #150 and is irreversible, so it
+   * is a different action with its own confirmation.
+   */
+  onForgetRow: (row: RosterRow) => void;
   onStartSession: () => void;
   onOpenDirectory: () => void;
   home: string | undefined;
@@ -116,6 +124,7 @@ export function SessionRail({
                   row={row}
                   focused={rowKey(row) === focusedId}
                   onFocus={() => onFocusRow(row)}
+                  onForget={() => onForgetRow(row)}
                   home={home}
                 />
               ))}
@@ -150,10 +159,18 @@ function rowKey(row: RosterRow): string {
   return row.session?.id ?? row.entry.path;
 }
 
-/** What to call a row before anything else answers. Never the handle for a row that is not running. */
+/**
+ * What to call a row — the SAME rule for a live session and one that is not running.
+ *
+ * The first version read `entry.name` raw for a remembered row, which is how a scratch session came back after a
+ * restart as `s2` instead of `Scratch session`, and how a placeholder value came back as the word itself. One
+ * function decides, so the two paths cannot disagree.
+ *
+ * A remembered entry with no id of its own uses the file name, which is stable and at least identifies the row.
+ */
 function rowName(row: RosterRow): string {
   if (row.session !== undefined) return displayName(row.session);
-  return row.entry.name ?? filenameOf(row.entry.path);
+  return nameLabel(row.entry.name, row.entry.scratch === true, filenameOf(row.entry.path));
 }
 
 /** The file's name without its extension, as a last-resort label. */
@@ -166,11 +183,13 @@ function RailRow({
   row,
   focused,
   onFocus,
+  onForget,
   home,
 }: {
   row: RosterRow;
   focused: boolean;
   onFocus: () => void;
+  onForget: () => void;
   home: string | undefined;
 }) {
   const session = row.session;
@@ -182,12 +201,21 @@ function RailRow({
     row.entry.cwd === undefined ? "directory unknown" : shortenPath(row.entry.cwd, 34, home);
 
   return (
-    <button
-      type="button"
-      className={`rail-row state-${activity}`}
-      aria-current={focused ? "true" : undefined}
-      onClick={onFocus}
-    >
+    /*
+      A `<div>` wrapping two controls, not a `<button>`: the row is focusable AND dismissable, and nesting
+      buttons is invalid HTML that browsers resolve by breaking the inner one.
+
+      Forget appears only for a row that is NOT running (issue #89). Dismissing a row while its process runs
+      would hide a live session from the rail while it kept working and spending — the roster is a view, but it
+      must not be able to lie about what is happening.
+    */
+    <div className={`rail-row state-${activity}${focused ? " is-focused" : ""}`}>
+      <button
+        type="button"
+        className="rail-row-main"
+        aria-current={focused ? "true" : undefined}
+        onClick={onFocus}
+      >
       <span className="r1">
         <span className="name">{rowName(row)}</span>
         {session?.scratch && <span className="chip chip-scratch">scratch</span>}
@@ -226,6 +254,17 @@ function RailRow({
           )}
         </>
       )}
-    </button>
+      </button>
+      {session === undefined && (
+        <button
+          type="button"
+          className="rail-row-forget"
+          onClick={onForget}
+          title="Remove from the rail. The session file is not deleted."
+        >
+          Forget
+        </button>
+      )}
+    </div>
   );
 }

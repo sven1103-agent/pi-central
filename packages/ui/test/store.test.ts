@@ -587,7 +587,7 @@ test("focusSession moves the focus to the named session", () => {
   state = reduce(state, { kind: "session", session: live({ id: "s2" }) });
   assert.equal(state.focusedId, "s1", "the first session keeps focus, as designed");
 
-  state = reduce(state, { kind: "focusSession", sessionId: "s2" });
+  state = reduce(state, { kind: "focusRow", key: "s2" });
   assert.equal(state.focusedId, "s2", "an explicit focus request must move the focus");
   assert.equal(focusedSession(state)?.id, "s2");
 });
@@ -598,7 +598,7 @@ test("focusSession does NOT touch the session list", () => {
   // this action must not be able to mutate a session at all.
   let state = reduce(initialState(), { kind: "session", session: live({ id: "s1" }) });
   const before = state.live;
-  state = reduce(state, { kind: "focusSession", sessionId: "s1" });
+  state = reduce(state, { kind: "focusRow", key: "s1" });
   assert.equal(state.live, before, "the live array must be the same reference, untouched");
 });
 
@@ -607,7 +607,7 @@ test("focusSession ignores a session that is not live", () => {
   // `focusedSession` return undefined and blank the main column — a worse outcome than ignoring
   // the request, and reachable by clicking a row for a session that was stopped concurrently.
   let state = reduce(initialState(), { kind: "session", session: live({ id: "s1" }) });
-  state = reduce(state, { kind: "focusSession", sessionId: "ghost" });
+  state = reduce(state, { kind: "focusRow", key: "ghost" });
   assert.equal(state.focusedId, "s1", "an unknown id must not clear the focus");
   assert.equal(focusedSession(state)?.id, "s1");
 });
@@ -623,7 +623,7 @@ test("a local focus action is routed locally, never as a protocol event", () => 
   base = reduce(base, { kind: "session", session: live({ id: "s2" }) });
   const viaEvent = reduce(base, { kind: "session", session: live({ id: "s2" }) });
   assert.equal(viaEvent.focusedId, "s1", "a session EVENT must not move focus (its own rule)");
-  const viaLocal = reduce(base, { kind: "focusSession", sessionId: "s2" });
+  const viaLocal = reduce(base, { kind: "focusRow", key: "s2" });
   assert.equal(viaLocal.focusedId, "s2", "the local action must move it");
 });
 
@@ -633,9 +633,9 @@ test("switching focus preserves the other session's transcript", () => {
   let state = reduce(initialState(), { kind: "session", session: live({ id: "s1" }) });
   state = reduce(state, { kind: "session", session: live({ id: "s2" }) });
   state = reduce(state, { kind: "record", sessionId: "s1", record: { type: "message_start", message: { role: "assistant" } } });
-  state = reduce(state, { kind: "focusSession", sessionId: "s2" });
+  state = reduce(state, { kind: "focusRow", key: "s2" });
   assert.equal(state.transcripts["s1"]?.messages.length, 1, "s1's transcript must survive the switch");
-  state = reduce(state, { kind: "focusSession", sessionId: "s1" });
+  state = reduce(state, { kind: "focusRow", key: "s1" });
   assert.equal(state.transcripts["s1"]?.messages.length, 1, "and still be there when switching back");
 });
 
