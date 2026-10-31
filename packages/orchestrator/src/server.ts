@@ -15,7 +15,7 @@ import { Transport } from "./transport.ts";
 import { describeBuiltUi, explainStartupError } from "./startup-error.ts";
 import { assertNotSandboxed, SandboxedEnvironmentError } from "./sandbox-guard.ts";
 import { hasBuiltUi, resolveUiDistDir } from "./static-ui.ts";
-import { findOwnPackage, PACKAGE_NAME } from "./package-meta.ts";
+import { VERIFY_INSTALL_HINT, findOwnPackage, PACKAGE_NAME } from "./package-meta.ts";
 
 interface Options {
   port: number;
@@ -39,6 +39,16 @@ interface Options {
  * by NAME rather than taking the nearest `package.json`, so running from source does not report
  * `@pi-central/orchestrator`'s version by accident (see `package-meta.ts`).
  */
+/**
+ * The directory the running package was loaded from, or a plain statement that it could not be found.
+ *
+ * Never guessed: an unidentifiable path is reported as unknown, for the same reason the self-hosting check
+ * does — "no path printed" and "the path is the safe one" must not look alike.
+ */
+function ownPackageRoot(): string {
+  return findOwnPackage()?.root ?? "unknown (no package.json found)";
+}
+
 function versionLine(): string {
   const own = findOwnPackage();
   if (own === undefined) return `${PACKAGE_NAME} (version unknown: no package.json found)`;
@@ -170,6 +180,24 @@ async function main(): Promise<number> {
   console.log(`  default workspace: ${config.workspaceRoot}`);
   console.log(`  agent root: ${config.agentRoot}${config.agentRootManaged ? " (managed)" : " (external)"}`);
   console.log(`  isolation: ${options.mode}`);
+  /*
+   * WHICH COPY THIS IS, and how to check it.
+   *
+   * Two questions a person actually asks, and neither is answerable from the process being asked:
+   *
+   *   1. "Am I running my checkout or a global install?" That cost a whole round trip during dogfooding
+   *      (#114): a rebuild in the checkout changed nothing, because the browser was talking to the
+   *      npm-installed copy at a different path entirely.
+   *   2. "Is this the tarball npm published?" The app cannot answer that itself — a malicious build would
+   *      simply omit the check — so the honest thing is to name the command that CAN, next to the version.
+   *
+   * Deliberately no integrity hash: npm records none for a global install (verified: no
+   * `.package-lock.json` under the global prefix, and no `_integrity` in the installed manifest), so
+   * printing one would mean inventing it. Version plus path is what is knowable offline, and it is enough
+   * to tell the two cases apart.
+   */
+  console.log(`  running from: ${ownPackageRoot()}`);
+  console.log(`  verify this install: ${VERIFY_INSTALL_HINT}   (see README, "Verify what you installed")`);
   // Where Pi Central thinks its own installation is (issue #25). Printed because the per-session
   // warning is SILENT when the path cannot be identified — and "no warning appeared" would otherwise
   // be indistinguishable from "the warning is broken". Saying it once, here, makes the difference
