@@ -794,7 +794,23 @@ export function describeExitFailure(
   signal: string | null,
   stderr: string,
 ): string {
-  const base = `pi exited (code=${code ?? "-"}, signal=${signal ?? "-"})${stderr ? `\n${stderr}` : ""}`;
+  /*
+   * ## Two defects fixed here, both reported from a window
+   *
+   * **1. `code=137, signal=-` does not say what happened.** A shell reports a child killed by a signal as
+   * `128 + n` with no signal name, because the wrapper exited rather than the signal propagating. So the most
+   * likely deliberate action — someone killing the session's process — produced a message that named a number
+   * and nothing else. The signal is decoded from the code, because that is what the reader needs.
+   *
+   * **2. The cause was buried under startup chatter.** The stderr tail used to be the WHOLE tail, so a session
+   * that started fine and ran for a while reported its failure after every extension's banner line — the
+   * LiteLLM and nvim-tmux notices, in the case that was reported. `Killed: 9` arrived on the last line of a
+   * screenful. The summary now names the reason, and the tail is bounded to its last lines with a count of
+   * what was left out, so the evidence survives without the wall.
+   */
+  const reason = exitReason(code, signal);
+  const tail = boundedTail(stderr);
+  const base = `${reason}${tail ? `\n${tail}` : ""}`;
   if (!/sandbox_apply|Operation not permitted/i.test(stderr)) return base;
   return (
     `${base}\n\n` +
@@ -802,6 +818,59 @@ export function describeExitFailure(
     "terminal, not inside another sandbox, editor task, or agent harness -- because `safehouse` " +
     "applies its policy with `sandbox-exec`, and that cannot run inside an existing sandbox."
   );
+}
+
+/** How many stderr lines survive into the message. */
+const STDERR_TAIL_LINES = 12;
+
+/**
+ * The first line of a failure message: what ended the process.
+ *
+ * `code` is the exit status and `signal` the terminating signal, and they are rarely both populated: a shell
+ * wrapping a killed child exits `128 + n`, so nobody sees `SIGKILL` — only `137`. Decoding it is the difference
+ * between a number and a sentence. The raw numbers are kept, because they are the evidence.
+ */
+export function exitReason(code: number | null, signal: string | null): string {
+  const raw = `pi exited (code=${code ?? "-"}, signal=${signal ?? "-"})`;
+  if (signal) return `${raw} — killed by ${signal}`;
+  // `128 + n` is how a SHELL reports a signalled child. Naming it is a reading of the number, not a guess about
+  // intent: a kill and an OOM kill both land here, which is why the number is kept alongside the name.
+  if (code !== null && code > 128 && code <= 128 + 64) {
+    const name = signame(code - 128);
+    if (name !== undefined) return `${raw} — killed by ${name}`;
+  }
+  return raw;
+}
+
+/** The conventional short name for a signal number, for the ones a session plausibly dies from. */
+function signame(number: number): string | undefined {
+  const names: Record<number, string> = {
+    1: "SIGHUP",
+    2: "SIGINT",
+    3: "SIGQUIT",
+    6: "SIGABRT",
+    9: "SIGKILL",
+    11: "SIGSEGV",
+    13: "SIGPIPE",
+    15: "SIGTERM",
+  };
+  return names[number];
+}
+
+/**
+ * The last lines of stderr, with a count of what was dropped.
+ *
+ * Trimmed from the TOP rather than the bottom because the cause is at the end: a process writes its banner as it
+ * starts and the fatal line as it dies.
+ */
+export function boundedTail(stderr: string): string {
+  const text = stderr.replace(/\s+$/, "");
+  if (text === "") return "";
+  const lines = text.split("\n");
+  if (lines.length <= STDERR_TAIL_LINES) return text;
+  const kept = lines.slice(-STDERR_TAIL_LINES);
+  const omitted = lines.length - STDERR_TAIL_LINES;
+  return `… ${omitted} earlier line${omitted === 1 ? "" : "s"} of output omitted\n${kept.join("\n")}`;
 }
 
 /** Only used so a display name is never a bare id. */

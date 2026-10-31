@@ -352,6 +352,13 @@ They are kept because each one is the reason a constraint or an invariant test e
   button, and the row says *"restart the orchestrator to retry"* instead. Offering an action the other half
   cannot perform is the same failure as a disabled control that promises something.
 
+  **A failure now names what killed it, and does not bury it.** Killing a session's process produced
+  `pi exited (code=137, signal=-)` with nothing else — 137 is `128 + 9`, because the wrapper exits rather than
+  the signal propagating, so the one word that explains the failure was missing. And the stderr tail was the
+  *whole* tail: the LiteLLM and nvim-tmux banner lines, then `Killed: 9` on the last line of a screenful. The
+  reason now leads, `128 + n` is decoded to a signal name (keeping the raw numbers as evidence), and the tail is
+  bounded to its last lines with a count of what was dropped.
+
   The refusals live in `retry.ts` rather than inside `Supervisor.retry`: a retry needs a real spawn to exercise
   end to end, which no test here can do (C1: the sandbox does not nest). Extracting the decisions makes all four
   criteria checkable.
