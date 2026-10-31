@@ -2,6 +2,13 @@
 
 ## Component overview
 
+![Pi Central's architecture: a browser UI over a loopback WebSocket to an orchestrator, which runs
+outside any sandbox and spawns one pi process per session, each in its own Safehouse sandbox drawn as
+a separate dashed frame.](../assets/architecture.svg)
+
+The shape below is the same picture in text, with the component detail this document is about — the
+diagram is the one to show someone who has not seen the project before.
+
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  Pi Central UI            (browser, 127.0.0.1 only)          │

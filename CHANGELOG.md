@@ -43,6 +43,12 @@ newer orchestrator has, and vice versa.
 
 ## [Unreleased]
 
+### Changed
+
+- The README leads with what it does and who it is for, states its requirements, and puts Quick start above
+  the explanation. The architecture diagram is now an SVG that follows the reader's theme and shows the
+  sandboxes as separate frames; the nine principles moved to [docs/PRINCIPLES.md](docs/PRINCIPLES.md).
+
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.4.1] — 2026-10-29

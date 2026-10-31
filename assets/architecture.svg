@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  How Pi Central is put together, and why the sandboxes are visible (README).
+
+  Drawn as SVG rather than the ASCII block it replaces: the ASCII version was legible only in a
+  monospace font at one size, could not show the nesting the picture exists to explain, and could not
+  follow the reader's theme. This one renders at any width and swaps its palette with
+  `prefers-color-scheme`, which GitHub honours for `<img src="*.svg">`.
+
+  The ONE thing the drawing has to make obvious: the orchestrator sits OUTSIDE every frame, and each
+  `pi` sits INSIDE its own. It SHOWS that with gaps between the frames rather than saying it — the
+  reason for the shape (C1, Seatbelt does not nest) belongs in the prose beside it, not in the
+  drawing, where it reads as clutter.
+
+  Colours are the app's own tokens (packages/ui/src/styles.css). Written as explicit class+media pairs
+  rather than CSS custom properties: `var()` inside an SVG `<style>` is not supported by every
+  renderer (librsvg 2.62 ignores it, which produced a blank diagram on first render), and a mode that
+  silently renders nothing is worse than one palette.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 444" width="880" height="444"
+     role="img" aria-labelledby="arch-title arch-desc">
+  <title id="arch-title">Pi Central's architecture</title>
+  <desc id="arch-desc">A browser window running the Pi Central UI talks to an orchestrator over a
+    loopback WebSocket. The orchestrator runs outside any sandbox and spawns one pi process per
+    session, each inside its own Safehouse sandbox for its own working directory. The sandboxes are
+    drawn as separate frames with gaps between them, to show that they do not nest.</desc>
+
+  <style>
+    /* Dark first: the app is dark-only, and a light diagram on a dark page is the commoner mistake. */
+    .bg          { fill: #0e1116; }
+    .card        { fill: #161b22; stroke: #262d3a; stroke-width: 1.5; }
+    .frame-fill  { fill: #3fa383; opacity: 0.07; }
+    .frame       { fill: none; stroke: #3fa383; stroke-width: 2; stroke-dasharray: 7 5; }
+    .title       { fill: #e6edf3; font: 600 15px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .label       { fill: #e6edf3; font: 600 13px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .body        { fill: #8b949e; font: 12px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .mono        { fill: #e6edf3; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .mono-dim    { fill: #8b949e; font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .wire        { stroke: #3a4354; stroke-width: 1.5; fill: none; }
+    .wire-accent { stroke: #4c9aff; stroke-width: 1.5; fill: none; }
+    .arrow       { fill: #3a4354; }
+    .arrow-accent{ fill: #4c9aff; }
+    .badge       { fill: #3fa383; opacity: 0.14; }
+    .badge-text  { fill: #3fa383; font: 600 10.5px ui-sans-serif, -apple-system, sans-serif;
+                   letter-spacing: 0.04em; }
+
+    @media (prefers-color-scheme: light) {
+      .bg          { fill: #ffffff; }
+      .card        { fill: #f6f8fa; stroke: #d0d7de; }
+      .frame-fill  { fill: #1a7f62; opacity: 0.06; }
+      .frame       { stroke: #1a7f62; }
+      .title       { fill: #1f2328; }
+      .label       { fill: #1f2328; }
+      .body        { fill: #59636e; }
+      .mono        { fill: #1f2328; }
+      .mono-dim    { fill: #59636e; }
+      .wire        { stroke: #afb8c1; }
+      .wire-accent { stroke: #0969da; }
+      .arrow       { fill: #afb8c1; }
+      .arrow-accent{ fill: #0969da; }
+      .badge       { fill: #1a7f62; opacity: 0.10; }
+      .badge-text  { fill: #1a7f62; }
+    }
+  </style>
+
+  <rect class="bg" x="0" y="0" width="880" height="444" rx="10"/>
+
+  <!-- 1. The browser: what the user touches. -->
+  <rect class="card" x="104" y="24" width="672" height="62" rx="8"/>
+  <text class="label" x="126" y="50">Pi Central UI</text>
+  <text class="body" x="126" y="68">session rail · transcript · approvals · tool trace</text>
+  <rect class="badge" x="640" y="38" width="118" height="20" rx="10"/>
+  <text class="badge-text" x="652" y="52">localhost only</text>
+
+  <!-- The wire between them, and what travels on it. -->
+  <line class="wire-accent" x1="440" y1="86" x2="440" y2="120"/>
+  <polygon class="arrow-accent" points="440,128 435,118 445,118"/>
+  <text class="mono-dim" x="452" y="107">WebSocket, typed envelopes</text>
+
+  <!-- 2. The orchestrator: OUTSIDE every sandbox. This is the load-bearing part of the picture. -->
+  <rect class="card" x="104" y="128" width="672" height="62" rx="8"/>
+  <text class="label" x="126" y="154">Orchestrator</text>
+  <text class="body" x="126" y="172">session registry · process supervision · one sandboxed pi per session</text>
+  <rect class="badge" x="628" y="142" width="130" height="20" rx="10"/>
+  <text class="badge-text" x="640" y="156">outside any sandbox</text>
+
+  <!-- 3. The spawn line, then three frames. The GAPS between them are the point. -->
+  <line class="wire" x1="440" y1="216" x2="440" y2="236"/>
+  <polyline class="wire" points="180,236 700,236"/>
+  <line class="wire" x1="180" y1="236" x2="180" y2="252"/>
+  <line class="wire" x1="440" y1="236" x2="440" y2="252"/>
+  <line class="wire" x1="700" y1="236" x2="700" y2="252"/>
+  <polygon class="arrow" points="180,260 175,250 185,250"/>
+  <polygon class="arrow" points="440,260 435,250 445,250"/>
+  <polygon class="arrow" points="700,260 695,250 705,250"/>
+  <text class="mono-dim" x="104" y="230">safehouse --workdir &lt;cwd&gt; -- pi --mode rpc</text>
+
+  <!-- 4. Three sessions, each a frame of its own. -->
+  <g>
+    <rect class="frame-fill" x="104" y="260" width="152" height="140" rx="8"/>
+    <rect class="frame" x="104" y="260" width="152" height="140" rx="8"/>
+    <text class="badge-text" x="116" y="278">SANDBOX</text>
+    <text class="mono" x="116" y="304">pi --mode rpc</text>
+    <text class="body" x="116" y="326">workdir</text>
+    <text class="mono-dim" x="116" y="342">~/git/api</text>
+    <text class="body" x="116" y="370">own profile,</text>
+    <text class="body" x="116" y="386">own credentials</text>
+  </g>
+  <g>
+    <rect class="frame-fill" x="364" y="260" width="152" height="140" rx="8"/>
+    <rect class="frame" x="364" y="260" width="152" height="140" rx="8"/>
+    <text class="badge-text" x="376" y="278">SANDBOX</text>
+    <text class="mono" x="376" y="304">pi --mode rpc</text>
+    <text class="body" x="376" y="326">workdir</text>
+    <text class="mono-dim" x="376" y="342">~/git/web</text>
+    <text class="body" x="376" y="370">own profile,</text>
+    <text class="body" x="376" y="386">own credentials</text>
+  </g>
+  <g>
+    <rect class="frame-fill" x="624" y="260" width="152" height="140" rx="8"/>
+    <rect class="frame" x="624" y="260" width="152" height="140" rx="8"/>
+    <text class="badge-text" x="636" y="278">SANDBOX</text>
+    <text class="mono" x="636" y="304">pi --mode rpc</text>
+    <text class="body" x="636" y="326">workdir</text>
+    <text class="mono-dim" x="636" y="342">~/notes</text>
+    <text class="body" x="636" y="370">own profile,</text>
+    <text class="body" x="636" y="386">own credentials</text>
+  </g>
+
+  <text class="body" x="104" y="426">Three sessions, three sandboxes, no shared access to each other's files.</text>
+</svg>

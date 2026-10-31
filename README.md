@@ -10,21 +10,100 @@
   <img alt="license" src="https://img.shields.io/npm/l/pi-central" />
 </p>
 
-**Pi Central** (/paɪ ˈsɛntrəl/) is a local dashboard for running, watching, and switching between
-multiple [Pi](https://pi.dev) coding-agent sessions that live in **different working directories**,
-while keeping every session inside its own **Agent Safehouse** sandbox.
+**A local dashboard for running several [Pi](https://pi.dev) coding-agent sessions at once — each in its
+own working directory, each inside its own sandbox.** /paɪ ˈsɛntrəl/
 
-The central station is the design brief: independent lines arrive, are dispatched, and are kept apart
-from one another. Pi Central does the same for agent sessions.
+`pi` gives you one process, one session, one directory. Pi Central is the fleet you were missing:
 
-**Status: works end to end, verified, and published.** The version is deliberately not written down
-here: `pi-central --version` reports the version of the package it was actually shipped in, and a
-number restated in prose is a number that drifts. See [docs/RELEASING.md](docs/RELEASING.md).
+- **See them all.** One rail with every session's state, cost and context burn — instead of three
+  terminals and three scrollbacks.
+- **Answer them from one place.** The approval dock handles `confirm`, `select`, `input` and `editor`
+  for whichever session is blocked.
+- **Keep them apart.** Each session gets its own Safehouse sandbox for its own directory. They cannot
+  read each other's files.
+
+**Who this is for.** People who already run `pi` and want more than one session at a time.
+Contributors: jump to [Working on this project](#working-on-this-project).
+
+**Status: works end to end, verified, and published.** The version is deliberately not written here —
+`pi-central --version` reports the version of the package it shipped in. See
+[docs/RELEASING.md](docs/RELEASING.md).
+
+## Requirements
+
+Check these first — Pi Central will not run without them, and it is better to know now.
+
+| | Why | Check |
+|---|---|---|
+| **macOS** | Safehouse (the sandbox) has no Linux backend yet. | `uname` |
+| **[Pi](https://pi.dev)** | Pi Central supervises `pi --mode rpc`; it is not a fork of it. | `pi --version` |
+| **[Safehouse](https://github.com/earendil-works/safehouse)** | Composes the per-session sandbox profile. | `safehouse --help` |
+| **Node ≥ 22** | The orchestrator runs TypeScript directly. | `node --version` |
+
+## Quick start
+
+```bash
+npm install --global pi-central   # inert: this package runs no install scripts
+npm audit signatures              # verify BEFORE the first run
+pi-central
+```
+
+It prints the URL it is serving — <http://127.0.0.1:8787> unless you passed `--port`. One process serves
+both the UI and the socket, so there is no dev server to start.
+
+> **Run it from a plain terminal.** Not from an editor task, a sandboxed shell, or an agent harness.
+> macOS Seatbelt does not nest: `safehouse` applies its policy with `sandbox-exec`, which cannot run
+> inside an existing sandbox. Pi Central checks this before binding a port and refuses with an
+> explanation rather than failing confusingly later. ([C1](docs/CONSTRAINTS.md))
+
+Once it is running, [install it as an app](#install-it-as-an-app) and you will not need the terminal
+again until the next reboot.
+
+### Verify what you installed
+
+`npm audit signatures` checks the **provenance attestation** every release carries — a signed statement,
+minted by the release workflow's OIDC identity rather than a stored token, that this tarball came from
+this commit via this workflow.
+
+What it does **not** do: it is a check you have to run (npm does not refuse an unattested tarball), and
+it answers *"did the publisher produce this?"* — not *"is the publisher trustworthy?"*. Pi Central runs
+**outside** the sandbox with your privileges by design, because it is the component that spawns sandboxed
+sessions. The attestation tells a tampered tarball from a genuine one; it cannot make a genuine tarball
+safe.
+
+`npx pi-central` has no window to check in: it fetches and executes in one step. If you use it, pin an
+exact version (`npx pi-central@<version>`, where `<version>` is what `pi-central --version` reports).
+The number is not written here on purpose — a README that restates a version goes stale, and
+`scripts/check-version.mjs` refuses to let one.
+
+## Why it exists
+
+`pi` has no fleet concept. One process owns one session and one directory: sessions are JSONL files under
+`~/.pi/agent/sessions/`, RPC mode is a long-lived child speaking JSONL over stdio, and there is **no
+daemon, no attach protocol, no socket registry, no port**.
+
+So three repositories means three terminals, three scrollbacks, and no single place to see what is
+running, what is waiting for approval, or how much context each session has burned.
+
+## How it works
+
+![Pi Central's architecture: a browser UI talks over a loopback WebSocket to an orchestrator, which
+runs outside any sandbox and spawns one pi process per session, each inside its own Safehouse
+sandbox drawn as a separate dashed frame.](assets/architecture.svg)
+
+The two boxes on top are ordinary and unremarkable. **The three frames below are the design**: the
+orchestrator sits *outside* every sandbox, and each `pi` sits *inside* its own, with no frame shared
+between them.
+
+That shape is forced by one fact — **Seatbelt does not nest** ([C1](docs/CONSTRAINTS.md)). A process
+already inside `sandbox-exec` cannot apply a second profile, so an architecture that hosted sessions
+in-process would have no sandbox at all. The orchestrator must live outside and spawn one `safehouse`
+invocation per session. Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Install it as an app
 
 Pi Central is a web app that installs to your dock. Start it once (see [Quick start](#quick-start)),
-open <http://127.0.0.1:8787>, and then install it from the browser's own menu:
+open <http://127.0.0.1:8787>, then install it from the browser's own menu:
 
 | Browser | How |
 |---|---|
@@ -38,152 +117,40 @@ You get the π mark in the dock and a window with no tab bar or address field.
 not running the installed app says `disconnected` and nothing else. A window that claimed to work
 offline would open onto a blank dashboard.
 
-## The problem
+## What works, and what does not
 
-Pi has no fleet concept. One `pi` process owns one session and one working directory:
+Stated plainly, because a dashboard that overstates itself is worse than one that does less.
 
-- Sessions are JSONL files grouped by working directory under `~/.pi/agent/sessions/`.
-- RPC mode (`pi --mode rpc`) is a long-lived child process speaking JSONL over stdio.
-- There is **no daemon, no attach protocol, no socket registry, and no port**. Each RPC process
-  privately owns its own stdin/stdout.
+**Works:** multiple sandboxed sessions in different directories with verified isolation; live transcripts
+reconstructed from Pi's delta-only stream; the approval dock answerable for any session; a bounded tool
+trace with full traversal; a read-only file tree and image viewer confined to the session's directory;
+history searchable by content, with a clear refusal when a session's directory is gone; a session roster
+that survives a restart; agent-scoped credentials with the host's own credentials denied, and commits
+signed as the agent when the store is configured to sign.
 
-So working on three repositories means three terminals, three scrollbacks, and no single place to
-see what is running, what is waiting for approval, or how much context each session has burned.
+**Not yet:** no file editing from the browser, no update checking, no export. Each is a tracked issue
+rather than a wish.
 
-## The non-obvious constraint
+## Working on this project
 
-macOS Seatbelt sandboxing does **not nest**. A process already inside `sandbox-exec` cannot apply a
-second profile — `sandbox_init` returns `EPERM`. Safehouse's own profile documents this as not
-fixable with additional allow rules.
-
-This single fact rules out the obvious design (a Pi extension that hosts other sessions in-process)
-and dictates the architecture: **the orchestrator must live outside any sandbox, and each session
-must be its own `safehouse` invocation.** See [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md).
-
-It also means Pi Central must run from a **plain terminal** — not from an editor task, a sandboxed
-shell, or an agent harness. It checks this before binding a port and refuses to start with an
-explanation rather than failing confusingly later.
-
-## Design in one picture
-
-![The Pi Central dashboard. On the left, a session rail lists two sessions with their state and
-cost. In the middle, a transcript shows the reader's own prompt in a tinted block labelled YOU,
-followed by the agent's reasoning, two tool runs, and a live "responding" indicator. Below the
-transcript, a tool trace lists the last three commands with their durations. The right-hand panel is
-collapsed.](docs/images/dashboard.png)
-
-*A session mid-run. The rail carries the fleet, the transcript carries the conversation, and the tool
-trace carries what the agent actually ran. The right-hand panel — session facts, or a file browser —
-is **collapsed by default**; `Show panel` in the top bar opens it.*
-
-The layers behind that window:
-
-```
-┌──────────────────────────────┐
-│  Pi Central UI (localhost)   │  session rail · transcript · approvals · tool trace
-│  React + Vite, TypeScript    │  Markdown rendered inert (ADR-0006)
-└──────────────┬───────────────┘
-               │  WebSocket over loopback (typed envelopes)
-┌──────────────▼───────────────┐
-│  Orchestrator (unsandboxed)  │  session registry · process supervision
-│  TypeScript on Node          │  · one sandboxed pi process per session
-└──────────────┬───────────────┘
-               │  spawn: safehouse --workdir <cwd> -- pi --mode rpc
-     ┌─────────┼─────────┐
-     ▼         ▼         ▼
-  ┌──────┐  ┌──────┐  ┌──────┐
-  │ pi   │  │ pi   │  │ pi   │   one sandbox per working directory
-  │ /a   │  │ /b   │  │ /c   │   isolation preserved per session
-  └──────┘  └──────┘  └──────┘
-```
-
-Each session gets a correctly composed Safehouse profile for its own workdir. The orchestrator
-never runs untrusted content, so being outside the sandbox is safe by construction.
-
-## Quick start
-
-**One process.** The orchestrator serves the built UI and the WebSocket from the same origin, so
-there is no dev server to start and no port to coordinate. It must run from a plain terminal (see
-the constraint above), and it prints the URL it is serving on — <http://127.0.0.1:8787> unless you
-passed `--port`.
-
-### From npm — what a user does
+Work is organised as **increments** (GitHub milestones) containing **slices** (issues). A slice is sized
+to land in one pull request and to be verifiable on its own. See
+[docs/INCREMENTS.md](docs/INCREMENTS.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ```bash
-npm install --global pi-central   # inert: this package runs no install scripts
-npm audit signatures              # verify BEFORE the first run
-pi-central
+npm install && npm run ui:build && npm run server   # from a checkout
+npm test            # unit + component tests, all packages
+npm run typecheck   # two configs: Node libs and DOM libs cannot share one
+npm run check:docs  # every reference in every Markdown file resolves
+npm run check:version # one version, declared once
 ```
 
-**The order is the point, and it is only sound because of the comment on line one.** `npm install`
-executes no code from this package — it declares no `preinstall`, `install`, `postinstall` or `prepare`
-script, and a test asserts that stays true. So there is a window between "the bytes are on disk" and
-"anything has run" in which you can check what you got.
+Serving the built UI from the orchestrator is not only convenience: a Vite dev server watches
+`packages/ui/src`, so an agent editing a component would reload the interface you are using out from
+under you. For hot reload, run the dev server deliberately — see
+[docs/DOGFOODING.md](docs/DOGFOODING.md).
 
-`npx pi-central` has no such window: it fetches and executes in one step. It is convenient and it is the
-least verifiable way to run this. If you use it, **pin an exact version** (`npx pi-central@<version>`, where
-`<version>` is what `pi-central --version` reports for the copy you mean) so you at least know which artifact
-you asked for. The number is not written here on purpose: a README that restates a version goes stale the
-moment the next release ships, and `scripts/check-version.mjs` refuses to let one.
-
-Once it is running, [install it as an app](#install-it-as-an-app) and you will not need the terminal
-again until the next reboot.
-
-#### Verify what you installed
-
-```bash
-npm audit signatures
-```
-
-Every release carries a **provenance attestation** — a signed statement, minted by the release
-workflow's OIDC identity rather than a stored token, that this tarball came from this commit via this
-workflow. That command checks it, along with the registry signature.
-
-**Be clear about what this does and does not do.** It is a check you have to run; npm does not refuse
-an unattested tarball, and neither does the app. And it answers *"did the publisher produce this?"* —
-**not** *"is the publisher trustworthy?"*. Pi Central runs **outside** the sandbox (see the constraint
-above) with your privileges, deliberately, because it is the component that spawns the sandboxed
-sessions. A malicious release of it would not need an exploit; it would have exactly what you have.
-The attestation is what lets you tell a tampered tarball from a genuine one. It cannot make a genuine
-tarball safe.
-
-The package is **one bundled ESM file plus the built UI**, with a single runtime dependency (`ws`),
-and `pi-central --version` reports the version of the package it was actually shipped in.
-
-### From a checkout — what a contributor does
-
-```bash
-npm install
-npm run ui:build      # once, and after any UI change
-npm run server        # the orchestrator, which also serves the UI
-```
-
-To build the publishable artifact from a checkout:
-
-```bash
-npm run build:package     # bundles the orchestrator, copies the built UI
-npm pack --dry-run        # show exactly what would ship
-npm run serve:package     # run the packaged binary from ./bin
-```
-
-It ships as JavaScript — TypeScript cannot be loaded from `node_modules` — as one bundled ESM file
-plus the built UI. See [ADR-0011](docs/decisions/0011-distribution-and-update.md).
-
-Serving the UI from the orchestrator is not only convenience. A Vite dev server watches
-`packages/ui/src`, so an agent editing a component reloads the interface you are using out from
-under you, mid-edit, into a syntax-error overlay. A built UI removes the watcher. It also makes
-the `connect-src 'self'` in the CSP truthful by construction: the socket really is same-origin with
-the document. See [docs/DOGFOODING.md](docs/DOGFOODING.md).
-
-### Working on the UI
-
-For hot reload while editing components, run the dev server instead — it proxies `/ws` to the
-orchestrator and still needs no configuration:
-
-```bash
-npm run server -- --no-ui   # terminal 1 — socket only
-npm run ui:dev              # terminal 2 — Vite, on http://localhost:5173
-```
+### Keyboard
 
 | Key | Action |
 |---|---|
@@ -192,90 +159,35 @@ npm run ui:dev              # terminal 2 — Vite, on http://localhost:5173
 | `Enter` | Send, or queue while a run is in progress |
 | `Esc` | Answer an open dialog → close a popover → stop the run. Never clears your draft |
 
-**Settings** (top of the window) shows which build is running, which protocol it speaks, and where
-Pi Central keeps sessions, workspaces and the agent root — facts that were previously only in the
-terminal's startup output. It has no preference controls yet, deliberately: update checking
-([#55](https://github.com/sven1103-agent/pi-central/issues/55)) will add the first one, and it will be
-opt-in.
-
-## What works, and what does not
-
-Stated plainly, because a dashboard that overstates itself is worse than one that does less.
-
-**Works:** multiple sandboxed sessions in different directories with verified isolation; live
-transcripts reconstructed from Pi's delta-only stream; the approval dock (`confirm` / `select` /
-`input` / `editor`) answerable for any session; a bounded tool trace with full traversal; history
-searchable by content, with a clear refusal when a session's directory is gone; agent-scoped
-credentials with the host's own credentials denied, and commits signed as the agent when the store is
-configured to sign.
-
-**Not yet:** no file navigation. It is an issue rather than a wish — see below.
-
-## Working on this project
-
-Work is organised as **increments** (GitHub milestones) containing **slices** (issues). A slice is
-sized to land in one pull request and to be verifiable on its own.
-
-- [docs/INCREMENTS.md](docs/INCREMENTS.md) — what each increment delivers and why it is ordered
-  that way
-- Issues — the slices, with acceptance criteria
-- [docs/ROADMAP.md](docs/ROADMAP.md) — the long view, including what is deliberately out of scope
-
-```bash
-npm test            # unit + component tests, all packages
-npm run typecheck   # two configs: Node libs and DOM libs cannot share one
-npm run check:docs  # every reference in every Markdown file resolves
-npm run check:version # one version, declared once
-npm run ui:build    # production build of the UI
-```
-
-The `check:docs` step exists because this repository is docs-driven, and a reference to a deleted
-file still *looks* authoritative. It has caught real rot more than once. `check:version` exists for
-the same reason one level up: the version was previously claimed in three places — `package.json`,
-`README.md`, and a `CHANGELOG.md` heading — and three claims are three chances to disagree.
-
-Releases are described in [docs/RELEASING.md](docs/RELEASING.md).
+**Settings** shows which build is running, which protocol it speaks, where Pi Central keeps sessions,
+workspaces and the agent root, and how to verify the install.
 
 ## Documentation
 
 | Document | What it covers |
 |---|---|
-| [docs/USER-STORIES.md](docs/USER-STORIES.md) | What users need, and the constraints those needs create |
 | [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) | The Seatbelt nesting limit and its consequences (C1–C15c) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, trust boundaries, lifecycle |
-| [docs/STACK.md](docs/STACK.md) | TypeScript/Node orchestrator, React UI, rendering pipeline |
-| [docs/PROTOCOL.md](docs/PROTOCOL.md) | The Pi RPC surface Pi Central depends on |
-| [docs/SANDBOX.md](docs/SANDBOX.md) | How safehouse is invoked per session, and what the composed policy denies |
+| [docs/SANDBOX.md](docs/SANDBOX.md) | How Safehouse is invoked per session, and what the policy denies |
 | [docs/AGENT-SETUP.md](docs/AGENT-SETUP.md) | Creating the agent identity a session runs as: SSH key, gitconfig, signing, `gh` |
-| [docs/INCREMENTS.md](docs/INCREMENTS.md) | Increments, slices, and how work is sequenced |
-| [docs/DOGFOODING.md](docs/DOGFOODING.md) | Using Pi Central to develop Pi Central, and what breaks if you run it from the checkout you edit |
-| [docs/RELEASING.md](docs/RELEASING.md) | Cutting a release: the version source, the tag, provenance, and how to roll back |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Phases, verification status, and out-of-scope items |
-| [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) | Unresolved decisions |
+| [docs/PROTOCOL.md](docs/PROTOCOL.md) | The Pi RPC surface Pi Central depends on |
+| [docs/STACK.md](docs/STACK.md) | TypeScript/Node orchestrator, React UI, rendering pipeline |
+| [docs/USER-STORIES.md](docs/USER-STORIES.md) | What users need, and the constraints those needs create |
+| [docs/PRINCIPLES.md](docs/PRINCIPLES.md) | The nine rules, in full |
+| [docs/DOGFOODING.md](docs/DOGFOODING.md) | Using Pi Central to develop Pi Central, and what breaks if you do |
+| [docs/RELEASING.md](docs/RELEASING.md) | Cutting a release: the version source, the tag, provenance, rollback |
+| [docs/INCREMENTS.md](docs/INCREMENTS.md) · [docs/ROADMAP.md](docs/ROADMAP.md) | How work is sequenced, and the long view |
 | [docs/decisions/](docs/decisions/) | Architecture decision records |
 | [packages/ui/DESIGN.md](packages/ui/DESIGN.md) | The UI design system, as implemented |
 
 ## Principles
 
+Three that explain most decisions. The full nine are in [docs/PRINCIPLES.md](docs/PRINCIPLES.md).
+
 1. **Isolation is the feature.** Never trade per-session sandboxing for convenience.
-2. **The orchestrator is the trust boundary.** It stays local, holds no untrusted content, and
-   never executes model output.
-3. **Pi is the source of truth.** Do not re-implement session semantics; consume RPC and the
-   persisted session tree.
-4. **Additive, not a replacement.** Pi Central supervises `pi`; it does not fork it.
-5. **Local first.** No telemetry, no network egress beyond providers Pi already calls.
-6. **Untrusted content is inert.** Transcripts and file contents are strings to display, never
-   markup to execute — see [ADR-0006](docs/decisions/0006-untrusted-markdown-rendering.md).
-7. **Confine the agents, not the user.** Safehouse constrains model-generated actions in a workdir.
-   The orchestrator is a user-level app acting as the user, on the user's files — see
-   [ADR-0007](docs/decisions/0007-filesystem-access-model.md).
-8. **Never state something false.** A displayed value that is wrong is a defect, not a cosmetic
-   issue: this project has shipped misleading counts, a mislabelled session id, and a permission
-   error reported as a missing directory, and treats each as a bug.
-9. **A peer, not a configurator.** Pi Central does not write into a user's Pi environment — no
-   skills, no extensions, no settings. It reads what exists and writes only its own state. A
-   defense does not require a new artifact in the environment it defends, and any setup a session
-   needs is a documented action the user takes (see [docs/AGENT-SETUP.md](docs/AGENT-SETUP.md)).
+2. **Never state something false.** A displayed value that is wrong is a defect, not a cosmetic issue.
+3. **A peer, not a configurator.** Pi Central writes nothing into your Pi environment — no skills, no
+   extensions, no settings.
 
 ## License
 
