@@ -734,7 +734,9 @@ test("the interim 'steer is not available' copy is gone", async () => {
     onRestored() {}, draft: "", onDraftChange() {},
   }));
   assert.ok(!/not available/i.test(html), "the interim capability hint must be removed");
-  assert.match(text(html), /Esc<\/kbd> stops the run and returns the queue to this box/);
+  // The hint names the ESC action. It used to add "and returns the queue to this box" — a sentence long enough to wrap
+  // under the field, describing feedback the reader already sees (the text reappears in the box).
+  assert.match(text(html), /Esc<\/kbd> stops the run/);
 });
 
 test("the composer names the action the selected mode will take, and offers no button", async () => {

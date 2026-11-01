@@ -32,6 +32,7 @@ import {
   transcriptFor,
 } from "./store.ts";
 import { SessionRail } from "./components/SessionRail.tsx";
+import { FollowToggle } from "./components/FollowToggle.tsx";
 import {
   parseTraceOrder,
   TRACE_DETAIL_DEFAULT_HEIGHT,
@@ -1154,6 +1155,11 @@ function SessionView({
               onRestored={onRestored}
               draft={draft}
               onDraftChange={onDraftChange}
+              follow={
+                onToggleAutoFollow === undefined ? undefined : (
+                  <FollowToggle following={autoFollow} onToggle={onToggleAutoFollow} />
+                )
+              }
             />
           )
         }

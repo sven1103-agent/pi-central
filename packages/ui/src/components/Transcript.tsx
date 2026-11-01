@@ -555,15 +555,16 @@ export function TranscriptView({
         last message permanently behind the input.
       */}
       {footer !== undefined && (
+        /*
+          The follow control is handed INTO the footer rather than stacked above it.
+          
+          As a pill over the field it straddled the focus ring and shifted the gap to the text depending on focus
+          (`img_40` vs `img_41`). It now lives in the composer's own chrome row, sharing the field's left edge — the
+          reviewer's recommendation, and it fixes the overlap, the left-edge stagger and the "two pill systems" problem in
+          one move.
+        */
         <div className="transcript-footer">
-          <div className="composer-dock">
-            {onToggleAutoFollow !== undefined && (
-              <div className="transcript-tools">
-                <FollowToggle following={autoFollow} onToggle={onToggleAutoFollow} />
-              </div>
-            )}
-            {footer}
-          </div>
+          <div className="composer-dock">{footer}</div>
         </div>
       )}
       {/* The reading column closes here, AFTER the composer: the column is scroller + composer, and a close before

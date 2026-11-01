@@ -32,6 +32,7 @@ export function Composer({
   restored,
   draft,
   onDraftChange,
+  follow,
 }: {
   session: LiveSession | undefined;
   /** The reducer state, for the queued texts. The mode itself comes from `composerMode`. */
@@ -46,6 +47,13 @@ export function Composer({
   restored: string[];
   draft: string;
   onDraftChange: (draft: string) => void;
+  /**
+   * The follow toggle, rendered in the composer's own chrome row.
+   *
+   * A SLOT rather than a prop pair, because the composer has no opinion about scrolling — the transcript owns that
+   * behaviour and passes the control down. The composer only decides WHERE it goes, which is the thing that was wrong.
+   */
+  follow?: React.ReactNode;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streaming = session?.state === "streaming";
@@ -248,18 +256,33 @@ export function Composer({
         rows={3}
       />
 
-      <div className="hint">
-        {streaming ? (
-          <>
-            <kbd>Enter</kbd> to {behavior === "steer" ? "steer" : "queue a follow-up"} ·{" "}
-            <kbd>Alt</kbd>+<kbd>Enter</kbd> for {behavior === "steer" ? "a follow-up" : "steer"} ·{" "}
-            <kbd>Esc</kbd> stops the run and returns the queue to this box
-          </>
-        ) : (
-          <>
-            <kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line
-          </>
-        )}
+      {/*
+        THE COMPOSER'S CHROME ROW: the hint, and the follow toggle.
+
+        Both used to float: the toggle as a pill ABOVE the field, straddling its focus ring and shifting the gap between
+        the pill and the text depending on whether the field was focused (`img_40` vs `img_41`). A reviewer's verdict was
+        that `auto-follow` should be "part of the composer's chrome instead of a pill floating over it" — and that the
+        hint row's empty right half was the place for it.
+
+        So one row, inside the composer's own boundary, sharing the field's left edge. The toggle is right-aligned in the
+        space the hint does not use, which also stops two pill systems (this and `Jump to latest`) competing above the
+        field.
+      */}
+      <div className="composer-chrome">
+        <span className="composer-hint">
+          {streaming ? (
+            <>
+              <kbd>Enter</kbd> to {behavior === "steer" ? "steer" : "queue a follow-up"} ·{" "}
+              <kbd>Alt</kbd>+<kbd>Enter</kbd> for {behavior === "steer" ? "a follow-up" : "steer"} ·{" "}
+              <kbd>Esc</kbd> stops the run
+            </>
+          ) : (
+            <>
+              <kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line
+            </>
+          )}
+        </span>
+        {follow !== undefined && follow}
       </div>
 
       {justStopped && (

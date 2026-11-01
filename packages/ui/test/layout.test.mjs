@@ -158,3 +158,41 @@ test("the companion sits to the RIGHT of the prose, and the pair is centred", ()
   const stacked = /@container transcript[^{]*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
   assert.match(stacked, /order:\s*0/, "the visual-order swap is row-only");
 });
+
+test("the composer's chrome shares the field's left edge, and its gap does not move with focus", () => {
+  /*
+   * A reviewer's recommendation, and it fixes four findings at once.
+   *
+   * The follow toggle was a pill ABOVE the field. It straddled the focus ring — so the strongest "this is focused" signal
+   * was cut by a chip lying on it — and because the ring is drawn OUTSIDE the border, the gap between the pill and the
+   * text changed with focus (`img_40` vs `img_41`). The chrome appeared to shift when you clicked into the field.
+   *
+   * It is now a row INSIDE the composer's boundary, sharing the field's left edge, with a `margin-top` measured from the
+   * field so nothing can move.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const chrome = /(?:^|\n)\.composer-chrome\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.ok(chrome, ".composer-chrome must exist — the hint and the toggle live in one row");
+  assert.match(chrome, /display:\s*flex/);
+  // No horizontal padding: the row must start where the field does, or the left edges stagger again.
+  assert.ok(!/padding(-left)?:\s*[^;]*\d/.test(chrome), "the row adds no horizontal inset of its own");
+  assert.match(chrome, /margin-top:\s*var\(--sp-2\)/, "a fixed gap below the field, measured from the border");
+
+  // The toggle is a SWITCH now, not a pill whose only difference is a word.
+  const toggle = /(?:^|\n)\.follow-toggle\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.ok(toggle, ".follow-toggle must have a base rule — the contrast audit holds every alone-used class to it");
+  assert.match(toggle, /background:\s*none/, "it declares its own face");
+  assert.match(toggle, /font:\s*inherit/);
+  const track = /\.follow-toggle-track\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.ok(track, "the switch needs a track, or the state is a word only");
+  const dot = /\.follow-toggle-dot\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(dot, /transition:/, "the dot moves, which is what makes it a switch rather than a bullet");
+
+  // And the toggle must no longer be rendered above the field.
+  const transcript = readFileSync(new URL("../src/components/Transcript.tsx", import.meta.url), "utf8");
+  assert.ok(!/transcript-tools/.test(transcript), "the floating row above the field is gone");
+  assert.match(transcript, /composer-dock">\{footer\}/, "the composer owns the whole foot now");
+});

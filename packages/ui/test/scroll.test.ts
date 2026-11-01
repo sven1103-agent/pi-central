@@ -232,11 +232,18 @@ test("auto-follow off means the transcript never moves on its own", () => {
 test("the toggle is a real control, and its label carries the state", () => {
   // Same visual language as `activity on` beside it in the trace, and the state is in the WORDS as
   // well as `aria-pressed`, so nothing depends on the tint alone.
+  /*
+   * The control gained a SWITCH, because a pill whose only difference between states is a word is a label wearing a
+   * button's clothes — a reviewer's verdict was that `auto-follow off` "reads equally as a state and as a command".
+   *
+   * The words stay: colour and position are never the only carrier of meaning in this project, so the track moves AND
+   * the label states the mode.
+   */
   const toggle = source("../src/components/FollowToggle.tsx");
   assert.match(toggle, /aria-pressed=\{following\}/, "assistive tech must hear the state");
-  assert.match(toggle, /auto-follow on/, "…and so must a reader");
-  assert.match(toggle, /auto-follow off/);
-  assert.match(toggle, /className="toggle-chip"/, "the shared chip affordance");
+  assert.match(toggle, /follow-toggle-track/, "a switch, so the state is visible as well as written");
+  assert.match(toggle, /auto-follow/, "…and a reader still gets the word");
+  assert.match(toggle, /className="follow-toggle"/, "its own affordance, not a generic chip");
 
   // It must reach the pane, or the setting is decoration.
   const pane = source("../src/components/Transcript.tsx");

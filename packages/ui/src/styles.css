@@ -1381,8 +1381,8 @@ button { font: inherit; color: inherit; }
  * button sat outside it — the misalignment a review kept pointing at. It spans the dock's width now: one rounded
  * box, the same left edge as the paragraph above it, and nothing beside it.
  *
- * `rows=2` and a 40vh cap: a prompt is usually a line or two, and a box that grows to most of the window while
- * typing would push the conversation away exactly when the reader wants to look at it.
+ * A 40vh cap: a prompt is usually a line or two, and a box that grows to most of the window while typing would push the
+ * conversation away exactly when the reader wants to look at it.
  */
 .composer .composer-input,
 .composer textarea {
@@ -1397,21 +1397,98 @@ button { font: inherit; color: inherit; }
   color: var(--text);
   font: var(--fs-md) / 1.5 var(--sans);
   /*
-   * Three lines of room before it scrolls: `min-height` in `em` of the INPUT's own font, so it holds three lines at
-   * any reading size rather than three lines at one.
+   * THREE lines when the reader needs them, ONE when they do not.
    *
-   * `rows={3}` alone is a HINT the browser may override with `field-sizing: content`; the explicit floor is what
-   * makes the promise hold. `resize: none` because the box grows with its content and is capped — the handle was a
-   * second, draggable dimension that also drew diagonal lines in the corner of a surface meant to look quiet.
+   * `min-height` was `1.5em * 3 + padding`, so a single-line draft sat at the top of a three-line box and the foot of the
+   * lane became a tall dark slab whose centre of mass was empty (`img_42`). The box is now sized by its content between a
+   * one-line floor and the existing cap: a short prompt gets a short field, and a long one grows to three lines before it
+   * scrolls.
+   *
+   * `field-sizing: content` does the growing; the floor is one line plus padding. A browser without `field-sizing` falls
+   * back to `rows={3}`, which is the old behaviour rather than a broken one.
    */
-  min-height: calc(1.5em * 3 + 20px);
+  min-height: calc(1.5em + 22px);
   field-sizing: content;
   resize: none;
+  /* The same radius as the message cards above it: two different corner sizes in one column read as two systems. */
+  border-radius: var(--r-2);
 }
 .composer textarea:focus { border-color: var(--accent); outline: none; }
 .composer textarea:disabled { opacity: 0.6; }
 
 
+
+/*
+ * THE COMPOSER'S CHROME ROW: hint left, follow toggle right.
+ *
+ * Both used to float. The toggle was a pill ABOVE the field, straddling its focus ring and changing the gap to the text
+ * with the focus state (`img_40` vs `img_41`); the hint sat below the field with its entire right half empty. One row,
+ * inside the composer's own boundary, sharing the field's left edge — which removes the overlap, the left-edge stagger
+ * and the "two pill systems above the field" problem in one move.
+ */
+.composer-chrome {
+  display: flex;
+  align-items: center;
+  /* Space between them, so a long hint wraps instead of colliding with the toggle. */
+  gap: var(--sp-3);
+  /* A fixed gap BELOW the field, so it cannot shift with the focus ring: the ring is drawn outside the border, and a
+     margin measured from the border would change apparent spacing when focus changes. */
+  margin-top: var(--sp-2);
+  min-height: 18px;
+}
+/* The hint takes the room; the toggle keeps its width. */
+.composer-hint { flex: 1; min-width: 0; font-size: var(--fs-xs); color: var(--dim); }
+
+/*
+ * The follow toggle: a SWITCH with its label beside it.
+ *
+ * A pill whose only difference between states is a word is a label wearing a button's clothes — `auto-follow off` "reads
+ * equally as a state and as a command". The track moves, so the state is visible; the word stays, so it is not carried by
+ * position and colour alone.
+ */
+.follow-toggle {
+  /* Alone on a `<button>`, so it declares its own face rather than inheriting the platform's light chrome (#100). */
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  cursor: pointer;
+  flex: none;
+}
+.follow-toggle:hover { color: var(--text); }
+.follow-toggle:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--r-1); }
+.follow-toggle-track {
+  position: relative;
+  display: inline-block;
+  width: 22px;
+  height: 12px;
+  border-radius: var(--r-pill);
+  background: var(--panel-3);
+  /* An inset edge, so the track is visible on `--bg` and `--panel` alike. */
+  box-shadow: inset 0 0 0 1px var(--line);
+  flex: none;
+  transition: background 120ms ease;
+}
+.follow-toggle-dot {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dim);
+  transition: transform 120ms ease, background 120ms ease;
+}
+.follow-toggle[aria-pressed="true"] { color: var(--text); }
+.follow-toggle[aria-pressed="true"] .follow-toggle-track { background: var(--accent-tint); box-shadow: inset 0 0 0 1px var(--accent); }
+.follow-toggle[aria-pressed="true"] .follow-toggle-dot { background: var(--accent-text); transform: translateX(10px); }
+/* The word states the mode, so the two states are never alike on a monochrome rendering. */
+.follow-toggle-label { white-space: nowrap; }
 
 /* The hint is the composer's own caption: dim, small, and directly under the input it describes. */
 .hint { font-size: var(--fs-xs); color: var(--dim); }
