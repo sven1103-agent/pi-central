@@ -20,9 +20,12 @@ names by path now all appear in the transcript — each in the place that matche
 **One protocol change: `PROTOCOL_VERSION` 4 → 5.** Nothing new crosses the wire for *rendering* — the bytes were already
 arriving in the `transcript` frame every client parses on connect, so drawing them costs a DOM node and a decode rather
 than a transfer. What is new is sending: `Control.prompt` now carries optional `images`, and `ModelOption` carries
-`input` so the composer only offers a paste where the model accepts one. A 0.6.x UI and orchestrator still work
-together; a 0.7.0 UI needs a 0.7.0 orchestrator, and the handshake refuses the mismatch rather than letting pastes
-disappear silently.
+`input` so the composer only offers a paste where the model accepts one.
+
+Pi Central ships as **one package with one version**, so a UI and an orchestrator cannot normally disagree — `npm install
+pi-central@0.7.0` gives you both at 5, and upgrading is a single act. The handshake matters only in the development
+layout, where an orchestrator from one checkout can serve a UI built from another; that pair refuses to connect rather
+than letting a paste disappear silently.
 
 The measured premise, from this machine's own session store: **447 image-bearing messages across 885 sessions, and
 every single one is a tool result** — a `read` of a PNG. None was a paste. So the placement that had to work first was
