@@ -17,9 +17,12 @@ They are kept because each one is the reason a constraint or an invariant test e
 Images, where the conversation puts them. A picture a tool read, a screenshot you paste, and a file your own prompt
 names by path now all appear in the transcript — each in the place that matches what it is.
 
-**No protocol change.** `PROTOCOL_VERSION` stays at 4, because nothing new crosses the wire: the bytes were already
-arriving in the `transcript` frame that every client parses on connect. Rendering them costs a DOM node and a decode,
-not a transfer.
+**One protocol change: `PROTOCOL_VERSION` 4 → 5.** Nothing new crosses the wire for *rendering* — the bytes were already
+arriving in the `transcript` frame every client parses on connect, so drawing them costs a DOM node and a decode rather
+than a transfer. What is new is sending: `Control.prompt` now carries optional `images`, and `ModelOption` carries
+`input` so the composer only offers a paste where the model accepts one. A 0.6.x UI and orchestrator still work
+together; a 0.7.0 UI needs a 0.7.0 orchestrator, and the handshake refuses the mismatch rather than letting pastes
+disappear silently.
 
 The measured premise, from this machine's own session store: **447 image-bearing messages across 885 sessions, and
 every single one is a tool result** — a `read` of a PNG. None was a paste. So the placement that had to work first was
@@ -28,6 +31,7 @@ Separately, **181 of 5 912 user prompts name an image file by path** (`@img_6.pn
 text until now.
 
 ### Added
+
 
 - **Images are shown in the transcript, where they belong in the conversation.** A tool that reads a
   picture (`read` on a PNG) now shows it above its output in the tool detail, and an image in a message
@@ -38,42 +42,6 @@ text until now.
   the one that had to work.
 - No extra transfer: Pi's `get_messages` already carries the base64 in the `transcript` frame every
   client parses on connect. What changed is that the block survives the parse.
-
-### Changed
-
-- A message whose only content is an image now produces a turn. Its blob URL is identified by
-  `(session, message, block)` rather than by the planned entry, because the transcript re-plans on every
-  streaming record — a URL rebuilt per render would be revoked and recreated dozens of times a second for
-  an image that is not changing.
-- **An image a message NAMES by path is previewed in that message.** 181 of the 5 912 user messages in this machine's
-  store point at a screenshot — `@img_6.png shows the latest screenshot…` — and until now that rendered as literal text
-  while the picture appeared only if the agent happened to `read` it later, inside a collapsed activity group. The
-  reference and the referent were in different places with a disclosure between them. Detection is conservative (four
-  extensions, relative paths only, no URLs, no `..`, at most three per message) and the bytes come from the
-  orchestrator's existing confined `readFile`, so no new trust surface was added. A referenced image is capped at 12vh
-  and expands on click: it is an annotation of a sentence, not content, and at turn size one `@` mention of a 4000px
-  screenshot would push the next two turns off the screen.
-- **A turn's images are budgeted, not just capped.** The first image of a message gets 40vh and every one after it 18vh,
-  which turns five pasted screenshots from 2.2 screens into about 1.1. The flat 40vh per image was wrong in a way only
-  arithmetic shows.
-- `Turn` in the transcript is memoized by an explicit comparison. Its props included a freshly allocated
-  entry object, so `memo` had never once short-circuited; that was invisible for headings and text, and
-  is not invisible for images.
-- An image type outside PNG/JPEG/GIF/WebP, or a payload with no data, is **stated** rather than omitted.
-  "This view cannot draw a TIFF" and "this message held no picture" are different facts, and the transcript
-  does not report the second while meaning the first.
-
-### Fixed
-
-- **A turn was left half-visible when an image arrived, until the agent started working.** Following ran in a
-  per-render effect, and a render is not when an image gets its height: React writes the DOM, the browser lays out an
-  `<img>` that is still decoding — zero height — and the follow scrolled to an end that was about to move down by 12vh.
-  Nothing ran again until the first streaming delta, which is why the pane jumped to the bottom only once the assistant
-  replied. A `ResizeObserver` on the transcript lane now follows any height that arrives after paint, which covers the
-  same class for lazy images, expanding disclosures and asynchronously highlighted code.
-
-### Added — clipboard images
-
 - **Paste or drop an image into the composer, and send it with the prompt.** ⌘V on a pasted screenshot works with no
   permission prompt, on `127.0.0.1` (a secure context), and matches Pi's own `ctrl+v` binding so muscle memory carries
   over. Dropping a file on the composer works too, and it claims the drop before the browser navigates away and loses
@@ -114,6 +82,16 @@ text until now.
   measured in the LIST's coordinate space rather than taken from `offsetTop`, which is relative to the nearest positioned
   ancestor — the absolute panel, including its header. That offset cancelled going down and did not going up, which is why
   the first attempt appeared to work in one direction only.
+- The `n images sent` note under the composer is gone. The chips vanishing already says the attachments left, and the message
+  appears in the transcript with its images one line below — three confirmations for one fact, in permanent screen space. A
+  REFUSAL still uses that strip, because a refusal is the one outcome the reader cannot see anywhere else.
+- **A prompt sent while idle carried its images into the wrong argument.** The transport built the supervisor call with a
+  positional spread — `...(behavior ? [behavior] : []), ...(images.length ? [images] : [])` — which is only correct when
+  every earlier optional argument is present. On an idle session (the normal case) `behavior` is absent, so the images array
+  shifted left into the `behavior` parameter, nothing reached Pi's `images`, and an empty message was sent: the transcript
+  showed an empty Assistant box and the prompt looked like it had not been sent at all. The UI reported success because the
+  frame did leave. Found by using it, not by CI — the test fake had been recording a shape that kept the broken call
+  plausible, and now records real argument positions.
 - The picker is capped at six rows with an internal scroll (eight made it taller than the field it belongs to), carries a
   border and shadow so it reads as a panel rather than the field growing a grey tail, and its header names the directory
   (`in docs`) instead of showing a bare `.`.
@@ -124,8 +102,38 @@ text until now.
   is eight — so `assets/` was unreachable in exactly the case the picker exists for. Images are the reason to FINISH a path,
   not the reason to start one.
 
-### Changed — protocol 4 → 5
+### Changed
+- A message whose only content is an image now produces a turn. Its blob URL is identified by
+  `(session, message, block)` rather than by the planned entry, because the transcript re-plans on every
+  streaming record — a URL rebuilt per render would be revoked and recreated dozens of times a second for
+  an image that is not changing.
+- **An image a message NAMES by path is previewed in that message.** 181 of the 5 912 user messages in this machine's
+  store point at a screenshot — `@img_6.png shows the latest screenshot…` — and until now that rendered as literal text
+  while the picture appeared only if the agent happened to `read` it later, inside a collapsed activity group. The
+  reference and the referent were in different places with a disclosure between them. Detection is conservative (four
+  extensions, relative paths only, no URLs, no `..`, at most three per message) and the bytes come from the
+  orchestrator's existing confined `readFile`, so no new trust surface was added. A referenced image is capped at 12vh
+  and expands on click: it is an annotation of a sentence, not content, and at turn size one `@` mention of a 4000px
+  screenshot would push the next two turns off the screen.
+- **A turn's images are budgeted, not just capped.** The first image of a message gets 40vh and every one after it 18vh,
+  which turns five pasted screenshots from 2.2 screens into about 1.1. The flat 40vh per image was wrong in a way only
+  arithmetic shows.
+- `Turn` in the transcript is memoized by an explicit comparison. Its props included a freshly allocated
+  entry object, so `memo` had never once short-circuited; that was invisible for headings and text, and
+  is not invisible for images.
+- An image type outside PNG/JPEG/GIF/WebP, or a payload with no data, is **stated** rather than omitted.
+  "This view cannot draw a TIFF" and "this message held no picture" are different facts, and the transcript
+  does not report the second while meaning the first.
 
+### Fixed
+- **A turn was left half-visible when an image arrived, until the agent started working.** Following ran in a
+  per-render effect, and a render is not when an image gets its height: React writes the DOM, the browser lays out an
+  `<img>` that is still decoding — zero height — and the follow scrolled to an end that was about to move down by 12vh.
+  Nothing ran again until the first streaming delta, which is why the pane jumped to the bottom only once the assistant
+  replied. A `ResizeObserver` on the transcript lane now follows any height that arrives after paint, which covers the
+  same class for lazy images, expanding disclosures and asynchronously highlighted code.
+
+### Protocol 4 → 5
 - **`Control.prompt` carries optional `images`, and `ModelOption` carries `input`.** Both are ADDED FIELDS rather than new
   wire kinds, which means `packages/protocol/test/wire-surface.test.ts` does **not** fail for either — that test
   fingerprints kinds, not bodies. The bump is therefore not optional: a v5 UI against a v4 orchestrator would offer the
@@ -136,7 +144,6 @@ text until now.
   one to the other at the single point where a control becomes Pi's stdin.
 
 ### Tooling
-
 - `scripts/render-session-html.mjs` renders a real session's transcript to one self-contained HTML file, for review
   without an orchestrator, a browser automation harness, or a sandbox escape. It exists because the agent that wrote
   the image support could not run the product (C1 stops an orchestrator inside a sandbox, and a headless browser hits
