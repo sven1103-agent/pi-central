@@ -404,6 +404,18 @@ export function TranscriptView({
     // The wrap also reserves the strip the button floats in (issue #71) — see the CSS. Being a
     // sibling is what makes that possible, and the reservation is what stops the button covering a
     // line of text at any scroll position.
+    /*
+      THREE ELEMENTS, and the outer one exists only to be a CONTAINER QUERY TARGET.
+      
+      A container cannot be styled by its own container query — an element with `container-type` is not matched by
+      `@container` rules that name it. `.transcript-wrap` declares the container, so every `@container transcript`
+      rule that named `.transcript-wrap.has-header` was silently ignored: the narrow layout never applied, and the
+      wide row simply overflowed the window with the column pushed off-screen.
+      
+      So: `transcript-shell` is the query container (it declares `container-type` and nothing else), and
+      `transcript-wrap` is the box the queries style. Two elements, one job each.
+    */
+    <div className="transcript-shell">
     <div className={`transcript-wrap${header !== undefined ? " has-header" : ""}`}>
       {header !== undefined && <div className="transcript-header">{header}</div>}
       {/*
@@ -558,6 +570,7 @@ export function TranscriptView({
           the footer made the composer a THIRD flex child of the row — which put it in its own column on the right
           (`img_31.png`). */}
       </div>
+    </div>
     </div>
   );
 }

@@ -2412,11 +2412,29 @@ select.btn { font-family: var(--sans); }
  * the prose when the transcript is wide and becomes a compact row when it is not. Keying that off the VIEWPORT would
  * be wrong — an open panel leaves a wide window with a narrow transcript.
  */
+/*
+ * THE QUERY CONTAINER, and a separate element from the box the queries style.
+ *
+ * CSS Containment is explicit that a container is not matched by its own `@container` rules. `.transcript-wrap`
+ * declared `container-type`, so every `@container transcript` rule naming `.transcript-wrap.has-header` was silently
+ * ignored — the narrow layout never applied and the wide row overflowed the window with the transcript off-screen.
+ *
+ * So the job is split: this element is the container and nothing else, and `.transcript-wrap` is what the queries
+ * style. One element cannot be both.
+ */
+.transcript-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  container-type: inline-size;
+  container-name: transcript;
+}
+
 .transcript-wrap {
   position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0;
   --jump-strip: 40px;
-  container-type: inline-size;
-  container-name: transcript;
 }
 
 /* Without a companion there is no second box: the column centres itself inside the wrapper. */

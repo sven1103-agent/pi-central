@@ -2441,3 +2441,46 @@ test("the narrow companion keeps what orients the reader and drops the labels", 
   assert.match(narrow, /\.picker-select\s*\{[^}]*max-width:\s*\d+ch/, "…and are capped so two fit beside the name");
   assert.ok(!/\.header-stats\s*\{\s*display:\s*none/.test(narrow), "the meter and cost are NOT dropped");
 });
+
+test("the query container is a DIFFERENT element from the one its queries style", () => {
+  /*
+   * The defect that made the narrow fallback a no-op, found by reading the DOM rather than the stylesheet: CSS
+   * Containment says a container is NOT matched by its own `@container` rules.
+   *
+   * `.transcript-wrap` declared `container-type: inline-size`, so every `@container transcript` rule naming
+   * `.transcript-wrap.has-header` was silently ignored — no error, no warning, the rule simply did not apply. The wide
+   * row therefore never flipped to a column, and on a narrow window it overflowed with the transcript off-screen.
+   *
+   * The guard is structural, because the bug is structural: the element that declares the container must not be an
+   * element the query targets. A class rename would slip past a name check; "these are two different elements" is the
+   * property that actually holds.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const shell = /(?:^|\n)\.transcript-shell\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(shell, /container-type:\s*inline-size/, "the shell declares the container");
+
+  const wrap = /(?:^|\n)\.transcript-wrap\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.ok(
+    !/container-type/.test(wrap),
+    "the styled box must NOT declare the container, or its own @container rules are ignored",
+  );
+
+  // Every rule inside the query must target something other than the container element.
+  const narrow = /@container transcript \(max-width: 1080px\)\s*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+  assert.ok(narrow.length > 0, "the narrow form must exist");
+  assert.ok(
+    !/\.transcript-shell/.test(narrow),
+    "no rule may style the container itself from its own query",
+  );
+  assert.match(narrow, /\.transcript-wrap\.has-header/, "…and the box the query styles is the wrap");
+
+  // And the markup must actually nest them that way.
+  const source = readFileSync(new URL("../src/components/Transcript.tsx", import.meta.url), "utf8");
+  const shellAt = source.indexOf('className="transcript-shell"');
+  const wrapAt = source.indexOf('className={`transcript-wrap');
+  assert.ok(shellAt !== -1 && wrapAt !== -1, "both wrappers must exist in the markup");
+  assert.ok(shellAt < wrapAt, "the shell must be the OUTER element");
+});
