@@ -81,6 +81,53 @@ test("the worker NEVER caches the app document", () => {
   assert.match(document, /return;/, "it falls through to the network, deliberately with no fallback");
 });
 
+test("ONLY fingerprinted assets are cacheable, and everything else is network-only", () => {
+  /*
+   * The reported defect: "I installed the latest version, but the PWA still loads the old one."
+   *
+   * The worker cached EVERY same-origin GET that was not a document and not `/ws` — which included
+   * `manifest.webmanifest` and the icons, both of which the server serves `no-cache` precisely because they are not
+   * fingerprinted. So an installed app could pin a stale manifest while the document it launched from was always fresh,
+   * and the two disagreed about what version it was running.
+   *
+   * The rule the server already applies is that ONE kind of response is immutable: anything under `assets/`, whose name
+   * changes with its content. The worker now applies the same rule, as an ALLOW-LIST, so a stable-path file added later
+   * is network-only by default — the safe direction to be wrong in.
+   */
+  assert.match(
+    worker,
+    /function isFingerprintedAsset\(url\)\s*\{\s*return url\.pathname\.startsWith\("\/assets\/"\)/,
+    "the cacheable set is defined as /assets/ and nothing else",
+  );
+
+  // The gate must be applied BEFORE the cache-first branch, so no other path can reach `cache.put`.
+  const gate = worker.indexOf("if (!isFingerprintedAsset(url)) return;");
+  const put = worker.indexOf("cache.put");
+  assert.ok(gate > 0, "the allow-list gate must exist");
+  assert.ok(put > gate, "and must run before anything can be written to the cache");
+
+  // Statement of the defect in executable form: the three stable paths must not be reachable by the cache branch.
+  for (const path of ["sw.js", "manifest.webmanifest", "icon-192.png"]) {
+    assert.ok(
+      !new RegExp(`pathname[^;]{0,40}${path.replace(".", "\\.")}`).test(worker),
+      `${path} must not appear in the worker's caching logic`,
+    );
+  }
+});
+
+test("the cache name was bumped, so an existing client can drop the old entries", () => {
+  /*
+   * Editing the worker alone cannot repair a client carrying the old cache: `activate` deletes caches whose name
+   * DIFFERS from `CACHE`, so with the name unchanged there is nothing to delete and the stale entries survive the
+   * upgrade. The bump is what gives `activate` work to do — and it is the only way out that does not ask the reader to
+   * clear site data by hand.
+   */
+  const name = /const CACHE = "([^"]+)"/.exec(worker)?.[1];
+  assert.ok(name, "the cache must be named");
+  assert.notEqual(name, "pi-central-v1", "v1 cached the manifest and the icons; that name must not be reused");
+  assert.match(worker, /name\.startsWith\("pi-central-"\) && name !== CACHE/, "…and activate must still sweep the rest");
+});
+
 test("only complete, same-origin responses are cached", () => {
   // An `opaque` response has no usable status, and a 404 or 500 must not become permanent.
   assert.match(worker, /response\.ok && response\.type === "basic"/, "real responses only");
