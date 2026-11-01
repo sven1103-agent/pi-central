@@ -8,7 +8,19 @@
  * "worked offline" would install, open, and be useless while implying otherwise, so it deliberately does
  * not try.
  *
- * ## The one rule that matters: `index.html` is NEVER cached
+ * ## The rule: ONLY fingerprinted assets are cached
+ *
+ * `static-ui.ts` marks exactly one kind of response immutable — anything under `assets/`, whose name changes with its
+ * content. Everything else it serves `no-cache`.
+ *
+ * The worker used to apply the opposite test: it cached EVERY same-origin GET that was not a document and not `/ws`.
+ * That included `manifest.webmanifest` and the icons — both served `no-cache` and neither fingerprinted — so an
+ * installed app could keep a stale manifest indefinitely while the document it launched from was always fresh.
+ *
+ * The fix is to invert the test into an allow-list: cache `/assets/` and nothing else. A future stable-path file is
+ * then network-only by default, which is the safe direction to be wrong in.
+ *
+ * ## And `index.html` is NEVER cached
  *
  * `index.html` names the current fingerprint set, which is exactly what `static-ui.ts` says in its
  * `Cache-Control`:
@@ -17,9 +29,8 @@
  *     // serves a stale app after a rebuild.
  *
  * A worker that cached it would make a stale build **permanent and invisible** — no reload button, no URL
- * to compare, and a worker the browser updates on its own schedule. So this file applies the SERVER's
- * rule: hashed assets are immutable and cached forever, and the document is fetched from the network every
- * time (issue #120 guards this).
+ * to compare, and a worker the browser updates on its own schedule. So this file applies the SERVER's rule: exactly
+ * one kind of response is cacheable, and the document is fetched from the network every time (issue #120 guards this).
  *
  * ## Why there is no precache list
  *
@@ -35,7 +46,29 @@
  * worker waits, and takes over on the next launch — which is the right trade for a tool that is open for
  * hours at a time.
  */
-const CACHE = "pi-central-v1";
+/*
+ * v2, and the bump is load-bearing rather than tidiness.
+ *
+ * `v1` cached the manifest and the icons as well as the assets. Editing this file cannot repair a client already
+ * carrying that cache, because `activate` only deletes caches whose name differs from `CACHE` — with the name unchanged
+ * there is nothing to delete, and the stale entries survive the upgrade. Bumping it is what gives `activate` work to do,
+ * and it is the only way out of a poisoned cache that does not involve asking the reader to clear site data by hand.
+ */
+const CACHE = "pi-central-v2";
+
+/**
+ * Is this response safe to keep forever?
+ *
+ * The same test the server applies: Vite fingerprints everything under `assets/`, so its name changes with its content
+ * and a cached copy can never be wrong. Nothing else in this app has that property — the manifest, the icons and
+ * `sw.js` itself all live at stable paths and are served `no-cache`, and the document is not cached at all.
+ *
+ * Written as an allow-list rather than a deny-list on purpose: a new stable-path file added later is then network-only
+ * by default, which is the safe direction to be wrong in.
+ */
+function isFingerprintedAsset(url) {
+  return url.pathname.startsWith("/assets/");
+}
 
 // A request for the app document, or for a directory that resolves to one.
 function isDocument(request, url) {
@@ -75,7 +108,16 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Hashed assets: cache-first, because their name cannot change under new content.
+  /*
+   * Everything that is NOT a fingerprinted asset is left to the browser and the server, untouched.
+   *
+   * That is `sw.js` (this file — the one that must always be re-checkable), `manifest.webmanifest`, the icons, and any
+   * future stable-path file. The rule used to be the inverse, and it pinned all three of those, which is exactly the
+   * reported symptom.
+   */
+  if (!isFingerprintedAsset(url)) return;
+
+  // Fingerprinted assets: cache-first, because their name cannot change under new content.
   event.respondWith(
     caches.match(request).then((cached) => {
       if (cached !== undefined) return cached;

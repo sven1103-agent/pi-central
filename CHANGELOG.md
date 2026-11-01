@@ -12,6 +12,36 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
+## [0.6.1] — 2026-11-01
+
+A PWA fix. If you installed Pi Central to the dock before this version, **it will need one clean start** to pick it
+up — see below.
+
+### Fixed
+
+- **An installed Pi Central kept loading the old version after an upgrade.** The service worker cached every
+  same-origin request that was not the app document, including `manifest.webmanifest` and the icons — all of which the
+  server deliberately serves `no-cache` because they are not fingerprinted. It now caches only `/assets/`, the one kind
+  of path whose name changes with its content, as an allow-list rather than a deny-list.
+- The worker's cache is renamed, so an existing installation drops the stale entries on the next launch instead of
+  carrying them forward. Editing the worker alone could not do this: the cleanup only removes caches whose name has
+  changed.
+
+**If your dock app still shows an old version after upgrading**, unregister the worker once from its devtools console
+and reload:
+
+```js
+const regs = await navigator.serviceWorker.getRegistrations();
+await Promise.all(regs.map((r) => r.unregister()));
+const keys = await caches.keys();
+await Promise.all(keys.filter((k) => k.startsWith("pi-central-")).map((k) => caches.delete(k)));
+location.reload();
+```
+
+Quit and relaunch the dock app afterwards. This is needed only once, and only for installations created before 0.6.1 —
+a cache written by the old worker cannot be repaired from the server side, because the old worker is what answers the
+request for the new one.
+
 ## [0.6.0] — 2026-11-01
 
 A workspace rework, driven by a series of screenshot reviews. The structure was right; the proportions and
