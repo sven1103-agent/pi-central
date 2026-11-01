@@ -5,7 +5,7 @@
  *
  * *"The transcript looks lost on bigger screens"* was answered once by centring the column (#92), which
  * produced five defects and was reverted (#132, #133). The honest reading was that this is a **preference**:
- * 72ch at 15px is comfortable on a 13" laptop and cramped on a 27" display, and there is no single right
+ * 80ch at 15px is comfortable on a 13" laptop and cramped on a 27" display, and there is no single right
  * number.
  *
  * So the number is not decided by the app. It is set by the reader and remembered.
@@ -31,7 +31,16 @@ export const READING_SIZE_DEFAULT = 15;
 /** The line length, in `ch`. `"fill"` is a deliberate option: some readers want the column's width. */
 export const READING_MEASURE_MIN = 50;
 export const READING_MEASURE_MAX = 100;
-export const READING_MEASURE_DEFAULT = 72;
+/**
+ * 80, raised from 72.
+ *
+ * 72ch is the classic book measure and it is right for a page of prose with no other content. A transcript is not
+ * that: it is dense with code, paths and tables, which read better on a wider line because wrapping is what makes
+ * them hard to scan — and the column now has a companion beside it, so a wider lane uses space that was empty.
+ *
+ * Still a DEFAULT, not a decision: the reader can move it from 50 to 100, or set `fill`.
+ */
+export const READING_MEASURE_DEFAULT = 80;
 
 /** A stored measure may also be this, which is not a number. */
 export const READING_MEASURE_FILL = "fill";

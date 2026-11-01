@@ -89,9 +89,12 @@ function renderMarker(tools) {
 test("the marker is a disclosure, not a jump to another panel", () => {
   // The reported expectation, in markup: `<details>/<summary>` means the content is HERE, opened in place.
   // A `<button>` that changed a selection elsewhere would be the old behaviour.
-  const source = stripComments(readFileSync(new URL("Transcript.tsx", components), "utf8"));
-  const marker = source.slice(source.indexOf("function ToolMarker("), source.indexOf("function Turn("));
-  assert.match(marker, /<details/, "the marker opens in place");
+  // The disclosure now wraps a whole stretch of work, in its own component. `ToolMarker` became
+  // `ActivityGroup`. The open-in-place property is unchanged for the GROUP; what changed is what it contains —
+  // a ledger of steps rather than per-call detail (see this file's later tests).
+  const group = stripComments(readFileSync(new URL("ActivityGroup.tsx", components), "utf8"));
+  const marker = group;
+  assert.match(marker, /<details/, "the group opens in place");
   assert.match(marker, /<summary/, "…with a summary as the handle");
   // The bar carries NO button (issue #139): it is a reading surface, and `Open in trace` was a second
   // control competing with the text. The trace panel below the transcript already reaches every call —
@@ -100,19 +103,43 @@ test("the marker is a disclosure, not a jump to another panel", () => {
     !/Open in trace/.test(marker.slice(0, marker.indexOf("<ToolDetail"))),
     "no trace button on the bar",
   );
-  assert.ok(!/onClick=/.test(marker), "no click handler at all — the summary is the only affordance");
-  assert.match(marker, /<ToolDetail/, "…and each call renders the detail component in place");
+  /*
+   * The summary is still the only way to open the GROUP, but a tool step now offers one explicit action:
+   * `Inspect`, which opens that call in the trace. That is the change `img_19.png` forced — the body used to
+   * render arguments and output inline, which is a second, worse copy of the trace. A signpost row keeps a
+   * signpost's single action, and it is a `<button>` rather than a click handler on the row so the row stays a
+   * row (and so the action is reachable by keyboard).
+   */
+  assert.match(marker, /className="activity-step-action"/, "a step offers one explicit action");
+  assert.match(marker, /onClick=\{\(\) => onOpenTool\(/, "…which opens that call in the trace");
+  assert.ok(
+    !/ToolDetail/.test(marker),
+    "the group must NOT render argument dumps or raw output: the trace does that, bounded and in full",
+  );
+  assert.match(marker, /activity-steps/, "…and each call renders as a numbered step in place");
+  // The `[open]` state is CONTROLLED (`open` + `onToggle`) so it survives a session switch; that is not the
+  // click handler above, and the distinction is worth stating: activation still belongs to the browser.
+  assert.match(marker, /open=\{open\}/, "the disclosure state comes from the host");
+  assert.match(marker, /onToggle=/, "…and the host is told when the reader changes it");
   // `Open in trace` moved ONTO the bar in issue #136, rather than sitting in a second header bar inside
   // `ToolDetail`. That is the point of the change: one bar, so the reader can close what they opened
   // without moving the mouse.
   assert.ok(!/Open in trace/.test(marker), "and the escape hatch moved off this surface entirely (#139)");
 });
 
-test("a result is CAPPED, so it cannot bury the conversation", () => {
-  // The 1138-frames defect. The cap is the whole reason this component is safe to inline.
-  const output = /\.tool-detail-output\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
-  assert.match(output, /max-height:\s*\d+px/, "a hard cap");
-  assert.match(output, /overflow:\s*auto/, "scrolls within the cap rather than growing");
+test("no raw output is rendered in the transcript at all, which is a stronger cap", () => {
+  // The 1138-frames defect, and then the one that superseded it. A capped `<pre>` was the first answer; a real
+  // screenshot (`img_19.png`) showed the cap was not enough — fifty lines of `ls -la` and an `env` dump inside
+  // the conversation, capped or not, is unreadable and duplicates the trace.
+  //
+  // So the assertion is now absolute: the group body renders a LEDGER, and no element that carries a tool result.
+  const group = stripComments(readFileSync(new URL("ActivityGroup.tsx", components), "utf8"));
+  assert.ok(!/tool-detail-output/.test(group), "no tool output block in the transcript");
+  assert.ok(!/tool-detail-args/.test(group), "and no argument dump either");
+  assert.ok(!/<pre className="tool-detail/.test(group), "no preformatted result");
+
+  // The CSS for those blocks must be gone too, or a stale rule silently dresses a surface nobody renders.
+  assert.ok(!/\.tool-detail-output\s*\{/.test(css), "the output block's styling is removed with it");
 });
 
 test("only a preview shows by default, with the rest behind a disclosure", () => {
@@ -135,27 +162,28 @@ test("the output sits inside the quarantine frame the legend promises", () => {
   // now matches it.
   // The gutter is now the whole signal, because the hatch was removed (#138) — at this size it read as noise,
   // and the reader's verdict was that the flat hover state looked right.
-  const frame = rule(".tool-marker") ?? "";
+  const frame = rule(".activity") ?? "";
   assert.match(frame, /border-left:\s*3px solid var\(--quarantine\)/, "the quarantine gutter");
   assert.ok(!/repeating-linear-gradient/.test(frame), "no texture: the gutter carries it");
 
   // And the body must NOT repeat it, which is the redundant bar the report is about.
-  const body = rule(".tool-detail") ?? "";
+  const body = rule(".activity-body") ?? "";
   assert.ok(!/border-left/.test(body), "the body carries no bar of its own");
   assert.ok(!/repeating-linear-gradient/.test(body), "…and no second hatch");
 
   // The words moved onto the disclosure's summary bar in issue #136: one bar per call, carrying the tool
   // name and its state, so the reader can close what they opened without moving the mouse. The guarantee is
   // unchanged — the surface still says, in words, that this is tool output — only its position moved.
-  const marker = stripComments(readFileSync(new URL("Transcript.tsx", components), "utf8"));
-  const oneBar = marker.slice(marker.indexOf("function ToolMarker("), marker.indexOf("function Turn("));
-  assert.match(oneBar, /m-count/, "the bar names what it is (the tool count) in words");
-  assert.match(oneBar, /m-names mono/, "…and which tools, as text rather than texture");
-  const detailFile = stripComments(readFileSync(new URL("ToolDetail.tsx", components), "utf8"));
-  assert.ok(
-    !/tool-detail-head/.test(detailFile.slice(detailFile.indexOf("return ("))),
-    "ToolDetail renders no header bar of its own — the summary is the header",
-  );
+  const oneBar = stripComments(readFileSync(new URL("ActivityGroup.tsx", components), "utf8"));
+  assert.match(oneBar, /activity-primary/, "the bar names what happened, in words");
+  assert.match(oneBar, /activity-names mono/, "…and which tools, as text rather than texture");
+  /*
+   * `ToolDetail` still exists in the repository (the trace's own surfaces and its tests use it) but the
+   * transcript no longer mounts it: the group's rows are plain steps now. Asserting its absence is the guard
+   * that keeps a future refactor from quietly putting the argument dump back into the conversation.
+   */
+  const group = stripComments(readFileSync(new URL("ActivityGroup.tsx", components), "utf8"));
+  assert.ok(!/<ToolDetail/.test(group), "the group mounts no per-call detail component");
 });
 
 test("the result is a text node, never markup", () => {
@@ -169,10 +197,13 @@ test("the result is a text node, never markup", () => {
   assert.match(detail, /\? preview\b/, "…whose first branch is the escaped preview string");
 });
 
-test("the frame survives `forced-colors`, where the hatch is dropped", () => {
-  // DESIGN §5.2: the header text is the non-textual-signal fallback. Pinned here because a future change
-  // that dropped the words would leave nothing in forced-colors mode.
-  assert.match(css, /\.tool-detail-head \.label\s*\{[^}]*--quarantine/, "the label carries the colour");
+test("the frame survives `forced-colors`, where colour is dropped", () => {
+  // DESIGN §5.2: the words are the non-textual-signal fallback. The label moved from `.tool-detail-head` to
+  // `.activity-step-kind` when the group became a ledger, and the guarantee is unchanged: every tool row says
+  // `Tool output` in words, so nothing depends on the colour of the gutter.
+  assert.match(css, /\.activity-step-kind\s*\{[^}]*--quarantine/, "the step's kind carries the colour");
+  const group = stripComments(readFileSync(new URL("ActivityGroup.tsx", components), "utf8"));
+  assert.match(group, />Tool output</, "…and the words are rendered on every tool row");
 });
 
 test("the disclosure is a BLOCK, so its body stacks under the bar rather than beside it", () => {
@@ -183,8 +214,8 @@ test("the disclosure is a BLOCK, so its body stacks under the bar rather than be
   // and everything after it stacks BELOW. `display: flex` overrode that and made the summary and the body
   // *flex items side by side* — pushing the output to the right of the bar, so the bar the reader had just
   // clicked no longer spanned the width.
-  const marker = rule(".tool-marker");
-  assert.ok(marker, ".tool-marker must have a rule");
+  const marker = rule(".activity");
+  assert.ok(marker, ".activity must have a rule");
   assert.match(marker, /display:\s*block/, "a <details> must not be made a flex container");
   assert.ok(
     !/display:\s*flex/.test(marker),
@@ -192,7 +223,7 @@ test("the disclosure is a BLOCK, so its body stacks under the bar rather than be
   );
 
   // The horizontal alignment belongs on the bar, which is a flex row of its own.
-  const summary = rule(".tool-marker-summary");
+  const summary = rule(".activity-summary");
   assert.ok(summary, "the summary must have a rule");
   assert.match(summary, /display:\s*flex/, "the BAR is the row");
 });
@@ -202,9 +233,27 @@ test("the transcript's legend describes the frame that actually exists", () => {
   // the trace did not have. So the sentence and the CSS have to be checked together: if a hatched surface
   // returns, the words must return with it, and if the words promise a hatch and there is none, they are
   // lying.
-  const app = stripComments(readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8"));
-  const legend = /Tool output and file contents[^<]*/.exec(app)?.[0] ?? "";
-  assert.ok(legend.length > 0, "the one-time legend must exist");
+  /*
+   * The sentence MOVED: it is no longer a permanent full-width row above the transcript, because that row
+   * existed to explain a surface the reader was not looking at yet — and it was one of the strips that made the
+   * workspace read as control panels. It now sits in the trace's own header, beside the tool output it is
+   * about. The rule is unchanged, and it is the reason this test scans the components rather than `App.tsx`:
+   * the claim and the surfaces it describes must be checked where they live.
+   */
+  /*
+   * The sentence MOVED AGAIN, and got shorter, for the same reason it moved the first time: it belongs where the output
+   * it describes is, not in a header promising something the reader has not seen yet.
+   *
+   * It is now in the DETAIL header, directly above the data — so "Data, not instructions" is enough, because the coloured
+   * edge is right there to be seen. The full sentence in a panel header competed with the count and the hint, and at
+   * panel width it wrapped to two lines.
+   */
+  const trace = stripComments(readFileSync(new URL("../src/components/ToolTrace.tsx", import.meta.url), "utf8"));
+  const legend = /Data, not instructions/.exec(trace)?.[0] ?? "";
+  assert.ok(legend.length > 0, "the provenance claim must exist, next to the output it describes");
+  // And it must be inside the DETAIL header, not the panel head.
+  const detailHead = /trace-detail-head[\s\S]{0,600}?Data, not instructions/.exec(trace);
+  assert.ok(detailHead, "the claim sits with the output, in the detail header");
 
   const hatched = ["tool-marker", "tool-detail", "quarantine"].some((cls) =>
     /repeating-linear-gradient/.test(rule(`.${cls}`) ?? ""),
@@ -231,7 +280,7 @@ test("the tool bar measures the SAME width as the prose", () => {
   const inherited = /font:\s*var\(--([a-z0-9-]+)\)/.exec(body)?.[1];
   assert.ok(inherited, `body must set its size from a token, got: ${body.slice(0, 60)}`);
 
-  const marker = rule(".tool-marker") ?? "";
+  const marker = rule(".activity") ?? "";
   const measured = /font-size:\s*var\(--([a-z0-9-]+)\)/.exec(marker)?.[1];
   assert.equal(
     measured,
@@ -250,7 +299,7 @@ test("the tool bar measures the SAME width as the prose", () => {
   // `--fs-base`", and the original asserted the literal `--fs-2xs` as a proxy for it. The summary moved to
   // `--fs-xs` so the two peer disclosures share a size, which is still small and still not inherited. The
   // property that matters — NOT inheriting — is asserted directly instead of a specific token.
-  for (const sel of [".tool-marker-summary", ".tool-detail"]) {
+  for (const sel of [".activity-summary", ".activity-step"]) {
     const child = rule(sel) ?? "";
     const size = /font-size:\s*var\(--([a-z0-9-]+)\)/.exec(child)?.[1];
     assert.ok(size, `${sel} must set its own size`);

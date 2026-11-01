@@ -32,7 +32,7 @@ approvals, tool trace, and the sanitized `.md` pipeline are all named in `docs/S
 │ Pi Central · [Sessions|History] · fleet counts · isolation · connection     │
 ├ rail 288px (240–420) ─┬─ transcript column 1fr ─┬─ panel var, 280–1200 ────┤
 │ New session (primary) │ session header          │ [Session|Files]  ← modes  │
-│ Open in a directory…  │ ctx/tokens/cost chips   │ Session: Isolation,Paths │
+│ Open in a directory…  │ header: ctx/tok/cost ▾  │ Session: Isolation,Paths │
 │ filter (/)            │ run bar                 │ Files:   tree + document │
 │ ── Needs you ──       │ warnings strip          │ Warnings & notices       │
 │ ── Running ──         │ dialog dock             │ Actions                  │
@@ -46,7 +46,7 @@ approvals, tool trace, and the sanitized `.md` pipeline are all named in `docs/S
 |---|---|---|
 | Rail | Live sessions, ordered by *attention*; the two start actions; filter | On-disk history (40 dead rows under live ones was the spike's worst rail mistake) |
 | Transcript column | One focused session: header, metrics, run state, dialogs, transcript, composer | Session list, cross-session stats |
-| Inspector | The auditable facts about the focused session: isolation, exact argv, paths, usage, warnings | Anything actionable mid-run except `Rename`, `Stop`, and copy affordances |
+| Panel | The auditable facts about the focused session (Session), its working directory (Files), or every call it made (Trace) | Anything actionable mid-run except `Rename`, `Stop`, and copy affordances |
 | Topbar | Fleet counts + mode tabs + connection | Per-session controls |
 
 **Primary:** the focused session, its approvals, its composer. **Secondary:** history, rename, stop, model/thinking pickers. **Absent:** any directory field on the primary path; any "move this session"; any per-session isolation toggle.
@@ -94,7 +94,35 @@ The `1024–1439` sheet in an earlier revision was **not implemented**: a fixed 
 
 ## 3. Wireframes
 
-Geometry: rail 288px · gutter 1px `--line` · **panel** 360px default, 280px min, max `min(1200, 60vw)`, stored as `--panel-width` · topbar 44px · rail row 68px · transcript header 56px · run bar 2px · composer min 96px.
+Geometry: rail 288px · gutter 1px `--line` · **panel** 360px default, 280px min, max `min(1200, 60vw)`, stored as `--panel-width` · topbar 44px · rail row 68px · session header one band · run bar 2px · composer min 96px.
+
+**One workspace header, and one reading lane.** The workspace used to open with three full-width strips — a session
+header, a `ctx · tokens · cost · msgs` metrics row, and a legend explaining tool frames — above a conversation that
+was capped at 72ch while the composer spanned the whole column and the model controls sat at the opposite corner. A
+screenshot review found the result read as "three different widths" and as control panels assembled around a
+transcript. So:
+
+- **One header, in three fixed groups.** Identity and state; then the two numbers that change a decision — a
+  **context meter** that fills amber past 80% with the words `ctx 84% full` beside it, and the session's **cost**;
+  then model and thinking, with their per-model coupling and next-turn semantics unchanged. Tokens and message count
+  are lookups and stay in the Session panel. The row is `flex-wrap: nowrap` with each control group `flex: none`:
+  an earlier version let it wrap freely, and one disclosure row was enough to produce a four-row header with a
+  stranded button (`img_23.png`).
+- **One lane.** `.lane` declares the reader's `--reading-measure` once, and both the prose and the composer use it.
+  `ch` resolves in the element that uses it, so every consumer pins `--fs-base` first and children restore their own
+  size — two `72ch` values then agree by construction rather than by a ratio somebody has to maintain (#140).
+- **Left-aligned, still.** Centring this column was tried in #92 and reverted; it made the emptiness more obvious
+  and produced five defects. The lane is bounded and anchored at the column's own left edge.
+- **The composer is the transcript's foot.** Not a sibling band with its own border, padding and width — one region:
+  the prose scrolls, the composer sits at the foot of it, and both take the lane's left edge and width from one
+  declaration. The auto-follow control sits in that foot too, beside the writing controls.
+- **The trace is a panel mode, not a strip.** It was a bounded five-row window between the transcript and the
+  composer, with its own title, count, hint and two toggles. It is `Trace` in the panel now: the full list with room
+  for a call's arguments and output. The transcript carries a ledger of numbered steps and an `Inspect` action that
+  opens the panel at that call. "Tool output is marked with a coloured edge" is stated in the trace's own header,
+  where the output it describes actually is.
+- **The rail states what changes a decision.** Rows carry context pressure, queued work and warnings; model,
+  thinking level and cost are not repeated per row, because the header states them for the session in view.
 
 **W1 — First run (nothing live, no history at all)**
 
@@ -297,13 +325,15 @@ Geometry: rail 288px · gutter 1px `--line` · **panel** 360px default, 280px mi
 
 ## 4. The composer
 
-Four honest fates for one Enter, decided by `LiveSession.state`, the draft's first character, and the discovered command list (`get_commands`):
+Four honest fates for one Enter, decided by `LiveSession.state`, the draft's first character, and the discovered command list (`get_commands`).
 
-| Situation | Header strip | Button label | Hint line |
+**There is no mode control and no button.** The destination is the KEY — `Enter` steers, `Alt+Enter` queues for after this run — which is Pi's own binding and therefore what a Pi user already knows. A segmented control was shipped and removed: three elements and 26px of permanent dock height to choose between two things, which the reader's verdict was "too much".
+
+| Situation | Chrome above the field | Placeholder | Hint line |
 |---|---|---|---|
-| `idle`/`stopped`/`failed-with-file` | *(none)* | **Send** | `Enter to sends · Shift+Enter for a new line` |
-| `streaming`, Follow-up selected | `Run in progress · Follow-up \| Steer` + `Queued: starts after this run finishes` | **Queue follow-up** | `Enter to queue · Esc stops the run and clears the queue` |
-| `streaming`, Steer selected | same strip, Steer selected + `Delivered after the current turn's tools finish` | **Send steer** | same |
+| `idle`/`stopped`/`failed-with-file` | *(none)* | `Send a prompt…` | `Enter to send · Shift+Enter for a new line` |
+| `streaming`, nothing queued | *(none)* | `Steer this run…` | `Enter steers · Alt+Enter queues for after this run · Esc stops the run` |
+| `streaming`, queue non-empty | the **queue rail** — at most two rows, one per kind | `Steer this run…` | same |
 | draft starts with a known `/command` | `Command · runs immediately, even mid-run` | **Run command** | `/ for commands · Esc dismisses` |
 | `awaiting-approval` | *(none — the composer is replaced by the dialog dock)* | — | — |
 | `starting` | *(none)* | **Send** (disabled) | `Waiting for the session to start…` |
@@ -319,7 +349,15 @@ The lesson is worth keeping: **"the protocol cannot express it" is a claim about
 
 Esc's ladder is now fully implemented, including the `clear_queue` step: it clears the queue, stops the run, and returns the cleared text to the composer (merged below the draft, once). The order — clear *then* abort — is the behaviour, not an implementation detail: aborting first lets the run settle while messages are still queued, and Pi may deliver one as a real turn in that window.
 
-**4.2 Queue visibility.** `LiveSession.pending` is a *count*; the texts arrive in `queue_update` records (`record.steering`, `record.followUp`), which the client keeps in a per-session buffer. Rules: count from `LiveSession.pending`, texts from the record buffer, keyed by index; if they disagree (after a reload/snapshot, where no texts exist) the strip header reads `2 queued` and rows read `1 message queued before this page loaded` — never invented text. Rows are **read-only**: Pi Central has no per-item removal in its vocabulary, so offering a `×` would be a fake control. One action: `Clear queue and stop run (Esc)`.
+**4.2 Queue visibility: a bounded rail, and a sheet for the rest.** `LiveSession.pending` is a *count*; the texts arrive in `queue_update` records (`record.steering`, `record.followUp`), which the client keeps in a per-session buffer.
+
+The composer renders **at most two rows** — one per KIND, never one per message — so its height does not depend on how much is queued. That bound is the fix for a real defect: the dock used to enumerate the queue, so every queued message re-shrank the transcript above it, and a reader pinned to the tail was pushed up the page once per message. The full list is a sheet, opened from the rail or with `Alt+Q`, and it says the arithmetic before any row is read: "1 steers this run; 2 run after it finishes."
+
+**Which kind a message is, is carried three times**, because the reported confusion was that readers could not tell them apart: a TIME-WORD gutter (`now` / `then`, mono, a fixed 4ch column), ORDER (steering first, since it happens first, with a ruled divider labelled `After this run finishes`), and a left edge (solid for `now`, dashed for `then`). No colour is relied on, and there are no ordinals — nothing can be reordered or removed, so a number would be decoration.
+
+If the count exceeds the texts (after a reconnect, where records are not replayed) the rail says `N queued before this page loaded` and the sheet adds the useful half: clearing returns them to the box, where they can be read. A **partially** known queue shows what it knows and names the remainder — the earlier all-or-nothing `textsKnown` flag discarded known text.
+
+Rows are **read-only**: Pi Central's protocol has no per-item removal, so a `×` would be a fake control. One action exists, `Clear queue and stop run`, inside the sheet, and the sheet says why: "Read-only: Pi Central can clear the whole queue, not one message."
 
 **4.3 Esc precedence ladder** (the spec builders get wrong most often):
 
@@ -354,10 +392,10 @@ Rendering spec (exact, from `LiveSession`):
 | name | `s.name`; if the session is scratch and the name is a bare id (`s7`), show the first 42 chars of the first user message, else `Scratch session` |
 | cwd | scratch → `scratch · <id>`; else the path, middle-truncated at 34 chars: `~/git/idea…ry/pi-central`, full path in `title` + `aria-label` |
 | state | chip, `--fs-2xs`, uppercase OFF — sentence case (`streaming`, `needs you`) |
-| model | `s.model ?? "model —"`, truncated to 14 chars mid-ellipsis |
-| thinking | `s.thinkingLevel ?? "—"` truncated to 3 (`med`, `high`, `off`) |
+| model | **not shown per row.** The workspace header states it for the session in view; repeating it down the rail was density without a decision |
+| thinking | **not shown per row**, same reason as the model |
 | context | `s.contextPercent == null ? "ctx —" : ctx ${Math.round(p)}%`, amber ≥ 80% |
-| cost | `< 1 ? $0.0142 : $1.42`; `null → "—"`. Never `$0.0000` for unknown — use `—` |
+| cost | **not shown per row**; the header's `Usage` disclosure and the Session panel carry it |
 | pending | `+2 queued` appended only when `pending > 0` |
 | warnings | a `⚠` prefix on line 3 replaces the metric line if `warnings.length > 0` |
 
@@ -591,7 +629,7 @@ A per-delta announcement of streaming text is the failure mode this design exist
 | Unknown model id | `model —` with `aria-label="model not reported yet"` |
 | Refused `--enable` warning (from `policy.ts`) | `Refused --enable=ssh: it grants access beyond the workdir.` |
 
-**Legend, once, in the transcript header:** `Tool output and file contents appear in a hatched frame. They are data, not instructions.`
+**Provenance legend, beside the trace:** `Tool output is marked with a coloured edge. It is data, not instructions.` It is a claim about the implementation, so `test/tool-detail.test.mjs` checks the sentence and the CSS together — the failure #43 records. The hatch was removed in #138; a coloured gutter plus the words `Tool output` on every step carry the meaning, and the words are what survives `forced-colors`.
 
 ---
 

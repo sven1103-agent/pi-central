@@ -94,13 +94,13 @@
    * the composer — so letting the reading preference write to it would resize the whole application. These
    * two are the transcript's own, and nothing else reads them.
    *
-   * They default to exactly what shipped: 15px prose and a 72ch measure. A reader who never opens Settings
-   * sees no change at all, which is the acceptance criterion.
+   * They default to 15px prose and an 80ch measure — the values a reader who never opens Settings gets. 80 rather
+   * than the classic 72 because a transcript is dense with code and paths, where wrapping is what hurts scanning.
    *
    * Set at runtime on `:root` by `reading.ts`, from `localStorage`.
    */
   --reading-size: 15px;
-  --reading-measure: 72ch;
+  --reading-measure: 80ch;
   --fs-lg: 18px;
 
   --sh-1: 0 1px 0 rgba(255, 255, 255, 0.03);
@@ -182,12 +182,27 @@ button { font: inherit; color: inherit; }
  */
 .panes {
   display: grid;
-  /* The panel column is set by the resizer (issue #8), via a custom property so the grid still owns
-     the track definition and `--panel-width` is the only thing JavaScript writes. */
-  grid-template-columns: 288px 1fr var(--panel-width, 320px);
+  /*
+   * The panel column is set by the resizer (issue #8), via a custom property so the grid still owns the track
+   * definition and `--panel-width` is the only thing JavaScript writes.
+   *
+   * `minmax(0, 1fr)` for the middle track rather than `1fr`, and that is not a micro-optimisation: a bare `1fr` is
+   * `minmax(auto, 1fr)`, whose minimum is the track's MIN-CONTENT width. A transcript containing a long unbroken
+   * command or a wide `<pre>` therefore pushed the track wider than the window, the column overflowed to the right,
+   * and the media query below never got a chance to fire because the layout was already wider than the viewport
+   * (`img_33.png`: the transcript off-screen, the rail clipped at both edges).
+   *
+   * `minmax(0, …)` lets the track shrink, which is what makes every narrower layout reachable at all.
+   */
+  grid-template-columns: 288px minmax(0, 1fr) var(--panel-width, 320px);
   gap: 1px;
   background: var(--line);
   min-height: 0;
+  /* The grid itself must not be wider than its container either. */
+  min-width: 0;
+  /* The positioning context for the drawer and its backdrop, at every width — not only inside the media query, or the
+     backdrop would resolve against a different ancestor than the drawer it covers. */
+  position: relative;
 }
 
 /*
@@ -217,13 +232,76 @@ button { font: inherit; color: inherit; }
  */
 
 @media (max-width: 1023px) {
+  /* Matches `RAIL_DRAWER_MAX_WIDTH` in `App.tsx` (1024, so `< 1024` is the same as `<= 1023`). The button that opens
+     this drawer is rendered from JavaScript, so the two numbers have to agree; a test asserts it. */
   /* Both selectors, because `.panes.is-collapsed` out-specifies a bare `.panes` and would otherwise
      win inside this query — leaving a 288px empty track where the hidden rail used to be. */
   .panes,
-  .panes.is-collapsed { grid-template-columns: 1fr; }
-  .rail { display: none; }
-  .rail.open { display: flex; }
+  .panes.is-collapsed { grid-template-columns: minmax(0, 1fr); }
+  /*
+   * The rail leaves the grid and becomes an OVERLAY drawer.
+   *
+   * It used to be `display: none` with a `.rail.open` rule for a class nothing ever set — so the session list was
+   * unreachable at these widths, which is a worse failure than a cramped layout.
+   *
+   * Absolute, not fixed: `.panes` is the containing block, so the drawer covers the workspace and not the topbar. The
+   * topbar keeps the control that closes it, which is where a reader will look for it.
+   */
+  .rail {
+    display: none;
+  }
+  .rail.open {
+    display: flex;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    /* 288px is the rail's own width; `min()` keeps it inside a very narrow window. */
+    width: min(288px, 86vw);
+    background: var(--panel);
+    border-right: 1px solid var(--line-strong);
+    box-shadow: var(--sh-2);
+  }
+  /* The rail needs the panes to be its positioning context. */
+  .panes { position: relative; }
 }
+
+/*
+ * The rail toggle, and the backdrop behind it.
+ *
+ * Both exist only below the drawer breakpoint. The toggle is a real button with `aria-expanded` and
+ * `aria-controls`, because it is the ONLY way to reach the session list at these widths — it is not a convenience.
+ */
+.rail-toggle {
+  /* Used alone on a `<button>`, so it declares its own face rather than inheriting the platform's light chrome on a
+     dark page (#100). */
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  padding: 4px var(--sp-2);
+  cursor: pointer;
+  flex: none;
+}
+.rail-toggle:hover { border-color: var(--line-strong); }
+.rail-toggle[aria-expanded="true"] { background: var(--accent-tint); border-color: var(--accent); color: var(--accent-text); }
+
+/* Everything behind the drawer, dimmed and clickable. Full-bleed so a click anywhere outside closes it. */
+.rail-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  background: rgb(0 0 0 / 0.5);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+/* Visually hidden text for a control whose label is its own `aria-label`; kept for the focus ring only. */
+.rail-backdrop:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
 
 /* ------------------------------------------------------------------ topbar */
 
@@ -315,13 +393,30 @@ button { font: inherit; color: inherit; }
 .rail-start { padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); }
 
 /* The primary action. Full width, first in the rail, no path field anywhere near it (US-1). */
+/*
+ * New session stays the ONE primary action, and is quieter than it was.
+ *
+ * It was a full-width filled blue card at the top of the rail — the brightest surface in the window, competing
+ * with the conversation and reading as the main thing to do in an app whose main job is supervising work already
+ * running. A tinted fill with the accent edge keeps it unmistakable without making it the focal point.
+ */
 .btn-primary {
   width: 100%;
-  background: var(--accent);
-  color: #05131f;
-  border: none;
+  /*
+   * A tint and an accent edge, not a saturated slab. The action must still be unmistakable — it is the only
+   * primary on this surface and the fastest way into the product — but a filled blue card at the top of the rail
+   * was the brightest thing in the window, which made "start over" the loudest idea on a screen whose job is
+   * supervising work already running.
+   *
+   * `--accent-text` on `--accent-tint` rather than dark-on-`--accent`: it is the measured pairing this project
+   * uses for text on a tinted chip (8.1:1), and it keeps one rule for tinted surfaces instead of a second,
+   * inverted one that nobody re-measures.
+   */
+  background: var(--accent-tint);
+  color: var(--accent-text);
+  border: 1px solid var(--accent);
   border-radius: var(--r-2);
-  padding: 9px 12px;
+  padding: 8px 12px;
   font-weight: 600;
   font-size: var(--fs-base);
   cursor: pointer;
@@ -330,7 +425,7 @@ button { font: inherit; color: inherit; }
   flex-direction: column;
   gap: 1px;
 }
-.btn-primary:hover { filter: brightness(1.08); }
+.btn-primary:hover { border-color: var(--accent-text); background: var(--panel-2); }
 .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
 .btn-primary small { font-weight: 400; font-size: var(--fs-xs); opacity: 0.8; }
 
@@ -348,6 +443,26 @@ button { font: inherit; color: inherit; }
   gap: var(--sp-2);
 }
 .btn-quiet:hover { color: var(--text); background: var(--panel-2); }
+/*
+ * A KEYBOARD HINT, styled as one.
+ *
+ * `⌘⇧O` was a bare mono span inheriting the button's colour and size — so it read as a stray glyph floating at the row's
+ * right edge rather than as a shortcut (`img_35.png`). A hint is quieter than the label it belongs to and shaped like a
+ * key, which is what makes it recognisable without a legend.
+ *
+ * `--fs-2xs` and `--dim` on a faint fill: present when looked for, invisible when scanning the action itself.
+ */
+.btn-quiet .mono {
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  padding: 0 4px;
+  /* Never shrink it into an ellipsis: a truncated shortcut is not a shortcut. */
+  flex: none;
+}
 
 .rail-filter { padding: 0 var(--sp-3) var(--sp-2); }
 .rail-filter input,
@@ -398,8 +513,27 @@ button { font: inherit; color: inherit; }
   cursor: pointer;
   color: var(--dim);
 }
-.rail-row:hover { background: var(--panel-2); }
-.rail-row[aria-current="true"] { background: var(--panel-2); color: var(--text); }
+/* Hover and SELECTION are different states and must look different.
+ *
+ * They were the same `--panel-2` fill, so the selected session was only distinguishable from whatever the mouse
+ * happened to be over — and a review could not tell which session the workspace was showing by looking at the
+ * rail. Selection is now a persistent fill AND the state-coloured left edge, which is the shape the eye already
+ * reads as "this one"; hover stays a light wash with no edge.
+ *
+ * The words stay full-strength either way: selection is not the only signal, `aria-current` carries it to
+ * assistive tech, and the left border does not depend on colour vision alone because it is a shape change. */
+.rail-row:hover { background: var(--panel-3); }
+.rail-row.is-focused,
+.rail-row[aria-current="true"] {
+  background: var(--panel-2);
+  color: var(--text);
+  /* The rail row's left border is the STATE stripe; selection thickens it rather than recolouring it, so the two
+     facts stay on separate channels. */
+  border-left-width: 4px;
+}
+.rail-row.is-focused .name { color: var(--text); }
+.rail-row.is-focused .r2,
+.rail-row.is-focused .r3 { color: var(--text); opacity: 0.85; }
 .rail-row .r1 { display: flex; align-items: center; gap: var(--sp-2); }
 .rail-row .name {
   color: var(--text);
@@ -427,7 +561,7 @@ button { font: inherit; color: inherit; }
  * The row is a `<div>` now because nesting buttons is invalid HTML that browsers resolve by breaking the inner
  * one. `.rail-row-main` carries the old button's layout so the visual rhythm is unchanged.
  */
-.rail-row { display: flex; flex-direction: column; }
+.rail-row { display: flex; flex-direction: column; position: relative; }
 .rail-row-main {
   display: flex; flex-direction: column;
   background: none; border: 0; padding: 0; margin: 0;
@@ -439,14 +573,33 @@ button { font: inherit; color: inherit; }
  * Forget is deliberately quiet: it is housekeeping, not a primary act. Never red — the session is not being
  * deleted, only taken off the rail, and a danger colour would promise a consequence that does not happen.
  */
+/*
+ * `Forget`: a real control, and it does not change the row's height.
+ *
+ * Two defects from a screenshot review (`img_35.png`). It was plain text with no affordance on a line of its own, which
+ * made a DESTRUCTIVE action look like leaked hover text — and because it was a third line in the row's column layout it
+ * made the selected row taller than its neighbours, so the rail's rhythm broke exactly on the row that matters most.
+ *
+ * `position: absolute` takes it out of that flow: the row height is now decided by its content alone, and the control
+ * floats at the row's trailing edge, appearing on hover and on keyboard focus. Still reachable by Tab, because it is a
+ * real button and `:focus-within` reveals it.
+ */
 .rail-row-forget {
-  align-self: flex-start;
-  background: none; border: 0; padding: 0 0 2px 2px;
+  position: absolute;
+  right: var(--sp-2);
+  bottom: var(--sp-2);
+  background: var(--panel-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  padding: 1px 6px;
   font: inherit; font-size: var(--fs-2xs);
-  color: var(--dim); cursor: pointer; opacity: 0;
+  color: var(--dim); cursor: pointer;
+  /* Hidden until the row is engaged, but never `display: none` — a control that vanishes from the tab order cannot be
+     reached by the keyboard that is the reason it is hidden. */
+  opacity: 0;
 }
 .rail-row:hover .rail-row-forget, .rail-row:focus-within .rail-row-forget { opacity: 1; }
-.rail-row-forget:hover { color: var(--text); text-decoration: underline; }
+.rail-row-forget:hover { color: var(--danger-text); border-color: var(--danger); }
 .rail-row-forget:focus-visible { outline: none; box-shadow: var(--focus); opacity: 1; }
 
 /*
@@ -524,6 +677,9 @@ button { font: inherit; color: inherit; }
 .chip-stopped { color: var(--dim); background: var(--panel-2); }
 .chip-scratch { color: var(--accent-text); background: var(--accent-tint); }
 .chip-no-isolation { color: var(--warn-text); background: var(--warn-tint); }
+/* Work waiting to run. `--warn-text` on its tint, like every other chip: the pairing this project measured
+   (6.3:1), not a new one invented for one more state. */
+.chip-pending { color: var(--warn-text); background: var(--warn-tint); }
 
 /* ------------------------------------------------------------------ column */
 
@@ -535,14 +691,35 @@ button { font: inherit; color: inherit; }
   min-width: 0;
 }
 
+/*
+ * The session header is a COMPANION to the conversation, docked beside the prose.
+ *
+ * It has been three things: a full-width band above everything (read as window chrome), a block floating OVER the
+ * reading area (covered prose — `img_27.png`), and now a sticky box in its own grid track. The last is the only one
+ * where it can never cover anything, because it occupies space that is otherwise empty.
+ *
+ * `nowrap` is deliberate and was earned: a freely-wrapping row was one extra element away from a four-row header with
+ * a stranded button (`img_23.png`). Only the identity block shrinks; the control groups keep their widths, because a
+ * clipped CONTROL label is a defect while a truncated session name is not. The narrow-container query reintroduces
+ * wrapping, and there it is the point.
+ */
 .session-header {
+  /* `relative` for the run bar, which is positioned against this block's edge. */
+  position: relative;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-3) 18px var(--sp-2);
-  border-bottom: 1px solid var(--line);
-  background: var(--panel);
+  flex-wrap: nowrap;
+  min-height: 44px;
+  /* A floating block: its own subtle surface and radius, so it reads as an object resting on the page rather than a
+     region of it. No border-bottom — that was the line that made it look like window chrome. */
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  padding: var(--sp-2) var(--sp-3);
+  max-width: 100%;
 }
+.session-header h2 { display: flex; align-items: center; gap: var(--sp-2); margin: 0; min-width: 0; }
 .session-header .title {
   display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1;
   /* The name yields to the controls. A clipped CONTROL label (`hinking`) is a defect; a truncated
@@ -554,7 +731,7 @@ button { font: inherit; color: inherit; }
  * The header's name: truncates, and is the ONLY rename target (issues #78, #79).
  *
  * One rule, not two. The cursor was briefly its own `.session-name` block, which broke a guard that reads the
- * FIRST matching rule — the trap this file already documents at `.tool-marker .m-names`: two rules for one
+ * FIRST matching rule — the trap this file already documents at `.activity-names`: two rules for one
  * selector and source order decides silently.
  *
  * The rail row had the text cursor too, and reported from use: *"the mouse changes on mouse over of the small card
@@ -611,16 +788,41 @@ button { font: inherit; color: inherit; }
   margin: 0 10px;
 }
 
-/* The run bar: 2px rule whose width is elapsed progress. Motion is never the only signal. */
+/*
+ * The run bar: a 2px rule whose width is elapsed progress, now on the header's own top edge.
+ *
+ * It used to be a `run-track` div between two full-width strips, which reserved height for a bar that is empty most
+ * of the time. Inside the floating header it costs nothing when idle.
+ */
 .run-bar { height: 2px; background: var(--accent); transition: width 0.3s linear; }
-.run-track { height: 2px; background: var(--line); }
+.run-track {
+  height: 2px;
+  /*
+   * Hung at the block's top edge rather than taking a row of its own — and spanning its FULL width.
+   *
+   * It used to be inset by `--sp-3` on both sides, which is right for a bar inside a padded row and wrong here: the
+   * companion's header has no horizontal padding, so the rule started 12px in from the title it sits above and read as a
+   * stray line (`img_36.png`). At full width it is the block's top edge, which is what stops the companion floating
+   * unattached in the transcript's canvas.
+   */
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: var(--line);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
 
+/* Warnings belong with the identity they qualify, so they render inside the floating header rather than as a
+   full-width strip above the conversation. */
 .warnings {
-  border-bottom: 1px solid var(--line);
+  flex-basis: 100%;
   background: var(--warn-tint);
   color: var(--warn-text);
-  padding: 6px 18px;
-  font-size: var(--fs-sm);
+  border-radius: var(--r-2);
+  padding: 3px var(--sp-2);
+  font-size: var(--fs-xs);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -628,10 +830,46 @@ button { font: inherit; color: inherit; }
 
 /* ------------------------------------------------------------------ transcript */
 
+/*
+ * The transcript VIEWPORT: the scroller and the floating control, as one box.
+ *
+ * It is the pill's positioned ancestor, which is the whole reason it exists. Anchored to the reading column instead,
+ * the pill landed under the composer (`bottom: 44px` from an edge below the input), so a control belonging to the
+ * conversation appeared over the thing you type into.
+ *
+ * It reserves `--jump-strip` at its foot — the band the pill floats in (#71). Reserving inside the scroller would
+ * protect only the LAST line, because padding at the end of the content scrolls away with it.
+ */
+.transcript-viewport {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding-bottom: var(--jump-strip);
+}
+
 .transcript {
   flex: 1;
   overflow-y: auto;
-  padding: var(--sp-4) 18px var(--sp-5);
+  /*
+   * THE TRANSCRIPT IS CENTRED, and this is a deliberate reversal of a recorded decision.
+   *
+   * `#92` centred the transcript and was reverted, and its comment is worth reading before changing this again: it
+   * centred each CHILD on its own width, so a tool marker (narrow) and a paragraph (wide) landed on different centres
+   * and the column visibly flickered as tools ran. The lesson was never "centring is wrong" — it was "centring is a
+   * property of the LANE, not of each element".
+   *
+   * So the centring is done ONCE, here, on a single `.transcript-lane` wrapper whose width is the reader's measure.
+   * Every child fills it, so there is one centre and nothing can disagree about it. The review asked for this twice;
+   * at 1600px the left-anchored column left ~400px of dead space on one side only, which is what made the emptiness
+   * read as a mistake rather than as a margin.
+   *
+   * The right padding stays small so the scrollbar sits at the column's edge: an inset there would move the reader's
+   * scroller away from where they expect it. The bottom reserves the `Jump to latest` band (#71) — it has to be
+   * inside what scrolls, or it becomes a blank row above the composer.
+   */
+  padding: var(--sp-4) 18px var(--sp-4) 18px;
   min-height: 0;
   /*
    * NO `scroll-behavior: smooth`, and that is a correctness fix rather than a taste one (issue #86).
@@ -646,7 +884,113 @@ button { font: inherit; color: inherit; }
    */
 }
 
+/*
+ * THE TRANSCRIPT'S SCROLLBAR: a slim overlay, not a trench.
+ *
+ * The platform default on macOS is a full-height track with a visible channel, which on a dark page reads as a bright
+ * vertical line down the right of the column — louder than the prose it sits beside. It also takes layout width, so
+ * the text inset had to compensate for it.
+ *
+ * `scrollbar-width: thin` covers Firefox and Chromium; the `::-webkit-scrollbar` rules cover the Chromium/Safari path
+ * where the platform's own styling would otherwise win. The thumb is `--line-strong` and inset by a transparent
+ * border, so it reads as a small floating marker rather than a filled channel, and the track is transparent — the
+ * page shows through, and there is no second vertical rule competing with the column's edge.
+ *
+ * The elapsed position is still visible: a thumb whose LENGTH is the visible fraction is the position indicator. That
+ * is the requirement — the requirement was never a wide channel.
+ */
+.transcript {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.transcript::-webkit-scrollbar { width: 10px; }
+.transcript::-webkit-scrollbar-track { background: transparent; }
+.transcript::-webkit-scrollbar-thumb {
+  /* An inset thumb: the border is transparent and `background-clip` paints only inside it, which is what makes a 12px
+     scrollbar show a 6px pill with air on both sides. */
+  background: var(--line-strong);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--r-pill);
+}
+.transcript::-webkit-scrollbar-thumb:hover { background: var(--dim); background-clip: padding-box; }
+/* The corner where both bars meet, if a horizontal one ever appears: never a filled square. */
+.transcript::-webkit-scrollbar-corner { background: transparent; }
+
+/*
+ * The same treatment for every OTHER scroll region, so they never look like different apps.
+ *
+ * The selectors are the elements that actually scroll: `.panel-body` is `overflow: hidden` (its children scroll), so
+ * styling it would have dressed nothing — which is the mistake `ToolFrame.tsx` once made for the invariant tests.
+ */
+.inspector,
+.files-tree,
+.files-doc,
+.history,
+.rail-list,
+.trace-list,
+.queue-strip {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.inspector::-webkit-scrollbar,
+.files-tree::-webkit-scrollbar,
+.files-doc::-webkit-scrollbar,
+.history::-webkit-scrollbar,
+.rail-list::-webkit-scrollbar,
+.trace-list::-webkit-scrollbar,
+.trace-detail::-webkit-scrollbar,
+.queue-strip::-webkit-scrollbar { width: 10px; height: 10px; }
+
+.inspector::-webkit-scrollbar-track,
+.files-tree::-webkit-scrollbar-track,
+.files-doc::-webkit-scrollbar-track,
+.history::-webkit-scrollbar-track,
+.rail-list::-webkit-scrollbar-track,
+.trace-list::-webkit-scrollbar-track,
+.trace-detail::-webkit-scrollbar-track,
+.queue-strip::-webkit-scrollbar-track { background: transparent; }
+
+.inspector::-webkit-scrollbar-thumb,
+.files-tree::-webkit-scrollbar-thumb,
+.files-doc::-webkit-scrollbar-thumb,
+.history::-webkit-scrollbar-thumb,
+.rail-list::-webkit-scrollbar-thumb,
+.trace-list::-webkit-scrollbar-thumb,
+.trace-detail::-webkit-scrollbar-thumb,
+.queue-strip::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--r-pill);
+}
+/* The corner where a horizontal and a vertical bar meet: never a filled square. */
+.inspector::-webkit-scrollbar-corner,
+.files-tree::-webkit-scrollbar-corner,
+.files-doc::-webkit-scrollbar-corner,
+.history::-webkit-scrollbar-corner,
+.trace-list::-webkit-scrollbar-corner { background: transparent; }
+
 /* Prose is capped so it stays readable on a wide display; tool output may use full width. */
+/*
+ * THE LANE: one wrapper, centred, that every transcript child fills.
+ *
+ * `margin-inline: auto` appears exactly ONCE in the transcript, here. Putting it on the children was #92's defect —
+ * see the note on `.transcript`.
+ *
+ * `width: 100%` with the `max-width` cap means the lane fills the column when the column is narrow and stops growing
+ * at the reader's measure when it is wide, with the spare room split evenly on both sides.
+ *
+ * `--reading-measure` is inherited from the reader's setting (#134) and resolves in `--fs-base` — the size
+ * `.measure` inherits — so the lane, the prose cap inside it and the composer all agree on one number (#140).
+ */
+.transcript-lane {
+  width: 100%;
+  max-width: var(--reading-measure);
+  margin-inline: auto;
+  font-size: var(--fs-base);
+}
+
 /*
  * Prose is capped so it stays readable on a wide display; tool output may use full width.
  *
@@ -659,9 +1003,67 @@ button { font: inherit; color: inherit; }
  * The original complaint is more likely about text SIZE than alignment — 72ch at 15px is small on a 27"
  * display — and that is a one-line change to `--fs-md` or to the number here, without moving anything.
  */
+/*
+ * THE READING LANE.
+ *
+ * One declared width, used by BOTH the conversation and the composer, so reading and writing line up. This is
+ * the "three different widths" finding: the transcript was narrow and left-aligned, the composer spanned almost
+ * the whole workspace with Send at the far edge, and the model controls sat at the opposite corner — elements of
+ * one activity that looked like they belonged to three different ones.
+ *
+ * `--reading-measure` is the reader's own setting (issue #134) and `ch` resolves in the element that uses it, so
+ * every consumer sets the SAME font size first: `.lane` pins `--fs-base`, which is what `.measure` inherits on
+ * `<article class="turn">`, and children restore their own size. Two `ch` values then agree by construction
+ * rather than by a hand-maintained ratio (the mistake #140 documents).
+ *
+ * LEFT-ALIGNED, and that is deliberate. Centring the PROSE was tried in #92 and reverted: it made the emptiness
+ * more obvious on a wide display and produced five defects (a marker that was capped but not centred, so tools
+ * made the transcript flicker between two alignments; three left edges in the composer; two inset mismatches).
+ *
+ * A second review (`img_22.png`, ~2000px) showed the same complaint returning for a different reason: the lane
+ * was bounded but sat against the column's left edge with nothing but void to its right, so on a wide window the
+ * conversation read as a narrow strip in a corner of empty space.
+ *
+ * The answer is NOT to re-centre the prose. It is to make the lane an explicit COLUMN that owns its room: the
+ * prose stays left-aligned inside it, and the widest thing in it (a tool step's actions) defines the edge, so the
+ * column looks composed rather than abandoned. `--lane-gutter` grows with the window up to a limit, which is the
+ * part #92 never had — a fixed inset cannot adapt, and centring inside 1330px made the gap symmetric and
+ * therefore doubly visible.
+ */
+.lane {
+  /* The size `.measure` inherits, so this element's `ch` and the prose's are the same number. */
+  font-size: var(--fs-base);
+  max-width: var(--reading-measure);
+  /* Never wider than the column, and it never stretches by accident: `100%` would make the cap meaningless when
+     the reader chose `fill`. */
+  width: 100%;
+  /* A left inset that grows with the window, so the lane is not pinned to the column's edge on a wide display.
+     `clamp` rather than a media query: the transition should be continuous, and there is one number to tune. */
+  margin-left: clamp(0px, calc((100% - var(--reading-measure)) * 0.18), 72px);
+}
+
 .measure { max-width: var(--reading-measure); }
 
+/*
+ * BLOCK RHYTHM, graded by what the gap MEANS.
+ *
+ * A screenshot review measured ~22px from a user bubble to the next activity row, ~28–30px from an activity row to the
+ * `Assistant` label, and ~40px from prose to the next user bubble. The largest gap sat INSIDE a turn, so turn boundaries
+ * were only implied — the reader could not see where one exchange ended and the next began.
+ *
+ * Three steps now, smallest to largest: steps within a turn (the activity group's own margin), then the turn itself,
+ * then the boundary between turns, which a user turn opens with extra space above it.
+ */
 .turn { margin-bottom: var(--sp-4); }
+/*
+ * A user turn OPENS an exchange, so the first turn is exempt from the extra space above it: the scroller's own top
+ * padding is already there, and doubling it would push the conversation away from the top of the column for no
+ * information.
+ *
+ * The margin itself lives in the `.turn-user` block below, so that selector stays ONE rule — two rules for one selector
+ * is the cascade trap this file documents, and a guard reads the first match.
+ */
+.transcript-lane > .turn-user:first-child { margin-top: 0; }
 
 /*
  * A first-person turn is a LANDMARK (issue #88).
@@ -686,6 +1088,15 @@ button { font: inherit; color: inherit; }
   background: var(--panel-2);
   border-radius: var(--r-2);
   padding: var(--sp-3);
+  /*
+   * The largest gap in the rhythm, and it goes ABOVE the reader's own turn.
+   *
+   * A review measured the gaps and found the biggest one INSIDE a turn (~28–30px from an activity row to its
+   * `Assistant` label) and the turn boundary at only ~40px spread unevenly — so where one exchange ended and the next
+   * began was implied rather than visible. A prompt is the thing a reader scans for; giving it the most air is what
+   * makes a long transcript navigable.
+   */
+  margin-top: var(--sp-5);
 }
 .turn-user .role {
   color: var(--text);
@@ -908,27 +1319,42 @@ button { font: inherit; color: inherit; }
 
 /* ------------------------------------------------------------------ composer */
 
+/*
+ * The composer sits in the SAME lane as the prose.
+ *
+ * It used to span the whole column with Send pushed to the far edge, while the conversation it belongs to
+ * stopped at 72ch — so the writing surface and the reading surface did not look like the same conversation
+ * (the "three different widths" finding). The border-top still spans the column, because that rule separates
+ * REGIONS; the lane is about where the text lives.
+ *
+ * `font-size: var(--fs-base)` is load-bearing: `.lane`'s `ch` cap has to resolve in the same font the transcript
+ * caps against, or the two `72ch` values are different widths (#140).
+ */
 .composer {
-  border-top: 1px solid var(--line);
-  background: var(--panel);
-  padding: var(--sp-3) 18px;
+  /* No padding, border or background: the DOCK owns the geometry, and the input is the only visible surface. A
+     composer box inside a dock box would be two nested rounded rectangles for one control. */
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
+  font-size: var(--fs-base);
+}
+/*
+ * Every child is capped to the lane, INCLUDING the row that holds the textarea and Send.
+ *
+ * The first version capped the children but let `.composer-row` keep Send outside the lane: the row was the
+ * lane's width and the button sat at its right end, so the input looked narrower than the prose and the button
+ * looked detached from it (`img_22.png`). The row is inside the lane, so the input and the button are one group
+ * of the same width as the conversation above them.
+ */
+.composer > * {
+  /* The dock already places and caps its children; this only stops a single strip (a mode toggle, a queue row) from
+     declaring its own width. Deliberately NO margin: the dock's `margin-inline: auto` is the one centring rule. */
+  max-width: 100%;
+  width: 100%;
 }
 
-.mode-strip {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--fs-xs);
-  background: var(--accent-tint);
-  color: var(--accent-text);
-  border: 1px solid var(--accent);
-  border-radius: var(--r-2);
-  padding: 5px 9px;
-}
-
+/* The composer no longer composes a row: the input is the only thing beside nothing. Kept as a name because the mode
+   strip and the queue are gone and this is the shape the remaining chrome uses. */
 .composer-row { display: flex; gap: var(--sp-2); align-items: flex-end; }
 /* The textarea takes the room; the button keeps its own width.
  *
@@ -936,47 +1362,144 @@ button { font: inherit; color: inherit; }
  * already never grow — this only stops it SHRINKING below its label on a narrow window. It did not fix
  * "cumbersome to hit": that was the composer spanning 1900px, which the row's `max-width` addressed and
  * which is now reverted. Kept because it is harmless and mildly useful, not because it solved anything. */
-.composer-row .btn-send { flex: none; }
-
+.composer-row /*
+ * The input IS the composer's surface.
+ *
+ * It used to sit in a row beside a Send button, so the visible control ended before the prose's right edge and the
+ * button sat outside it — the misalignment a review kept pointing at. It spans the dock's width now: one rounded
+ * box, the same left edge as the paragraph above it, and nothing beside it.
+ *
+ * A 40vh cap: a prompt is usually a line or two, and a box that grows to most of the window while typing would push the
+ * conversation away exactly when the reader wants to look at it.
+ */
+.composer .composer-input,
 .composer textarea {
-  flex: 1;
-  min-height: 72px;
-  max-height: 40vh;
-  resize: vertical;
-  background: var(--bg);
+  width: 100%;
+  /* The field's height is FIXED at three lines; content scrolls inside it. See the note below. */
+  height: calc(1.5em * 3 + 22px);
+  background: var(--panel-2);
   border: 1px solid var(--line);
-  border-radius: var(--r-2);
-  padding: 9px 11px;
+  border-radius: var(--r-3);
+  padding: 10px 12px;
   color: var(--text);
   font: var(--fs-md) / 1.5 var(--sans);
-}
-.composer textarea:focus { border-color: var(--accent); }
-.composer textarea:disabled { opacity: 0.6; }
-
-.btn-send {
-  height: 34px;
-  padding: 0 var(--sp-4);
-  background: var(--accent);
-  color: #05131f;
-  border: none;
+  /*
+   * A FIXED THREE-LINE FIELD. It does not grow; the text scrolls inside it.
+   *
+   * Three lines is the size of prompt this app is for — a sentence or two of instruction. That number has been argued
+   * both ways and is now settled as a FIXED height rather than a floor:
+   *
+   *   - floored at one line, a prompt could not be reviewed before sending;
+   *   - floored at three and allowed to GROW (`field-sizing: content`), the composer pushed itself up into the transcript
+   *     as the reader typed — the dock's height became a function of the draft, which is the same class of defect as the
+   *     queue enumeration: the canvas moving because of something typed into the box at its foot.
+   *
+   * `em` of the input's own font, so it holds three lines at any reading size. `resize: none` because the height is a
+   * decision rather than a handle to find, and `overflow-y: auto` below gives the whole prompt somewhere to go.
+   */
+  resize: none;
+  /* The same radius as the message cards above it: two different corner sizes in one column read as two systems. */
   border-radius: var(--r-2);
   /*
-   * The font, explicitly (issue #100). A `<button>` inherits NEITHER family nor size from its parent —
-   * the UA sets its own — so this rule's `font-weight` alone left the most-clicked control in the app
-   * rendering in the platform's typeface, at the platform's size, next to text that is not.
-   *
-   * Found by the audit rather than by looking: it is the same omission as the toggle chip, in a place
-   * nobody had thought to check.
+   * A prompt longer than three lines scrolls HERE rather than pushing the composer up over the conversation. Scoped to
+   * the field, so the opt-in slim scrollbar treatment below applies and the bar is quiet until hovered — a permanent
+   * bright bar beside the caret would be the loudest thing in a surface meant to recede.
    */
-  font-family: inherit;
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
+  overflow-y: auto;
 }
-.btn-send:disabled { opacity: 0.5; cursor: not-allowed; }
+.composer textarea:focus { border-color: var(--accent); outline: none; }
+/* The same slim overlay the transcript and the panel use, so every scroller in the app dresses alike. */
+.composer textarea {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.composer textarea::-webkit-scrollbar { width: 10px; }
+.composer textarea::-webkit-scrollbar-track { background: transparent; }
+.composer textarea::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--r-pill);
+}
+.composer textarea:disabled { opacity: 0.6; }
 
+
+
+/*
+ * THE COMPOSER'S CHROME ROW: hint left, follow toggle right.
+ *
+ * Both used to float. The toggle was a pill ABOVE the field, straddling its focus ring and changing the gap to the text
+ * with the focus state (`img_40` vs `img_41`); the hint sat below the field with its entire right half empty. One row,
+ * inside the composer's own boundary, sharing the field's left edge — which removes the overlap, the left-edge stagger
+ * and the "two pill systems above the field" problem in one move.
+ */
+.composer-chrome {
+  display: flex;
+  align-items: center;
+  /* Space between them, so a long hint wraps instead of colliding with the toggle. */
+  gap: var(--sp-3);
+  /* A fixed gap BELOW the field, so it cannot shift with the focus ring: the ring is drawn outside the border, and a
+     margin measured from the border would change apparent spacing when focus changes. */
+  margin-top: var(--sp-2);
+  min-height: 18px;
+}
+/* The hint takes the room; the toggle keeps its width. */
+.composer-hint { flex: 1; min-width: 0; font-size: var(--fs-xs); color: var(--dim); }
+
+/*
+ * The follow toggle: a SWITCH with its label beside it.
+ *
+ * A pill whose only difference between states is a word is a label wearing a button's clothes — `auto-follow off` "reads
+ * equally as a state and as a command". The track moves, so the state is visible; the word stays, so it is not carried by
+ * position and colour alone.
+ */
+.follow-toggle {
+  /* Alone on a `<button>`, so it declares its own face rather than inheriting the platform's light chrome (#100). */
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  cursor: pointer;
+  flex: none;
+}
+.follow-toggle:hover { color: var(--text); }
+.follow-toggle:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--r-1); }
+.follow-toggle-track {
+  position: relative;
+  display: inline-block;
+  width: 22px;
+  height: 12px;
+  border-radius: var(--r-pill);
+  background: var(--panel-3);
+  /* An inset edge, so the track is visible on `--bg` and `--panel` alike. */
+  box-shadow: inset 0 0 0 1px var(--line);
+  flex: none;
+  transition: background 120ms ease;
+}
+.follow-toggle-dot {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dim);
+  transition: transform 120ms ease, background 120ms ease;
+}
+.follow-toggle[aria-pressed="true"] { color: var(--text); }
+.follow-toggle[aria-pressed="true"] .follow-toggle-track { background: var(--accent-tint); box-shadow: inset 0 0 0 1px var(--accent); }
+.follow-toggle[aria-pressed="true"] .follow-toggle-dot { background: var(--accent-text); transform: translateX(10px); }
+/* The word states the mode, so the two states are never alike on a monochrome rendering. */
+.follow-toggle-label { white-space: nowrap; }
+
+/* The hint is the composer's own caption: dim, small, and directly under the input it describes. */
 .hint { font-size: var(--fs-xs); color: var(--dim); }
+.composer .hint { padding: 0 2px; }
 .hint kbd {
   font-family: var(--mono);
   background: var(--panel-2);
@@ -1081,6 +1604,8 @@ select.btn { font-family: var(--sans); }
   flex-direction: column;
   justify-content: center;
   padding: var(--sp-6) 18px;
+  /* Was 72ch, which this was never tied to — the empty state has no relationship to the reading measure. Left as it
+     was when the default moved to 80. */
   max-width: 72ch;
   gap: var(--sp-3);
 }
@@ -1297,7 +1822,7 @@ select.btn { font-family: var(--sans); }
 /*
  * A TOGGLE needs an affordance at rest, and this one had none (issue #74).
  *
- * `markers on` is a real button — `onClick` plus `aria-pressed` — but it rendered as plain bold text
+ * `activity on` is a real button — `onClick` plus `aria-pressed` — but it rendered as plain bold text
  * with the panel background only on hover. So it read as a status readout, and a control that only
  * reveals itself on hover is the one thing this design forbids (§5.1: no hover-only information).
  *
@@ -1306,7 +1831,7 @@ select.btn { font-family: var(--sans); }
  * trace`) and so already reads as a control. Styling the class would have made both look boxed and
  * turned the header into a toolbar.
  *
- * State is carried by the WORDS (`markers on` / `markers off`) as well as the tint, so nothing here
+ * State is carried by the WORDS (`activity on` / `activity off`) as well as the tint, so nothing here
  * depends on colour alone.
  */
 .toggle-chip {
@@ -1380,18 +1905,172 @@ select.btn { font-family: var(--sans); }
  * The words were already there (`latest 5 shown · the rest below for debugging · ↑↓ to traverse`);
  * this adds the thing a glance can use.
  */
+/*
+ * THE LIST IS A RESIZABLE PANE, not a 5-row window.
+ *
+ * `max-height: 108px` was chosen for the DRAWER, where the trace shared the reading column with the conversation and had
+ * to stay out of its way. As a panel mode it is actively wrong: it showed five rows of 44 and left ~700px of the panel
+ * empty below (`img_38.png`) — re-creating the exact limitation the trace was moved out of the drawer to escape. The
+ * panel solved "show the output properly" and re-created "cannot see the list" one dimension over.
+ *
+ * So the list is a proportional pane: it takes the space it can and the detail keeps a floor. `flex: 1 1 auto` with a
+ * `min-height` of a few rows means a short panel still shows several calls, and a tall one fills itself.
+ */
+.trace.is-panel { height: 100%; }
+/* The panel's proportions are set on the list rule itself (see `.trace-list`), which owns the bound. */
+/*
+ * THE DETAIL'S HEIGHT IS SET BY THE READER, NOT BY THE SELECTED CALL.
+ *
+ * It was `flex: 0 1 auto`, so the pane's height followed its content: a two-line `echo` gave a short box and a
+ * forty-line `ls` a tall one, and traversing with the arrow keys resized the pane at every step — the rows jumped and the
+ * scroll position moved under the reader. Reported as "confusing and mentally exhausting while traversing".
+ *
+ * `flex: none` plus an explicit height from `trace.ts` makes the pane a property of the PANEL: moving through calls
+ * changes only what is inside it. The handle below can change the height, and a double-click restores the default.
+ */
+.trace.is-panel .trace-detail {
+  flex: none;
+  max-height: none;
+  /* The pane scrolls its own output, so a long result cannot push the list away. */
+  overflow-y: auto;
+}
+
+/*
+ * The handle between the list and the detail.
+ *
+ * The same shape as the panel's own vertical resizer — one resize idiom in the app, not two. A 1px visible rule with a
+ * 9px invisible hit area: a 1px target is not grabbable, and a 9px rule would read as a border between regions.
+ */
+.trace-resizer {
+  position: relative;
+  flex: none;
+  height: 9px;
+  margin: -4px 0;
+  cursor: row-resize;
+  z-index: 3;
+  background: none;
+  border: none;
+  padding: 0;
+}
+.trace-resizer::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 1px;
+  background: var(--line);
+}
+.trace-resizer:hover::after { background: var(--line-strong); }
+.trace-resizer:focus-visible { outline: none; }
+.trace-resizer:focus-visible::after { background: var(--accent); height: 2px; }
+
+/*
+ * The order control: a filter glyph that opens a menu.
+ *
+ * It was a native `<select>`, which works but reads as a FORM FIELD inside a strip of chrome — and at 11px its
+ * platform-drawn arrow was the heaviest mark in the header. A glyph says "narrow the list"; the menu says the rest.
+ */
+.trace-order { position: relative; display: inline-flex; align-items: center; flex: none; }
+
+.trace-order-trigger {
+  /* Alone on a `<button>`, so it declares its own face rather than inheriting the platform's light chrome (#100). */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  color: var(--dim);
+  font: inherit;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+.trace-order-trigger:hover { color: var(--text); border-color: var(--line); background: var(--panel-2); }
+.trace-order-trigger[aria-expanded="true"] { color: var(--text); border-color: var(--line-strong); background: var(--panel-2); }
+/* The glyph is filled when an order other than the default is active — so "this list is filtered" is visible without
+   opening the menu, and without relying on colour. */
+.trace-order-trigger[data-active="true"] { color: var(--accent-text); }
+.trace-order-trigger:focus-visible { outline: none; box-shadow: var(--focus); }
+
+/*
+ * The menu: positioned against its trigger, opening DOWN and to the RIGHT.
+ *
+ * It was anchored `right: 0`, which resolves against the trigger's right edge — and the trigger is a ~22px icon sitting
+ * mid-header, so a 230px menu grew LEFTWARD out of the panel and was clipped. The trigger is near the panel's left side,
+ * so the menu opens rightward from its left edge, where the room actually is.
+ *
+ * `z-index` above the list rows: it is the one floating surface in this panel, and a menu drawn under the thing it orders
+ * would be the worst possible arrangement. `top: 100%` keeps it attached however the header wraps.
+ */
+.trace-order-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 230px;
+  background: var(--panel-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  box-shadow: var(--sh-2);
+  padding: var(--sp-1);
+  display: flex;
+  flex-direction: column;
+}
+
+.trace-order-item {
+  display: grid;
+  grid-template-columns: 1.2em 1fr;
+  align-items: baseline;
+  gap: 0 var(--sp-1);
+  background: none;
+  border: none;
+  border-radius: var(--r-1);
+  /* Alone on a button: its own face, or it inherits the platform's light chrome on a dark page (#100). */
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text);
+  text-align: left;
+  padding: 5px var(--sp-2);
+  cursor: pointer;
+}
+.trace-order-item:hover,
+.trace-order-item:focus-visible { background: var(--panel-2); outline: none; }
+.trace-order-tick { color: var(--accent-text); font-size: var(--fs-xs); }
+.trace-order-item-label { font-weight: 600; }
+/* The hint is a separate line and quieter: it explains the consequence rather than naming the choice. */
+.trace-order-item-hint {
+  grid-column: 2;
+  color: var(--dim);
+  font-size: var(--fs-2xs);
+}
+
 .trace-list {
+  /*
+   * The bound is the DRAWER's: it shares the reading column with the conversation and must stay out of its way.
+   *
+   * A panel has no such competition, so it grows instead — one rule, because two rules for this selector is the cascade
+   * trap this file documents at `.activity-names`, and it caught me here.
+   */
   max-height: 108px;
   overflow-y: auto;
   padding: 2px 0;
   background: var(--bg);
-  scrollbar-width: thin;
-  scrollbar-color: var(--line-strong) transparent;
 }
-.trace-list::-webkit-scrollbar { width: 9px; }
-.trace-list::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 5px; }
-.trace-list::-webkit-scrollbar-track { background: transparent; }
+.trace.is-panel .trace-list {
+  flex: 1 1 auto;
+  /* A usable handful of rows even in a short panel. */
+  min-height: 132px;
+  max-height: none;
+}
 
+/*
+ * A trace row: index, state, tool, label, outcome.
+ *
+ * The INDEX leads because it is the one identifier that is always present and always distinct. The state glyph and the
+ * outcome word are separate signals for one fact, so the word is only rendered for a non-normal state — see the
+ * component. Budget at panel width: index 2ch, glyph 1ch, tool name (fixed), label (flexible), outcome (auto).
+ */
 .trace-row {
   display: flex;
   align-items: center;
@@ -1477,8 +2156,22 @@ select.btn { font-family: var(--sans); }
   top: 0;
 }
 .trace-detail-head .label { color: var(--quarantine); font-weight: 600; }
+/* A separator and a weight change, so `Tool output · bash` is a label and a NAME rather than one phrase. */
+.trace-detail-sep { color: var(--line-strong); }
+.trace-detail-head .tool-name { color: var(--text); font-weight: 600; }
+/* The provenance claim, small and quiet: it is a footnote to the data, not a heading. */
+.trace-detail-head .trace-legend { color: var(--dim); font-size: var(--fs-2xs); font-style: italic; }
 .trace-detail-head .err { color: var(--danger-text); }
 .trace-detail-head .spacer { flex: 1; }
+/* The arguments, behind a disclosure: context for the output rather than the evidence itself. */
+.trace-args-block { border-top: 1px solid var(--line); }
+.trace-args-block > summary {
+  padding: 4px 10px;
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  cursor: pointer;
+}
+.trace-args-block > summary:hover { color: var(--text); }
 .trace-args {
   margin: 0;
   padding: var(--sp-2) 18px;
@@ -1500,215 +2193,404 @@ select.btn { font-family: var(--sans); }
 }
 .trace-output.error { color: var(--danger-text); }
 
-/* --- the compact marker in the transcript ---------------------------------------------------- */
+/* --- the activity group in the transcript ---------------------------------------------------- */
 
-.tool-marker {
-
-  /*
-   * ONE frame, like the thinking block (issue #137).
-   *
-   * The first version had two: this element carried a 3px left bar, and `.tool-detail` carried another
-   * inside it. Open, that showed a DOUBLED gutter with nothing between them — a vertical rule that meant
-   * nothing, on the surface whose whole job is to say "this is data".
-   *
-   * `.quarantine` already had the right shape and is the model: one `<details>` wrapping head and body, so
-   * the bar runs unbroken from the summary down through the output, and the hatch covers both. This element
-   * is that frame; `.tool-marker-summary` is its head; `.tool-detail` is its body with no border of its own.
-   *
-   * `display: block`, not `flex` (issue #136): a `<details>` stacks its children below the `<summary>`, and
-   * `flex` made them siblings side by side.
-   */
+/*
+ * ACTIVITY GROUP — one disclosure for a stretch of internal work.
+ *
+ * ## What replaced what
+ *
+ * A tool run used to have `.tool-marker`, and each thinking block used `.quarantine`. Because Pi
+ * interleaves them, a real session rendered a column of alternating 10px/11px bars under repeated
+ * `Assistant` headings, every one already collapsed (`img_18.png`). The rows were the clutter: no
+ * dominant result, no stable progress anchor, nothing to read but the machinery.
+ *
+ * The unit is now the GROUP, so there is one frame per stretch of work and one line to scan. The frame
+ * keeps the quarantine gutter, because its body is tool result data — the legend in the transcript header
+ * still describes exactly what a reader sees, and the words `Tool output` still appear on each step, which
+ * is what carries the meaning when `forced-colors` drops the colour.
+ *
+ * ## Hierarchy, deliberately unchanged
+ *
+ * The work still outranks the reasoning (issue #144): the summary line is `--text` and the tool names in it
+ * are `--text`, while a thinking block's own row is flat and `--dim`. Routing both through one container
+ * must not flatten that order back into "everything the same".
+ */
+.activity {
   display: block;
-  width: 100%;
-  /*
-   * The width of the PROSE MEASURE, which `ch` could not express from here (issue #140).
-   *
-   * `1ch` is the width of "0" in the element's OWN font, and this bar renders at `--fs-2xs` (10px) while
-   * prose renders at `--fs-md` (15px). So `max-width: 72ch` gave the bar ~396px against the prose's
-   * ~594px — the same number, a third narrower, which is exactly the inset that was reported.
-   *
-   * Widening to the column is the wrong fix: `width: 100%` makes it ~1294px, i.e. 700px *wider* than the
-   * text it belongs to. `rem` and `em` do not help either — `em` is this element's font, and any `rem`
-   * multiplier would be a ratio I would have to invent and then keep true.
-   *
-   * So the cap is declared on the SIZE, not on a converted number: the bar sets its font to the size that
-   * `.measure` INHERITS and then applies `72ch` in it, and `.tool-marker-summary` sets its own size back.
-   * The two `72ch` then resolve in the same font by construction.
-   *
-   * **`--fs-base`, not `--fs-md`** — and this was the trap. `.measure` sits on `<article class="turn">`,
-   * which inherits from `body` (`--fs-base`, 13px); it is `.prose` INSIDE the article that is 15px. My first
-   * version measured in `--fs-md` and was ~80px too wide, which would have been a *different* silent
-   * mismatch than the one being fixed.
-   *
-   * A custom property cannot carry this because `ch` resolves where it is USED, not where it is defined —
-   * but `font-size` resolves where it is inherited, which is what makes this work.
-   */
-  font-size: var(--fs-base);
-  /* The same token `.measure` uses, so the bar keeps matching the prose when the reader changes it
-     (issue #140's rule, now expressed once). */
-  max-width: var(--reading-measure);
-  text-align: left;
   border-left: 3px solid var(--quarantine);
-  /*
-   * NO HATCH (issue #138). The 45° texture was dropped: at this size it read as visual noise rather than
-   * as a signal, and the reader's own verdict was that the HOVER state — flat `--panel` — was the one that
-   * looked right.
-   *
-   * The signal that this is untrusted data is carried by the two things that survive both `forced-colors`
-   * and a single glance: the **3px quarantine gutter** and the **words** in the bar (`1 tool · read`,
-   * coloured `--quarantine`). DESIGN §5.2 already says the header is the load-bearing signal and the
-   * texture is secondary — this removes the secondary one rather than the load-bearing one.
-   *
-   * The one-time legend in the transcript header said "a hatched frame", and that is now false; it was
-   * changed in the same commit, because a promise the UI does not keep is worse than no promise (issue #43).
-   */
   background: var(--panel);
   border-radius: 0 var(--r-2) var(--r-2) 0;
   overflow: hidden;
-  /* Attached under the turn it follows rather than floating between turns: it reads as "and it ran this",
-     which is the actual relationship, and costs almost no vertical space. */
   margin: 2px 0 var(--sp-3);
-  /* No `font-size` here: this element carries `--fs-base` — the size `.measure` inherits — so its `72ch`
-     measures the same width as the transcript's text (issue #140). The children set their own. */
+  /*
+   * The same measure as the prose it sits between (issue #140): the summary and the body must not be a
+   * different width from the text above them. `ch` here resolves against `--fs-base` — the size `.measure`
+   * INHERITS, since `.measure` sits on `<article class="turn">` and it is `.prose` inside that is
+   * `--reading-size` — so the two caps are the same number in the same font.
+   */
+  font-size: var(--fs-base);
+  max-width: var(--reading-measure);
   color: var(--dim);
 }
-/* The summary is the disclosure handle now, so the hover affordance moves to it (issue #131). */
-.tool-marker-summary {
-  /* The bar is the row, so the alignment lives here and the `<details>` stays a plain block.
-   *
-   * `font-size` is set EXPLICITLY: the marker carries `--fs-base` so its `72ch` matches the transcript's
-   * width (issue #140), and this bar renders small. Inheriting would silently make every tool bar 13px.
-   *
-   * `--fs-xs`, not `--fs-2xs` (issue #144). This bar and the thinking block's head are peer disclosures on
-   * the same screen, and they were set one pixel apart (10px vs 11px) with different fills. Two sizes that
-   * close cannot read as a hierarchy — there is no scale to read them against — so the difference registered
-   * only as inconsistency, and the smaller number made the actionable row look weaker than the inert one. */
-  font-size: var(--fs-xs);
+.activity.has-error { border-left-color: var(--danger); }
+.activity.is-live { border-left-color: var(--ok); }
+.activity:hover { border-left-color: var(--line-strong); }
+.activity.has-error:hover { border-left-color: var(--danger); }
+
+.activity-summary {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+  padding: 5px 10px;
+  /* `--fs-xs`, NOT the frame's inherited size: the frame carries `--fs-base` so its `72ch` cap matches the
+     prose, and setting the bar's size explicitly is the fix #140 records. */
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text);
+  background: var(--panel);
   cursor: pointer;
   list-style: none;
-  /* The bar is the quarantine header now (issue #136), so it carries the label colour that says "this is
-     data, not the assistant" — the words are the signal under `forced-colors`, where the hatch is dropped. */
-  color: var(--quarantine);
-  font-weight: 600;
-  /*
-   * The default triangle is replaced by `.m-open` below, which rotates with the disclosure — one
-   * affordance that moves, rather than a triangle plus an arrow saying the same thing.
-   */
-
-  /* The WORK tier (issue #144). The bar's base colour stays `--quarantine` for its structural parts, but
-     the tool NAMES are the thing a reader scans for — they were inheriting `--quarantine`, which is 2.71:1
-     on `--panel` and the least legible text in the transcript. See `.m-names` below. */
-  background: var(--panel);
 }
-.tool-marker-summary::-webkit-details-marker { display: none; }
+.activity-summary::-webkit-details-marker { display: none; }
+.activity-summary:hover { background: var(--panel-2); }
 /*
- * The tool names are the signal (issue #144).
+ * The summary's dot answers ONE question: is this group working NOW?
  *
- * They inherited the bar's `--quarantine` (#586069), which measures 2.71:1 against `--panel` — the dimmest
- * text anywhere in the transcript, on the row that records what actually ran. The thinking block's label sat
- * at 5.62:1 for content the reader is usually skipping. Full `--text` (14.6:1) puts the work above the
- * reasoning, which is the order the reader asked for.
+ * It used to turn red whenever any call in the group had failed, which on a recorded group is permanent — so a
+ * finished run sat there red while nothing was wrong any more (`img_20.png`). A past failure belongs to the
+ * detail text (`1 call failed`, in `--danger-text`), where it is a fact the reader can act on.
  */
-/*
- * The hover, and the no-op it used to contain (issue #144).
- *
- * The old rule was `background: var(--panel)` — which is `.tool-marker`'s OWN background, so the
- * background half did nothing. Only the colour changed, on a 10px bar. The comment above it credited the
- * hover as the reason the hatch was removed ("the reader's verdict was that the flat hover state looked
- * right"), so the state that carried that judgement was itself broken: what was judged was not what shipped.
- *
- * `--panel-2` is the one step up from the marker's `--panel`, and it is the same token the thinking block's
- * header uses — so the two disclosures light up identically, which is the point of this fix.
- */
-.tool-marker-summary:hover { background: var(--panel-2); color: var(--text); }
-.tool-marker .m-open { margin-left: auto; transition: transform 120ms ease; }
-@media (prefers-reduced-motion: reduce) { .tool-marker .m-open { transition: none; } }
-.tool-marker[open] .m-open { transform: rotate(180deg); }
-
-/*
- * The inline output: the quarantine frame the legend promises (ADR-0006 / DESIGN §5.2), not a plain block.
- * `is-quarantined` is the same modifier the trace panel uses, because the hatch is a claim the transcript's
- * own legend makes about every surface carrying tool output.
- */
-.tool-detail {
-  /* Same as the summary: the marker carries `--fs-base` for measurement, so this restores the size the
-     content actually renders at (issue #140). The `<pre>` children set their own font too. */
+.activity-glyph { color: var(--quarantine); font-size: var(--fs-2xs); line-height: 1; }
+.activity-glyph.is-live { color: var(--ok-text); }
+.activity.is-live .activity-glyph.is-live { animation: pulse 1.6s ease-in-out infinite; }
+.activity-primary { color: var(--text); }
+/* The facts that collapsing must not lose: a failed call, a call with no recorded result. The reason to
+   open the group, so it is not rendered as a whisper. */
+.activity-detail { color: var(--danger-text); font-weight: 600; }
+/* What ran, rolled up. Mono because every machine value is (DESIGN §8), clipped rather than wrapped so the
+   bar stays one line at any width. */
+.activity-names {
   font-size: var(--fs-2xs);
-
-  /*
-   * NO border, NO hatching, NO radius (issue #137). It sits INSIDE `.tool-marker`'s frame, which already
-   * provides all three — a second 3px bar here was the redundant vertical rule the report is about: two
-   * gutters with nothing between them.
-   *
-   * `.tool-marker` has `overflow: hidden`, so this body inherits the frame's rounded bottom corners without
-   * repeating them, and the hatch runs continuously from the bar down through the output — the same shape the
-   * thinking block has always had.
-   */
-  border-top: 1px solid var(--line);
+  font-weight: 400;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 45%;
 }
-.tool-detail-head {
+.activity .spacer { flex: 1; }
+.activity .m-open { color: var(--dim); transition: transform 120ms ease; }
+@media (prefers-reduced-motion: reduce) { .activity .m-open { transition: none; } }
+.activity[open] .m-open { transform: rotate(180deg); }
+
+.activity-body {
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-xs);
+}
+
+/* The reasoning: flat, `--dim`, no fill of its own — the demoted tier from #144. */
+.activity-thought { border-top: 1px solid var(--line); }
+.activity-thought:first-child { border-top: none; }
+.activity-thought-head {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   padding: 4px 10px;
   font-size: var(--fs-xs);
   color: var(--dim);
-  background: var(--panel-2);
+  background: none;
+  cursor: pointer;
+  list-style: none;
 }
-.tool-detail-head .label { color: var(--quarantine); font-weight: 600; }
-.tool-detail-head .spacer { flex: 1; }
-.tool-detail-head .err { color: var(--danger-text); }
-.tool-detail-meta { font-family: var(--mono); font-size: var(--fs-2xs); }
-
-/* A CAP, because this is inline in the conversation. Without it a `read` of a 40 KB file pushes the next
-   turn off the screen — the defect this whole component exists to avoid. */
-.tool-detail > :first-child { margin-top: 0; }
-.tool-detail-args,
-.tool-detail-output {
-  margin: 0;
-  padding: var(--sp-2) 10px;
-  max-height: 220px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: var(--fs-xs);
-}
-.tool-detail-args { color: var(--dim); border-bottom: 1px solid var(--line); }
-.tool-detail-output.error { color: var(--danger-text); }
-.tool-detail-rest > summary { padding: 4px 10px; font-size: var(--fs-2xs); color: var(--dim); cursor: pointer; }
-
-/*
- * With the hatch gone, the resting background IS `--panel`, so the old hover lost its contrast. The bar
- * carries the hover now (`--panel-2` on the summary, already there) and the gutter brightens — a cue that
- * does not reintroduce a texture.
- */
-.tool-marker:hover { border-left-color: var(--line-strong); }
-.tool-marker.has-error { border-left-color: var(--danger); }
-.tool-marker.running { border-left-color: var(--ok); }
-.tool-marker .m-count { color: var(--text); }
-.tool-marker .m-names {
+.activity-thought-head::-webkit-details-marker { display: none; }
+.activity-thought-head:hover { background: var(--panel-2); color: var(--text); }
+.activity-thought-head .label { color: var(--dim); font-weight: 600; }
+.activity-thought-state { color: var(--ok-text); }
+/* One line, elided: the row says WHICH thought it was without wrapping into a paragraph (issue #143). */
+.activity-thought-gist {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
-  min-width: 0;
+  font-weight: 400;
+  opacity: 0.8;
+  text-align: right;
+}
+.activity-thought-body {
+  margin: 0;
   /*
-   * THE WORK IS THE SIGNAL (issue #144). These were inheriting the bar's `--quarantine` (#586069), which is
-   * 2.71:1 on `--panel` — the dimmest text in the transcript, on the row recording what actually ran, while
-   * the thinking block's label sat at 5.62:1 for content the reader is usually skipping. Full `--text` is
-   * 14.6:1 and puts the work above the reasoning.
+   * Indented to the ledger's TEXT column, not to the row's padding.
+   *
+   * It was `padding: var(--sp-2) 10px`, so the reasoning began at x=10 — left of the rail at x=18 — and the opened
+   * thinking block rendered BEHIND the rail (`img_37.png`). Text that crosses the rail reads as a rendering fault.
+   *
+   * `--step-text-x` is where every row's label starts, so the reasoning lines up with the `Thinking` label it belongs to
+   * and nothing is drawn left of the rail except the dots.
    */
+  padding: var(--sp-2) var(--step-pad) var(--sp-2) var(--step-text-x);
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
   color: var(--text);
 }
-.tool-marker .m-failed { color: var(--danger-text); }
-.tool-marker .m-running { color: var(--ok-text); }
+/* --- the step ledger inside an activity group --------------------------------------------------- */
+
+/*
+ * One row per recorded step, numbered, in recorded order.
+ *
+ * This replaced a body that rendered `ToolDetail` per call — JSON arguments plus the raw result — which on a real
+ * session put fifty lines of `ls -la` output and an `env` dump inside the conversation (`img_19.png`). The trace
+ * window already shows arguments and output properly; a step here is a SIGNPOST, so it states what ran and
+ * offers one explicit action to see the detail.
+ *
+ * The index is the sequence. It is `aria-hidden` because the list is an `<ol>`, which already announces position
+ * to assistive tech — the number is a visual aid, not a second source of truth.
+ */
+.activity-step {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 5px var(--step-pad);
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  border-top: 1px solid var(--line);
+  min-height: 30px;
+}
+.activity-step:first-child { border-top: none; }
+/*
+ * THE RAIL: the vertical line through every step's dot.
+ *
+ * A run of steps is a sequence, so it is drawn as one — a hairline down the left of the ledger with a dot per
+ * step. This replaces the step NUMBERS, which said "these are ordered" a second time and put a column of digits
+ * where the eye goes first, competing with the labels that are the actual content.
+ *
+ * The line lives on the LIST and the dots break it, so a row's background cannot hide it and the rail reads as
+ * continuous across rows of different states.
+ */
+.activity-steps {
+  /* ONE rule for this selector — list reset and geometry together. Two rules for one selector is the cascade trap this
+     file documents at `.activity-names`, and a guard that reads the first match silently guards the wrong one. */
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+  /*
+   * THE LEDGER'S GEOMETRY, declared once and inherited by both row kinds.
+   *
+   * Before this the two rows computed their dot positions differently — a tool row centred its dot with a `margin-left`
+   * derived from the column, and a thought row overrode that margin to `0` because its dot lives inside a nested
+   * `<summary>` with its own padding. The results were 18px and 13.5px: the rail ran through the thinking dots instead
+   * of through their centres (`img_37.png`).
+   *
+   * One number, inherited, cannot disagree with itself.
+   */
+  --step-pad: 10px;
+  --dot-column: var(--sp-4);
+  /* Where a row's TEXT starts: past the dot column and the gap. Used by the thought body too. */
+  --step-text-x: calc(var(--step-pad) + var(--dot-column) + var(--sp-2));
+}
+.activity-steps::before {
+  content: "";
+  position: absolute;
+  /*
+   * Centred under the DOT COLUMN — not under a number that happens to match it.
+   *
+   * The dot is now a fixed-width box at the start of every row, so its centre is `--step-pad + --dot-column / 2` in both
+   * kinds of row. Expressed that way the rail and the dots cannot drift apart, whatever padding a row later needs.
+   */
+  left: calc(var(--step-pad) + (var(--dot-column) / 2) - 0.5px);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+  pointer-events: none;
+}
+
+/*
+ * One dot per step. State is the dot's colour; POSITION is the rail.
+ *
+ * The element is a fixed-width COLUMN and the visible dot is painted at its centre by `::after`. That is what makes the
+ * rail pass through every dot: the column's centre is `--dot-column / 2`, so the rail's own offset — computed from the
+ * same two numbers — lands on it in a tool row and in a thought row alike.
+ *
+ * The alternative, sizing the element to the dot and centring it with margins, is what produced the 4.5px mismatch: the
+ * two row kinds had different paddings, so the same margin expression resolved to different centres.
+ */
+.activity-dot {
+  flex: none;
+  width: var(--dot-column);
+  height: var(--dot-column);
+  display: grid;
+  place-items: center;
+  position: relative;
+  z-index: 1;
+}
+.activity-dot::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-strong);
+  /* The ring is the page behind it, so the dot appears to sit ON the rail rather than beside it. */
+  box-shadow: 0 0 0 3px var(--panel);
+}
+/* State colours the DOT, not the column. */
+.activity-dot.is-thought::after { background: var(--dim); }
+.activity-dot.is-live::after { background: var(--ok); }
+.activity-dot.is-live::after { animation: pulse 1.6s ease-in-out infinite; }
+.activity-dot.is-failed::after { background: var(--danger); }
+.activity-dot.is-missing::after { background: var(--warn); }
+.activity-step-kind {
+  color: var(--quarantine);
+  font-weight: 600;
+  /* A fixed-ish column so every label starts at the same x down the ledger — the alignment property that makes a
+     list scannable rather than ragged. `ch` on a mono-adjacent label is stable across rows. */
+  min-width: 8.5ch;
+}
+.activity-step-label {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+.activity-step.has-error .activity-step-label { color: var(--danger-text); }
+.activity-step .err { color: var(--danger-text); flex: none; }
+.activity-step-running { color: var(--ok-text); flex: none; }
+.activity-step-missing { color: var(--warn-text); flex: none; }
+.activity-step.is-running { border-left: 2px solid var(--ok); padding-left: calc(10px - 2px); }
+.activity-step.has-error { border-left: 2px solid var(--danger); padding-left: calc(10px - 2px); }
+
+/* The one action a step offers. Quiet at rest, because it is an escape hatch to the trace rather than the point
+   of the row, and never the only way to reach the call — the trace lists every one. */
+.activity-step-action {
+  flex: none;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  padding: 1px 6px;
+  cursor: pointer;
+}
+.activity-step-action:hover { color: var(--text); border-color: var(--line-strong); background: var(--panel-2); }
+.activity-step-action:focus-visible { box-shadow: var(--focus); }
+
+/* A thought row inside the ledger: the same row geometry, opening to its own text in place. */
+.activity-step.is-thought { padding: 0; border-top: 1px solid var(--line); }
+.activity-step.is-thought:first-child { border-top: none; }
+.activity-step.is-thought .activity-thought { width: 100%; }
+.activity-step.is-thought .activity-thought-head {
+  /* The same padding and gap as a tool row, from the same variables — that is what puts its dot column, and therefore
+     its dot, exactly where a tool row's is. */
+  padding: 5px var(--step-pad);
+  min-height: 30px;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+}
+
+.activity-step.is-thought .activity-step-kind { min-width: 8.5ch; color: var(--dim); }
+/* The thought row's dot sits where a tool row's does, so the rail reads straight through both kinds. */
+
 
 /* A call whose result was never recorded: worth noticing, not worth alarming. */
 .trace-row.unfinished { border-left-color: var(--warn); }
 .trace-row.unfinished .t-status { color: var(--warn-text); }
+
+/* --- the focused session's header ------------------------------------------------------------- */
+
+/*
+ * ONE header, where there used to be three full-width strips.
+ *
+ * The workspace opened with a session header, a `metrics` strip (`ctx · tokens · cost · msgs`) and a `legend`
+ * row explaining tool frames — each defensible alone, together a stack of control panels above a conversation
+ * that had been squeezed into a narrow column. The review's finding was that the regions used "three different
+ * widths" and read as assembled rather than composed.
+ *
+ * So: identity and state left, the two numbers that change a decision next, configuration right. The session name
+ * is the only thing that may truncate — everything else moves as a group rather than being cut, and each group has
+ * a fixed place so the row cannot scatter into four lines (which is what a disclosure did: `img_23.png`).
+ */
+/* --- the two numbers that earn a permanent place in the header ---------------------------------- */
+
+/*
+ * Context usage: a bar, then the number.
+ *
+ * `inline-flex` with `align-items: center` so the bar and its label sit on one baseline and cannot wrap apart —
+ * the label is the part that survives `forced-colors`, so separating it from the bar would lose the meaning
+ * exactly where colour is unavailable.
+ */
+.context-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+/* Unreported: the words alone. A meter with an empty fill would claim a measurement nobody made. */
+.context-meter.is-unknown { color: var(--dim); font-family: var(--mono); font-size: var(--fs-xs); }
+
+.context-meter-track {
+  position: relative;
+  display: block;
+  width: 76px;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--panel-3);
+  /* A hairline edge, so the track is visible against `--panel` even when the fill is at 0 — otherwise "empty" and
+     "not rendered" look the same. */
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+.context-meter-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+  /* Width is the value; the transition is short and only there so a compaction does not look like a flicker.
+     Reduced motion removes it (see the global rule). */
+  transition: width 240ms ease-out;
+}
+/* Past the threshold the bar goes amber AND the label says `full` — two signals, so the colour is never the only
+   carrier. `--warn`, not `--warn-text`: this is a non-text fill and takes the saturated hue (DESIGN §8). */
+.context-meter.is-full .context-meter-fill { background: var(--warn); }
+.context-meter.is-full .context-meter-label { color: var(--warn-text); }
+.context-meter-label { font-size: var(--fs-xs); }
+
+/*
+ * The header's stats group: the meter and the cost, held together and against the right edge.
+ *
+ * `flex: none` so it never wraps away from the pickers, and `margin-left: auto` so it is pushed right even when the
+ * pickers have wrapped — the first version let them all share one wrapping row, which is what produced a four-row
+ * header with a stranded `Usage` button (`img_23.png`).
+ */
+.header-stats {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: none;
+  /* After identity, before configuration: context and cost read as part of "how is this session doing", which is
+     the same question the name and state answer. `margin-left: auto` on the PICKER group is what pushes
+     configuration to the right edge. */
+}
+.header-cost {
+  font-size: var(--fs-sm);
+  color: var(--text);
+  /* Tabular figures would be right if the app shipped a font with them; the mono face achieves the same: a cost
+     that changes does not make the numbers beside it jump. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* The provenance sentence, beside the trace it is about rather than in a row of its own. */
+.trace-legend { color: var(--dim); font-size: var(--fs-2xs); }
 
 /* --- The model picker (issue #1) -------------------------------------------------------------
    A native <select>, so keyboard and screen-reader correctness come for free. Styled towards
@@ -1759,6 +2641,11 @@ select.btn { font-family: var(--sans); }
   /* Row gap only: a column gap would push the labels away from their controls by a second, different amount. */
   gap: 2px var(--sp-2);
   justify-content: end;
+  /* The right-hand group. `auto` margin here (not on the stats) keeps the stats beside the identity they describe
+     while configuration stays anchored to the edge. */
+  margin-left: auto;
+  /* Never shrink: a control that shrinks starts clipping its own label (#92, #96). */
+  flex: none;
 }
 .picker-grid [data-picker-row="provider"] { grid-row: 1; }
 .picker-grid [data-picker-row="model"] { grid-row: 2; }
@@ -1782,7 +2669,10 @@ select.btn { font-family: var(--sans); }
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 3px 6px;
-  max-width: 30ch;
+  /* Matches `ModelPicker`'s `LABEL_MAX` — a `max-width` smaller than the character cap clips an already-shortened
+     string, producing a trailing cut instead of the chosen elision (issue #42). Raised with it: the header is one
+     band now, so the pickers are no longer competing with a metrics strip for the same width. */
+  max-width: 44ch;
 }
 .picker-select:focus-visible { outline: none; box-shadow: var(--focus); border-color: var(--accent); }
 .picker-select:disabled { opacity: 0.55; cursor: not-allowed; }
@@ -1820,8 +2710,12 @@ select.btn { font-family: var(--sans); }
   position: relative;
   display: inline-flex;
   align-items: center;
+  /* `flex-shrink: 0` because a control that shrinks starts clipping its own label, and a clipped control label is
+     worse than a truncated session name (which is also in the rail). The wrapper must be at least as wide as the
+     control inside it, or the child paints over its neighbour — `hinking` for `Thinking`, with every test green
+     (issues #92, #96). */
   flex-shrink: 0;
-  max-width: 30ch;
+  max-width: 44ch;
 }
 .picker-display {
   position: absolute;
@@ -1845,7 +2739,9 @@ select.btn { font-family: var(--sans); }
 /* While the control cannot act, the overlay must look as inert as the select beneath it. A modifier
    class rather than `:has()`, which would make correctness depend on selector support. */
 .picker-display.is-disabled { opacity: 0.55; }
-.picker-note { font-size: var(--fs-xs); color: var(--dim); flex-basis: 100%; text-align: right; }
+/* Spans both columns (the row rule sets `grid-column: 1 / -1`) and reads as one line under the block rather than as
+   a widow in the label column. */
+.picker-note { font-size: var(--fs-xs); color: var(--dim); text-align: right; justify-self: end; }
 /* --warn-text, not --warn: the design's no-colour-alone rule means the text carries the meaning
    and the colour only reinforces it. */
 .picker-note.warn { color: var(--warn-text); }
@@ -1859,54 +2755,427 @@ select.btn { font-family: var(--sans); }
 /* Only rendered while a run is in progress, where the choice between steering and following up is
    real. Two buttons rather than a <select>: there are exactly two options and both labels fit, so
    a dropdown would hide one of them behind a click. */
-.mode-strip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 0; }
-.mode-choice { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-.mode-option { background: transparent; border: 0; color: inherit; font: inherit; padding: 3px 10px; cursor: pointer; }
-.mode-option + .mode-option { border-left: 1px solid var(--line); }
-.mode-option-on { background: var(--accent); color: var(--accent-ink); }
 .mode-consequence { opacity: 0.85; }
 
 /* The queue's contents. Read-only on purpose: there is no per-item removal in the vocabulary,
    so a `×` would be a control that cannot work. */
-.queue-strip { padding: 4px 0; }
-.queue-head { opacity: 0.85; }
-.queue-rows { list-style: none; margin: 2px 0 0; padding: 0; }
-.queue-rows li { opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.queue-unknown { opacity: 0.7; font-style: italic; }
 
 /* --- Jump to latest (issue #6) ------------------------------------------------------------------ */
 
-/* The positioned ancestor for the control. The scroller itself must not be the containing block,
-   or an absolutely-positioned button scrolls away with the content.
+/*
+ * The transcript region: the scroll port, its header, AND the composer, as one container.
+ *
+ * The composer used to be a sibling band below this with its own top border, padding and width. A review called that
+ * separation the biggest problem in the layout — conversation, writing surface and trace each occupied a different
+ * strip, so the workspace read as three panels stacked.
+ *
+ * `--jump-strip` is the band the "Jump to latest" control floats in, reserved at the wrapper's foot so the scrollport
+ * ends above it (issue #71). Reserving INSIDE the scroller would not work: padding at the end of the content protects
+ * only the LAST line, because it scrolls with the content while the control does not — mid-list the control would
+ * still land on text. The cost is a band below the scrollport even while the control is hidden, and that is the price
+ * of never covering a line.
+ *
+ * `container-type: inline-size` makes this the query container for the header's placement: the header floats beside
+ * the prose when the transcript is wide and becomes a compact row when it is not. Keying that off the VIEWPORT would
+ * be wrong — an open panel leaves a wide window with a narrow transcript.
+ */
+/*
+ * THE QUERY CONTAINER, and a separate element from the box the queries style.
+ *
+ * CSS Containment is explicit that a container is not matched by its own `@container` rules. `.transcript-wrap`
+ * declared `container-type`, so every `@container transcript` rule naming `.transcript-wrap.has-header` was silently
+ * ignored — the narrow layout never applied and the wide row overflowed the window with the transcript off-screen.
+ *
+ * So the job is split: this element is the container and nothing else, and `.transcript-wrap` is what the queries
+ * style. One element cannot be both.
+ */
+.transcript-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  container-type: inline-size;
+  container-name: transcript;
+}
 
-   It also RESERVES the strip the control floats in, and that detail is the whole fix (issue #71).
-   The control is positioned against the bottom of the VIEWPORT, so while the reader is mid-list it
-   sits over whatever line happens to be there — and with an opaque background it produced a sentence
-   with a hole in it: "…the escaped quote in m[ ↓ Jump to latest ]check."
-
-   Reserving space INSIDE the scroller would not have fixed that: padding at the end of the content
-   protects only the LAST line, because the padding scrolls with the content while the control does
-   not. Mid-list the control would still land on text. So the scrollport itself stops `--jump-strip`
-   short of the column's bottom and the control lives in the strip that is left, where it can overlap
-   nothing but its own reserved space at any scroll position.
-
-   The cost is a `--jump-strip`-tall band below the transcript even while the control is hidden. A
-   small permanent gap is the price of never covering a line; stated here rather than discovered
-   later. */
 .transcript-wrap {
   position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0;
   --jump-strip: 40px;
-  padding-bottom: var(--jump-strip);
+}
+
+/* Without a companion there is no second box: the column centres itself inside the wrapper. */
+.transcript-wrap:not(.has-header) .transcript-main { margin-inline: auto; flex: 1 1 auto; }
+/*
+ * THE SESSION HEADER IS A STICKY COMPANION BESIDE THE CONVERSATION.
+ *
+ * ## The three placements this has had, and why this one
+ *
+ * 1. **A full-width band above everything.** Read as window chrome rather than as part of the session — the review
+ *    said so twice.
+ * 2. **Floating over the reading area, top right.** Worse: it COVERED prose. A screenshot (`img_27.png`) showed
+ *    "Interesting — doors=10…" cut off mid-sentence where the block began, and reserving padding under it only helps
+ *    the first message while the block still eats the page. Hovering information over reading text is the same
+ *    mistake as #92's centring, in a different costume.
+ * 3. **A box docked to the right of the prose lane.** This one. It occupies space that is otherwise empty on a
+ *    desktop, so it can never cover anything, and it scrolls with the page as a sticky block so the identity and
+ *    the model stay visible while the conversation moves.
+ *
+ * ## Why a grid, and not `float` or `position: fixed`
+ *
+ * `position: fixed` would escape the column and land over the panel. `float` would let the first paragraph wrap
+ * around it, which is the overlap problem again with a different shape. A two-column grid — prose, companion — is
+ * the only arrangement where the box is genuinely BESIDE the text: the prose lane keeps its measure, the box has its
+ * own track, and neither can overlap the other.
+ *
+ * Below the container width that can hold both, the box would be narrower than its content, so it becomes a compact
+ * row above the scroller — the shell's old arrangement, chosen here by the TRANSCRIPT's width rather than the
+ * window's, because an open panel leaves a wide window holding a narrow transcript.
+ */
+.transcript-header {
+  /*
+   * Sticky, so it stays with the reader: the conversation scrolls past it while the identity, state, meter and model
+   * remain in view.
+   *
+   * `align-self: flex-start` and `height: min-content` are what make `position: sticky` work as a flex item — an item
+   * stretched to the row's height has no room to move, and `sticky` silently behaves like `static`. Both are required;
+   * neither is decoration.
+   */
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: min-content;
+  display: flex;
+  justify-content: flex-start;
+  padding: var(--sp-4) 0;
+  /* Its own width, never shrunk into its own labels. */
+  flex: none;
+  width: 340px;
+}
+
+/* The block itself: a quiet raised surface, wide enough for the pickers on one line each. */
+/*
+ * The companion, made QUIETER.
+ *
+ * It was a raised card at `--panel` with a border and a 10px radius — the same weight as a panel or a dialog, so it
+ * competed with the conversation it is only annotating. A box that sits beside the reading column should read as a
+ * margin note, not as another region of the app.
+ *
+ * Three changes, all reductions: no fill of its own (the page shows through), no border and no radius (nothing is
+ * enclosed, so nothing looks like a container), and the padding tightens. What remains to say "this is a block" is
+ * its position and the whitespace around it — which is enough, and is the quietest possible answer.
+ *
+ * The text stays at full contrast: subtle is about the SURFACE, never about legibility. A note you cannot read is not
+ * subtle, it is broken.
+ */
+.transcript-header .session-header {
+  width: 340px;
+  max-width: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-2);
+  /*
+   * Room ABOVE the content, because the run track is drawn there.
+   *
+   * `.run-track` is absolutely positioned at `top: 0` inside this block. With `padding: 0` that put a 2px rule straight
+   * through the title's own line box — a grey bar cutting the tops of the `scratch` and `idle` pills (`img_36.png`).
+   *
+   * The bar is wanted: it reports that a run is in progress, and at rest it gives the companion a top edge so the block
+   * does not float unattached in the transcript's canvas. So the fix is space rather than removal. `--sp-3` above the
+   * first line clears a 2px rule with room to spare.
+   *
+   * NO horizontal padding, and the run track drops its own horizontal inset to match: a 2px rule inset by 12px above a
+   * title that starts flush reads as a stray line rather than as the block's edge. Spanning the full width is what makes
+   * it the top edge of the companion, which is the reason it exists.
+   */
+  padding-top: var(--sp-3);
+  background: none;
+  border: none;
+  border-radius: 0;
+}
+/* In the companion column the identity and the stats stack; the pickers keep their label column. */
+.transcript-header .session-header .title { min-width: 0; }
+/* The stats sit under the name, not pushed to a far edge: the `auto` margin belongs to a ROW layout, and inside a
+   column it became the gap that a screenshot showed between `idle` and `ctx 2%` (`img_27.png`). */
+.transcript-header .header-stats { margin-left: 0; }
+/* Same for the picker block: anchored left, under the stats, with its own label column intact. */
+/*
+ * The pickers STACK in the companion box: label above control, one control per row.
+ *
+ * The two-column label/control grid is right for a wide header — it lines up six values down one edge — but it needs
+ * horizontal room a 340px box does not have. Left as a grid with a wrapping flex row inside, the model select took the
+ * full width and pushed the thinking picker onto the next line INSIDE the same cell, so `Model` and `Thinking` ended up
+ * side by side above a select that belonged to neither (`img_28.png`).
+ *
+ * Stacking is the honest layout for this width: every label sits directly above the control it names, so there is no
+ * column for anything to fall out of alignment with.
+ */
+.transcript-header .picker-grid {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-2);
+  margin-left: 0;
+}
+.transcript-header .picker-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-2);
+}
+/* The thinking picker is one of those rows: its own label, then its own select. */
+.transcript-header .picker {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  flex-wrap: nowrap;
+}
+.transcript-header .picker-label { text-align: left; justify-self: start; }
+.transcript-header .picker-field { max-width: 100%; }
+/* The model id gets the box's width instead of `LABEL_MAX`, so its elision is sized by the space that actually
+   exists here rather than by the cap chosen for the wide header. */
+.transcript-header .picker-select { width: 100%; max-width: none; }
+
+/*
+ * The wide layout: prose in column 1, companion in column 2.
+ *
+ * `max-content` for the companion track, so the box is exactly as wide as it declares and the prose lane takes the
+ * rest. `align-items: start` on the scroller would break the sticky child, so the row alignment is left alone.
+ */
+/*
+ * THE WIDE LAYOUT: one centred row — [ reading column ] [ companion ].
+ *
+ * `display: flex` with `justify-content: center`, and the reading column given an explicit width. Not a grid with
+ * max-sized tracks: that version computed the right thing on paper and rendered pinned to the left edge on a real
+ * window (`img_30.png`), because whether `minmax(0, 72ch)` + `justify-content: center` centres anything depends on how
+ * the track resolves against the container's spare space. A layout whose centring has that many preconditions drifts
+ * again the next time anything nearby changes.
+ *
+ * Flex says what is meant: two boxes, centred as a pair.
+ */
+.transcript-wrap.has-header {
+  display: flex;
+  /* A ROW that centres its two boxes. `flex-direction` must be said explicitly: the base `.transcript-wrap` is a
+     column, and a second rule that only changed `display` would leave the companion stacked under the prose. */
+  flex-direction: row;
+  /*
+   * `center` centres the two boxes as a pair. The pair is not symmetric — 72ch of prose plus a 340px companion — so
+   * the pair's centre is left of the column's centre by half the companion's width. That is correct for "the
+   * composition is centred"; making the PROSE the centred thing instead is #92's mistake and puts the box off the
+   * right edge on a wide window.
+   */
+  justify-content: center;
+  /* The gap between the prose and the box is this one number. */
+  gap: var(--sp-5);
+  /* Let the row shrink on a narrow window instead of overflowing it. */
+  min-width: 0;
+  flex: 1;
+}
+
+/*
+ * VISUAL ORDER: reading column first, companion second.
+ *
+ * The companion is the FIRST child in the DOM, which is right — a screen reader and a keyboard should meet the
+ * session's identity before its conversation, and the tab order should follow the same path. But in a flex ROW that
+ * put it on the LEFT, so the layout was `[companion][conversation]` (`img_32.png`) while every description of it —
+ * and the review that asked for it — says the box sits to the RIGHT of the prose.
+ *
+ * `order` moves the boxes without touching the source, which is the one thing it is good for: the reading order and
+ * the visual order legitimately differ here, and this keeps them both correct instead of bending the DOM to the
+ * picture.
+ */
+.transcript-wrap.has-header .transcript-main { order: 1; }
+.transcript-wrap.has-header .transcript-header { order: 2; }
+
+/*
+ * The reading column: the scroller and the composer, stacked, at the reader's measure.
+ *
+ * `flex: 0 1 var(--reading-measure)` — grow 0, shrink 1, basis the measure. That is what makes it exactly the measure
+ * on a wide window and narrower (never overflowing) on a narrow one, without a `max-width` that would leave the flex
+ * line sizing to the content's wishes.
+ */
+.transcript-main {
+  display: flex;
+  flex-direction: column;
+  /*
+   * `width: 100%` + `max-width: var(--reading-measure)` — and NOT `width: var(--reading-measure)` or a
+   * `flex-basis` of it.
+   *
+   * Two reasons, both reachable:
+   *
+   *   - the reader's measure may be `none` (the `fill` setting), and `width: none` is invalid while `max-width: none`
+   *     means exactly what `fill` asks for;
+   *   - `width: 100%` capped by `max-width` is what lets the parent's `justify-content: center` actually centre it —
+   *     an item sized by its own basis leaves the free space to `justify-content` in a way that depended on the
+   *     track's resolution, which is how the previous grid version rendered pinned to the left edge (`img_30.png`).
+   */
+  width: 100%;
+  max-width: var(--reading-measure);
+  min-width: 0;
+  min-height: 0;
+}
+
+/*
+ * Narrow: flip to a compact row above the scroller.
+ *
+ * The container query is the whole point of the arrangement: the box needs ~340px beside a 72ch lane, and the
+ * transcript knows whether it has that. Keying off the window would be wrong — an open panel leaves a wide window
+ * holding a narrow transcript, and the box would be squeezed into prose that has no room for it.
+ */
+@container transcript (max-width: 1080px) {
+  /*
+   * The row becomes a COLUMN: companion on top, then the reading column.
+   *
+   * `flex-direction: column` on the wrapper is the whole change — the boxes keep their own rules, and nothing needs
+   * repositioning because flex places them in source order, which is already header then main.
+   */
+  .transcript-wrap.has-header {
+    flex-direction: column;
+    /* Centring would centre each child on its own width here, which is #92's defect: a full-width row and a capped
+       column would sit on different centres. A column of full-width children needs no horizontal centring. */
+    justify-content: flex-start;
+    gap: 0;
+  }
+  /* The visual-order swap exists for the ROW only. Stacked, the companion must be on top, so `order` returns to
+     source order — which is already header-then-main. */
+  .transcript-wrap.has-header .transcript-main,
+  .transcript-wrap.has-header .transcript-header { order: 0; }
+  .transcript-header {
+    position: static;
+    /* Full width across the top, and no longer a floating box. */
+    width: 100%;
+    flex: none;
+    padding: 0;
+    display: block;
+  }
+  /*
+   * THE COMPANION, MINIMAL.
+   *
+   * Stacked above the prose there is a single line's worth of room, and the block has four things competing for it:
+   * identity, stats, the two pickers, and their labels. The first version let all of it wrap, which produced a header
+   * four rows tall eating half the viewport on a small screen (`img_33.png`).
+   *
+   * So at this width it keeps what a reader needs to ORIENT — the name, the state, and the two numbers that change a
+   * decision — and the pickers stay on one line beside them, without their labels: the controls are self-describing
+   * (`deepseek-ai/…` and `high`), and the labels are the first thing that can go when there is no room. Everything
+   * dropped is one click away in the Session panel.
+   */
+  .transcript-header .session-header {
+    width: 100%;
+    max-width: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2) var(--sp-3);
+    /*
+     * The same clearance above the first line as the wide form, for the same reason: `.run-track` is drawn at `top: 0`,
+     * and here the block has a `--panel` fill and a bottom border, so a bar through the title would be even more
+     * obviously wrong.
+     */
+    padding: calc(var(--sp-3) + 2px) 18px var(--sp-2);
+    background: var(--panel);
+    border: none;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+  }
+  /* The identity keeps one line: the name truncates, the chips stay. */
+  .transcript-header .session-header .title { flex: 1 1 12ch; min-width: 0; }
+  .transcript-header .session-header .where { display: none; }
+  /* Labels go, controls stay. `display: none` rather than `visibility`: a hidden label must not reserve a column. */
+  .transcript-header .picker-label { display: none; }
+  .transcript-header .picker-grid { flex-direction: row; align-items: center; gap: var(--sp-2); margin-left: auto; }
+  .transcript-header .picker-controls { flex-direction: row; align-items: center; gap: var(--sp-2); }
+  .transcript-header .picker { flex-direction: row; align-items: center; gap: var(--sp-2); }
+  /* Neither picker may stretch: two selects side by side have to share the line with the name. */
+  .transcript-header .picker-field { flex: 0 1 auto; min-width: 0; }
+  .transcript-header .picker-select { width: auto; max-width: 22ch; }
+  .transcript-header .header-stats { flex: none; }
+  /* The reading column takes the rest, and still centres itself. */
+  .transcript-main { flex: 1 1 auto; margin-inline: auto; }
+}
+
+/*
+ * The composer's dock: it LOOKS like it floats, and takes real space.
+ *
+ * NO BORDER, NO FILL, NO BAND. The previous version was a full-width strip with a top border and a `--panel`
+ * background, which drew a hard rule across the column and made the composer read as a separate panel — the
+ * separation a review called the biggest problem in the layout, twice.
+ *
+ * ## Why it is in the flow rather than `position: absolute`
+ *
+ * Floating it over the scroller would be the more literal reading of "resting on the conversation", and it was the
+ * first version of this change. It is the wrong trade: the dock's height VARIES — a mode strip appears while
+ * streaming, a queue strip when messages are waiting — so a fixed reservation under the scroller is wrong by
+ * 60–100px in exactly the states where the reader is most likely to be at the bottom, and the last message ends up
+ * permanently behind the input. A floating composer that hides the end of the conversation is the "Jump to latest
+ * covers a line" defect (#71) with a bigger control.
+ *
+ * So it occupies its own height and the effect is made with LIGHT rather than layering: a gradient from transparent
+ * to the page colour at the dock's top edge dissolves the transcript into it, so there is no line to see. The input
+ * itself is the only visible surface. Nothing is ever covered, and nothing shifts as the window resizes.
+ */
+.transcript-footer {
+  flex: none;
+  /* The fade IS the separation: no border, no fill, no shadow. */
+  background: linear-gradient(to bottom, transparent, var(--bg) 12px);
+  /*
+   * The SAME horizontal inset as the scroller.
+   *
+   * Without it the composer was capped at `--reading-measure` of the COLUMN while the lane was capped at the same
+   * measure of the column MINUS the scroller's 36px of padding — so the input stuck out ~30px past the widest
+   * paragraph and the lane had two right edges (`img_35.png`). The two boxes now resolve the same cap in the same
+   * available width.
+   */
+  padding: 0 18px var(--sp-2);
+}
+.composer-dock {
+  /*
+   * The dock fills the footer, which is already the lane's width.
+   *
+   * It used to carry its own `max-width` + `margin-inline: auto` — the same declarations as `.transcript-lane` — which
+   * was correct in theory and wrong in practice: the footer had no horizontal padding, so the two boxes resolved the
+   * same cap in different available widths and ended up with different right edges. One of them owns the width now,
+   * and it is the footer.
+   */
+  width: 100%;
+  padding: var(--sp-2) 0 0;
 }
 
 /* Shown only while the reader is scrolled away from the bottom, where it has a job to do. The
    position is bottom-CENTRE rather than a corner so it does not cover the scrollbar. */
+/*
+ * The pill sits at the foot of the SCROLLER, not of the wrapper.
+ *
+ * It was positioned against `.transcript-wrap`, which is right only while the composer is outside that wrapper... and
+ * the composer is INSIDE it now. So `bottom: 4px` put the pill below the composer, at the very bottom of the window —
+ * exactly what a review caught (`img_26.png`). The wrapper reserves the band at its foot, so anchoring there is
+ * correct: the pill lands in the reserved strip, directly above the composer.
+ */
+/*
+ * The pill sits INSIDE the band the viewport reserves for it — not above it.
+ *
+ * The offset was `calc(var(--jump-strip) + 4px)`, which placed a ~30px control 44px up from the viewport's bottom: 4px
+ * ABOVE the top of the 40px reservation it was supposed to occupy. So it floated over the last paragraph and, because
+ * a positioned element still takes part in the line box around it in this flow, the text wrapped around it — "…not a
+ * count —" cut through, then `[ ↓ Jump to latest ]` splitting the second line (`img_35.png`).
+ *
+ * `bottom: 4px` puts it in the band: the reservation is 40px, the control is ~30px, and 4px of air above the viewport's
+ * foot is the whole budget. Nothing can be under it because nothing is drawn there.
+ *
+ * It is centred on the LANE, which is this element's width: `.transcript-viewport` spans the reading column, so
+ * `left: 50%` is the message column's centre. It previously read as off-centre because the elements inside the
+ * visible region are inset by the scroller's own horizontal padding.
+ */
 .jump-latest {
   position: absolute; left: 50%; transform: translateX(-50%); bottom: 4px;
   display: inline-flex; align-items: center; gap: 6px;
   padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line);
   background: var(--bg-raised, var(--bg)); color: inherit; font: inherit; cursor: pointer;
   box-shadow: 0 2px 10px rgb(0 0 0 / 0.25);
+  /* An OVERLAY: its own layer, out of the text's way entirely. Without this a positioned box can still influence the
+     line box beside it, which is how the paragraph appeared to wrap around the control. */
+  z-index: 5;
 }
 .jump-latest:hover { border-color: var(--accent); }
 
@@ -2362,3 +3631,183 @@ select.btn { font-family: var(--sans); }
 .settings-updates strong { color: var(--text); font-style: normal; }
 
 .settings .dialog-actions { margin-top: var(--sp-5); }
+
+/* ------------------------------------------------------------------ queued prompts */
+
+/*
+ * THE RAIL: at most two rows, between the scroller and the field.
+ *
+ * Its height is a function of how many KINDS are queued — steering, follow-ups, both — and never of how many messages
+ * are. That is the defect it fixes: the dock used to enumerate the queue, so every queued message re-shrank the
+ * transcript above it.
+ *
+ * No border of its own. It sits inside the composer's dock, and a rule here would draw a second separator between the
+ * conversation and the field.
+ */
+.queue-rail {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: 0 0 var(--sp-2);
+  font-size: var(--fs-xs);
+}
+
+.queue-rail-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/*
+ * One row per KIND. The left edge is the second carrier: SOLID for `now` (it happens inside this run), DASHED for `then`
+ * (it has not begun). Style rather than colour, so `forced-colors` and a reader who cannot distinguish hue both keep it.
+ */
+.queue-rail-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+  /* A fixed height, so the rail cannot grow with a long message — that is the whole invariant. */
+  height: 18px;
+}
+.queue-rail-row.is-steer { border-left: 2px solid var(--accent); padding-left: var(--sp-2); }
+.queue-rail-row.is-followUp { border-left: 2px dashed var(--line-strong); padding-left: var(--sp-2); }
+.queue-rail-row.is-unknown { border-left: 2px dashed var(--line); padding-left: var(--sp-2); color: var(--dim); }
+
+/*
+ * THE TIME-WORD — the primary carrier, and the reason no colour is needed.
+ *
+ * `now` / `then` at a fixed 4ch so the two groups align, in the mono face because it is a value rather than prose. Real
+ * text, not a glyph and not `aria-hidden`: a screen reader must hear it.
+ */
+.queue-when {
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  flex: none;
+  width: 4ch;
+}
+
+.queue-rail-text {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+/* The way to the full list. Quiet, because the rail already answered the first question. */
+.queue-rail-open {
+  /* Alone on a `<button>`, so it declares its own face rather than inheriting the platform's light chrome (#100). */
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: none;
+  border: none;
+  border-radius: var(--r-1);
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--fs-xs);
+  padding: 1px 4px;
+  cursor: pointer;
+  flex: none;
+}
+.queue-rail-open:hover { color: var(--text); background: var(--panel-2); }
+.queue-rail-open:focus-visible { outline: none; box-shadow: var(--focus); }
+.queue-rail-more { font-family: var(--mono); font-size: var(--fs-2xs); }
+.queue-rail-open-label { white-space: nowrap; }
+
+/*
+ * THE SHEET: the full list, anchored to the composer.
+ *
+ * Above the field and to the left, where the rail is. `position: absolute` against `.composer`, which is the nearest
+ * positioned ancestor — so it cannot escape the lane however the window is sized.
+ */
+.composer { position: relative; }
+.queue-sheet {
+  position: absolute;
+  bottom: calc(100% + var(--sp-2));
+  left: 0;
+  right: 0;
+  z-index: 40;
+  max-height: min(420px, 50vh);
+  overflow-y: auto;
+  background: var(--panel-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-3);
+  box-shadow: var(--sh-2);
+  padding: var(--sp-3) var(--sp-4);
+}
+.queue-sheet:focus-visible { outline: none; }
+.queue-sheet-title {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* The arithmetic, in words, before any row is read. */
+.queue-summary { margin: 0 0 var(--sp-3); font-size: var(--fs-xs); color: var(--dim); }
+
+.queue-group { margin-bottom: var(--sp-3); }
+.queue-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-2xs);
+  font-weight: 400;
+  color: var(--dim);
+}
+/* The follow-up group is separated by a RULE, so the two groups read as two moments in time rather than one list. */
+.queue-group + .queue-group {
+  border-top: 1px solid var(--line);
+  padding-top: var(--sp-3);
+}
+
+.queue-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+
+/*
+ * One queued message. The left edge carries the kind again — solid for `now`, dashed for `then` — so a reader scanning
+ * down the sheet sees two blocks without reading a word.
+ */
+.queue-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding-left: var(--sp-2);
+  font-size: var(--fs-xs);
+}
+.queue-item.is-steer { border-left: 2px solid var(--accent); }
+.queue-item.is-follow-up { border-left: 2px dashed var(--line-strong); }
+.queue-item-when { font-family: var(--mono); font-size: var(--fs-2xs); color: var(--dim); flex: none; width: 4ch; }
+/* Wraps, unlike the rail's one line: the sheet exists so the whole message can be read. */
+.queue-item-text { color: var(--text); white-space: pre-wrap; word-break: break-word; min-width: 0; }
+
+/* Texts that never arrived. Named, never invented, and never dressed as a row. */
+.queue-unknown { margin: var(--sp-2) 0 0; font-size: var(--fs-xs); color: var(--dim); font-style: italic; }
+
+.queue-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+  padding-top: var(--sp-2);
+}
+/*
+ * Why there is no per-item control, stated rather than implied. Without the sentence a read-only list reads as a list
+ * that is missing its controls.
+ */
+.queue-note { margin: 0; font-size: var(--fs-2xs); color: var(--dim); }
+.queue-actions { display: flex; align-items: center; gap: var(--sp-2); }
+.queue-clear { color: var(--danger-text); }
+.queue-clear:hover { color: var(--danger-text); background: var(--danger-tint); }

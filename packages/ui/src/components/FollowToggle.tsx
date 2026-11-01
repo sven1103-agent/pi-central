@@ -17,14 +17,18 @@
  * still there for when they want it — which is the difference between "do not move me" and "do not
  * let me move".
  *
- * The label states the state (`auto-follow on` / `auto-follow off`) with `aria-pressed` carrying it to
- * assistive tech, matching the `markers on` toggle beside it in the same visual language.
+ * The label states the state with `aria-pressed` carrying it to assistive tech — and it now carries a SWITCH, because
+ * a pill whose only difference between states is a word is a label wearing a button's clothes. A reviewer put it
+ * plainly: `auto-follow off` "reads equally as a state and as a command".
+ *
+ * The switch is the affordance and the dot is its position; the words stay, because colour and position are never the
+ * only carrier of meaning in this project.
  */
 export function FollowToggle({ following, onToggle }: { following: boolean; onToggle: () => void }) {
   return (
     <button
       type="button"
-      className="toggle-chip"
+      className="follow-toggle"
       aria-pressed={following}
       onClick={onToggle}
       title={
@@ -33,7 +37,11 @@ export function FollowToggle({ following, onToggle }: { following: boolean; onTo
           : "Scroll to new output automatically whenever you are at the end of the transcript."
       }
     >
-      {following ? "auto-follow on" : "auto-follow off"}
+      <span className="follow-toggle-track" aria-hidden="true">
+        <span className="follow-toggle-dot" />
+      </span>
+      {/* The state is in the WORD as well as the track, so a monochrome or `forced-colors` rendering still reads. */}
+      <span className="follow-toggle-label">{following ? "auto-follow on" : "auto-follow off"}</span>
     </button>
   );
 }

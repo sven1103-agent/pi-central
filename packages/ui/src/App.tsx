@@ -32,6 +32,23 @@ import {
   transcriptFor,
 } from "./store.ts";
 import { SessionRail } from "./components/SessionRail.tsx";
+import { FollowToggle } from "./components/FollowToggle.tsx";
+import {
+  parseTraceOrder,
+  TRACE_DETAIL_DEFAULT_HEIGHT,
+  TRACE_ORDER_KEY,
+  type TraceOrder,
+} from "./trace.ts";
+
+/**
+ * Below this width the rail becomes an overlay drawer.
+ *
+ * Chosen to match the stylesheet's own breakpoint, and stated here because the BUTTON that opens the drawer is
+ * rendered from JavaScript while the layout that needs it is CSS. The two are kept in step by `RAIL_DRAWER_MAX_WIDTH`
+ * being the one number, and a test asserts the media query uses the same value — the class of drift this project
+ * records for `FILES_SPLIT_MIN_WIDTH` in `panel.ts`.
+ */
+export const RAIL_DRAWER_MAX_WIDTH = 1024;
 import { TranscriptView } from "./components/Transcript.tsx";
 import { ToolTrace } from "./components/ToolTrace.tsx";
 import { Composer, type QueueBehavior } from "./components/Composer.tsx";
@@ -41,7 +58,6 @@ import { Settings } from "./components/Settings.tsx";
 import { FilesPanel } from "./components/FilesPanel.tsx";
 import { Panel } from "./components/Panel.tsx";
 import { PanelToggle } from "./components/PanelToggle.tsx";
-import { FollowToggle } from "./components/FollowToggle.tsx";
 import {
   PANEL_DEFAULT_WIDTH,
   PANEL_FILES_DEFAULT_WIDTH,
@@ -57,6 +73,7 @@ import { ModelPicker } from "./components/ModelPicker.tsx";
 import { OpenDirectorySheet } from "./components/OpenDirectorySheet.tsx";
 import { InlineRename } from "./components/InlineRename.tsx";
 import { ThinkingPicker } from "./components/ThinkingPicker.tsx";
+import { SessionHeader } from "./components/SessionHeader.tsx";
 import { HistoryView } from "./components/History.tsx";
 import { displayName, formatContext, formatCost, formatTokens, headerLocation } from "./format.ts";
 import { stateLabel, type UiState } from "./store.ts";
@@ -118,12 +135,38 @@ export function App() {
   // Read through an initialiser so a corrupt value cannot throw during the first render — the same rule
   // `parsePanelPrefs` follows, and for the same reason: `localStorage` outlives upgrades and is shared
   // with whatever else runs on this origin.
-  const [traceCollapsedBySession, setTraceCollapsedBySession] = useState<Record<string, boolean>>(
-    () => readTracePrefs().collapsed,
-  );
   const [showMarkersBySession, setShowMarkersBySession] = useState<Record<string, boolean>>(
     () => readTracePrefs().markers,
   );
+  //
+  // Which activity groups the reader has opened, keyed by `sessionId` and then by the group's own key.
+  //
+  // HERE, for the same reason as the trace maps above: `SessionView` carries `key={focused?.id}` and remounts
+  // on every switch, so a disclosure opened inside it would snap shut the moment the reader looked at another
+  // session. Not persisted — a group key names a block in one transcript, and remembering "open" across a
+  // browser restart would either be stale or, worse, apply to an unrelated group after a session was rewritten.
+  const [activityOpen, setActivityOpen] = useState<Record<string, Record<string, boolean>>>({});
+  //
+  // Which tool call is selected in the panel's Trace view, per session.
+  //
+  // HERE rather than in `SessionView`, for the reason #108 records: that component remounts on every switch, so a
+  // selection held inside it would be lost exactly when the reader comes back to look at it. The trace is a panel
+  // now, so the selection has to outlive both a session switch and the panel being closed and reopened.
+  const [openToolBySession, setOpenToolBySession] = useState<Record<string, string | undefined>>({});
+  //
+  // The trace panel's order and detail height, PERSISTED.
+  //
+  // Both are the reader's choices about a surface they use repeatedly, so neither belongs in `SessionView` (which remounts
+  // per session) nor in the component's own state (which dies with the panel). Read through initialisers so a corrupt
+  // stored value cannot throw during the first render — the same rule `parsePanelPrefs` follows.
+  const [traceOrder, setTraceOrder] = useState<TraceOrder>(() => {
+    try {
+      return parseTraceOrder(localStorage.getItem(TRACE_ORDER_KEY));
+    } catch {
+      return "oldest";
+    }
+  });
+  const [traceDetailHeight, setTraceDetailHeight] = useState(TRACE_DETAIL_DEFAULT_HEIGHT);
 
 
   // The right panel's geometry and mode, restored from the last visit (issue #8; #15 generalises
@@ -142,6 +185,15 @@ export function App() {
   // fraction of the window: a window narrowed after a drag must not leave the panel wider than the
   // transcript can survive.
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 1440 : window.innerWidth));
+  //
+  // Is the session rail showing as a DRAWER?
+  //
+  // Below `RAIL_DRAWER_MAX_WIDTH` the columns cannot all fit, so the rail leaves the grid and becomes an overlay —
+  // opened deliberately, closed by Escape, by the backdrop, or by choosing a session. Without this the rail was simply
+  // `display: none` at those widths, and `.rail.open` was styled for a class nothing ever set: the session list became
+  // unreachable, which is a worse failure than a cramped one.
+  const [railOpen, setRailOpen] = useState(false);
+  const railIsDrawer = viewportWidth < RAIL_DRAWER_MAX_WIDTH;
   useEffect(() => {
     const onResize = () => {
       setViewportWidth(window.innerWidth);
@@ -151,10 +203,43 @@ export function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  /*
+   * Closing it on resize is not tidiness: a drawer left open while the window grows would cover a rail that is already
+   * there, so the reader would see two lists. The state is meaningless once the breakpoint is crossed.
+   */
+  useEffect(() => {
+    if (!railIsDrawer) setRailOpen(false);
+  }, [railIsDrawer]);
+
+  /*
+   * Escape closes the drawer, and it is registered HERE rather than in the rail because the composer already owns
+   * Escape for stopping a run. This handler is on the capture phase and stops the event only when the drawer is open,
+   * so the two never both act on one keystroke.
+   */
+  useEffect(() => {
+    if (!railOpen) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      setRailOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, [railOpen]);
+
   // Persisted on change, not on every render: the maps only change when a toggle is pressed.
   useEffect(() => {
-    writeTracePrefs({ collapsed: traceCollapsedBySession, markers: showMarkersBySession });
-  }, [traceCollapsedBySession, showMarkersBySession]);
+    writeTracePrefs({ collapsed: {}, markers: showMarkersBySession });
+  }, [showMarkersBySession]);
+
+  // Persisted on change, not on every render: both only change when the reader acts.
+  useEffect(() => {
+    try {
+      localStorage.setItem(TRACE_ORDER_KEY, traceOrder);
+    } catch {
+      // Storage disabled or full. A preference that is not remembered is not an error.
+    }
+  }, [traceOrder]);
 
   const setPanelWidth = useCallback((width: number, userSized: boolean) => {
     setPanel((current) => ({ ...current, width, userSized }));
@@ -298,6 +383,25 @@ export function App() {
   }, []);
 
   const focused = focusedSession(state);
+
+  /**
+   * Remember that a group was opened or closed, for the focused session.
+   *
+   * Structural rather than behavioural: the open state must outlive `SessionView`'s remount, and the group key
+   * already identifies the transcript content, so no extra guard is needed here.
+   */
+  const toggleActivity = useCallback(
+    (key: string, open: boolean) => {
+      if (!focused) return;
+      const sessionId = focused.id;
+      setActivityOpen((current) => ({
+        ...current,
+        [sessionId]: { ...(current[sessionId] ?? {}), [key]: open },
+      }));
+    },
+    [focused],
+  );
+
 
   // --- file browsing (issue #8) -----------------------------------------------------------
 
@@ -531,6 +635,21 @@ export function App() {
           <img className="wordmark-mark" src={logoIcon} alt="" aria-hidden="true" />
           Pi Central
         </h1>
+        {/*
+          Only rendered when the rail is a drawer. A control that does nothing at every other width would be a permanent
+          question ("what is hidden?") on a layout where nothing is.
+        */}
+        {railIsDrawer && (
+          <button
+            type="button"
+            className="rail-toggle"
+            aria-expanded={railOpen}
+            aria-controls="session-rail"
+            onClick={() => setRailOpen((open) => !open)}
+          >
+            Sessions
+          </button>
+        )}
         <div className="tabs" role="tablist" aria-label="View">
           <button
             type="button"
@@ -618,6 +737,20 @@ export function App() {
         />
       )}
 
+      {railOpen && railIsDrawer && (
+        /*
+          The backdrop is the drawer's close affordance for a pointer, and it is a real button so it is reachable by
+          keyboard too. `aria-label` because an unlabelled button riding over the whole workspace announces as
+          "button" and nothing else.
+        */
+        <button
+          type="button"
+          className="rail-backdrop"
+          aria-label="Close the session list"
+          onClick={() => setRailOpen(false)}
+        />
+      )}
+
       <div
         className={panel.collapsed ? "panes is-collapsed" : "panes"}
         style={{ "--panel-width": `${panel.width}px` } as React.CSSProperties}
@@ -632,12 +765,16 @@ export function App() {
            */
           rows={rosterRows(state.roster, state.live)}
           focusedId={state.focusedId}
+          openAsDrawer={railOpen}
+          onCloseDrawer={() => setRailOpen(false)}
           onFocusRow={(row) => {
             // EVERY row is focusable, including one with no live session (issue #89). That is what makes the
             // composer usable for it, and the composer is how resume-on-send starts the session again.
             // Focus is local: a view change between rows, not a restart (C2).
             dispatch({ kind: "focusRow", key: rowKeyOf(row) });
             setTab("sessions");
+            // Choosing a session closes the overlay: leaving it open would cover the conversation just selected.
+            setRailOpen(false);
           }}
           onForgetRow={(row) => dispatch({ kind: "forget", path: row.entry.path })}
           retryAvailable={supportsRetry(state.install?.protocol)}
@@ -673,12 +810,16 @@ export function App() {
             <SessionView
               key={focused?.id}
               session={focused}
-              traceCollapsed={focused ? traceCollapsedBySession[focused.id] === true : false}
               showMarkers={focused ? showMarkersBySession[focused.id] !== false : true}
-              onToggleTraceCollapsed={(collapsed) =>
-                focused &&
-                setTraceCollapsedBySession((current) => ({ ...current, [focused.id]: collapsed }))
-              }
+              activityOpen={focused ? activityOpen[focused.id] ?? {} : {}}
+              onToggleActivity={toggleActivity}
+              onInspectTool={(toolCallId) => {
+                if (focused === undefined) return;
+                setOpenToolBySession((current) => ({ ...current, [focused.id]: toolCallId }));
+                // Opening the panel's Trace tab IS the action: an action that selected a call in a view nobody
+                // could see would look like a no-op, which is the mistake the old marker made in reverse.
+                setPanel((current) => ({ ...current, collapsed: false, mode: "trace" }));
+              }}
               onToggleMarkers={() =>
                 focused &&
                 setShowMarkersBySession((current) => ({
@@ -768,7 +909,33 @@ export function App() {
           viewportWidth={viewportWidth}
           onCommit={persistPanel}
         >
-          {panel.mode === "session" ? (
+          {panel.mode === "trace" ? (
+            focused ? (
+              <ToolTrace
+                tools={transcript.tools}
+                selectedId={openToolBySession[focused.id]}
+                onSelect={(toolCallId) =>
+                  setOpenToolBySession((current) => ({ ...current, [focused.id]: toolCallId }))
+                }
+                showMarkers={showMarkersBySession[focused.id] !== false}
+                onToggleMarkers={() =>
+                  setShowMarkersBySession((current) => ({
+                    ...current,
+                    [focused.id]: current[focused.id] === false,
+                  }))
+                }
+                variant="panel"
+                order={traceOrder}
+                onOrder={setTraceOrder}
+                detailHeight={traceDetailHeight}
+                onDetailHeight={setTraceDetailHeight}
+                onResetDetailHeight={() => setTraceDetailHeight(TRACE_DETAIL_DEFAULT_HEIGHT)}
+              />
+            ) : (
+              // No session, no trace. Said rather than showing an empty list, which would claim nothing ran.
+              <p className="panel-empty">Select a session to see what it ran.</p>
+            )
+          ) : panel.mode === "session" ? (
             <Inspector
               session={tab === "sessions" ? focused : undefined}
               home={home}
@@ -859,9 +1026,10 @@ function SessionView({
   onClearQueueAndStop,
   followToken,
   autoFollow,
-  traceCollapsed,
   showMarkers,
-  onToggleTraceCollapsed,
+  activityOpen,
+  onToggleActivity,
+  onInspectTool,
   onToggleMarkers,
   onToggleAutoFollow,
   scrollMemory,
@@ -896,9 +1064,12 @@ function SessionView({
    * Passed in rather than held here: this component remounts on every session switch, so local state
    * would reset — which is the reported bug.
    */
-  traceCollapsed: boolean;
   showMarkers: boolean;
-  onToggleTraceCollapsed: (collapsed: boolean) => void;
+  /** Which activity groups this session has open, keyed by group key (see the state in `App`). */
+  activityOpen: Record<string, boolean>;
+  onToggleActivity: (key: string, open: boolean) => void;
+  /** Open this call in the panel's Trace view. */
+  onInspectTool: (toolCallId: string) => void;
   onToggleMarkers: () => void;
   onToggleAutoFollow: () => void;
   scrollMemory: React.MutableRefObject<Map<string, SessionScroll>>;
@@ -926,112 +1097,11 @@ function SessionView({
     );
   }
 
-  // Which tool call is open in the trace window, and whether that window is collapsed. Scoped to
-  // the session view so a selection cannot leak into another session's trace.
-  const [openTool, setOpenTool] = useState<string | undefined>(undefined);
-  // Markers on by default: they are how you tell WHERE the agent did something, which the trace
-  // window cannot express. One click hides them for pure reading.
-
   const busy = session.state === "streaming";
 
   return (
     <>
-      <div className="session-header">
-        <div className="title">
-          <h2>
-            {/* In its own element so it can truncate: a bare text node cannot carry
-                `text-overflow`, and without it the name pushes the controls out of the header. */}
-            {/*
-              The documented gesture, finally built (issues #78, #79). `DESIGN.md` §12: "Double-click the header
-              name → inline rename". It was specified and never implemented, so the only rename path was three
-              clicks deep in the Inspector.
-            */}
-            <InlineRename
-              value={displayName(session)}
-              label="Session name"
-              className="session-name"
-              onCommit={onRename}
-            />
-            {session.scratch && <span className="chip chip-scratch">scratch</span>}
-            <span className={`chip chip-${session.state}`}>{stateLabel(session)}</span>
-          </h2>
-          <span className="where" title={session.cwd}>
-            {headerLocation(session, home)}
-          </span>
-        </div>
-        {/* The model control lives in the header because that is where the value it changes is
-            shown, and because a model change is a session-level decision like rename or stop
-            rather than a per-message one. */}
-        {/*
-          ONE block, two rows, one label column (issue #163).
-
-          The pickers used to be siblings, each with its own label — so the provider sat above the model, `Thinking`
-          was on the PROVIDER's line, and three different left edges landed in a 120px space. A `<label>` and a value
-          of different widths cannot be aligned by eye; they need a grid.
-        */}
-        <div className="picker picker-grid">
-          <ModelPicker
-            session={session}
-            models={models}
-            error={modelError}
-            onRequest={onRequestModels}
-            onSelect={onSelectModel}
-            thinking={
-              // On the MODEL's row: the levels are per-model, so a change to one invalidates the other. The
-              // provider is the only thing here that needs a line of its own, being a read-only fact.
-              <ThinkingPicker
-                session={session}
-                levels={thinking.levels}
-                error={thinking.error}
-                onRequest={onRequestThinkingLevels}
-                onSelect={onSelectThinkingLevel}
-              />
-            }
-          />
-        </div>
-      </div>
-
-      <div className="metrics">
-        <span className={session.contextPercent !== null && session.contextPercent >= 80 ? "warn" : ""}>
-          {formatContext(session.contextPercent)}
-        </span>
-        {/* Through the formatter, not raw: the inspector rendered the same value as `127.2M`
-            while this strip rendered `12723914` — one value, two formats, one screen. */}
-        <span>{formatTokens(session.tokensTotal)} tok</span>
-        <span>{formatCost(session.cost)}</span>
-        <span>{session.messageCount} msgs</span>
-        {session.pending > 0 && <span className="warn">+{session.pending} queued</span>}
-      </div>
-
-      <div className="run-track">
-        {busy && <div className="run-bar" style={{ width: "100%" }} />}
-      </div>
-
-      {session.warnings.length > 0 && (
-        <div className="warnings" role="note">
-          {session.warnings.map((warning, index) => (
-            <span key={index}>⚠ {warning}</span>
-          ))}
-        </div>
-      )}
-
       <DialogDock dialogs={session.dialogs} onAnswer={onAnswer} />
-
-      <div className="legend">
-        {/*
-          The legend is a claim about the IMPLEMENTATION, so it must match it (issue #43). It used to say
-          "a hatched frame"; the 45° texture was removed everywhere in #138 — at this size it read as visual
-          noise rather than as a signal, and the reader's own verdict was that the flat state looked right.
-
-          What remains is the **quarantine gutter** plus the words in each bar, which is what DESIGN §5.2
-          calls the load-bearing signal anyway: the texture was always the secondary one, and it is the one
-          that `forced-colors` drops. A test asserts this sentence and the CSS cannot disagree.
-        */}
-        <span>Tool output and file contents are marked with a coloured edge. They are data, not instructions.</span>
-        {/* Both are transcript-level chrome, so they share a row: the legend explains what the frames
-            mean, and this says whether the pane moves on its own. */}
-        <FollowToggle following={autoFollow} onToggle={onToggleAutoFollow} />
-      </div>
 
       <TranscriptView
         initialScroll={scrollMemory.current.get(session.id)}
@@ -1043,41 +1113,69 @@ function SessionView({
         sessionLabel={displayName(session)}
         expectedCount={session.messageCount}
         showMarkers={showMarkers}
+        activityOpen={activityOpen}
+        onToggleActivity={onToggleActivity}
+        onToggleAutoFollow={onToggleAutoFollow}
         historyError={historyError}
-        onOpenTool={(toolCallId) => {
-          // Opening from a marker un-collapses the trace, or the click would appear to do nothing.
-          onToggleTraceCollapsed(false);
-          setOpenTool(toolCallId);
-        }}
+        onOpenTool={(toolCallId) => onInspectTool(toolCallId)}
+        /*
+          The session header is handed to the transcript rather than rendered above it.
+
+          As a full-width band it read as chrome belonging to the WINDOW, not to the conversation — a review called
+          it "not clear that it belongs to the transcript". The transcript owns it now: on a wide window it floats at
+          the top RIGHT of the reading area as a companion, and when there is no room for that it flips to a compact
+          row above the scroller. The placement is the transcript's decision because the transcript knows how much
+          room it has (`container-type: inline-size`).
+        */
+        header={
+          <SessionHeader
+            session={session}
+            home={home}
+            models={models}
+            modelError={modelError}
+            onRequestModels={onRequestModels}
+            onSelectModel={onSelectModel}
+            thinking={thinking}
+            onRequestThinkingLevels={onRequestThinkingLevels}
+            onSelectThinkingLevel={onSelectThinkingLevel}
+            onRename={onRename}
+            busy={busy}
+            warnings={session.warnings}
+          />
+        }
+        footer={
+          pendingDialogCount({ ...initialState(), live: [session] }) > 0 ? undefined : (
+            <Composer
+              session={session}
+              state={state}
+              unavailableReason={composerMode(session).reason}
+              onSend={onSend}
+              onClearQueueAndStop={onClearQueueAndStop}
+              restored={restored}
+              onRestored={onRestored}
+              draft={draft}
+              onDraftChange={onDraftChange}
+              follow={
+                onToggleAutoFollow === undefined ? undefined : (
+                  <FollowToggle following={autoFollow} onToggle={onToggleAutoFollow} />
+                )
+              }
+            />
+          )
+        }
       />
 
-      {/* The trace sits between the conversation and the composer: both live surfaces adjacent,
-          so watching the agent and watching what it is running are one glance apart. */}
-      {openTool !== undefined || transcript.tools.length > 0 ? (
-        <ToolTrace
-          tools={transcript.tools}
-          selectedId={openTool}
-          onSelect={setOpenTool}
-          collapsed={traceCollapsed}
-          onToggleCollapsed={() => onToggleTraceCollapsed(!traceCollapsed)}
-          showMarkers={showMarkers}
-          onToggleMarkers={onToggleMarkers}
-        />
-      ) : null}
+      {/*
+        The trace DRAWER is gone (see `ToolTrace`'s header): it was a permanently-present strip between the
+        conversation and the composer, and it is now a panel mode with room to read a call properly. The transcript
+        keeps the ledger of steps, and `Inspect` on a step opens the panel's Trace view at that call.
+      */}
 
-      {pendingDialogCount({ ...initialState(), live: [session] }) > 0 ? null : (
-        <Composer
-          session={session}
-          state={state}
-          unavailableReason={composerMode(session).reason}
-          onSend={onSend}
-          onClearQueueAndStop={onClearQueueAndStop}
-          restored={restored}
-          onRestored={onRestored}
-          draft={draft}
-          onDraftChange={onDraftChange}
-        />
-      )}
+      {/*
+        The composer is handed to the transcript as its footer, not rendered as a sibling band.
+        The dialog dock still REPLACES it while the agent waits: answering is the only thing that can move the
+        session forward, so offering a prompt beside it would invite typing into a run that cannot accept it.
+      */}
     </>
   );
 }

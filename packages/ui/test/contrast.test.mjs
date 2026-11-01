@@ -143,3 +143,28 @@ test("the token that failed is recorded, so the reason does not have to be redis
   const chip = /\.toggle-chip\s*\{([^}]*)\}/.exec(css);
   assert.ok(!/color:\s*var\(--dim\)/.test(chip[1]), "the chip must not go back to --dim");
 });
+
+test("no rule sets a colour to a token that does not exist", () => {
+  /*
+   * Found while planning the queued-prompts rework: `.mode-option-on` set `color: var(--accent-ink)`, and `--accent-ink`
+   * was never defined in `:root`. The selected segment therefore inherited `--text` on the accent fill — about 2.4:1,
+   * below AA — with every other test green and no error anywhere, because an undefined custom property is not an error in
+   * CSS, it is simply nothing.
+   *
+   * That is the whole failure mode, so the check is general rather than about that one token: every `var(--x)` used as a
+   * colour must name a property the stylesheet declares.
+   */
+  const declared = new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
+  assert.ok(declared.size > 20, `the stylesheet must declare its tokens, found ${declared.size}`);
+
+  const colourish = /(?:^|[;{])\s*(?:background|background-color|color|border-color|border-left-color|fill|stroke)\s*:\s*var\((--[a-z0-9-]+)\)/g;
+  const missing = [...css.matchAll(colourish)]
+    .map((m) => m[1])
+    .filter((token) => !declared.has(token));
+
+  assert.deepEqual(
+    [...new Set(missing)],
+    [],
+    `a colour is set to a token nothing declares, so it silently resolves to nothing: ${[...new Set(missing)].join(", ")}`,
+  );
+});

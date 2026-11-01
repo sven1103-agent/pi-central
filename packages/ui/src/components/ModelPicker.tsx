@@ -39,8 +39,17 @@ import { isCurrentModel, modelsByProvider } from "../store.ts";
  * `openrouter/d_4.1-f…` — while empty space sat beside it in the header. The model is what the cost
  * attribution is about, so losing the variant is expensive; the cap only has to fit the *header*,
  * not a rail row. The two numbers still move together, and a test asserts they agree.
+ *
+ * **Raised again, to 44, after a second screenshot review** (`img_22.png`) showed `deepseek-ai/Deep…1-Flash-`
+ * in the header with ~1100px of empty space beside it. The cap was sized for the OLD three-strip header, where
+ * the pickers competed with a metrics row; the header is one band now and has room. Eliding the model when there
+ * is space to show it is the same defect #74 reported, only later: the variant is what identifies the model, and
+ * it is the thing the reader is checking.
+ *
+ * The number is a HINT, not the only defence: `.picker-select` also caps in `ch` so a pathological id cannot
+ * push the controls out of the header, and a test keeps the two in step.
  */
-const LABEL_MAX = 30;
+const LABEL_MAX = 44;
 
 export interface ModelPickerProps {
   session: LiveSession;
@@ -277,8 +286,16 @@ export function ModelPicker({ session, models, error, onRequest, onSelect, think
       </span>
       {/* The notes span the block rather than sitting inside a row, so a long message cannot widen the label
           column. `data-picker-row` places them across both columns. */}
+      {/*
+        `data-picker-label` must NOT be on the note.
+        
+        It was, which put the note in the LABEL column — a `auto`-width column sized by its widest label (`Provider`,
+        `Model`, `Thinking`). So "reading the model list…" was rendered into that narrow column, overflowed it, and
+        appeared as a clipped fragment at the far right of the header (`img_25`: the stray `read…` past `Thinking`).
+        The note spans both columns instead, which is what the comment below always intended.
+      */}
       {loading && (
-        <span className="picker-note" data-picker-row="note" data-picker-label="">
+        <span className="picker-note" data-picker-row="note">
           reading the model list…
         </span>
       )}

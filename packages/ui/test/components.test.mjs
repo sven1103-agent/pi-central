@@ -157,18 +157,24 @@ test("the rail states the TRUE total on disk, not the number loaded", () => {
   assert.ok(!html.includes("500 sessions"), "the page size must not be shown as the total");
 });
 
-test("a long model name does not swallow the rail's metrics line", () => {
-  // The screenshot showed `deepseek-ai/DeepSeek-V4.1-Flash  high  ct…` -- context and cost cut
-  // off entirely, which is worse than a shortened model because those are the scanned values.
+test("a row carries what changes the decision, and not the header's whole metric set", () => {
+  /*
+   * The rail's third line used to carry `model · thinking · ctx · cost` on every row — four values the workspace
+   * header already states for the session being looked at, repeated down the list. A review found that dense
+   * without making selection clearer.
+   *
+   * The defect this test was written for still matters, though, and is the reason it is not simply deleted: a
+   * long model name used to eat the line (`deepseek-ai/DeepSeek-V4.1-Flash  high  ct…`), cutting off the values a
+   * reader scans for. Dropping the model from the row fixes the cause rather than shortening the symptom — so the
+   * assertion is that the SCANNED values survive and the per-row duplicate of the header does not appear.
+   */
   const html = renderToString(createElement(SessionRail, {
-    // contextPercent and cost are set deliberately: the point is that THEY survive the model.
     rows: rowsOf([session({ model: "deepseek-ai/DeepSeek-V4.1-Flash", contextPercent: 62, cost: 0.0142 })]),
     focusedId: "s7", onFocusRow() {}, onForgetRow() {}, onRetryRow() {}, retryAvailable: true, onStartSession() {}, onOpenDirectory() {}, home: "/Users/x", historyTotal: 0,
   }));
-  assert.ok(!html.includes("deepseek-ai/DeepSeek-V4.1-Flash"), "the raw model name must be shortened");
-  assert.match(html, /…/, "the shortening should be visible");
-  assert.match(html, /ctx 62%/, "the context value must survive");
-  assert.match(html, /\$0\.0142/, "the cost must survive");
+  assert.ok(!html.includes("deepseek-ai/DeepSeek-V4.1-Flash"), "no per-row copy of the model in the rail");
+  assert.match(html, /ctx 62%/, "pressure, which changes what the reader should do, stays");
+  assert.ok(!/\$0\.0142/.test(html), "cost is a lookup, not a decision: it lives in the header and panel");
 });
 
 test("the rail abbreviates HOME, so rows are scannable", () => {
@@ -277,7 +283,8 @@ test("the trace shows the latest tools and marks the one running now", () => {
   assert.match(html, /Tool trace/);
   assert.match(html, /13 calls/);
   assert.match(html, /write running/);
-  // The panel states its own economy rather than silently hiding the rest.
+  // The DRAWER states its own economy rather than silently hiding the rest. The panel variant does not: it shows
+  // the whole list, so "latest 5 shown" would be false there (see the `variant` tests).
   assert.match(html, /latest 5 shown/);
   // Every call is reachable for debugging: the list is the whole trace, not only the latest 5.
   // Asserted by ROW COUNT rather than by id, because the id is a React key and never reaches the
@@ -686,37 +693,36 @@ test("the level list is keyed on the model AND the level, so a switch invalidate
 
 // --- The composer's mode strip and Esc (issue #3) ------------------------------------------------
 
-test("the mode strip appears ONLY while a run is in progress", async () => {
-  const init = initialState;
-
+test("there is no mode strip: the destination is a key, not a control", async () => {
+  /*
+   * The strip is deleted, and this asserts the DECISION rather than the absence of a class name.
+   *
+   * Three elements and 26px of permanent dock height existed to choose between two things, and the choice was already
+   * expressible as Pi's own keys: `Enter` steers, `Alt+Enter` queues for after the run. The reader's complaint was that
+   * the bar was "too much", and it was.
+   */
   const streaming = renderToString(createElement(Composer, {
-    session: session({ state: "streaming" }), state: init(),
-    unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
-    onRestored() {}, draft: "", onDraftChange() {},
-  }));
-  assert.match(streaming, /mode-strip/);
-
-  // Idle: only one thing can happen, so a selector would be a lie about complexity.
-  const idle = renderToString(createElement(Composer, {
-    session: session({ state: "idle" }), state: init(),
-    unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
-    onRestored() {}, draft: "", onDraftChange() {},
-  }));
-  assert.ok(!/mode-strip/.test(idle), "an idle composer must not offer a queue choice");
-});
-
-test("the strip offers BOTH modes and states which one is selected", async () => {
-  const html = renderToString(createElement(Composer, {
     session: session({ state: "streaming" }), state: initialState(),
     unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
     onRestored() {}, draft: "", onDraftChange() {},
   }));
-  assert.match(html, /Steer/);
-  assert.match(html, /Follow-up/);
-  // Steer is the default, matching Pi's own Enter binding, and it is stated as selected.
-  assert.match(text(html), /aria-checked="true"[^>]*>Steer/);
-  // The consequence of the SELECTED mode, which is what the issue asks the strip to convey.
-  assert.match(text(html), /Delivered after the current turn's tools finish/);
+  assert.ok(!/mode-strip|mode-choice|mode-option/.test(streaming), "no segmented control");
+  const plainStreaming = streaming.replace(/<!-- -->/g, "").replace(/<[^>]*>/g, "");
+  // …and both destinations are still stated, which is what the strip was FOR.
+  assert.match(plainStreaming, /Enter steers/, "the hint names the steering key");
+  assert.match(plainStreaming, /Alt\+Enter queues for after this run/, "…and the follow-up key");
+  assert.match(plainStreaming, /Esc stops the run/, "…and the escape hatch");
+
+  // The placeholder states one promise at a time, which is what the caption used to do badly.
+  assert.match(streaming, /Steer this run/, "the field says what Enter will do");
+
+  const idle = renderToString(createElement(Composer, {
+    session: session({ state: "idle" }), state: initialState(),
+    unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
+    onRestored() {}, draft: "", onDraftChange() {},
+  }));
+  assert.ok(!/mode-strip/.test(idle), "an idle composer offers no destination choice");
+  assert.match(idle, /Send a prompt/, "…and says what Enter does when there is only one thing");
 });
 
 test("the interim 'steer is not available' copy is gone", async () => {
@@ -727,38 +733,75 @@ test("the interim 'steer is not available' copy is gone", async () => {
     onRestored() {}, draft: "", onDraftChange() {},
   }));
   assert.ok(!/not available/i.test(html), "the interim capability hint must be removed");
-  assert.match(text(html), /Esc<\/kbd> stops the run and returns the queue to this box/);
+  // The hint names the ESC action. It used to add "and returns the queue to this box" — a sentence long enough to wrap
+  // under the field, describing feedback the reader already sees (the text reappears in the box).
+  assert.match(text(html), /Esc<\/kbd> stops the run/);
 });
 
-test("the button label names the action the selected mode will take", async () => {
+test("the composer names the action the selected mode will take, and offers no button", async () => {
+  /** Rendered text without React's comment separators (which split adjacent text nodes). */
+  const plain = (html) => html.replace(/<!-- -->/g, "").replace(/<[^>]*>/g, "");
+
+  /*
+   * The Send button is gone: Enter submits, which is the natural way to send a prompt and already worked. A second
+   * affordance for the same action sat OUTSIDE the input's box and was what dragged the control's width away from
+   * the prose's.
+   *
+   * The distinction the button carried still matters, though — "Send", "Send steer" and "Queue follow-up" are
+   * different promises — so it is stated in the placeholder and the hint instead of being lost with the control.
+   */
   const steer = renderToString(createElement(Composer, {
     session: session({ state: "streaming" }), state: initialState(),
     unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
     onRestored() {}, draft: "hello", onDraftChange() {},
   }));
-  assert.match(steer, /Send steer/);
+  /*
+   * The label is gone with the button, and with the strip. What remains is the HINT, which is where a keyboard
+   * destination belongs — and the placeholder, which states the one promise the next Enter will keep.
+   */
+  assert.match(plain(steer), /Enter steers/, "the hint says which key does what");
+  assert.match(steer, /Steer this run/, "…and the field states the promise");
+  assert.ok(!/btn-send/.test(steer), "no submit button");
+  assert.ok(!/<button[^>]*>\s*Send/.test(steer), "…and no control that looks like one");
 
   const idle = renderToString(createElement(Composer, {
     session: session({ state: "idle" }), state: initialState(),
     unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
     onRestored() {}, draft: "hello", onDraftChange() {},
   }));
-  assert.match(idle, />Send</);
+  assert.match(plain(idle), /Enter to send/, "Enter is named as the way to send");
+  assert.ok(!/btn-send/.test(idle), "no submit button when idle either");
 });
 
-test("the queued texts are listed, and a read-only row has no removal control", async () => {
-  // Rows are read-only because Pi Central has no per-item removal, so a `×` would be a fake
-  // control — the one real action is Esc, which the hint names.
+test("the queue renders as a bounded rail, and offers no per-item control", async () => {
+  /*
+   * Rows are read-only because Pi Central has no per-item removal, so a `\u00d7` would be a fake control. The one real action
+   * is `Clear queue and stop run`, inside the sheet, which says why.
+   *
+   * The rail is BOUNDED: one row per KIND, never one per message. That is the fix for "it changes the canvas of the
+   * transcript" — the dock's height no longer depends on how much is queued.
+   */
   const state = { ...initialState(), queues: { s7: { steering: ["do this instead"], followUp: ["and then"] } } };
   const html = renderToString(createElement(Composer, {
     session: session({ state: "streaming", pending: 2 }), state,
     unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
     onRestored() {}, draft: "", onDraftChange() {},
   }));
-  assert.match(text(html), /2 queued/);
-  assert.match(text(html), /do this instead/);
-  assert.match(text(html), /and then/);
-  assert.ok(!/×|Remove|remove/.test(html), "no per-item removal control may be offered");
+  const plain = html.replace(/<!-- -->/g, "").replace(/<[^>]*>/g, "");
+
+  // Both representatives are there, with their time-words.
+  assert.match(plain, /do this instead/);
+  assert.match(plain, /and then/);
+  assert.match(plain, /now/, "the steering row carries its time-word");
+  assert.match(plain, /then/, "…and the follow-up row carries the other");
+
+  // Exactly two rows, whatever is queued. Counted by KIND rather than by the shared class: an `is-unknown` row (for
+  // texts that never arrived) is a third kind of row and belongs to a different test.
+  const rows = [...html.matchAll(/class="queue-rail-row is-(steer|followUp)/g)].length;
+  assert.equal(rows, 2, `one row per kind, got ${rows}`);
+
+  assert.ok(!/\u00d7|Remove|remove/.test(html), "no per-item removal control may be offered");
+  assert.match(plain, /Show queue/, "there is a way to the full list");
 });
 
 test("a queue count with no texts says so instead of inventing rows", async () => {
@@ -768,7 +811,14 @@ test("a queue count with no texts says so instead of inventing rows", async () =
     unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
     onRestored() {}, draft: "", onDraftChange() {},
   }));
-  assert.match(text(html), /1 message queued before this page loaded/);
+  /*
+   * The rail cannot show an invented row, so it says what it knows — the COUNT — in its own words. The sheet adds the
+   * useful half: clearing returns the text to the box, where it can be read.
+   */
+  const plain = html.replace(/<!-- -->/g, "").replace(/<[^>]*>/g, "");
+  assert.match(plain, /1 queued before this page loaded/);
+  // Never a fabricated row: a placeholder would be a claim about what the reader asked for.
+  assert.equal([...html.matchAll(/class="queue-rail-row is-steer|class="queue-rail-row is-followUp/g)].length, 0);
 });
 
 test("a stopped run says the run stopped rather than claiming text was discarded", async () => {
@@ -1107,7 +1157,12 @@ test("the closed model control shows a MIDDLE-elided name, not a trailing cut", 
   // of a model name carry identity — the provider says where it runs, the tail distinguishes variants
   // — so a trailing cut throws away the part a reader scans for.
   const { ModelPicker } = await server.ssrLoadModule("/src/components/ModelPicker.tsx");
-  const model = "litellm/deepseek-v4-flash-vision-exp";
+  // Long enough to be elided at the CURRENT cap. The cap has moved twice (22 → 30 → 44), and each time the old
+  // fixture stopped being elided at all — which made the assertions below pass vacuously rather than fail.
+  const cap = Number(/const LABEL_MAX = (\d+);/.exec(
+    readFileSync(new URL("../src/components/ModelPicker.tsx", import.meta.url), "utf8"))[1]);
+  const model = `litellm/${"deepseek-v4-flash-vision-".repeat(3)}experimental`;
+  assert.ok(model.length > cap, `the fixture must exceed the ${cap}ch cap, got ${model.length}`);
   const html = renderToString(createElement(ModelPicker, {
     session: session({ model, provider: "litellm" }),
     models: undefined, error: undefined, onRequest() {}, onSelect() {},
@@ -1116,8 +1171,6 @@ test("the closed model control shows a MIDDLE-elided name, not a trailing cut", 
   // Asserted as PROPERTIES, not as a literal: the cap moved once already (#74) and a hard-coded
   // string made a change of width look like a change of behaviour. What the test is about is that an
   // elision keeps both ends.
-  const cap = Number(/const LABEL_MAX = (\d+);/.exec(
-    readFileSync(new URL("../src/components/ModelPicker.tsx", import.meta.url), "utf8"))[1]);
   assert.ok(shown.startsWith("litellm/"), `the provider must survive (it says where it runs), got ${JSON.stringify(shown)}`);
   assert.ok(shown.endsWith(model.slice(-12)), `the variant tail must survive, got ${JSON.stringify(shown)}`);
   assert.ok(!shown.endsWith("-"), "a trailing cut is the bug: it loses the identifying tail");
@@ -1161,7 +1214,12 @@ test("the OPTIONS are never truncated, because that is where the choice is made"
   // Long enough to be elided at the CURRENT cap: at 22 characters the shorter name below was elided
   // for the wrong reason, and at 30 it would not be elided at all, leaving the second half of this
   // test asserting nothing.
-  const long = "DeepSeek V4 Flash Vision Experimental";
+  // Derived from the CURRENT cap, so raising it cannot silently make this test assert nothing — which it did when
+  // the cap moved from 30 to 44: the "long" name below was no longer long enough to be elided at all.
+  const cap = Number(/const LABEL_MAX = (\d+);/.exec(
+    readFileSync(new URL("../src/components/ModelPicker.tsx", import.meta.url), "utf8"))[1]);
+  const long = `${"DeepSeek V4 Flash ".repeat(3)}Vision Experimental`;
+  assert.ok(long.length > cap, `the fixture must exceed the ${cap}ch cap, got ${long.length}`);
   const html = renderToString(createElement(ModelPicker, {
     session: session({ model: "deepseek-v4-flash-vision-exp", provider: "litellm" }),
     models: [{ provider: "litellm", id: "deepseek-v4-flash-vision-exp", name: long }],
@@ -1415,14 +1473,15 @@ function panelProps(extra = {}) {
   };
 }
 
-test("the panel offers both modes, and marks the active one", () => {
+test("the panel offers every mode, and marks the active one", () => {
   const html = renderToString(createElement(Panel, panelProps(), createElement("p", null, "body")));
   assert.match(html, /role="tablist"/);
   assert.match(html, /role="tab"/);
-  // Both modes are present; exactly one is selected.
-  assert.equal((html.match(/role="tab"/g) ?? []).length, 2);
+  // Session, Files, Trace — the trace moved here from a drawer under the transcript, so there are three.
+  assert.equal((html.match(/role="tab"/g) ?? []).length, 3, "Session, Files and Trace");
   assert.equal((html.match(/aria-selected="true"/g) ?? []).length, 1);
   assert.match(html, /aria-selected="true"[^>]*>Session</);
+  assert.match(html, />Trace</, "the trace is reachable as a mode rather than a strip");
 });
 
 test("only the selected TAB is in the tab order (roving tabindex)", () => {
@@ -1431,13 +1490,13 @@ test("only the selected TAB is in the tab order (roving tabindex)", () => {
   // passed for the wrong reason.
   const html = renderToString(createElement(Panel, panelProps(), createElement("p", null, "body")));
   const tabs = html.match(/<button[^>]*role="tab"[^>]*>/g) ?? [];
-  assert.equal(tabs.length, 2, "expected two tabs");
+  assert.equal(tabs.length, 3, "expected three tabs");
   const selected = tabs.filter((t) => t.includes('aria-selected="true"'));
   const other = tabs.filter((t) => t.includes('aria-selected="false"'));
   assert.equal(selected.length, 1);
-  assert.equal(other.length, 1);
+  assert.equal(other.length, 2, "every unselected tab is skipped, not just the first");
   assert.match(selected[0], /tabindex="0"/, "the selected tab must be reachable by Tab");
-  assert.match(other[0], /tabindex="-1"/, "the unselected tab must be skipped");
+  for (const tab of other) assert.match(tab, /tabindex="-1"/, "the unselected tabs must be skipped");
 });
 
 test("the body is tied to the tab that labels it", () => {
@@ -1717,8 +1776,8 @@ test("the narrow-viewport query collapses the rail track for a hidden panel too"
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(
     css,
-    /\.panes,\s*\n\s*\.panes\.is-collapsed\s*\{\s*grid-template-columns:\s*1fr/,
-    "the ≤1023px query must list `.panes.is-collapsed` as well as `.panes`",
+    /\.panes,\s*\n\s*\.panes\.is-collapsed\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "the ≤1023px query must list `.panes.is-collapsed` as well as `.panes`, and let the track shrink",
   );
 });
 
@@ -1789,45 +1848,67 @@ test("wrapped mode wraps, keeps indentation, and breaks long tokens", () => {
 
 // --- `Jump to latest` must not cover a line of text (issue #71) -----------------------------------
 
-test("the jump control floats in reserved space, so it cannot cover a line of text", () => {
-  // The defect: the control is positioned against the bottom of the VIEWPORT, so mid-list it sat on
-  // whatever line happened to be there — "…the escaped quote in m[ ↓ Jump to latest ]check." The fix
-  // is that `.transcript-wrap` reserves a strip, so the scrollport ends ABOVE the control.
-  //
-  // Asserted on the stylesheet because the markup cannot express it, and because the tempting fix —
-  // `padding-bottom` INSIDE the scroller — would pass a naive check while leaving the defect in
-  // place: padding at the end of the content scrolls away with it, so it protects only the last line.
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  const wrap = /\.transcript-wrap\s*\{([^}]*)\}/.exec(css);
-  assert.ok(wrap, ".transcript-wrap must have a rule");
-  assert.match(wrap[1], /padding-bottom:\s*var\(--jump-strip\)/,
-    "the wrap must RESERVE the strip, not the scroller's own padding");
-
-  const strip = /--jump-strip:\s*(\d+)px/.exec(css);
-  assert.ok(strip, "--jump-strip must be defined");
-  const height = Number(strip[1]);
-
-  const pill = /\.jump-latest\s*\{([^}]*)\}/.exec(css);
-  assert.ok(pill, ".jump-latest must have a rule");
-  assert.match(pill[1], /position:\s*absolute/, "the control floats over the strip");
-  const bottom = /bottom:\s*(\d+)px/.exec(pill[1]);
-  assert.ok(bottom, "the control must be offset from the bottom");
-  assert.ok(
-    Number(bottom[1]) < height,
-    `the control's ${bottom[1]}px offset must sit inside the ${height}px strip, or it hangs below it`,
+test("the jump control floats in a band, anchored to the scroller", () => {
+  /*
+   * Issue #71: the control is positioned against the bottom of its region, so mid-list it sat on whatever line
+   * happened to be there — "…the escaped quote in m[ ↓ Jump to latest ]check."
+   *
+   * Where the reservation and the anchor live has moved three times, and each move was a real defect rather than a
+   * tidy-up:
+   *
+   *   1. `padding-bottom` on `.transcript-wrap` — correct while the composer was a sibling below it, wrong once the
+   *      composer moved inside the wrapper, where the reserved row became a permanent gap above the input;
+   *   2. anchored to the reading COLUMN — `bottom: 44px` measured from an edge below the composer, so the pill meant
+   *      for the conversation appeared over the input (`img_31.png`);
+   *   3. this: a `.transcript-viewport` that wraps ONLY the scroller and the pill, reserves the band, and is the
+   *      pill's positioned ancestor.
+   *
+   * The property is what is asserted, not the selector: the pill is absolutely positioned, its offset is measured
+   * from the same element that reserves at least that much space at its foot, and therefore nothing can sit under it.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
   );
-});
+  const viewport = /(?:^|\n)\.transcript-viewport\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.ok(viewport, ".transcript-viewport must exist — it is the pill's anchor");
+  assert.match(viewport, /position:\s*relative/, "it is the positioned ancestor");
+  assert.match(viewport, /padding-bottom:\s*var\(--jump-strip\)/, "…and it reserves the band");
 
-test("the scroller is the only scrolling element in the transcript column", () => {
-  // The reservation above is only sound if the scroller does not also pad itself at the end — that
-  // would be the "protects only the last line" mistake, and it would double the gap.
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  const scroller = /\.transcript\s*\{([^}]*)\}/.exec(css);
-  assert.ok(scroller, ".transcript must have a rule");
+  /*
+   * THE OFFSET MUST BE INSIDE THE BAND, not above it.
+   *
+   * This assertion previously required `var(--jump-strip)` in the offset, on the reasoning that the pill should be
+   * measured from the reservation. That reasoning was wrong in the direction that matters: with a 40px reservation and
+   * `bottom: calc(var(--jump-strip) + 4px)`, a ~30px control sat 44px up — i.e. 4px ABOVE the top of the band it was
+   * meant to occupy — so it floated over the last paragraph and the text visibly wrapped around it (`img_35.png`).
+   *
+   * The real property is arithmetic, so it is asserted as arithmetic: the offset must be smaller than the band, or the
+   * control is not in the band at all.
+   */
+  const pill = /(?:^|\n)\.jump-latest\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(pill, /position:\s*absolute/, "the control floats");
+  assert.match(pill, /z-index:/, "…on its own layer, so it cannot influence the line box beside it");
+
+  const bottom = /bottom:\s*([^;]+);/.exec(pill)?.[1]?.trim() ?? "";
+  const offset = Number(/^(\d+)px$/.exec(bottom)?.[1]);
   assert.ok(
-    !/padding-bottom/.test(scroller[1]),
-    ".transcript must not reserve space itself; the wrap does that",
+    Number.isFinite(offset),
+    `the offset must be a plain length INSIDE the reserved band, not measured from its top; got ${bottom}`,
   );
+
+  const strip = Number(/--jump-strip:\s*(\d+)px/.exec(css)?.[1]);
+  assert.ok(Number.isFinite(strip), "--jump-strip must be a number, or the reservation is a guess");
+  assert.ok(
+    offset < strip,
+    `the control's ${offset}px offset must sit inside the ${strip}px band, or it is drawn above it — over the text`,
+  );
+
+  // And structurally: the pill must be a child of the viewport, not of the column that also holds the composer.
+  const source = readFileSync(new URL("../src/components/Transcript.tsx", import.meta.url), "utf8");
+  const view = /<div className="transcript-viewport">([\s\S]*?)\{\/\*\s*\n\s*THE COMPOSER LIVES HERE/.exec(source)?.[1] ?? "";
+  assert.match(view, /jump-latest/, "the pill is rendered inside the viewport");
+  assert.ok(!/transcript-footer/.test(view), "…and the composer is NOT, or the anchor would include it");
 });
 
 // --- The Reading panel's reset, and a preview that can show the setting (issue #142) ----------------
@@ -1898,7 +1979,10 @@ test("a collapsed thinking block shows a gist, so four blocks are not four ident
   const html = renderToString(createElement(TranscriptView, {
     transcript: { messages: [msg], tools: [] }, busy: false, sessionLabel: "Demo",
   }));
-  const gists = [...html.matchAll(/class="quarantine-gist"[^>]*>([^<]*)/g)].map((m) => m[1]);
+  // The gists now live inside the activity group (`ActivityGroup`), one row per thinking block, rather than
+  // in top-level bars. The property is unchanged: each block names itself, so a run of them is not a stack
+  // of identical lines.
+  const gists = [...html.matchAll(/class="activity-thought-gist"[^>]*>([^<]*)/g)].map((m) => m[1]);
   assert.equal(gists.length, 2, `each thinking block gets a gist: ${html}`);
   assert.notEqual(gists[0], gists[1], "…and they differ from each other, which is the whole fix");
   assert.match(gists[0], /reproduce it first/);
@@ -1912,8 +1996,11 @@ test("a thinking block with no words still renders the label, and no empty gist"
   const html = renderToString(createElement(TranscriptView, {
     transcript: { messages: [msg], tools: [] }, busy: false, sessionLabel: "Demo",
   }));
-  assert.match(html, /Thinking/, "the block is still announced");
-  assert.ok(!html.includes("quarantine-gist"), "but no empty gist element is emitted");
+  // An empty FINISHED block is not announced at all any more: it used to render a bar that opened to nothing,
+  // which is the noise this rework removes. Only the prose the message actually carries remains.
+  assert.ok(!html.includes("activity-thought"), `an empty finished block gets no row: ${html}`);
+  assert.ok(!html.includes("activity-thought-gist"), "and no empty gist");
+  assert.match(html, /Done\./, "the prose the message does carry still renders");
 });
 
 test("a collapsed thinking block does NOT reveal its text on hover", () => {
@@ -1933,7 +2020,7 @@ test("a collapsed thinking block does NOT reveal its text on hover", () => {
     transcript: { messages: [msg], tools: [] }, busy: false, sessionLabel: "Demo",
   }));
 
-  const gistTag = /<span class="quarantine-gist"[^>]*>/.exec(html)?.[0];
+  const gistTag = /<span class="activity-thought-gist"[^>]*>/.exec(html)?.[0];
   assert.ok(gistTag !== undefined, `the gist must exist: ${html}`);
   assert.ok(!/title=/.test(gistTag), `the gist must carry no tooltip: ${gistTag}`);
 
@@ -1941,11 +2028,23 @@ test("a collapsed thinking block does NOT reveal its text on hover", () => {
   // one line. Asserting "does not contain the full text" was the first attempt and it was wrong twice — the
   // thought is 500 characters so any preview "fails" to contain it trivially, and the repeated padding words
   // made the phrase check pass on the gist itself. Bounding the summary is the property that actually holds.
-  const summary = /<summary class="quarantine-head"[^>]*>([\s\S]*?)<\/summary>/.exec(html)?.[1] ?? "";
+  const summary = /<summary class="activity-thought-head"[^>]*>([\s\S]*?)<\/summary>/.exec(html)?.[1] ?? "";
   assert.ok(summary.length > 0, "the summary must exist");
+  /*
+   * The bound, restated after the row gained structure. The property is that the row cannot carry the thought;
+   * the old `< 200` was a proxy for "one line" at 72 characters of gist. The row now also carries its index and
+   * its kind (`1`, `Thinking`), so the bound is: the GIST is elided (asserted below) and the row's own text —
+   * excluding those two fixed labels — stays far short of the 500-character thought.
+   */
+  const gist = /<span class="activity-thought-gist">([\s\S]*?)<\/span>/.exec(summary)?.[1] ?? "";
+  assert.ok(gist.length > 0, "the row carries a gist");
+  assert.ok(gist.length < 120, `the gist must be elided, got ${gist.length} chars: ${gist}`);
+  // The rendered row is markup, not text: tags and attributes are not characters the reader sees. Measured on the
+  // VISIBLE text, which is the thing "one line" is a claim about.
+  const visible = summary.replace(/<[^>]*>/g, "").trim();
   assert.ok(
-    summary.length < 200,
-    `a collapsed summary must stay one line, not carry the thought (${summary.length} chars): ${summary}`,
+    visible.length < 140,
+    `a collapsed row must stay one line, not carry the thought ("${visible}" = ${visible.length} chars)`,
   );
   assert.match(summary, /\u2026/, "the gist is elided, so no title is needed to shorten it");
   assert.ok(!/title=/.test(summary), `nothing in the summary may pop a tooltip: ${summary}`);
@@ -1974,7 +2073,7 @@ test("an in-progress thinking block says so, and a finished one does not", () =>
     transcript: { messages: [msg], tools: [] }, busy: true, sessionLabel: "Demo",
   }));
 
-  const summaries = [...html.matchAll(/<summary class="quarantine-head">([\s\S]*?)<\/summary>/g)].map((m) => m[1]);
+  const summaries = [...html.matchAll(/<summary class="activity-thought-head">([\s\S]*?)<\/summary>/g)].map((m) => m[1]);
   assert.equal(summaries.length, 2, "both blocks render");
   assert.match(summaries[0], /thinking\u2026/, "the in-progress block says so");
   assert.ok(!/thinking\u2026/.test(summaries[1]), "the finished block must NOT — or the state means nothing");
@@ -1997,7 +2096,7 @@ test("the thinking state is a WORD, and does not repeat the message's own dot", 
   const html = renderToString(createElement(TranscriptView, {
     transcript: { messages: [msg], tools: [] }, busy: true, sessionLabel: "Demo",
   }));
-  const summary = /<summary class="quarantine-head">([\s\S]*?)<\/summary>/.exec(html)?.[1] ?? "";
+  const summary = /<summary class="activity-thought-head">([\s\S]*?)<\/summary>/.exec(html)?.[1] ?? "";
   assert.match(summary, /thinking\u2026/, `the word must be present: ${summary}`);
   assert.ok(!/live-dot/.test(summary), `no dot may repeat the message's own indicator: ${summary}`);
 
@@ -2016,7 +2115,7 @@ test("a thinking block with no text yet still shows it is running", () => {
     transcript: { messages: [msg], tools: [] }, busy: true, sessionLabel: "Demo",
   }));
   assert.match(html, /thinking\u2026/, "an empty in-progress block still announces itself");
-  assert.ok(!html.includes("quarantine-gist"), "…but has no gist, which would be empty");
+  assert.ok(!html.includes("activity-thought-gist"), "…but has no gist, which would be empty");
 });
 
 // --- A row that is not running is still in the rail (issue #89) ----------------------------------
@@ -2322,4 +2421,149 @@ test("the text cursor belongs to the header's name only", () => {
   assert.equal(rules.length, 1, "one rule for .session-name, or source order decides");
   assert.match(rules[0], /cursor:\s*text/, "the header's name is a rename target");
   assert.ok(!/\.rail-row-main \.name[^{]*\{[^}]*cursor:\s*text/.test(css), "the rail's name is not");
+});
+
+// --- The narrow fallback is a working layout, not a hidden one --------------------------------
+
+test("the rail is reachable below the drawer breakpoint", () => {
+  /*
+   * The reported defect (`img_33.png`): at a narrow width the transcript was pushed off-screen, the rail was clipped
+   * at both edges, and there was no way to reach the session list at all — the stylesheet hid `.rail` and styled
+   * `.rail.open` for a class nothing ever set.
+   *
+   * Two faults, and both are guarded:
+   *
+   *   1. the grid's middle track was `1fr` = `minmax(auto, 1fr)`, whose minimum is the content's MIN-CONTENT width, so
+   *      a long command made the column wider than the window and no narrower rule could ever apply;
+   *   2. the hidden rail needed a control, and a rule that actually works.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  assert.match(
+    css,
+    /grid-template-columns:\s*288px minmax\(0,\s*1fr\)/,
+    "the workspace track must be allowed to shrink below its content's min-content width",
+  );
+
+  // A drawer that is never opened is `display: none` with extra steps.
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /rail-toggle/, "a control must open the drawer");
+  assert.match(app, /aria-expanded=\{railOpen\}/, "…and state whether it is open");
+  assert.match(app, /rail-backdrop/, "a backdrop must close it");
+  assert.match(app, /setRailOpen\(false\)/, "Escape, the backdrop and a selection all close it");
+
+  // The two numbers that have to agree: the media query and the JavaScript breakpoint.
+  const jsBreakpoint = Number(/RAIL_DRAWER_MAX_WIDTH = (\d+)/.exec(app)?.[1]);
+  const cssBreakpoint = Number(/@media \(max-width: (\d+)px\)/.exec(css)?.[1]);
+  assert.ok(Number.isFinite(jsBreakpoint), "App.tsx must declare the breakpoint");
+  assert.equal(
+    jsBreakpoint,
+    cssBreakpoint + 1,
+    `the button and the layout must flip at the same width: JS ${jsBreakpoint}, CSS ≤${cssBreakpoint}`,
+  );
+});
+
+test("the narrow companion keeps what orients the reader and drops the labels", () => {
+  /*
+   * "More minimalistic, because not everything can fit."
+   *
+   * Stacked above the prose there is one line's worth of room and four things competing for it. The first version let
+   * everything wrap, producing a header four rows tall that ate half a small viewport.
+   *
+   * The rule is a priority order, not a list of things to hide: identity and the two decision-changing numbers stay,
+   * the pickers stay WITHOUT their labels because the controls are self-describing, and what is dropped is reachable
+   * in the Session panel.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const narrow = /@container transcript \(max-width: 1080px\)\s*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+  assert.match(narrow, /\.picker-label\s*\{\s*display:\s*none/, "the picker labels are the first thing to go");
+  assert.match(narrow, /\.picker-grid\s*\{[^}]*flex-direction:\s*row/, "the pickers stay, on one line");
+  assert.match(narrow, /\.picker-select\s*\{[^}]*max-width:\s*\d+ch/, "…and are capped so two fit beside the name");
+  assert.ok(!/\.header-stats\s*\{\s*display:\s*none/.test(narrow), "the meter and cost are NOT dropped");
+});
+
+test("the query container is a DIFFERENT element from the one its queries style", () => {
+  /*
+   * The defect that made the narrow fallback a no-op, found by reading the DOM rather than the stylesheet: CSS
+   * Containment says a container is NOT matched by its own `@container` rules.
+   *
+   * `.transcript-wrap` declared `container-type: inline-size`, so every `@container transcript` rule naming
+   * `.transcript-wrap.has-header` was silently ignored — no error, no warning, the rule simply did not apply. The wide
+   * row therefore never flipped to a column, and on a narrow window it overflowed with the transcript off-screen.
+   *
+   * The guard is structural, because the bug is structural: the element that declares the container must not be an
+   * element the query targets. A class rename would slip past a name check; "these are two different elements" is the
+   * property that actually holds.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const shell = /(?:^|\n)\.transcript-shell\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(shell, /container-type:\s*inline-size/, "the shell declares the container");
+
+  const wrap = /(?:^|\n)\.transcript-wrap\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.ok(
+    !/container-type/.test(wrap),
+    "the styled box must NOT declare the container, or its own @container rules are ignored",
+  );
+
+  // Every rule inside the query must target something other than the container element.
+  const narrow = /@container transcript \(max-width: 1080px\)\s*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+  assert.ok(narrow.length > 0, "the narrow form must exist");
+  assert.ok(
+    !/\.transcript-shell/.test(narrow),
+    "no rule may style the container itself from its own query",
+  );
+  assert.match(narrow, /\.transcript-wrap\.has-header/, "…and the box the query styles is the wrap");
+
+  // And the markup must actually nest them that way.
+  const source = readFileSync(new URL("../src/components/Transcript.tsx", import.meta.url), "utf8");
+  const shellAt = source.indexOf('className="transcript-shell"');
+  const wrapAt = source.indexOf('className={`transcript-wrap');
+  assert.ok(shellAt !== -1 && wrapAt !== -1, "both wrappers must exist in the markup");
+  assert.ok(shellAt < wrapAt, "the shell must be the OUTER element");
+});
+
+test("the run track clears the companion's first line", () => {
+  /*
+   * `.run-track` is absolutely positioned at `top: 0` of the session header. When the companion's header had `padding:
+   * 0` that put a 2px rule through the title's own line box — a grey bar cutting the tops of the `scratch` and `idle`
+   * pills (`img_36.png`).
+   *
+   * The bar is WANTED: it reports a run in progress, and at rest it gives the companion a top edge so the block does not
+   * float unattached in the transcript's canvas. So the rule is arithmetic rather than removal — the header's top
+   * padding must exceed the bar's height, in both the wide and the stacked form.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const track = /(?:^|\n)\.run-track\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(track, /position:\s*absolute/, "the track floats at the header's top edge");
+  assert.match(track, /top:\s*0/, "…exactly at the top");
+  const height = Number(/height:\s*(\d+)px/.exec(track)?.[1]);
+  assert.ok(Number.isFinite(height), "the track must declare its height, or the clearance cannot be checked");
+  // Full width: an inset rule above a flush title reads as a stray line, not as the block's edge.
+  assert.match(track, /left:\s*0/, "the track spans the block's full width");
+  assert.match(track, /right:\s*0/);
+
+  const wide = /\.transcript-header \.session-header\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  const wideTop = /padding-top:\s*var\(--sp-(\d+)\)/.exec(wide)?.[1];
+  assert.ok(wideTop !== undefined, `the companion needs top padding for the track; got ${wide}`);
+  // The spacing scale: --sp-1 4, --sp-2 8, --sp-3 12. Any of the usable steps clears a 2px rule.
+  assert.ok(Number(wideTop) >= 2, "the padding must clear the bar");
+
+  // And the stacked form, which has its own padding and a visible fill.
+  const stacked = /@container transcript[^{]*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+  assert.match(
+    stacked,
+    /padding:\s*calc\(var\(--sp-3\) \+ 2px\)/,
+    "the stacked header clears the track too, and adds the track's own height",
+  );
 });

@@ -19,6 +19,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { LiveSession } from "@pi-central/protocol";
 import { queuedMessages, type UiState } from "../store.ts";
+import { escalation } from "../queue.ts";
+import { QueueRail } from "./QueueRail.tsx";
+import { QueueSheet } from "./QueueSheet.tsx";
 
 export type QueueBehavior = "steer" | "followUp";
 
@@ -32,6 +35,7 @@ export function Composer({
   restored,
   draft,
   onDraftChange,
+  follow,
 }: {
   session: LiveSession | undefined;
   /** The reducer state, for the queued texts. The mode itself comes from `composerMode`. */
@@ -46,15 +50,27 @@ export function Composer({
   restored: string[];
   draft: string;
   onDraftChange: (draft: string) => void;
+  /**
+   * The follow toggle, rendered in the composer's own chrome row.
+   *
+   * A SLOT rather than a prop pair, because the composer has no opinion about scrolling — the transcript owns that
+   * behaviour and passes the control down. The composer only decides WHERE it goes, which is the thing that was wrong.
+   */
+  follow?: React.ReactNode;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streaming = session?.state === "streaming";
   const unavailable = unavailableReason !== undefined;
 
-  // The choice is only REAL while streaming, so it is only remembered then. Idle, the strip is
-  // hidden and `behavior` is not sent at all — Pi drops a streamingBehavior on a non-streaming
-  // prompt, but sending one would still be a claim that a choice was made.
-  const [behavior, setBehavior] = useState<QueueBehavior>("steer");
+  /*
+   * NO MODE STATE.
+   *
+   * There used to be a `behavior` state behind a segmented control. The choice is now the KEY: `Enter` steers,
+   * `Alt+Enter` queues for after the run - Pi's own bindings, which this control was mirroring anyway. Deleting the
+   * state deleted the whole strip with it: three elements and 26px of permanent dock height to choose between two things.
+   */
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const sheetTriggerRef = useRef<HTMLButtonElement>(null);
   const queue = queuedMessages(state, session);
 
   /**
@@ -88,21 +104,43 @@ export function Composer({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      // 1. A dialog open is handled by the dialog dock (it stops propagation).
-      // 2. Popovers close themselves.
-      // 3. Streaming: clear the queue (returning the text) and stop the run.
-      if (streaming) {
+      // The ladder lives in ONE place (`queue.ts`), because two components act on Escape - this one and the sheet - and a
+      // ladder implemented twice is a ladder that drifts. Step 1 (a dialog open) is handled by the dialog dock, which
+      // stops propagation before this runs.
+      const action = escalation({ sheetOpen, streaming });
+      if (action === "close-sheet") {
+        event.preventDefault();
+        setSheetOpen(false);
+        sheetTriggerRef.current?.focus();
+        return;
+      }
+      if (action === "clear-and-stop") {
         event.preventDefault();
         onClearQueueAndStop();
-        // Said here rather than inferred: the queue coming back into the box is the main
-        // feedback, but with nothing queued there would otherwise be no sign the run is stopping.
+        // Said here rather than inferred: the queue coming back into the box is the main feedback, but with nothing
+        // queued there would otherwise be no sign the run is stopping.
         setJustStopped(true);
       }
-      // 4. Otherwise: no-op. The draft is NEVER touched.
+      // `noop`: the draft is NEVER touched.
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [streaming, onClearQueueAndStop]);
+  }, [sheetOpen, streaming, onClearQueueAndStop]);
+
+  /*
+   * Alt+Q opens the sheet, for the same reason the destination has a key: reaching the queue must not require a pointer.
+   */
+  useEffect(() => {
+    if (!streaming) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.altKey && (event.key === "q" || event.key === "Q")) {
+        event.preventDefault();
+        setSheetOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [streaming]);
 
   const [justStopped, setJustStopped] = useState(false);
 
@@ -119,9 +157,9 @@ export function Composer({
   const submit = () => {
     const message = draft.trim();
     if (message.length === 0 || unavailable) return;
-    // The behavior is sent ONLY while streaming, where it is a real choice. Sending "steer" for
-    // an idle prompt would be harmless to Pi and misleading to a reader of the wire.
-    onSend(message, streaming ? behavior : "steer");
+    // Plain Enter STEERS while streaming. Sending "steer" for an idle prompt would be harmless to Pi and misleading to a
+    // reader of the wire, so the behavior is only claimed when the choice was real.
+    onSend(message, "steer");
     onDraftChange("");
   };
 
@@ -132,10 +170,8 @@ export function Composer({
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       if (streaming && event.altKey) {
-        setBehavior("followUp");
-        // Alt+Enter sends as a follow-up directly rather than only changing the toggle: the user
-        // pressed a key that means "queue this for after", so making them press Enter again would
-        // be a second gesture for one intent.
+        // Alt+Enter sends as a follow-up directly. The key MEANS "queue this for after", so making the reader press
+        // Enter again would be a second gesture for one intent - and with the toggle gone, the key is the whole choice.
         const message = draft.trim();
         if (message.length > 0 && !unavailable) {
           onSend(message, "followUp");
@@ -147,68 +183,13 @@ export function Composer({
     }
   };
 
-  const buttonLabel = streaming
-    ? behavior === "steer"
-      ? "Send steer"
-      : "Queue follow-up"
-    : "Send";
-
   return (
     <div className="composer">
-      {streaming && (
-        <div className="mode-strip">
-          <div className="mode-choice" role="radiogroup" aria-label="What this message does">
-            <button
-              type="button"
-              role="radio"
-              aria-checked={behavior === "steer"}
-              className={behavior === "steer" ? "mode-option mode-option-on" : "mode-option"}
-              onClick={() => setBehavior("steer")}
-            >
-              Steer
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={behavior === "followUp"}
-              className={behavior === "followUp" ? "mode-option mode-option-on" : "mode-option"}
-              onClick={() => setBehavior("followUp")}
-            >
-              Follow-up
-            </button>
-          </div>
-          <span className="mode-consequence">
-            {/* The consequence, not the mechanism. This is the sentence the issue asks for: which
-                of the two will happen. */}
-            {behavior === "steer"
-              ? "Delivered after the current turn's tools finish"
-              : "Starts after this run finishes"}
-          </span>
-        </div>
-      )}
-
-      {streaming && queue.total > 0 && (
-        <div className="queue-strip" role="status">
-          <span className="queue-head">{queue.total} queued</span>
-          {/* Rows are read-only: Pi Central has no per-item removal, so a `×` would be a fake
-              control. The one real action is Esc, which is stated in the hint line. */}
-          {queue.textsKnown ? (
-            <ul className="queue-rows">
-              {queue.steering.map((text, index) => (
-                <li key={`s${index}`}>{text}</li>
-              ))}
-              {queue.followUp.map((text, index) => (
-                <li key={`f${index}`}>{text}</li>
-              ))}
-            </ul>
-          ) : (
-            // Never invented. After a reconnect the count is known and the texts are not.
-            <span className="queue-unknown">
-              {queue.total === 1 ? "1 message" : "Messages"} queued before this page loaded
-            </span>
-          )}
-        </div>
-      )}
+      {/*
+        THE RAIL. At most two rows, whatever the count — see `queue.ts`. It sits between the transcript's scroller and
+        the field, and its height is a function of how many KINDS are queued, never of how many messages are.
+      */}
+      <QueueRail queue={queue} onOpenSheet={() => setSheetOpen(true)} />
 
       {unavailable && unavailableReason && (
         <div className="hint" role="note">
@@ -216,45 +197,90 @@ export function Composer({
         </div>
       )}
 
-      <div className="composer-row">
-        <textarea
-          ref={textareaRef}
-          value={draft}
-          onChange={(event) => onDraftChange(event.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder={unavailable ? unavailableReason ?? "Unavailable" : "Send a prompt…"}
-          disabled={unavailable}
-          aria-label="Prompt"
-          rows={3}
-        />
-        <button
-          type="button"
-          className="btn-send"
-          onClick={submit}
-          disabled={unavailable || draft.trim().length === 0}
-        >
-          {unavailable ? "Send" : buttonLabel}
-        </button>
-      </div>
+      {/*
+        ONE SURFACE, NO BUTTON.
 
-      <div className="hint">
-        {streaming ? (
-          <>
-            <kbd>Enter</kbd> to {behavior === "steer" ? "steer" : "queue a follow-up"} ·{" "}
-            <kbd>Alt</kbd>+<kbd>Enter</kbd> for {behavior === "steer" ? "a follow-up" : "steer"} ·{" "}
-            <kbd>Esc</kbd> stops the run and returns the queue to this box
-          </>
-        ) : (
-          <>
-            <kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line
-          </>
-        )}
+        Enter sends — it is the natural way to submit a prompt, and it already worked. The button was a second
+        affordance for the same action, sitting outside the input's box and therefore dragging the control's width
+        away from the prose's. Removing it makes the input the whole composer: one rounded surface, one left edge,
+        one width, and nothing to misalign.
+
+        The button's LABEL still matters while streaming, because "Send", "Send steer" and "Queue follow-up" are
+        different promises — so the state is stated in the hint line below rather than lost with the button.
+      */}
+      <textarea
+        ref={textareaRef}
+        className="composer-input"
+        value={draft}
+        onChange={(event) => onDraftChange(event.target.value)}
+        onKeyDown={onKeyDown}
+        placeholder={
+          unavailable
+            ? unavailableReason ?? "Unavailable"
+            : streaming
+              ? "Steer this run…"
+              : "Send a prompt…"
+        }
+        disabled={unavailable}
+        aria-label="Prompt"
+        /*
+         * THREE LINES, FIXED. A longer prompt scrolls inside the field rather than growing the composer.
+         *
+         * `rows` is the fallback for a browser that ignores the stylesheet's `height`; the CSS is the authority, because
+         * the height has to be the same whether or not the browser supports everything else here. Three lines is the
+         * smallest height that shows a short paragraph in full, which is the size of prompt this app is for.
+         */
+        rows={3}
+      />
+
+      {/*
+        THE COMPOSER'S CHROME ROW: the hint, and the follow toggle.
+
+        Both used to float: the toggle as a pill ABOVE the field, straddling its focus ring and shifting the gap between
+        the pill and the text depending on whether the field was focused (`img_40` vs `img_41`). A reviewer's verdict was
+        that `auto-follow` should be "part of the composer's chrome instead of a pill floating over it" — and that the
+        hint row's empty right half was the place for it.
+
+        So one row, inside the composer's own boundary, sharing the field's left edge. The toggle is right-aligned in the
+        space the hint does not use, which also stops two pill systems (this and `Jump to latest`) competing above the
+        field.
+      */}
+      <div className="composer-chrome">
+        <span className="composer-hint">
+          {streaming ? (
+            <>
+              <kbd>Enter</kbd> steers · <kbd>Alt</kbd>+<kbd>Enter</kbd> queues for after this run ·{" "}
+              <kbd>Esc</kbd> stops the run
+            </>
+          ) : (
+            <>
+              <kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line
+            </>
+          )}
+        </span>
+        {follow !== undefined && follow}
       </div>
 
       {justStopped && (
         <div className="hint" role="status">
           Stopped the run.
         </div>
+      )}
+
+      {sheetOpen && queue.total > 0 && (
+        <QueueSheet
+          queue={queue}
+          onClose={() => {
+            setSheetOpen(false);
+            // Focus returns to the trigger: a surface opened from the keyboard must be closable from it.
+            sheetTriggerRef.current?.focus();
+          }}
+          onClearQueueAndStop={() => {
+            setSheetOpen(false);
+            onClearQueueAndStop();
+            setJustStopped(true);
+          }}
+        />
       )}
     </div>
   );

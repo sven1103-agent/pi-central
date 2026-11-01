@@ -109,8 +109,18 @@ export function resizePanelTo(
   }
 }
 
-/** Which view the panel is showing. Two, and the union is closed so a switch must handle both. */
-export type PanelMode = "session" | "files";
+/**
+ * Which view the panel is showing.
+ *
+ * `trace` is the third, and it is where tool output belongs. The trace used to be a bounded window between the
+ * transcript and the composer: two headers' worth of chrome — a title, a call count, a "latest 5 shown" line and
+ * two toggles — permanently occupying the bottom of the reading column. A screenshot review called it a second
+ * place to look for the same evidence, and it was the last of the strips that made the workspace feel assembled.
+ *
+ * As a panel mode it is a full view rather than a five-row window: every call, its arguments and its whole output,
+ * with the room to read them. The transcript keeps the ledger of steps and an `Inspect` action that opens this.
+ */
+export type PanelMode = "session" | "files" | "trace";
 
 export interface PanelPrefs {
   width: number;
@@ -164,7 +174,10 @@ export function parsePanelPrefs(raw: string | null): PanelPrefs {
   }
   if (typeof parsed !== "object" || parsed === null) return fallback;
   const record = parsed as Record<string, unknown>;
-  const mode: PanelMode = record["mode"] === "files" ? "files" : "session";
+  // Every mode validated, and anything unrecognised degrades to `session` — `localStorage` outlives upgrades, so a
+  // stored mode may name one that no longer exists (which is exactly how this one was added).
+  const storedMode = record["mode"];
+  const mode: PanelMode = storedMode === "files" ? "files" : storedMode === "trace" ? "trace" : "session";
   const width = typeof record["width"] === "number" ? record["width"] : fallback.width;
   return {
     width,

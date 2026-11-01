@@ -43,6 +43,38 @@ newer orchestrator has, and vice versa.
 
 ## [Unreleased]
 
+A workspace rework, driven by a series of screenshot reviews. The structure was right; the proportions and
+the repeated chrome were not.
+
+### Changed
+
+- **One workspace header.** Session identity, a context meter (amber past 80%), cost, and the model pickers —
+  where there were three full-width strips and a `Usage` disclosure that broke the row it lived in.
+- **A session header that belongs to the transcript.** It docks beside the prose on a wide window and becomes
+  a compact row when the container is narrow. A container query, not a viewport one: an open panel leaves a
+  wide window holding a narrow transcript.
+- **The transcript is centred, as one lane**, at a default measure of 80ch. Centring was tried before and
+  reverted for five defects; the cause was centring each CHILD, so a tool marker and a paragraph landed on
+  different centres. The lane is now one box that everything fills.
+- **The composer is the transcript's foot**, sharing that lane and its left edge, with no band of its own.
+  `auto-follow` is a switch in its chrome row, Enter sends, and the field is a fixed three lines that scrolls
+  rather than growing into the conversation. The Steer/Follow-up strip is gone: the destination is the key
+  (`Enter` steers, `Alt+Enter` queues for after the run).
+- **Queued prompts are a bounded rail plus a sheet.** The rail shows at most one row per kind, so the dock's
+  height no longer depends on the count; the sheet (`Alt+Q`) has the room. Steering and follow-up are told
+  apart three ways — a `now`/`then` gutter, order with a ruled divider, and a solid vs dashed edge — because
+  colour is never the only carrier.
+- **A run of internal work is one activity group.** Thinking and tool calls between two spans of prose collapse
+  into one disclosure with a ledger inside, instead of a bar per step under a repeated `Assistant` heading.
+- **The trace is a panel tab**, not a strip between the transcript and the composer. Rows carry an index and an
+  identifier that survives truncation; the detail pane has a fixed height the reader can drag, so traversing
+  calls no longer resizes it; and the list is ordered by a control rather than by position.
+- **The rail ranks instead of listing facts.** Selection is distinguishable from hover, New session is no
+  longer the brightest surface in the window, and rows carry only what changes a decision.
+- The README leads with what it does and who it is for, states its requirements, and puts Quick start above
+  the explanation. The architecture diagram is now an SVG that follows the reader's theme and shows the
+  sandboxes as separate frames; the nine principles moved to [docs/PRINCIPLES.md](docs/PRINCIPLES.md).
+
 ### Fixed
 
 - The model picker no longer shows a standing note about when a change applies — it was true and unhelpful, and
@@ -50,12 +82,15 @@ newer orchestrator has, and vice versa.
 - Choosing a model the first time shows the whole list instead of one placeholder entry. A native `<select>`
   builds its popup at mousedown and never re-renders it, so fetching then produced an empty list and the
   catalogue landed in the closed control; the picker now asks first and opens once there is something to show.
-
-### Changed
-
-- The README leads with what it does and who it is for, states its requirements, and puts Quick start above
-  the explanation. The architecture diagram is now an SVG that follows the reader's theme and shows the
-  sandboxes as separate frames; the nine principles moved to [docs/PRINCIPLES.md](docs/PRINCIPLES.md).
+- A window narrower than the rail's breakpoint had no way to reach the session list at all. The workspace track
+  could not shrink below its content, so the transcript was pushed off-screen and the narrow rules never
+  applied; the rail is a drawer now, and the track is `minmax(0, 1fr)`.
+- `Jump to latest` was drawn above the band reserved for it, so it floated over the last paragraph and the text
+  wrapped around it.
+- The composer's selected segment used `var(--accent-ink)`, a token nothing declared — about 2.4:1. Anything
+  that sets a colour to an undefined token is now a test failure.
+- A partially known queue discarded its known messages: the flag was all-or-nothing, so one message out of
+  three rendered nothing.
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 

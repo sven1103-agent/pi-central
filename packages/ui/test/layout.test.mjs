@@ -48,11 +48,12 @@ function rule(selector) {
 test("the prose is CAPPED, which is the readability limit that matters", () => {
   const measure = rule(".measure");
   assert.ok(measure, ".measure must have a rule");
-  // The cap is now the READER's token (#134), defaulting to 72ch. Asserting the literal would fail on the
-  // feature that makes it configurable — the property is "a cap in ch", not "the number 72".
+  // The cap is the READER's token (#134). Asserting the literal would fail on the feature that makes it
+  // configurable — the property is "a cap in ch", not a specific number. The default's VALUE is asserted in
+  // `reading.test.ts`, where the setting lives.
   assert.match(measure, /max-width:\s*var\(--reading-measure\)/, "the reader's measure token");
   const root = /:root\s*\{([\s\S]*?)\n\}/m.exec(css)?.[1] ?? "";
-  assert.match(root, /--reading-measure:\s*72ch/, "…which defaults to the 72ch that shipped");
+  assert.match(root, /--reading-measure:\s*\d+ch/, "…which has a numeric default in the stylesheet");
 });
 
 test("the prose is NOT centred", () => {
@@ -74,18 +75,172 @@ test("the composer spans the column instead of being individually centred", () =
   assert.ok(!/align-items:\s*stretch/.test(composer), "…and the patch for it is gone too, with the cap");
 });
 
-test("the send button does not shrink below its label", () => {
-  // Kept from #92, with a corrected reason: a flex item defaults to `flex: 0 1 auto` and could never grow,
-  // so this only prevents SHRINKING. It is harmless and mildly useful on a narrow window — it did not fix
-  // "cumbersome to hit", which was the composer spanning 1900px.
-  const button = rule(".composer-row .btn-send");
-  assert.ok(button, "the send button needs a rule");
-  assert.match(button, /flex:\s*none/, "`0 0 auto`: no shrinking, which is all this ever did");
+/*
+ * "The send button does not shrink below its label" lived here. The button is gone — Enter submits — so the rule it
+ * guarded no longer exists, and a `skip` would have been a guard that silently stopped guarding. The DECISION (no
+ * button, Enter sends) is asserted in `components.test.mjs`, where the composer's markup is readable.
+ */
+
+test("the transcript keeps its own horizontal padding, and centres ONE lane", () => {
+  /*
+   * Two properties, and the second is a deliberate reversal of #92 with a different mechanism.
+   *
+   * #92 centred the transcript by putting `margin-inline: auto` on each CHILD. A tool marker is narrower than a
+   * paragraph, so each child was centred on its own width, the centres disagreed, and the column visibly flickered
+   * as tools ran. It was reverted, and the note in `.transcript` says centring is "the thing that failed".
+   *
+   * What actually failed was per-child centring. The review asked twice for a centred column, so it is centred ONCE,
+   * on a single lane wrapper that every entry fills: there is exactly one centre, so nothing can disagree about it.
+   * That is the property asserted here — one lane, one auto margin — rather than the presence or absence of centring.
+   */
+  // Read the BASE rule directly: `rule()` returns the LAST match, and the container-query override also sets
+  // `.transcript`, so the helper handed back `grid-row: 2`.
+  const source = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const transcript = /(?:^|\n)\.transcript\s*\{([^}]*)\}/.exec(source)?.[1] ?? "";
+  assert.ok(transcript, ".transcript must have a rule");
+  assert.match(
+    transcript,
+    /padding:\s*var\(--sp-4\) 18px var\(--sp-4\) 18px/,
+    `18px on both sides, so the scrollbar sits at the column's edge; got: ${transcript}`,
+  );
+
+  const lane = rule(".transcript-lane");
+  assert.ok(lane, ".transcript-lane must exist — it is the one thing that is centred");
+  assert.match(lane, /margin-inline:\s*auto/, "the lane is centred");
+  assert.match(lane, /max-width:\s*var\(--reading-measure\)/, "…at the reader's measure, like the prose and composer");
+
+  // The guard that makes this safe: nothing else in the transcript may centre itself.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const centred = [...css.matchAll(/([^{}]+)\{([^}]*margin-inline:\s*auto[^}]*)\}/g)]
+    .map((m) => m[1].trim())
+    .filter((selector) => selector.includes("turn") || selector.includes("measure") || selector.includes("activity"));
+  assert.deepEqual(
+    centred,
+    [],
+    `per-child centring is #92's defect: a narrower child gets a different centre. Found: ${centred.join(", ")}`,
+  );
+});
+test("the companion sits to the RIGHT of the prose, and the pair is centred", () => {
+  /*
+   * Two properties, and the first was wrong twice.
+   *
+   * The companion is the first child in the DOM, which is correct for reading and tab order — a screen reader should
+   * meet the session's identity before its conversation. In a flex ROW that put it on the LEFT, so the layout was
+   * `[companion][conversation]` (`img_32.png`) while every description of the design, and the review that asked for
+   * it, says the box is to the right of the prose.
+   *
+   * `order` is the one tool that separates visual order from source order, and this is a legitimate use: both orders
+   * are correct, they simply differ. The guard is that the swap exists in the row form and is neutralised when the
+   * layout stacks, because there the companion must be on top.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const rowOrder = /\.transcript-wrap\.has-header \.transcript-main\s*\{\s*order:\s*(\d+)/.exec(css)?.[1];
+  const boxOrder = /\.transcript-wrap\.has-header \.transcript-header\s*\{\s*order:\s*(\d+)/.exec(css)?.[1];
+  assert.ok(rowOrder !== undefined && boxOrder !== undefined, "both boxes must declare their visual order");
+  assert.ok(
+    Number(boxOrder) > Number(rowOrder),
+    `the companion must come after the prose visually, got main=${rowOrder} header=${boxOrder}`,
+  );
+
+  const pair = /\.transcript-wrap\.has-header\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(pair, /justify-content:\s*center/, "the pair is centred as a unit");
+
+  // Stacked, the swap must be neutralised or the companion would be reordered below the conversation it labels.
+  const stacked = /@container transcript[^{]*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+  assert.match(stacked, /order:\s*0/, "the visual-order swap is row-only");
 });
 
-test("the transcript keeps its own horizontal padding", () => {
-  // Independent of the centring, and the only thing keeping text off the edges on a narrow window.
-  const transcript = rule(".transcript");
-  assert.ok(transcript, ".transcript must have a rule");
-  assert.match(transcript, /padding:\s*var\(--sp-4\) 18px/, "horizontal breathing room");
+test("the composer's chrome shares the field's left edge, and its gap does not move with focus", () => {
+  /*
+   * A reviewer's recommendation, and it fixes four findings at once.
+   *
+   * The follow toggle was a pill ABOVE the field. It straddled the focus ring — so the strongest "this is focused" signal
+   * was cut by a chip lying on it — and because the ring is drawn OUTSIDE the border, the gap between the pill and the
+   * text changed with focus (`img_40` vs `img_41`). The chrome appeared to shift when you clicked into the field.
+   *
+   * It is now a row INSIDE the composer's boundary, sharing the field's left edge, with a `margin-top` measured from the
+   * field so nothing can move.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const chrome = /(?:^|\n)\.composer-chrome\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.ok(chrome, ".composer-chrome must exist — the hint and the toggle live in one row");
+  assert.match(chrome, /display:\s*flex/);
+  // No horizontal padding: the row must start where the field does, or the left edges stagger again.
+  assert.ok(!/padding(-left)?:\s*[^;]*\d/.test(chrome), "the row adds no horizontal inset of its own");
+  assert.match(chrome, /margin-top:\s*var\(--sp-2\)/, "a fixed gap below the field, measured from the border");
+
+  // The toggle is a SWITCH now, not a pill whose only difference is a word.
+  const toggle = /(?:^|\n)\.follow-toggle\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.ok(toggle, ".follow-toggle must have a base rule — the contrast audit holds every alone-used class to it");
+  assert.match(toggle, /background:\s*none/, "it declares its own face");
+  assert.match(toggle, /font:\s*inherit/);
+  const track = /\.follow-toggle-track\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.ok(track, "the switch needs a track, or the state is a word only");
+  const dot = /\.follow-toggle-dot\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(dot, /transition:/, "the dot moves, which is what makes it a switch rather than a bullet");
+
+  // And the toggle must no longer be rendered above the field.
+  const transcript = readFileSync(new URL("../src/components/Transcript.tsx", import.meta.url), "utf8");
+  assert.ok(!/transcript-tools/.test(transcript), "the floating row above the field is gone");
+  assert.match(transcript, /composer-dock">\{footer\}/, "the composer owns the whole foot now");
+});
+
+test("the prompt field holds three lines before it scrolls", () => {
+  /*
+   * This number was argued both ways and needs a guard, because a plausible review note can always be written for either
+   * side.
+   *
+   * `min-height` was briefly floored at ONE line, following a note that a single-line draft sat at the top of a tall box
+   * and looked bottom-heavy. That traded the empty space for a worse problem: a prompt field showing one line cannot be
+   * reviewed before sending, and every prompt then scrolls.
+   *
+   * Three lines is a REQUIREMENT of this app — it is the size of prompt it is for, a sentence or two of instruction
+   * rather than a chat message. Asserted as arithmetic on `1.5em * 3`, so it holds at any reading size rather than at one
+   * font, and a shrink to `1.5em` fails here with the reason attached.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const field = /\.composer \.composer-input,\s*\n?\.composer textarea\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.ok(field, "the composer field must have a rule");
+  /*
+   * A FIXED height, not a floor, and that distinction is the whole point.
+   *
+   * The number has been argued both ways. Floored at one line, a prompt could not be reviewed before sending. Floored at
+   * three AND allowed to grow (`field-sizing: content`), the composer pushed itself up into the transcript as the reader
+   * typed — the dock's height became a function of the draft, which is the same class of defect as the queue
+   * enumeration: the canvas moving because of something typed into the box at its foot.
+   *
+   * So: three lines exactly, and a longer prompt scrolls INSIDE the field.
+   */
+  assert.match(
+    field,
+    /height:\s*calc\(1\.5em \* 3/,
+    `the field's height must be fixed at three lines; got ${/height:[^;]*/.exec(field)?.[0] ?? "none"}`,
+  );
+  assert.ok(
+    !/field-sizing:\s*content/.test(field),
+    "the field must NOT grow with its content, or the composer rises into the transcript",
+  );
+  // The prompt needs somewhere to go, and it must not be clipped.
+  assert.match(field, /overflow-y:\s*auto/, "a long prompt scrolls inside the field");
+  // The slim overlay treatment, the same as every other scroller in the app.
+  assert.match(
+    css,
+    /\.composer textarea::-webkit-scrollbar-thumb\s*\{[^}]*--line-strong/,
+    "the field's scrollbar uses the shared slim thumb",
+  );
 });

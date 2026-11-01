@@ -26,12 +26,20 @@ import {
   serializeReadingPrefs,
 } from "../src/reading.ts";
 
-test("the defaults are exactly what shipped", () => {
-  // The acceptance criterion: a reader who touches nothing gets 15px prose and a 72ch measure, i.e. the
-  // look that was there before the setting existed.
-  assert.deepEqual(defaultReadingPrefs(), { sizePx: 15, measure: 72 });
+test("the defaults are the shipped look", () => {
+  /*
+   * The acceptance criterion: a reader who touches nothing gets the designed default, not a surprise.
+   *
+   * The measure was 72ch — the classic book measure — and was raised to 80 when the transcript gained a companion
+   * column. 72 is right for a page of prose; a transcript is dense with code, paths and tables, where wrapping is
+   * what makes it hard to scan, so a wider line reads better and the space beside it is no longer empty.
+   *
+   * The assertion names the CURRENT number rather than a variable, because "the default is X" is the claim; the
+   * range and clamping tests below cover the behaviour of the setting itself.
+   */
+  assert.deepEqual(defaultReadingPrefs(), { sizePx: 15, measure: 80 });
   assert.equal(READING_SIZE_DEFAULT, 15);
-  assert.equal(READING_MEASURE_DEFAULT, 72);
+  assert.equal(READING_MEASURE_DEFAULT, 80);
 });
 
 test("the defaults turn into the CSS that was hard-coded before", () => {
@@ -39,7 +47,7 @@ test("the defaults turn into the CSS that was hard-coded before", () => {
   // declarations the stylesheet used to carry.
   assert.deepEqual(readingStyle(defaultReadingPrefs()), {
     "--reading-size": "15px",
-    "--reading-measure": "72ch",
+    "--reading-measure": "80ch",
   });
 });
 
@@ -85,7 +93,13 @@ test("a corrupt stored value falls back to the defaults", () => {
 
 test("a stored value is honoured, and a partial one keeps the default for the rest", () => {
   assert.deepEqual(parseReadingPrefs(JSON.stringify({ sizePx: 17, measure: 88 })), { sizePx: 17, measure: 88 });
-  assert.deepEqual(parseReadingPrefs(JSON.stringify({ sizePx: 17 })), { sizePx: 17, measure: 72 });
+  // A partial value keeps the CURRENT default for the rest — a reader who stored only a size when the default was 72
+  // gets the new default measure, which is what "the rest is my default" means. Asserted against the constant so a
+  // future change to the default does not read as a regression here.
+  assert.deepEqual(parseReadingPrefs(JSON.stringify({ sizePx: 17 })), {
+    sizePx: 17,
+    measure: READING_MEASURE_DEFAULT,
+  });
   assert.deepEqual(parseReadingPrefs(JSON.stringify({ measure: "fill" })), { sizePx: 15, measure: "fill" });
 });
 

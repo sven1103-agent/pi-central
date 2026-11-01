@@ -43,6 +43,7 @@ import {
 const MODES: { mode: PanelMode; label: string }[] = [
   { mode: "session", label: "Session" },
   { mode: "files", label: "Files" },
+  { mode: "trace", label: "Trace" },
 ];
 
 export function Panel({
