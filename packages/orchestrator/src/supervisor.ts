@@ -26,6 +26,8 @@ import { composePolicy, describe, type LaunchMode, type SessionSpec } from "./po
 import { RpcProcess, type LaunchSpec } from "./rpc.ts";
 import { retryRefusal } from "./retry.ts";
 import { checkResumable } from "./resume.ts";
+import { OpenSessionStore, type OpenSession } from "./open-sessions.ts";
+import { sessionAt } from "./registry.ts";
 import { isScratch, scratchDirFor, type Config } from "./config.ts";
 import { agentRoutingEnv } from "./env.ts";
 import type { AcceptedImage } from "./prompt-images.ts";
@@ -81,18 +83,118 @@ export interface StartFailure {
   message: string;
 }
 
+/** What a startup restore managed to reopen, and what it could not (issue #185). */
+export interface RestoreReport {
+  /** A problem with the remembered set itself (unreadable, corrupt). */
+  note?: string;
+  /** Sessions that are running again. */
+  restored: LiveSession[];
+  /** Session files that no longer exist and were dropped from the set. */
+  missingFile: string[];
+  /**
+   * Sessions that were KEPT but could not start, with the reason.
+   *
+   * The usual cause is a working directory that is not there at the moment — an unmounted volume,
+   * a worktree that will be recreated — which is temporary and must not be treated as deletion.
+   */
+  unavailable: { sessionFile: string; message: string }[];
+}
+
 export class Supervisor extends EventEmitter {
   #config: Config;
   #sessions = new Map<string, LiveSession>();
   #processes = new Map<string, RpcProcess>();
   #created = 0;
+  /**
+   * Which sessions were open, so a restart can reopen them (issue #185).
+   *
+   * Loaded eagerly rather than on first use: the startup restore reads it before any session
+   * exists, and a lazily-created store would be a second code path that only the first launch takes.
+   */
+  #open: OpenSessionStore;
+  /**
+   * Whether starting and stopping a session changes the remembered set (issue #185).
+   *
+   * Off for the one-shot CLI (`run`, `resume`), and that is a correctness requirement rather than a
+   * preference: the CLI exits immediately after stopping its session, so recording it would leave an
+   * entry the web app would faithfully reopen on its next launch — a session nobody has open, spawned
+   * behind the surprise of whoever started the orchestrator. It would also rewrite the file the
+   * running web app owns, from a second process.
+   *
+   * On for the long-running server, which is the thing a restart can lose.
+   */
+  #rememberOpenSessions: boolean;
 
-  constructor(config: Config) {
+  constructor(config: Config, options: { rememberOpenSessions?: boolean } = {}) {
     super();
     this.#config = config;
+    this.#open = new OpenSessionStore(config.stateRoot);
+    // Opt-in, so every existing caller (tests, the CLI, the verification harness) keeps its current
+    // behaviour and only the server that owns the rail writes the list. See the field's comment.
+    this.#rememberOpenSessions = options.rememberOpenSessions === true;
     // Resolved from THIS module's URL rather than configured: a configured path would be right for
     // exactly one checkout — the author's — and silently wrong everywhere else (issue #25).
     this.#installationRoot = resolveInstallationRoot();
+  }
+
+  /**
+   * Reopen the sessions that were open when this process last ran (issue #185).
+   *
+   * Called once at startup by the entry point, deliberately NOT from the constructor: restoring
+   * spawns Pi, and a constructor that spawned processes would make every test that builds a
+   * supervisor launch sandboxes (C1 — they cannot, in CI).
+   *
+   * Each entry goes through the SAME path a reader's click does — `sessionAt` for the file, then
+   * `resume` for the spawn — so restore inherits every rule already established there: the file
+   * must still be a valid Pi session, the recorded cwd must still exist (C2), and the cwd is never
+   * retargeted (ADR-0008). A second implementation of "is this resumable" is exactly the drift
+   * `registry.ts` refuses elsewhere.
+   *
+   * Three outcomes, and the difference between them is the point:
+   *
+   *   - **the file is gone** → dropped from the set. A deleted session cannot come back, and keeping
+   *     it would mean reporting the same absence on every launch forever.
+   *   - **the cwd is gone** → reported and KEPT. This is the case that must not be forgotten: a
+   *     worktree on an unmounted volume, a directory restored later in the day. Dropping it would
+   *     turn a temporary absence into permanent loss of the reader's rail.
+   *   - **it resumed** → nothing to say.
+   *
+   * Returns a summary rather than logging, so the entry point owns the wording and a test can assert
+   * the decisions without capturing stderr.
+   */
+  async restoreOpenSessions(): Promise<RestoreReport> {
+    const loaded = this.#open.load();
+    const report: RestoreReport = {
+      ...(loaded.note === undefined ? {} : { note: loaded.note }),
+      restored: [],
+      missingFile: [],
+      unavailable: [],
+    };
+
+    for (const entry of loaded.sessions) {
+      // A file that no longer parses as a session is indistinguishable from one that was deleted:
+      // `sessionAt` refuses both, and neither can be reopened.
+      const session = await sessionAt(this.#config, entry.sessionFile);
+      if (session === undefined) {
+        this.#open.forget(entry.sessionFile);
+        report.missingFile.push(entry.sessionFile);
+        continue;
+      }
+      const result = this.resume(session, { mode: entry.mode });
+      if (!result.ok) {
+        // The entry survives: `checkResumable`'s refusals include a directory that is not there at
+        // the moment — a volume that will remount — and only an explicit stop may forget a session.
+        report.unavailable.push({ sessionFile: entry.sessionFile, message: result.message });
+        continue;
+      }
+      report.restored.push(result.session);
+    }
+    return report;
+  }
+
+  /** The remembered open sessions, for diagnosis and tests. */
+  openSessions(): OpenSession[] {
+    return this.#open.list();
   }
 
   list(): LiveSession[] {
@@ -160,15 +262,22 @@ export class Supervisor extends EventEmitter {
     if (live) return { ok: true, session: live }; // one process per session file (ADR-0004)
 
     const id = `s${++this.#created}`;
-    return this.#spawn({
+    const mode = options.mode ?? "sandboxed";
+    const spawned = this.#spawn({
       id,
       cwd: readiness.cwd,
-      mode: options.mode ?? "sandboxed",
+      mode,
       // No name: the session already carries its own, and re-applying one would append a
       // redundant session_info entry to a file we did not create.
       ...(options.env ? { env: options.env } : {}),
       sessionPath: session.path,
     });
+    // Recorded HERE as well as from `#refreshState`, because reopening a session on the next launch
+    // is the whole point of #185, and a resumed session that failed to start must still be
+    // remembered — otherwise one bad spawn at startup would quietly shrink the rail on the launch
+    // after it. `resume` is the only path that knows the file synchronously.
+    if (spawned.ok && this.#rememberOpenSessions) this.#open.remember(session.path, mode);
+    return spawned;
   }
 
   #findLiveByPath(sessionPath: string): LiveSession | undefined {
@@ -380,6 +489,23 @@ export class Supervisor extends EventEmitter {
   }
 
   /**
+   * Persist a session once its FILE is known (issue #185).
+   *
+   * Called from the two places that learn it: `#refreshState` (the first `get_state` of a new
+   * session, where Pi reports the file it just created) and `retry` of a session that already had
+   * one. Recording the Pi Central handle here instead would be the "keyed by handle" mistake
+   * `roster.ts` documents: `sN` is per-process, and after a restart it addresses a different
+   * conversation.
+   *
+   * A resumed session is already known — `resume` records it synchronously — so the store's own
+   * "nothing changed, no write" check keeps this from writing on every state refresh.
+   */
+  #rememberSession(session: LiveSession): void {
+    if (!this.#rememberOpenSessions) return;
+    this.#open.remember(session.sessionFile, session.mode);
+  }
+
+  /**
    * A resumed session reopens its file (`--session <path>`); a new session is left to Pi's
    * default naming in its workspace.
    *
@@ -403,6 +529,9 @@ export class Supervisor extends EventEmitter {
       session.provider = model?.provider;
       session.thinkingLevel = state.thinkingLevel as string | undefined;
       if (typeof state.sessionFile === "string") session.sessionFile = state.sessionFile;
+      // A new session's file only exists after this first `get_state`, which is why the set is
+      // written HERE rather than at spawn (issue #185). A no-op once known.
+      this.#rememberSession(session);
       // Pi's OWN session id, which is a uuid. Distinct from `session.id`, which is Pi Central's
       // short handle. Both are needed: the handle addresses the process, the uuid identifies the
       // transcript, and showing one under the other's label is a lie about which is which.
@@ -769,13 +898,41 @@ export class Supervisor extends EventEmitter {
     if (!session || !rpc) return;
     session.state = "stopped";
     session.dialogs = [];
+    // An EXPLICIT stop is the only thing that forgets a session (issue #185). Shutdown does not —
+    // see `stopAll` — because "I am updating Pi Central" and "I am done with this conversation"
+    // are different statements, and only the second should empty the rail.
+    if (this.#rememberOpenSessions) this.#open.forget(session.sessionFile);
     this.#patch(id);
     await rpc.stop();
     this.#processes.delete(id);
   }
 
-  async stopAll(): Promise<void> {
-    await Promise.all([...this.#processes.keys()].map((id) => this.stop(id)));
+  /**
+   * Stop every session, WITHOUT forgetting them (issue #185).
+   *
+   * This is the shutdown path (Ctrl-C, SIGTERM), and the distinction is the whole feature: the next
+   * launch reopens what was open. `forget` exists for the one caller that really means "empty the
+   * rail" — an explicit stop.
+   */
+  async stopAll(options: { forget?: boolean } = {}): Promise<void> {
+    const ids = [...this.#processes.keys()];
+    if (options.forget === true) {
+      await Promise.all(ids.map((id) => this.stop(id)));
+      return;
+    }
+    // Stop the processes directly rather than through `stop`, whose contract includes forgetting.
+    await Promise.all(
+      ids.map(async (id) => {
+        const session = this.#sessions.get(id);
+        const rpc = this.#processes.get(id);
+        if (!session || !rpc) return;
+        session.state = "stopped";
+        session.dialogs = [];
+        this.#patch(id);
+        await rpc.stop();
+        this.#processes.delete(id);
+      }),
+    );
   }
 
   /**
