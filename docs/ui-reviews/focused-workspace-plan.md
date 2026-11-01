@@ -1,8 +1,8 @@
 # Pi Central — focused workspace implementation plan
 
 **Status:** Proposed; no implementation is included in this document.
-**Baseline:** Pi Central 0.5.0 screenshots and the current checkout inspected during planning. The checkout may contain fixes newer than the screenshots.
-**Inputs:** [UI review](pi-central-0.5.0-review.md), [overall layout](../../img_17.png), [tool/thinking sequence](../../img_18.png).
+**Baseline:** the screenshots and current checkout inspected during planning. The checkout may contain fixes newer than the screenshots.
+**Inputs:** [UI review](focused-workspace-review.md), [overall layout](../../img_17.png), [tool/thinking sequence](../../img_18.png).
 **Scope:** A staged frontend refactor within `packages/ui/`, not a server, protocol, or session-engine rewrite.
 
 ## 1. Outcome and governing decisions
