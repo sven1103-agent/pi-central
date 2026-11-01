@@ -290,6 +290,36 @@ export interface InstallFacts {
    * this codebase avoids: everything the UI shows comes from an event (`store.ts`).
    */
   protocol: number;
+  /**
+   * The identity of the UI bundle this orchestrator is SERVING (issue #184).
+   *
+   * Optional, and **a new optional field is deliberately NOT a protocol-version change** — the same
+   * convention `install` itself follows. An older orchestrator simply does not send it, and the UI
+   * treats absence as "not reported", never as "different".
+   *
+   * What it is for: a page that outlives an update. An installed PWA window is focused rather than
+   * reloaded when its dock icon is clicked, so the bundle in memory can be older than the one the
+   * restarted orchestrator now serves. The page cannot discover that by looking at itself — its own
+   * stamp is the old one, and everything it can *query* answers fresh. The orchestrator is the only
+   * side that knows which bundle is on disk NOW, so it says so, and the UI compares that against the
+   * identity it was loaded from. `undefined` when no UI is served (`--no-ui`).
+   */
+  ui?: ServedUiIdentity | undefined;
+}
+
+/**
+ * Which bundle the orchestrator would serve to a fresh load.
+ *
+ * `entry` is the fingerprinted entry chunk named in `index.html` (`assets/index-<hash>.js`): its
+ * name changes with its content, so two different builds can never share it. A page can read its
+ * OWN entry from the document it was loaded from and compare — equal means the page is current,
+ * different means it is stale, and neither answer can be produced by asking the page itself.
+ */
+export interface ServedUiIdentity {
+  /** The fingerprinted entry-bundle path, e.g. `assets/index-D8opqHSQ.js`. */
+  entry: string;
+  /** When the served `index.html` was written (its mtime), ISO-formatted. */
+  builtAt: string;
 }
 
 /**

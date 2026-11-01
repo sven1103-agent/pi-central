@@ -12,6 +12,28 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
+### Fixed
+
+- **An installed Pi Central now picks up an update by itself** ([#184]). The cache was never the problem:
+  `static-ui.ts` serves `index.html` `no-cache` and the worker has cached only fingerprinted `/assets/` since 0.6.1.
+  The PWA window was — clicking the dock icon **focuses** an installed window rather than reloading it, so the
+  previous release's bundle stayed in memory while the new orchestrator came up behind it. When the protocol had
+  changed, the `hello` skew check was right and its advice — *reload the UI* — named an action a standalone window
+  has no affordance for.
+- The orchestrator now reports **which bundle it is serving** (`InstallFacts.ui`: the fingerprinted entry chunk
+  read from the `index.html` on disk), and the page compares that against the entry it was loaded from. Different
+  means stale, and the page reloads itself. This is the follow-up #178 named in its "Not in this PR" section.
+- The comparison is silent when either side has nothing to report — an older orchestrator sends no `ui`, a dev
+  page has no fingerprinted entry, `--no-ui` serves nothing. Only two *present and different* entries are evidence,
+  because "not reported" and "different" must not look alike.
+- Reloading is one-shot per target identity, marked in `sessionStorage`: the second verdict is a banner with a
+  real **Reload now** button and the advice that works (quit with ⌘Q; restart the older half if the halves still
+  disagree). Without the guard, a new page against an old orchestrator — the dev-layout hazard — would loop.
+- A protocol skew takes the same path instead of the dismissible error strip, because a message with no available
+  action is not a recovery.
+
+[#184]: https://github.com/sven1103-agent/pi-central/issues/184
+
 ## [0.7.0] — 2026-11-01
 
 Images, where the conversation puts them. A picture a tool read, a screenshot you paste, and a file your own prompt
