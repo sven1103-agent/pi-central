@@ -58,6 +58,24 @@ export class RpcProcess extends EventEmitter {
   #stderr = "";
   #stopping = false;
   #exited = false;
+  /**
+   * True when the process never started at all (`spawn` failed).
+   *
+   * Node's contract for a failed spawn is `error` and **no `exit`**. Every wait below is on
+   * `exit`, so treating that case as "still running" made `stop()` wait out its timers for a
+   * process that does not exist — and because those timers are `unref`'d, the event loop could
+   * drain first and take the caller's promise with it.
+   *
+   * Found through the startup restore (issue #185): a fleet of restored sessions on a host where
+   * the binary is missing (C10 — `safehouse` is macOS-only) is a fleet of failed spawns, and
+   * shutdown then never finished. It was always reachable by hand; restoring made it the normal
+   * path.
+   *
+   * `child.pid === undefined` is the precise signal, which is why it is the condition rather than
+   * "any `error` event": a runtime error on a started process still has a pid, and it still gets
+   * its `exit`.
+   */
+  #spawnFailed = false;
 
   constructor(launch: LaunchSpec) {
     super();
@@ -85,20 +103,33 @@ export class RpcProcess extends EventEmitter {
       this.#stderr += text;
       this.emit("stderr", text);
     });
-    child.on("error", (error) => this.emit("failed", error));
+    child.on("error", (error) => {
+      if (child.pid === undefined) {
+        this.#spawnFailed = true;
+        // A process that never existed can never answer. Reject now rather than leaving each
+        // command to its own timeout (20–60s), which is what made a failed restore look hung.
+        this.#rejectPending(`could not start ${this.launch.command}: ${error.message}`);
+      }
+      this.emit("failed", error);
+    });
     child.on("exit", (code, signal) => {
       this.#exited = true;
       // Any record still buffered at exit is real; flush before reporting.
       for (const record of this.#decoder.flush()) this.#dispatch(record);
-      for (const [, pending] of this.#pending) {
-        clearTimeout(pending.timer);
-        pending.reject(new Error(`pi exited before responding (code=${code ?? "-"}, signal=${signal ?? "-"})`));
-      }
-      this.#pending.clear();
+      this.#rejectPending(`pi exited before responding (code=${code ?? "-"}, signal=${signal ?? "-"})`);
       this.emit("exit", { code, signal, stderr: this.stderrTail } satisfies ExitInfo);
     });
 
     return this;
+  }
+
+  /** Reject every in-flight command with one reason, clearing their timers. */
+  #rejectPending(reason: string): void {
+    for (const [, pending] of this.#pending) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(reason));
+    }
+    this.#pending.clear();
   }
 
   #dispatch(record: PiRecord): void {
@@ -166,7 +197,7 @@ export class RpcProcess extends EventEmitter {
     if (this.#stopping) return;
     this.#stopping = true;
     const child = this.#child;
-    if (!child || this.#exited) return;
+    if (!child || this.#exited || this.#spawnFailed) return;
 
     try {
       child.stdin.end();
@@ -196,14 +227,31 @@ export class RpcProcess extends EventEmitter {
 
   #waitForExit(ms: number): Promise<boolean> {
     const child = this.#child;
-    if (!child || this.#exited) return Promise.resolve(true);
+    if (!child || this.#exited || this.#spawnFailed) return Promise.resolve(true);
     return new Promise((resolve) => {
-      const timer = setTimeout(() => resolve(this.#exited), ms);
-      timer.unref?.();
-      child.once("exit", () => {
+      /*
+       * Finish on `failed` as well as on `exit`, and the `failed` path is not a nicety.
+       *
+       * A spawn failure is reported asynchronously, so `stop()` can be called in the window
+       * BEFORE `#spawnFailed` is set — the restore path does exactly that — and then this waits
+       * for an `exit` that will never come. The timer below is `unref`'d so shutdown cannot be
+       * held open by a dying process, which means that window ends with the event loop drained
+       * and the caller's promise never settled (CI: "Promise resolution is still pending").
+       *
+       * Resolving on the failure closes it: once Node has told us the process does not exist, there
+       * is nothing left to wait for.
+       */
+      const settle = (): void => {
         clearTimeout(timer);
         resolve(true);
-      });
+      };
+      const timer = setTimeout(() => resolve(this.#exited || this.#spawnFailed), ms);
+      timer.unref?.();
+      child.once("exit", settle);
+      // `failed` is emitted by THIS object, not by the child — listening on the child was the first
+      // attempt and it never fired, so the race stayed. Nothing about that is obvious from either
+      // emitter's name, which is why the test asserts the timing rather than the wiring.
+      this.once("failed", settle);
     });
   }
 
@@ -213,6 +261,6 @@ export class RpcProcess extends EventEmitter {
 
   get running(): boolean {
     const child = this.#child;
-    return child !== null && !this.#exited;
+    return child !== null && !this.#exited && !this.#spawnFailed;
   }
 }

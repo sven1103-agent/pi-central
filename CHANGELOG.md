@@ -51,6 +51,14 @@ They are kept because each one is the reason a constraint or an invariant test e
 - A session file is keyed by its **canonical** path. Found by this change's own suite: `sessionAt` resolves
   through `realpathSync`, so the same conversation arrived under two spellings and the list held it twice — which
   on the next launch means two processes appending to one file (ADR-0004).
+- **A process that never started no longer makes shutdown wait forever.** Node's contract for a failed `spawn` is
+  `error` and no `exit`, and every wait in `RpcProcess.stop()` is on `exit`; because those timers are `unref`'d, the
+  event loop could drain first and leave the caller's promise unsettled. Reachable by hand at any time (a host
+  without the binary, C10); the startup restore above made it the normal path, since a restored fleet on such a host
+  is a fleet of failed spawns. A spawn failure is reported ASYNCHRONOUSLY, so `stop()` can also be called in the
+  window before it arrives — the restore path does exactly that — and then it waits for an `exit` that will never
+  come. Both windows are closed: in-flight commands reject with the spawn error instead of waiting out their
+  deadlines, teardown returns immediately, and `#waitForExit` settles on the failure as well as on the exit.
 
 [#184]: https://github.com/sven1103-agent/pi-central/issues/184
 [#185]: https://github.com/sven1103-agent/pi-central/issues/185
