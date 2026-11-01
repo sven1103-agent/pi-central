@@ -22,6 +22,12 @@ Labels carry the axes that matter: `kind/*` (slice, bug, decision), `area/*`, `v
 `priority/*`. They are defined in `scripts/setup-github.mjs` so the taxonomy is reviewable rather
 than remembered.
 
+## If you are a coding agent
+
+Read [AGENTS.md](AGENTS.md) first. It covers the rules that are easy to violate without noticing —
+above all that the changelog is [a summary, not a transcript](docs/RELEASING.md#the-changelog-is-a-summary-not-a-transcript):
+one line per change, with the issue it addresses, and the reasoning in the commit message instead.
+
 ## Before you change anything
 
 Read, in this order:
