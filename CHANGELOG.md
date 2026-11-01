@@ -12,6 +12,21 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
+## [0.7.0] — 2026-11-01
+
+Images, where the conversation puts them. A picture a tool read, a screenshot you paste, and a file your own prompt
+names by path now all appear in the transcript — each in the place that matches what it is.
+
+**No protocol change.** `PROTOCOL_VERSION` stays at 4, because nothing new crosses the wire: the bytes were already
+arriving in the `transcript` frame that every client parses on connect. Rendering them costs a DOM node and a decode,
+not a transfer.
+
+The measured premise, from this machine's own session store: **447 image-bearing messages across 885 sessions, and
+every single one is a tool result** — a `read` of a PNG. None was a paste. So the placement that had to work first was
+the tool detail, not the composer; a UI that handled only pasted images would have looked correct and shown nothing.
+Separately, **181 of 5 912 user prompts name an image file by path** (`@img_6.png shows…`), which rendered as literal
+text until now.
+
 ### Added
 
 - **Images are shown in the transcript, where they belong in the conversation.** A tool that reads a
@@ -48,6 +63,15 @@ They are kept because each one is the reason a constraint or an invariant test e
   "This view cannot draw a TIFF" and "this message held no picture" are different facts, and the transcript
   does not report the second while meaning the first.
 
+### Fixed
+
+- **A turn was left half-visible when an image arrived, until the agent started working.** Following ran in a
+  per-render effect, and a render is not when an image gets its height: React writes the DOM, the browser lays out an
+  `<img>` that is still decoding — zero height — and the follow scrolled to an end that was about to move down by 12vh.
+  Nothing ran again until the first streaming delta, which is why the pane jumped to the bottom only once the assistant
+  replied. A `ResizeObserver` on the transcript lane now follows any height that arrives after paint, which covers the
+  same class for lazy images, expanding disclosures and asynchronously highlighted code.
+
 ### Tooling
 
 - `scripts/render-session-html.mjs` renders a real session's transcript to one self-contained HTML file, for review
@@ -63,12 +87,6 @@ up — see below.
 
 ### Fixed
 
-- **A turn was left half-visible when an image arrived, until the agent started working.** Following ran in a
-  per-render effect, and a render is not when an image gets its height: React writes the DOM, the browser lays out an
-  `<img>` that is still decoding — zero height — and the follow scrolled to an end that was about to move down by 12vh.
-  Nothing ran again until the first streaming delta, which is why the pane jumped to the bottom only once the assistant
-  replied. A `ResizeObserver` on the transcript lane now follows any height that arrives after paint, which covers the
-  same class for lazy images, expanding disclosures and asynchronously highlighted code.
 - **An installed Pi Central kept loading the old version after an upgrade.** The service worker cached every
   same-origin request that was not the app document, including `manifest.webmanifest` and the icons — all of which the
   server deliberately serves `no-cache` because they are not fingerprinted. It now caches only `/assets/`, the one kind
