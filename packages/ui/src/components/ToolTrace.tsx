@@ -33,6 +33,7 @@ import type { ToolExecution } from "../transcript.ts";
 import { recentTools, toolSummary } from "../transcript.ts";
 import { traceRowLabel } from "../activity.ts";
 import { TraceOrderMenu } from "./TraceOrderMenu.tsx";
+import { TranscriptImage } from "./TranscriptImage.tsx";
 import {
   clampTraceDetailHeight,
   orderTools,
@@ -434,6 +435,29 @@ export function ToolTrace({
               Close
             </button>
           </div>
+          {/*
+            IMAGES THE CALL RETURNED, above its text.
+
+            A `read` of a PNG returns `Read image file [image/png]` plus the picture, and the text line alone tells the
+            reader nothing they can act on — the whole point of the call was to LOOK. So the picture comes first here,
+            for the same reason the output text comes above the arguments: it is the evidence, and the arguments are
+            context for it.
+
+            Every one of the 447 image-bearing messages in this machine's session store is this shape, so this is the
+            placement that decides whether the feature is visible in practice.
+          */}
+          {selected.images !== undefined && selected.images.length > 0 && (
+            <div className="trace-images">
+              {selected.images.map((block, index) => (
+                <TranscriptImage
+                  key={`${selected.toolCallId}:image:${index}`}
+                  block={block}
+                  identity={`tool\u0000${selected.toolCallId}\u0000${index}`}
+                  role="tool"
+                />
+              ))}
+            </div>
+          )}
           {/*
             OUTPUT FIRST.
             

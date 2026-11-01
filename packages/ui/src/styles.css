@@ -3371,6 +3371,62 @@ select.btn { font-family: var(--sans); }
 }
 .imagepane-meta { margin: 0; font-family: var(--mono); font-size: var(--fs-xs); color: var(--dim); }
 
+/* --- An image inside a turn (transcript images) -------------------------------------------------
+
+   Three decisions, and the third is the one that keeps a conversation with forty screenshots usable.
+
+   1. `max-height: 40vh`, LOWER than the file viewer's 60vh. The file viewer has the window to itself; a turn shares
+      it with the next turn, and one pasted screenshot must not be able to fill the reading column. `object-fit:
+      contain` so the whole image is shown rather than cropped to a box that is not its shape.
+   2. The checkerboard, for the same reason as the file viewer: a PNG with transparency on this background reads as
+      a picture with holes in it.
+   3. `margin-inline: 0` and `max-width: 100%`, so the image sits on the SAME left edge as the prose above it. A
+      centred image would break the lane the whole workspace is built on (`--measure`).
+
+   `contain` on the figure is deliberately absent: `content-visibility` and friends would make `scrollHeight` an
+   estimate, and the transcript's follow-the-tail arithmetic reads it directly (`scroll.ts`). */
+.turn-image { margin: var(--sp-2) 0 0 0; }
+.turn-image-img {
+  display: block;
+  max-width: 100%;
+  max-height: 40vh;
+  object-fit: contain;
+  border-radius: var(--r-2);
+  background-color: var(--panel-2);
+  background-image:
+    linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%),
+    linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+.turn-image-meta {
+  margin: 4px 0 0 0;
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+}
+/*
+ * A refusal is a NOTE, not a placeholder box: the words carry the whole message, so there is nothing to frame. It
+ * gets the quarantine gutter the transcript's legend promises for anything that came from the session rather than
+ * from the assistant — the same signal a tool result carries, for the same reason.
+ */
+.turn-image.is-refused {
+  border-left: 3px solid var(--quarantine);
+  padding-left: var(--sp-2);
+}
+.turn-image-note { margin: 0; font-size: var(--fs-xs); color: var(--dim); }
+
+/*
+ * Images a tool call returned, in the trace panel's detail.
+ *
+ * A column with a gap, so two images from one call (a before/after pair) are told apart as two pictures rather than read
+ * as one collage. The panel is narrow, so `max-height` here is SMALLER than a turn's: the detail pane's job is to show
+ * that the picture exists and let the reader recognise it, and a full-height screenshot in a 300px column would put the
+ * output text — which is what the pane is actually scrollable for — below an unscrollable image.
+ */
+.trace-images { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.trace-images .turn-image-img { max-height: 30vh; }
+
 /* --- The Reading preference (issue #134) -------------------------------------------------------
 
    Two sliders and a sample. The sample uses the reader's own tokens, so the choice is judged where it is

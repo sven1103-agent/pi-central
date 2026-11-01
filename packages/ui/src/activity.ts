@@ -43,7 +43,7 @@
  * prose to tidy the layout would be a false statement about what happened.
  */
 
-import type { TextBlock, ToolExecution, Transcript, TranscriptMessage } from "./transcript.ts";
+import type { ImageBlock, TextBlock, ToolExecution, Transcript, TranscriptMessage } from "./transcript.ts";
 
 /** One item inside an activity group. A REFERENCE into the transcript, never a copy of its content. */
 export type ActivityPart =
@@ -77,6 +77,18 @@ export type PlannedEntry =
        * this entry from repainting when a thinking block above it streams.
        */
       textIndexes: readonly number[];
+      /**
+       * Which blocks of `message` are IMAGES to render, in order.
+       *
+       * A second list rather than one list of `{ kind, index }`, because the two render through entirely
+       * different components and the common case for each is "all of them" — `messageTexts` stays a one-line
+       * map, and the image path stays explicit about the fact that it needs an identity key per block.
+       *
+       * Before this existed, an image-only message produced NO entry at all: `isVisibleText` rejected every
+       * block it had, `spans` stayed empty, and `flushMessage` emitted nothing. A pasted screenshot was therefore
+       * invisible in the one place it mattered most — the turn the reader had just sent.
+       */
+      imageIndexes: readonly number[];
     }
   | {
       kind: "activity";
@@ -93,6 +105,17 @@ export type PlannedEntry =
  */
 function isVisibleText(block: { kind: string; text?: string }): boolean {
   return block.kind === "text" && (block.text ?? "").trim().length > 0;
+}
+
+/**
+ * Is this block an image a reader should see?
+ *
+ * Deliberately `true` for a REFUSED image as well: "this is an unsupported TIFF" is information, and dropping the
+ * block would put the transcript back where it started — an invisible part of a message. The refusal is stated by the
+ * component, not by silence here.
+ */
+function isVisibleImage(block: { kind: string }): boolean {
+  return block.kind === "image";
 }
 
 /**
@@ -145,12 +168,25 @@ export function planEntries(transcript: Transcript): PlannedEntry[] {
 
   transcript.messages.forEach((message, index) => {
     let spans: number[] = [];
+    let images: number[] = [];
 
     const flushMessage = () => {
-      if (spans.length === 0) return;
-      const first = spans[0]!;
-      entries.push({ kind: "message", key: `message:${message.id}:${first}`, message, textIndexes: spans });
+      if (spans.length === 0 && images.length === 0) return;
+      /*
+       * The key names the entry's FIRST block, whichever kind it is — so an entry keeps its identity when an image
+       * arrives beside prose it already had. Deriving it from `spans[0]` alone would have re-keyed (and so remounted)
+       * the whole turn the moment its first image landed, which during a run is a flicker of every image inside it.
+       */
+      const first = spans[0] ?? images[0] ?? 0;
+      entries.push({
+        kind: "message",
+        key: `message:${message.id}:${first}`,
+        message,
+        textIndexes: spans,
+        imageIndexes: images,
+      });
       spans = [];
+      images = [];
     };
 
     message.blocks.forEach((block, blockIndex) => {
@@ -166,6 +202,22 @@ export function planEntries(transcript: Transcript): PlannedEntry[] {
           text: block.text,
           complete: block.complete,
         });
+        return;
+      }
+
+      /*
+       * An IMAGE is content, not work.
+       *
+       * It therefore flushes pending activity exactly as a text span does — a screenshot that arrived after three
+       * tool calls belongs BELOW them, and putting it above would claim the agent had it before it ran them. The
+       * activity group's key is its first part, so flushing (rather than merging) is what keeps that order honest.
+       */
+      if (isVisibleImage(block)) {
+        if (pending.length > 0) {
+          flushMessage();
+          flushActivity();
+        }
+        images.push(blockIndex);
         return;
       }
 
@@ -221,6 +273,24 @@ export function messageTexts(message: TranscriptMessage, textIndexes: readonly n
     .map((index) => message.blocks[index])
     .map((block) => (block?.kind === "text" ? block.text : ""))
     .filter((text) => text.length > 0);
+}
+
+/**
+ * Resolve a message's image indexes to their blocks, keeping the recorded order and the ADDRESS.
+ *
+ * The index is returned alongside the block because it is half of the blob-URL identity (`imageKey`): a message may
+ * hold two images, and they are two different pictures that must not share a cache entry.
+ */
+export function messageImages(
+  message: TranscriptMessage,
+  imageIndexes: readonly number[],
+): { index: number; block: ImageBlock }[] {
+  const found: { index: number; block: ImageBlock }[] = [];
+  for (const index of imageIndexes) {
+    const block = message.blocks[index];
+    if (block?.kind === "image") found.push({ index, block });
+  }
+  return found;
 }
 
 /**

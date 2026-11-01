@@ -12,6 +12,31 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
+### Added
+
+- **Images are shown in the transcript, where they belong in the conversation.** A tool that reads a
+  picture (`read` on a PNG) now shows it above its output in the tool detail, and an image in a message
+  is drawn inside the turn it belongs to. Before this the blocks were dropped on purpose, which was right
+  while nothing could draw one and wrong once a screenshot could reach a session: an image-only message
+  planned **no entry at all**, so the turn disappeared. Measured across 885 sessions on this machine, 447
+  messages carry an image and **all of them are tool results** — so the tool path, not the composer, is
+  the one that had to work.
+- No extra transfer: Pi's `get_messages` already carries the base64 in the `transcript` frame every
+  client parses on connect. What changed is that the block survives the parse.
+
+### Changed
+
+- A message whose only content is an image now produces a turn. Its blob URL is identified by
+  `(session, message, block)` rather than by the planned entry, because the transcript re-plans on every
+  streaming record — a URL rebuilt per render would be revoked and recreated dozens of times a second for
+  an image that is not changing.
+- `Turn` in the transcript is memoized by an explicit comparison. Its props included a freshly allocated
+  entry object, so `memo` had never once short-circuited; that was invisible for headings and text, and
+  is not invisible for images.
+- An image type outside PNG/JPEG/GIF/WebP, or a payload with no data, is **stated** rather than omitted.
+  "This view cannot draw a TIFF" and "this message held no picture" are different facts, and the transcript
+  does not report the second while meaning the first.
+
 ## [0.6.1] — 2026-11-01
 
 A PWA fix. If you installed Pi Central to the dock before this version, **it will need one clean start** to pick it

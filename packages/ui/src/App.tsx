@@ -1110,6 +1110,7 @@ function SessionView({
         autoFollow={autoFollow}
         transcript={transcript}
         busy={busy}
+        sessionId={session.id}
         sessionLabel={displayName(session)}
         expectedCount={session.messageCount}
         showMarkers={showMarkers}

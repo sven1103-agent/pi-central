@@ -23,8 +23,10 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Transcript as TranscriptModel } from "../transcript.ts";
 import type { TranscriptMessage } from "../transcript.ts";
-import { messageTexts, planEntries, showActivity, type PlannedEntry } from "../activity.ts";
+import { imageKey } from "../transcript.ts";
+import { messageImages, messageTexts, planEntries, showActivity, type PlannedEntry } from "../activity.ts";
 import { MessageBody } from "./MessageBody.tsx";
+import { TranscriptImage } from "./TranscriptImage.tsx";
 import { ActivityGroup } from "./ActivityGroup.tsx";
 import {
   decideOnSessionChange,
@@ -76,6 +78,7 @@ export function TranscriptView({
   onScrollMemory,
   transcript,
   busy,
+  sessionId,
   sessionLabel,
   followToken = 0,
   autoFollow = true,
@@ -103,6 +106,14 @@ export function TranscriptView({
   onScrollMemory?: (state: SessionScroll) => void;
   transcript: TranscriptModel;
   busy: boolean;
+  /**
+   * Which session this transcript belongs to.
+   *
+   * Required rather than optional, because it is half of an image's identity (`imageKey`) and a default would have to
+   * be invented. The reason it cannot be inferred from the transcript is that message ids are minted per transcript by
+   * counting — every session has an `m0` — so a cache keyed without it would show one session another's screenshot.
+   */
+  sessionId: string;
   sessionLabel: string;
   /**
    * Changes when the reader sends a prompt, which re-arms following (#86).
@@ -487,7 +498,7 @@ export function TranscriptView({
                 />
               ) : null
             ) : (
-              <Turn key={entry.key} entry={entry} />
+              <Turn key={entry.key} entry={entry} sessionId={sessionId} />
             ),
           )}
         </>
@@ -581,10 +592,30 @@ export function TranscriptView({
  *
  * Without this, a delta in the LAST message re-rendered every turn above it — with streaming that is dozens of
  * times a second, over the whole conversation. `message` is replaced only for the message being written to, so
- * reference equality is the right comparison. There is no custom `areEqual`: the props are the message and
- * nothing else, and a hand-written comparison is how memoization silently stops working.
+ * reference equality is the right comparison.
+ *
+ * ## Why the comparison is now written down, which it deliberately was not
+ *
+ * The note above used to say *"there is no custom `areEqual`: the props are the message and nothing else, and a
+ * hand-written comparison is how memoization silently stops working"*. That was true when it was written and it
+ * stopped being true when `planEntries` grew a second block list: the entry object is allocated FRESH on every
+ * re-plan (`activity.ts`), and `Transcript.tsx` re-plans whenever the transcript object changes — during a run,
+ * once per streaming record. So `{ entry }` was reference-unequal every time and `memo` never once short-circuited.
+ *
+ * That was invisible while a turn was a heading plus some text, and it is not invisible with an image in it: a child
+ * that rebuilt its blob URL per render would revoke and recreate it dozens of times a second, and every
+ * `loading="lazy"` decode in the conversation would be restarted. So the comparison is written down, and it compares
+ * the things that actually change what is drawn: the message (for prose), and the two index lists (for which blocks
+ * this entry owns).
  */
-const Turn = memo(function Turn({ entry }: { entry: Extract<PlannedEntry, { kind: "message" }> }) {
+const Turn = memo(function Turn({
+  entry,
+  sessionId,
+}: {
+  entry: Extract<PlannedEntry, { kind: "message" }>;
+  /** Namespaces the blob-URL identity: message ids are minted per transcript, so `m0` exists in every session. */
+  sessionId: string;
+}) {
   const { message } = entry;
   const label = message.role === "user" ? "You" : message.role === "assistant" ? "Assistant" : message.role;
   /*
@@ -595,10 +626,11 @@ const Turn = memo(function Turn({ entry }: { entry: Extract<PlannedEntry, { kind
    * planner, which is the only place that ordering rule is written down.
    */
   const texts = messageTexts(message, entry.textIndexes);
+  const images = messageImages(message, entry.imageIndexes);
 
   // The planner never emits an empty message entry; this keeps a heading above nothing impossible even if
   // a future caller builds one by hand.
-  if (texts.length === 0) return null;
+  if (texts.length === 0 && images.length === 0) return null;
 
   return (
     // The ROLE is a class, so the two kinds of turn can be told apart by looking (issue #88). Before
@@ -626,6 +658,49 @@ const Turn = memo(function Turn({ entry }: { entry: Extract<PlannedEntry, { kind
           streaming={message.streaming && index === texts.length - 1}
         />
       ))}
+
+      {/*
+        Images, after the prose they accompany and in recorded order.
+
+        The image's identity is built from the SESSION, the message and the block index — never from the entry, which
+        is a fresh object on every re-plan. That is what lets the URL cache answer without work on a re-render.
+      */}
+      {images.map(({ index, block }) => (
+        <TranscriptImage
+          key={`${entry.key}:image:${index}`}
+          block={block}
+          identity={imageKey(sessionId, message.id, index)}
+          role={message.role}
+        />
+      ))}
     </article>
   );
-});
+}, sameTurn);
+
+/**
+ * The comparison this file used to argue against, now that the argument no longer holds.
+ *
+ * `entry.message` is the only thing whose CONTENT this component reads for prose, and it is reference-stable except
+ * for the message being streamed into — so the common case is one cheap identity check. The two index arrays are
+ * compared by length and element, because `planEntries` re-allocates them on every plan while their VALUES are
+ * almost always identical; that is exactly the case a hand-written comparison exists for.
+ *
+ * `sessionId` is compared too, because a different session means a different namespace for the same message id.
+ */
+function sameTurn(
+  previous: { entry: Extract<PlannedEntry, { kind: "message" }>; sessionId: string },
+  next: { entry: Extract<PlannedEntry, { kind: "message" }>; sessionId: string },
+): boolean {
+  if (previous.sessionId !== next.sessionId) return false;
+  if (previous.entry.message !== next.entry.message) return false;
+  return (
+    sameIndexes(previous.entry.textIndexes, next.entry.textIndexes) &&
+    sameIndexes(previous.entry.imageIndexes, next.entry.imageIndexes)
+  );
+}
+
+function sameIndexes(a: readonly number[], b: readonly number[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  return a.every((value, index) => value === b[index]);
+}

@@ -20,7 +20,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planEntries, activityStatus, activitySummary, activityTools, messageTexts, stepLabel, traceRowLabel } from "../src/activity.ts";
+import { planEntries, activityStatus, activitySummary, activityTools, messageImages, messageTexts, stepLabel, traceRowLabel } from "../src/activity.ts";
 import { emptyTranscript, type Transcript, type TranscriptMessage, type ToolExecution } from "../src/transcript.ts";
 
 function text(value: string, complete = true) {
@@ -387,4 +387,73 @@ test("a long trace row label is elided in the MIDDLE, keeping the verb and the t
 test("a trace row falls back to the tool name when there is nothing to say", () => {
   assert.equal(traceRowLabel(tool("t", 0, { toolName: "list", args: {} })), "list");
   assert.equal(traceRowLabel(tool("t", 0, { toolName: "list", args: undefined })), "list");
+});
+
+// --- Images are content, so they plan like prose -------------------------------------------------
+
+function image(id: string, type = "image/png", data = "AAAA"): TranscriptMessage["blocks"][number] {
+  return { kind: "image" as const, contentIndex: 0, type, base64: data };
+}
+
+test("an IMAGE-ONLY message plans an entry, where it used to produce nothing at all", () => {
+  /*
+   * The defect this locks down, and it is the reason the feature could not ship as a render-only change.
+   *
+   * `isVisibleText` accepted only `kind === "text"`, so a user message whose whole content was a pasted screenshot had
+   * no visible span; `spans` stayed empty, `flushMessage` returned early, and NO entry was emitted. The turn the reader
+   * had just sent was therefore missing from the conversation — an absence that reads as a fact ("they sent nothing")
+   * when the truth is "there is content here we chose not to draw".
+   */
+  const plan = planEntries(transcript([message("u1", [image("i1")])]));
+  assert.equal(plan.length, 1, "one entry, not zero");
+  const entry = plan[0];
+  assert.ok(entry?.kind === "message");
+  assert.deepEqual(entry.imageIndexes, [0]);
+  assert.deepEqual(entry.textIndexes, [], "no prose, and that is a real answer");
+  assert.deepEqual(messageImages(entry.message, entry.imageIndexes).map((found) => found.index), [0]);
+});
+
+test("text and images in one message are ONE entry naming both addresses", () => {
+  const plan = planEntries(transcript([
+    message("u1", [text("look:"), image("i1"), image("i2")]),
+  ]));
+  assert.equal(plan.length, 1);
+  const entry = plan[0];
+  assert.ok(entry?.kind === "message");
+  assert.deepEqual(entry.textIndexes, [0]);
+  assert.deepEqual(entry.imageIndexes, [1, 2]);
+  assert.equal(entry.key, "message:u1:0", "the key names the FIRST block of either kind");
+});
+
+test("an image flushes pending activity, so it stays BELOW the work that preceded it", () => {
+  /*
+   * An image is content, not work. A screenshot recorded after three tool calls belongs under them; emitting it above
+   * would state that the agent had it before it ran them, which is a claim about what happened rather than a layout
+   * preference. The group is emitted first, then the turn.
+   */
+  const plan = planEntries(transcript(
+    [message("u1", [image("i1")])],
+    [tool("t1", 0)],
+  ));
+  assert.deepEqual(
+    plan.map((entry) => entry.kind),
+    ["activity", "message"],
+    "the group comes first, then the turn holding the image",
+  );
+});
+
+test("an image does not become an activity part, even when a group is open", () => {
+  // The alternative — folding images into the ActivityPart union — would put a picture behind a disclosure and give it
+  // a thinking/tool key. It is conversation, so it stays in the message.
+  const plan = planEntries(transcript([
+    message("a1", [thinking("hmm"), image("i1")]),
+  ]));
+  assert.equal(plan.length, 2, "the thought groups, the image does not");
+  const activity = plan[0];
+  assert.ok(activity?.kind === "activity");
+  assert.deepEqual(activity.parts.map((part) => part.kind), ["thinking"], "the image is not a part");
+  const turn = plan[1];
+  assert.ok(turn?.kind === "message");
+  assert.deepEqual(turn.imageIndexes, [1], "it is the message's own block");
+  assert.deepEqual(turn.textIndexes, [], "and `shape` counts prose, so this entry reads as 0 texts");
 });
