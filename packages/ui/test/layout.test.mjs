@@ -196,3 +196,31 @@ test("the composer's chrome shares the field's left edge, and its gap does not m
   assert.ok(!/transcript-tools/.test(transcript), "the floating row above the field is gone");
   assert.match(transcript, /composer-dock">\{footer\}/, "the composer owns the whole foot now");
 });
+
+test("the prompt field holds three lines before it scrolls", () => {
+  /*
+   * This number was argued both ways and needs a guard, because a plausible review note can always be written for either
+   * side.
+   *
+   * `min-height` was briefly floored at ONE line, following a note that a single-line draft sat at the top of a tall box
+   * and looked bottom-heavy. That traded the empty space for a worse problem: a prompt field showing one line cannot be
+   * reviewed before sending, and every prompt then scrolls.
+   *
+   * Three lines is a REQUIREMENT of this app — it is the size of prompt it is for, a sentence or two of instruction
+   * rather than a chat message. Asserted as arithmetic on `1.5em * 3`, so it holds at any reading size rather than at one
+   * font, and a shrink to `1.5em` fails here with the reason attached.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const field = /\.composer \.composer-input,\s*\n?\.composer textarea\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.ok(field, "the composer field must have a rule");
+  assert.match(
+    field,
+    /min-height:\s*calc\(1\.5em \* 3/,
+    `the field must hold three lines before scrolling; got ${/min-height:[^;]*/.exec(field)?.[0] ?? "none"}`,
+  );
+  // And it grows with the content, so three lines is a floor rather than a fixed height.
+  assert.match(field, /field-sizing:\s*content/, "…and grows beyond three lines as the reader types");
+});
