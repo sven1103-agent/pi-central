@@ -797,11 +797,18 @@ button { font: inherit; color: inherit; }
 .run-bar { height: 2px; background: var(--accent); transition: width 0.3s linear; }
 .run-track {
   height: 2px;
-  /* Hung just above the block's top edge rather than taking a row of its own. */
+  /*
+   * Hung at the block's top edge rather than taking a row of its own — and spanning its FULL width.
+   *
+   * It used to be inset by `--sp-3` on both sides, which is right for a bar inside a padded row and wrong here: the
+   * companion's header has no horizontal padding, so the rule started 12px in from the title it sits above and read as a
+   * stray line (`img_36.png`). At full width it is the block's top edge, which is what stops the companion floating
+   * unattached in the transcript's canvas.
+   */
   position: absolute;
   top: 0;
-  left: var(--sp-3);
-  right: var(--sp-3);
+  left: 0;
+  right: 0;
   background: var(--line);
   border-radius: var(--r-pill);
   overflow: hidden;
@@ -2576,7 +2583,21 @@ select.btn { font-family: var(--sans); }
   flex-direction: column;
   align-items: stretch;
   gap: var(--sp-2);
-  padding: 0;
+  /*
+   * Room ABOVE the content, because the run track is drawn there.
+   *
+   * `.run-track` is absolutely positioned at `top: 0` inside this block. With `padding: 0` that put a 2px rule straight
+   * through the title's own line box — a grey bar cutting the tops of the `scratch` and `idle` pills (`img_36.png`).
+   *
+   * The bar is wanted: it reports that a run is in progress, and at rest it gives the companion a top edge so the block
+   * does not float unattached in the transcript's canvas. So the fix is space rather than removal. `--sp-3` above the
+   * first line clears a 2px rule with room to spare.
+   *
+   * NO horizontal padding, and the run track drops its own horizontal inset to match: a 2px rule inset by 12px above a
+   * title that starts flush reads as a stray line rather than as the block's edge. Spanning the full width is what makes
+   * it the top edge of the companion, which is the reason it exists.
+   */
+  padding-top: var(--sp-3);
   background: none;
   border: none;
   border-radius: 0;
@@ -2756,7 +2777,12 @@ select.btn { font-family: var(--sans); }
     flex-wrap: wrap;
     align-items: center;
     gap: var(--sp-2) var(--sp-3);
-    padding: var(--sp-2) 18px;
+    /*
+     * The same clearance above the first line as the wide form, for the same reason: `.run-track` is drawn at `top: 0`,
+     * and here the block has a `--panel` fill and a bottom border, so a bar through the title would be even more
+     * obviously wrong.
+     */
+    padding: calc(var(--sp-3) + 2px) 18px var(--sp-2);
     background: var(--panel);
     border: none;
     border-bottom: 1px solid var(--line);

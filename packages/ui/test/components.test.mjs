@@ -2501,3 +2501,41 @@ test("the query container is a DIFFERENT element from the one its queries style"
   assert.ok(shellAt !== -1 && wrapAt !== -1, "both wrappers must exist in the markup");
   assert.ok(shellAt < wrapAt, "the shell must be the OUTER element");
 });
+
+test("the run track clears the companion's first line", () => {
+  /*
+   * `.run-track` is absolutely positioned at `top: 0` of the session header. When the companion's header had `padding:
+   * 0` that put a 2px rule through the title's own line box — a grey bar cutting the tops of the `scratch` and `idle`
+   * pills (`img_36.png`).
+   *
+   * The bar is WANTED: it reports a run in progress, and at rest it gives the companion a top edge so the block does not
+   * float unattached in the transcript's canvas. So the rule is arithmetic rather than removal — the header's top
+   * padding must exceed the bar's height, in both the wide and the stacked form.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const track = /(?:^|\n)\.run-track\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(track, /position:\s*absolute/, "the track floats at the header's top edge");
+  assert.match(track, /top:\s*0/, "…exactly at the top");
+  const height = Number(/height:\s*(\d+)px/.exec(track)?.[1]);
+  assert.ok(Number.isFinite(height), "the track must declare its height, or the clearance cannot be checked");
+  // Full width: an inset rule above a flush title reads as a stray line, not as the block's edge.
+  assert.match(track, /left:\s*0/, "the track spans the block's full width");
+  assert.match(track, /right:\s*0/);
+
+  const wide = /\.transcript-header \.session-header\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  const wideTop = /padding-top:\s*var\(--sp-(\d+)\)/.exec(wide)?.[1];
+  assert.ok(wideTop !== undefined, `the companion needs top padding for the track; got ${wide}`);
+  // The spacing scale: --sp-1 4, --sp-2 8, --sp-3 12. Any of the usable steps clears a 2px rule.
+  assert.ok(Number(wideTop) >= 2, "the padding must clear the bar");
+
+  // And the stacked form, which has its own padding and a visible fill.
+  const stacked = /@container transcript[^{]*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+  assert.match(
+    stacked,
+    /padding:\s*calc\(var\(--sp-3\) \+ 2px\)/,
+    "the stacked header clears the track too, and adds the track's own height",
+  );
+});
