@@ -137,6 +137,19 @@ function rank(entry: Entry, tail: string): number {
 }
 
 /**
+ * Directories that are never offered.
+ *
+ * A review of the first version flagged `node_modules/` in the default suggestions: noise in a list that will almost never
+ * be `@`-mentioned, and on a real repository root it occupies one of six visible rows. These are the three that are
+ * *always* noise — dependency trees and version-control internals, never a file a reader wants to point an agent at.
+ *
+ * Deliberately a short, closed list rather than a pattern. `.github/` and `.idea/` are genuinely useful to mention, and a
+ * "hide dotfiles" rule would take them; `dist/` and `build/` are legitimate targets for a question. The test for inclusion
+ * is "would a person ever type `@` and mean this", and for these three the answer is no.
+ */
+const NEVER_OFFERED = new Set(["node_modules", ".git", ".svn"]);
+
+/**
  * What the picker offers for one mention.
  *
  * `entries` is the listing of the directory the query names, or `undefined` when it is not loaded yet — which the caller
@@ -151,6 +164,9 @@ export function complete(mention: Mention, entries: readonly Entry[] | undefined
 
   const ranked: { entry: Entry; rank: number }[] = [];
   for (const entry of entries ?? []) {
+    // Never offered at any query: see `NEVER_OFFERED`. Filtered before ranking so it cannot take a visible row from a
+    // directory the reader might actually want.
+    if (NEVER_OFFERED.has(entry.name)) continue;
     const value = rank(entry, tail);
     if (value >= 0) ranked.push({ entry, rank: value });
   }

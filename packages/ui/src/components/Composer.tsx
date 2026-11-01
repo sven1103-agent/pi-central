@@ -496,24 +496,6 @@ export function Composer({
       />
 
       {/*
-        THE @ PICKER, above the field and below the attachments.
-
-        Placed INSIDE the composer's boundary rather than floating over the transcript: a popover positioned absolutely would
-        need to know the field's viewport offset, and it would cover the conversation it is being written about. Inside the
-        boundary it grows the composer by its own height while open, which is the honest trade for a surface that exists for
-        a few keystrokes.
-      */}
-      {pickerOpen && (
-        <MentionPicker
-          directory={mentionDirectory}
-          completions={completions}
-          loading={entries === undefined}
-          selected={selected}
-          onChoose={accept}
-        />
-      )}
-
-      {/*
         THE ATTACHMENTS, above the field.
 
         Above rather than below, because they are part of the MESSAGE being composed — the field's content follows them in
@@ -567,6 +549,40 @@ export function Composer({
         <div className="hint" role="status">
           Stopped the run.
         </div>
+      )}
+
+      {/*
+        THE @ PICKER — a floating popover ABOVE the composer, not a row inside it.
+
+        ## Why this moved, and what the first version did wrong
+
+        It was rendered in the composer's flex column, which meant opening it GREW the composer: the transcript shrank,
+        everything below the field moved down, and — because it sat between the field and the chrome row — the
+        `Enter to send` hint and the auto-follow toggle were pushed past the bottom edge of the window. A reviewer's
+        verdict was two blockers in one sentence: the hint row is literally sliced by the viewport, and every open/close
+        is a ~200px layout jump of the element the reader is looking at.
+
+        ## Why floating is right rather than merely tidier
+
+        The same composer ALREADY has a popover that floats — the queue sheet, at `bottom: calc(100% + 8px)` against
+        `.composer { position: relative }`. Two popovers on one composer behaving differently is the actual defect; this
+        now matches the convention that was already here.
+
+        The honest cost, stated: a floating panel COVERS the last few lines of the reply above it instead of shrinking the
+        transcript. That is the better trade because `scrollTop` does not move — closing the picker returns the reader to
+        exactly where they were, and nothing shifts twice. Covering is a temporary occlusions; pushing is a position the
+        reader has to re-find.
+
+        The chrome row therefore stays WELDED under the field, in its own place, whether the picker is open or not.
+      */}
+      {pickerOpen && (
+        <MentionPicker
+          directory={mentionDirectory}
+          completions={completions}
+          loading={entries === undefined}
+          selected={selected}
+          onChoose={accept}
+        />
       )}
 
       {sheetOpen && queue.total > 0 && (

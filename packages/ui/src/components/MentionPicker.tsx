@@ -40,11 +40,28 @@ export function MentionPicker({
 }) {
   return (
     <div className="mention" role="presentation">
+      {/*
+        A SLIMMER HEADER, after a review called the first one overloaded.
+
+        It carried a bare `.` on the left — which reads as a rendering fault rather than as a path — and four key hints on
+        the right, at ~10px grey-on-dark, competing with the results they describe. Three changes:
+
+          - the directory is LABELLED (`in .`), so a lone punctuation mark is not asked to mean "the session root";
+          - the hints are trimmed to the keys that are not guessable: `↑↓` is visible from the list itself, `Esc` is
+            universal, and "Tab or Enter" was two words for one affordance;
+          - the MATCH COUNT takes the middle, which is the fact a reader of a filtered list actually wants and which the
+            first version left out entirely.
+      */}
       <div className="mention-head">
-        <span className="mention-dir mono">{directory.length === 0 ? "." : directory}</span>
+        <span className="mention-dir mono">in {directory.length === 0 ? "." : directory}</span>
+        {completions.length > 0 && (
+          <span className="mention-count">
+            {completions.length} match{completions.length === 1 ? "" : "es"}
+          </span>
+        )}
         <span className="mention-hint">
           <kbd>↑</kbd>
-          <kbd>↓</kbd> choose · <kbd>Tab</kbd> or <kbd>Enter</kbd> accept · <kbd>Esc</kbd> dismiss
+          <kbd>↓</kbd> · <kbd>Tab</kbd> accept · <kbd>Esc</kbd> dismiss
         </span>
       </div>
 

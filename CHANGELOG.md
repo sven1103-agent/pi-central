@@ -98,6 +98,19 @@ text until now.
   than a path typed from memory. Accepting a file inserts it followed by a space; `Esc` dismisses the picker for that one
   mention without touching the draft. The listing is the SAME cache the file tree uses, so a directory already expanded in
   the panel costs one lookup rather than a second request.
+- **The `@` picker floats above the composer instead of pushing it.** The first version rendered it in the composer's flex
+  column, so opening it grew the composer by ~216px: the transcript shrank, everything below the field moved down, and —
+  because it sat between the field and the chrome row — the `Enter to send` hint and the auto-follow toggle were pushed
+  past the bottom edge of the window. A review named both as blockers. It now uses the same
+  `position: absolute; bottom: calc(100% + 8px)` anchor the queue sheet already used, which is the convention that was
+  already here. The trade is stated in the code: a floating panel covers the last few lines above it rather than shrinking
+  the transcript, and that is better because `scrollTop` does not move — closing it returns the reader to exactly where
+  they were.
+- The picker is capped at six rows with an internal scroll (eight made it taller than the field it belongs to), carries a
+  border and shadow so it reads as a panel rather than the field growing a grey tail, and its header names the directory
+  (`in docs`) instead of showing a bare `.`.
+- `node_modules/`, `.git/` and `.svn/` are never offered. `.github/` and `.idea/` deliberately still are: the test for
+  inclusion is "would a person ever type `@` and mean this", and a blanket hide-dotfiles rule would take the useful ones.
 - **Directories are offered before images, which reverses the obvious order.** Measured against this repository's own root: a
   bare `@` offered eight images and not one directory, because the root holds dozens of `img_*.png` screenshots and the cap
   is eight — so `assets/` was unreachable in exactly the case the picker exists for. Images are the reason to FINISH a path,

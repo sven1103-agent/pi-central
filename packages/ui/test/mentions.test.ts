@@ -241,3 +241,26 @@ test("selection wraps, so Down at the end returns to the first", () => {
   assert.equal(moveSelection(0, 3, -1), 2, "and before the start wraps to the end");
   assert.equal(moveSelection(0, 0, 1), 0, "an empty list cannot fail");
 });
+
+test("node_modules/.git are never offered, at any query", () => {
+  /*
+   * A review flagged `node_modules/` in the default suggestions: noise in a list that will almost never be @-mentioned, and
+   * on a real repository root it takes one of six visible rows.
+   *
+   * Deliberately a SHORT list rather than a "hide dotfiles" rule — `.github/` and `.idea/` are genuinely useful to mention,
+   * and `dist/` is a legitimate target for a question.
+   */
+  const entries: Entry[] = [
+    { name: "node_modules", kind: "directory" },
+    { name: ".git", kind: "directory" },
+    { name: ".github", kind: "directory" },
+    { name: "docs", kind: "directory" },
+  ];
+  for (const query of ["@", "@node", "@no", "@."]) {
+    const labels = complete(mustMention(query, query.length), entries).map((o) => o.label);
+    assert.ok(!labels.includes("node_modules/"), `node_modules is never offered (${query})`);
+    assert.ok(!labels.includes(".git/"), `.git is never offered (${query})`);
+  }
+  // …and the useful dot-directory survives, which a "hide dotfiles" rule would have taken.
+  assert.deepEqual(complete(mustMention("@", 1), entries).map((o) => o.label), [".github/", "docs/"]);
+});

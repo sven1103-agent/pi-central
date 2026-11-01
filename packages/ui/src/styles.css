@@ -3533,11 +3533,32 @@ select.btn { font-family: var(--sans); }
       a highlight nobody can see is a picker with no current option.
    3. The name is monospace and left-aligned on the same edge as the field's text, so the eye does not have to re-find the
       column. */
+/*
+ * FLOATING, above the composer — the same anchor the queue sheet uses.
+ *
+ * `position: absolute` against `.composer`, which is already `position: relative`. There is deliberately no
+ * `margin-bottom`: this is out of the flow, so a margin here would be spacing around nothing.
+ *
+ * `z-index: 41`, one above the queue sheet's 40: both anchor to the same edge, and if they can ever be open together the
+ * picker is the newer surface — it is opened by typing, after the sheet was opened deliberately.
+ */
 .mention {
-  margin-bottom: var(--sp-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-2);
-  background: var(--panel-2);
+  position: absolute;
+  bottom: calc(100% + var(--sp-2));
+  left: 0;
+  right: 0;
+  z-index: 41;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-3);
+  background: var(--panel-3);
+  box-shadow: var(--sh-2);
+  /*
+   * CAPPED AT SIX ROWS, with an internal scroll.
+   *
+   * Eight rows made the panel taller than the field it belongs to, which is what "the picker dominates the composer"
+   * meant. Six is enough to see that there IS a list and to arrow through it, and the scroll is the signal that more
+   * exist. The list's own `max-height` below is the backstop for a short window.
+   */
   overflow: hidden;
 }
 .mention-head {
@@ -3548,6 +3569,8 @@ select.btn { font-family: var(--sans); }
   border-bottom: 1px solid var(--line);
 }
 .mention-dir { font-size: var(--fs-2xs); color: var(--dim); }
+/* The match count: the fact a reader of a filtered list wants, and the middle of the row had room for it. */
+.mention-count { font-size: var(--fs-2xs); color: var(--text); }
 .mention-hint {
   margin-left: auto;
   display: flex;
@@ -3567,14 +3590,22 @@ select.btn { font-family: var(--sans); }
   margin: 0;
   padding: 2px 0;
   list-style: none;
-  max-height: 220px;
+  /* Six rows at ~22px, and never more than 45% of the window on a short screen. */
+  max-height: min(132px, 45vh);
   overflow-y: auto;
 }
 .mention-option {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+  /*
+   * INSET BY 4px, so the highlight does not run edge-to-edge against the panel's border and then stop. The first version
+   * touched the boundary while its text was padded, which read as a bar sliding under the panel rather than a row being
+   * selected.
+   */
+  margin: 0 4px;
   padding: 3px var(--sp-2);
+  border-radius: var(--r-2);
   font-size: var(--fs-xs);
   color: var(--text);
   cursor: pointer;
@@ -3584,6 +3615,8 @@ select.btn { font-family: var(--sans); }
 .mention-option.is-selected {
   background: var(--accent-tint);
   border-left-color: var(--accent);
+  /* The accent text as well as the tint: on a washed background the default grey was a weak primary state. */
+  color: var(--text);
 }
 /* A directory says "continue into me" twice: by the trailing slash in its name, and by the quieter weight. */
 .mention-option.is-dir .mention-name { color: var(--accent-text); }

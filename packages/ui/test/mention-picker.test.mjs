@@ -39,6 +39,13 @@ const options = [
   { value: "img_2.png", label: "img_2.png", continues: false },
 ];
 
+/**
+ * Render the picker, with SSR's comment markers removed.
+ *
+ * React separates adjacent expressions with `<!-- -->` — `in <span>{dir}</span>` becomes `in <!-- -->docs` — so a regex
+ * written against the source text matches nothing. Stripping them once here keeps every assertion about the MARKUP rather
+ * than about React's serialisation.
+ */
 function render(overrides = {}) {
   return renderToString(
     createElement(MentionPicker, {
@@ -49,7 +56,7 @@ function render(overrides = {}) {
       onChoose: () => {},
       ...overrides,
     }),
-  );
+  ).replace(/<!-- -->/g, "");
 }
 
 test("the list is a listbox with one option marked current", () => {
@@ -94,16 +101,29 @@ test("an unloaded directory says Reading…, and an empty one says No match", ()
   assert.ok(!/Reading…/.test(empty));
 });
 
-test("the header names the directory being completed, and the keys that work", () => {
+test("the header names the directory being completed, and only the keys worth stating", () => {
+  /*
+   * Trimmed after a review called the first header overloaded: it carried a bare `.` (which reads as a rendering fault)
+   * and four hints at ~10px grey-on-dark, competing with the results they describe. What survives is the directory,
+   * labelled; the match count; and the two keys that are not guessable.
+   */
   const html = render();
-  assert.match(html, /mention-dir mono">docs</, "the directory, so the reader knows where the options come from");
+  assert.match(html, /mention-dir mono">in docs</, "the directory, LABELLED, so the reader knows where options come from");
   assert.match(html, /Tab/, "the accept key is stated");
   assert.match(html, /Esc/, "…and the dismiss key");
+  assert.ok(!/Tab<\/kbd> or <kbd>Enter/.test(html), "but 'Tab or Enter' was two words for one affordance");
 });
 
-test("the session root is shown as '.' rather than as an empty string", () => {
-  // An empty header would read as a rendering fault.
-  assert.match(render({ directory: "" }), /mention-dir mono">\.</);
+test("the header states how many matched, which the first version left out", () => {
+  // The fact a reader of a filtered list wants, and the middle of the row had room for it.
+  assert.match(render(), /mention-count">3 matches</);
+  assert.match(render({ completions: options.slice(0, 1) }), /1 match</, "singular");
+  assert.ok(!/mention-count/.test(render({ completions: [] })), "and nothing when nothing matched");
+});
+
+test("the session root is LABELLED as '.', not shown as a bare period", () => {
+  // A lone `.` in a header reads as a rendering bug rather than as "the session root".
+  assert.match(render({ directory: "" }), /mention-dir mono">in \.</);
 });
 
 test("Escape closes the PICKER before it considers stopping a run", () => {
