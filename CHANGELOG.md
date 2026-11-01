@@ -12,21 +12,6 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
-## [0.7.0] — 2026-11-01
-
-Images, where the conversation puts them. A picture a tool read, a screenshot you paste, and a file your own prompt
-names by path now all appear in the transcript — each in the place that matches what it is.
-
-**No protocol change.** `PROTOCOL_VERSION` stays at 4, because nothing new crosses the wire: the bytes were already
-arriving in the `transcript` frame that every client parses on connect. Rendering them costs a DOM node and a decode,
-not a transfer.
-
-The measured premise, from this machine's own session store: **447 image-bearing messages across 885 sessions, and
-every single one is a tool result** — a `read` of a PNG. None was a paste. So the placement that had to work first was
-the tool detail, not the composer; a UI that handled only pasted images would have looked correct and shown nothing.
-Separately, **181 of 5 912 user prompts name an image file by path** (`@img_6.png shows…`), which rendered as literal
-text until now.
-
 ### Added
 
 - **Images are shown in the transcript, where they belong in the conversation.** A tool that reads a
