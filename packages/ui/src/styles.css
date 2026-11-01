@@ -1881,21 +1881,81 @@ select.btn { font-family: var(--sans); }
 .trace-resizer:focus-visible { outline: none; }
 .trace-resizer:focus-visible::after { background: var(--accent); height: 2px; }
 
-/* The order control, in the header where the list it governs begins. */
-.trace-order { display: inline-flex; align-items: center; flex: none; }
-.trace-order-select {
-  /* Used ALONE on a `<select>`, so it declares its own face rather than inheriting the platform's light chrome (#100). */
-  background: var(--panel-2);
-  border: 1px solid var(--line);
+/*
+ * The order control: a filter glyph that opens a menu.
+ *
+ * It was a native `<select>`, which works but reads as a FORM FIELD inside a strip of chrome — and at 11px its
+ * platform-drawn arrow was the heaviest mark in the header. A glyph says "narrow the list"; the menu says the rest.
+ */
+.trace-order { position: relative; display: inline-flex; align-items: center; flex: none; }
+
+.trace-order-trigger {
+  /* Alone on a `<button>`, so it declares its own face rather than inheriting the platform's light chrome (#100). */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid transparent;
   border-radius: var(--r-1);
   color: var(--dim);
   font: inherit;
-  font-size: var(--fs-2xs);
-  padding: 1px 4px;
+  padding: 2px 4px;
   cursor: pointer;
 }
-.trace-order-select:hover { color: var(--text); border-color: var(--line-strong); }
-.trace-order-select:focus-visible { outline: none; box-shadow: var(--focus); }
+.trace-order-trigger:hover { color: var(--text); border-color: var(--line); background: var(--panel-2); }
+.trace-order-trigger[aria-expanded="true"] { color: var(--text); border-color: var(--line-strong); background: var(--panel-2); }
+/* The glyph is filled when an order other than the default is active — so "this list is filtered" is visible without
+   opening the menu, and without relying on colour. */
+.trace-order-trigger[data-active="true"] { color: var(--accent-text); }
+.trace-order-trigger:focus-visible { outline: none; box-shadow: var(--focus); }
+
+/*
+ * The menu: positioned against its trigger, rising from the header.
+ *
+ * `z-index` above the list rows — it is the one floating surface in this panel, and a menu drawn under the thing it
+ * filters would be the worst possible arrangement. `top: 100%` keeps it attached however the header wraps.
+ */
+.trace-order-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 230px;
+  background: var(--panel-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  box-shadow: var(--sh-2);
+  padding: var(--sp-1);
+  display: flex;
+  flex-direction: column;
+}
+
+.trace-order-item {
+  display: grid;
+  grid-template-columns: 1.2em 1fr;
+  align-items: baseline;
+  gap: 0 var(--sp-1);
+  background: none;
+  border: none;
+  border-radius: var(--r-1);
+  /* Alone on a button: its own face, or it inherits the platform's light chrome on a dark page (#100). */
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text);
+  text-align: left;
+  padding: 5px var(--sp-2);
+  cursor: pointer;
+}
+.trace-order-item:hover,
+.trace-order-item:focus-visible { background: var(--panel-2); outline: none; }
+.trace-order-tick { color: var(--accent-text); font-size: var(--fs-xs); }
+.trace-order-item-label { font-weight: 600; }
+/* The hint is a separate line and quieter: it explains the consequence rather than naming the choice. */
+.trace-order-item-hint {
+  grid-column: 2;
+  color: var(--dim);
+  font-size: var(--fs-2xs);
+}
 
 .trace-list {
   /*

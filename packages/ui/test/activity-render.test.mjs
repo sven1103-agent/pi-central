@@ -390,9 +390,30 @@ test("the trace list is ordered by a control, not by index numbers", () => {
    */
   const source = readFileSync(new URL("../src/components/ToolTrace.tsx", import.meta.url), "utf8");
   assert.ok(!/t-index/.test(source), "no per-row index column");
-  assert.match(source, /trace-order-select/, "an order control in the header");
-  assert.match(source, /Oldest first/, "…with oldest first as the default option");
-  assert.match(source, /Newest first/);
+  assert.match(source, /<TraceOrderMenu/, "an order control in the header");
+
+  /*
+   * The control itself is a filter glyph with a MENU, not a `<select>`.
+   *
+   * A native select works, but reads as a form field inside a strip of chrome, and at 11px its platform-drawn arrow was
+   * the heaviest mark in the header. The glyph says "narrow the list"; the menu says the rest. Its accessibility is the
+   * part worth guarding, because a custom menu is where keyboard behaviour goes missing.
+   */
+  const menu = readFileSync(new URL("../src/components/TraceOrderMenu.tsx", import.meta.url), "utf8");
+  assert.match(menu, /aria-haspopup="menu"/, "the trigger announces that it opens a menu");
+  assert.match(menu, /aria-expanded=\{open\}/, "…and whether it is open");
+  assert.match(menu, /role="menu"/);
+  assert.match(menu, /role="menuitemradio"/, "the items are mutually exclusive choices");
+  assert.match(menu, /aria-checked=/, "…with the current one checked");
+  assert.match(menu, /Oldest first/, "oldest first is offered");
+  assert.match(menu, /Newest first/);
+  // Escape must close AND return focus — a surface opened from the keyboard has to be closable from it.
+  assert.match(menu, /event\.key === "Escape"[\s\S]{0,200}?close\(true\)/, "Escape closes and refocuses");
+  // An outside click must close it, on the CAPTURE phase so a row underneath does not act first.
+  assert.match(menu, /addEventListener\("pointerdown", onPointerDown, true\)/, "an outside click closes it");
+  // The active state must be visible without opening the menu, and not by colour alone: the glyph fills.
+  assert.match(menu, /data-active=/, "the trigger carries its state");
+  assert.match(menu, /fill=\{order !== "oldest" \? "currentColor" : "none"\}/, "the glyph fills when filtered");
 
   // Traversal must follow the DISPLAYED order: in a reversed list an arrow key that moved through the underlying data
   // would jump in the wrong direction.

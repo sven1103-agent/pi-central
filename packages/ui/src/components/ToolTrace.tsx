@@ -32,6 +32,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import type { ToolExecution } from "../transcript.ts";
 import { recentTools, toolSummary } from "../transcript.ts";
 import { traceRowLabel } from "../activity.ts";
+import { TraceOrderMenu } from "./TraceOrderMenu.tsx";
 import {
   clampTraceDetailHeight,
   orderTools,
@@ -272,17 +273,7 @@ export function ToolTrace({
 
           A native `<select>`, so keyboard and screen-reader behaviour come free and the current value is always visible.
         */}
-        <label className="trace-order">
-          <span className="visually-hidden">Order</span>
-          <select
-            className="trace-order-select"
-            value={order}
-            onChange={(event) => setOrder(event.target.value === "newest" ? "newest" : "oldest")}
-          >
-            <option value="oldest">Oldest first</option>
-            <option value="newest">Newest first</option>
-          </select>
-        </label>
+        <TraceOrderMenu order={order} onOrder={setOrder} />
         {/*
           The toggle that controls the TRANSCRIPT's activity groups.
           
