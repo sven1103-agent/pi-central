@@ -166,7 +166,23 @@ async function main(): Promise<number> {
   }
 
   const config = defaultConfig();
-  const supervisor = new Supervisor(config);
+  // `rememberOpenSessions` is this process's job alone (issue #185): it is the one that outlives
+  // a restart, and the one whose Ctrl-C means "updating", not "done".
+  const supervisor = new Supervisor(config, { rememberOpenSessions: true });
+
+  /*
+   * Reopen the sessions that were open when this process last ran (issue #185).
+   *
+   * BEFORE the transport listens, so the sessions are in the first snapshot a client receives and the
+   * rail comes back with its rows LIVE rather than as stopped tombstones the reader has to resume by
+   * hand. Hence before the banner too: the count printed below is the count that is actually running.
+   *
+   * Awaited rather than fired-and-forgotten. Spawning is fast (a `pi` process per session), and a
+   * half-restored fleet behind a listening socket would show rows appearing for several seconds —
+   * the same "half-state" the connect snapshot exists to avoid.
+   */
+  const restored = await supervisor.restoreOpenSessions();
+
   const transport = new Transport(supervisor, config, { port: options.port, uiDir: options.uiDir });
   transport.attach();
 
@@ -180,6 +196,27 @@ async function main(): Promise<number> {
   console.log(`  default workspace: ${config.workspaceRoot}`);
   console.log(`  agent root: ${config.agentRoot}${config.agentRootManaged ? " (managed)" : " (external)"}`);
   console.log(`  isolation: ${options.mode}`);
+  /*
+   * What the restore did, said once and in full (issue #185).
+   *
+   * Each outcome is a different fact and gets its own wording: sessions that came back (nothing to
+   * do), files that are gone (dropped forever — a deleted conversation cannot return), and sessions
+   * KEPT but not started (a directory that is not there NOW: an unmounted volume, a worktree not yet
+   * recreated). Reporting the last one matters most — it is the case where silence would look like
+   * the rail had been edited, and the reminder is that the entry survived.
+   */
+  if (restored.note !== undefined) console.log(`  sessions to restore: ${restored.note}`);
+  if (restored.restored.length > 0) {
+    console.log(`  reopened ${restored.restored.length} session${restored.restored.length === 1 ? "" : "s"} from the last run`);
+  }
+  for (const gone of restored.missingFile) {
+    console.log(`  forgot a session whose file no longer exists: ${gone}`);
+  }
+  for (const unavailable of restored.unavailable) {
+    const [first = ""] = unavailable.message.split("\n");
+    console.log(`  could not reopen ${unavailable.sessionFile}: ${first}`);
+    console.log(`    kept in the list; it will be tried again on the next start`);
+  }
   /*
    * WHICH COPY THIS IS, and how to check it.
    *
@@ -258,7 +295,9 @@ async function main(): Promise<number> {
     // The transport closes first so clients are told, rather than seeing a dead socket with
     // sessions still running behind it.
     await transport.close().catch(() => undefined);
-    await supervisor.stopAll().catch(() => undefined);
+    // `forget: false` is the whole feature (issue #185): stopping for an update is not the same
+    // statement as being done with a conversation, so the set survives and the next launch reopens it.
+    await supervisor.stopAll({ forget: false }).catch(() => undefined);
     console.log("stopped.");
     process.exit(0);
   };

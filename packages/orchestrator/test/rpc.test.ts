@@ -104,3 +104,56 @@ test("start() twice is refused", () => {
   assert.throws(() => rpc.start(), /already started/);
   return rpc.stop();
 });
+
+test("a process that never STARTED does not make stop() wait, and rejects in-flight commands", async () => {
+  // Node's contract for a failed spawn is `error` and NO `exit`, and every wait in `stop()` is on
+  // `exit`. Treating that as "still running" waited out the timers for a process that does not
+  // exist — and because they are `unref`'d, the event loop could drain first and take the caller's
+  // promise with it (CI caught this as "Promise resolution is still pending").
+  //
+  // Reachable by hand at any time; the startup restore (issue #185) made it the NORMAL path, since
+  // a restored fleet on a host without the binary (C10) is a fleet of failed spawns.
+  const rpc = new RpcProcess({
+    command: "/definitely/not/a/binary",
+    args: [],
+    cwd,
+    env: testEnv(),
+  });
+  rpc.start();
+
+  // A command in flight rejects on the spawn failure rather than waiting out its 10s deadline.
+  const started = Date.now();
+  await assert.rejects(() => rpc.send({ type: "get_state" }, 10_000), /could not start/);
+  assert.ok(Date.now() - started < 2000, "rejected on the spawn failure, not on the timeout");
+
+  assert.equal(rpc.running, false, "a process that never started is not running");
+
+  // And teardown is immediate: no grace period to wait out.
+  const stopping = Date.now();
+  await rpc.stop(5000);
+  assert.ok(Date.now() - stopping < 500, `stop() took ${Date.now() - stopping}ms for a process that never existed`);
+});
+
+test("stop() called BEFORE the spawn failure is delivered still settles", async () => {
+  // The window CI caught, and the reason the first fix was not enough: a spawn failure is reported
+  // ASYNCHRONOUSLY, so `stop()` can run before `#spawnFailed` is set. It then waited on `exit`,
+  // which a process that never existed will never emit — and because the timer is `unref`'d, the
+  // event loop drained and the promise was never settled.
+  //
+  // The startup restore (issue #185) is exactly this shape: resume a session, then shut down, with
+  // no await in between. `once("failed")` is on THIS object rather than on the child, which was the
+  // first attempt and silently did nothing.
+  const rpc = new RpcProcess({
+    command: "/definitely/not/a/binary",
+    args: [],
+    cwd,
+    env: testEnv(),
+  });
+  rpc.on("failed", () => {}); // without a listener this would be an unhandled error event
+  rpc.start();
+
+  const started = Date.now();
+  await rpc.stop(5000);
+  assert.ok(Date.now() - started < 1000, "stop() must not wait out its grace periods for a nonexistent process");
+  assert.equal(rpc.running, false);
+});

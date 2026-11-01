@@ -31,8 +31,38 @@ They are kept because each one is the reason a constraint or an invariant test e
   disagree). Without the guard, a new page against an old orchestrator — the dev-layout hazard — would loop.
 - A protocol skew takes the same path instead of the dismissible error strip, because a message with no available
   action is not a recovery.
+- **Open sessions survive a restart, including an update** ([#185]). They did not: the supervisor held them in
+  memory and shutdown stopped them, so the update dance — stop, `npm install`, restart — brought the app back with
+  the rail full of stopped rows. The roster kept the *rows* (issue #89, `localStorage`), but nothing re-spawned
+  anything, so resuming a dozen sessions by hand after every update was the actual work reported.
+- `~/.config/pi-central/open-sessions.json` now records `{sessionFile, mode}` per open session, written
+  **eagerly** — when a session's file becomes known, and removed only on an **explicit** stop. Eager writes are
+  what make an orchestrator killed with SIGKILL restorable, and `stopAll({ forget: false })` on SIGINT is what
+  makes Ctrl-C-because-I-am-updating different from *I am done with this conversation*.
+- Restore happens before the transport listens, through the **existing** `resume` path (`sessionAt`, then
+  `resume`), so it inherits every rule already established there: the file must still be a valid Pi session, the
+  recorded directory must still exist (C2), and the cwd is never retargeted (ADR-0008).
+- Three outcomes, deliberately distinguished: a gone session **file** is dropped from the list, a gone
+  **directory** is reported and kept (a volume remounts; only an explicit stop may forget), and a resumed session
+  says nothing.
+- Only the long-running server remembers. The one-shot CLI (`run`, `resume`) opts out, because it exits
+  immediately — recording its session would leave an entry the web app would faithfully reopen on its next launch,
+  and would rewrite a file the running web app owns.
+- A session file is keyed by its **canonical** path. Found by this change's own suite: `sessionAt` resolves
+  through `realpathSync`, so the same conversation arrived under two spellings and the list held it twice — which
+  on the next launch means two processes appending to one file (ADR-0004).
+- **A process that never started no longer makes shutdown wait forever.** Node's contract for a failed `spawn` is
+  `error` and no `exit`, and every wait in `RpcProcess.stop()` is on `exit`; because those timers are `unref`'d, the
+  event loop could drain first and leave the caller's promise unsettled. Reachable by hand at any time (a host
+  without the binary, C10); the startup restore above made it the normal path, since a restored fleet on such a host
+  is a fleet of failed spawns. A spawn failure is reported ASYNCHRONOUSLY, so `stop()` can also be called in the
+  window before it arrives — the restore path does exactly that — and then it waits for an `exit` that will never
+  come. Both windows are closed: in-flight commands reject with the spawn error instead of waiting out their
+  deadlines, teardown returns immediately, and `#waitForExit` settles on the failure as well as on the exit.
 
 [#184]: https://github.com/sven1103-agent/pi-central/issues/184
+[#185]: https://github.com/sven1103-agent/pi-central/issues/185
+
 
 ## [0.7.0] — 2026-11-01
 
