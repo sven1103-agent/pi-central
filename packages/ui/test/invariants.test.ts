@@ -227,3 +227,35 @@ test("the header does not append the path to a line that already contains it", (
     "appending shortenPath() to whereLine() duplicates the path for project sessions",
   );
 });
+
+// --- The dock's height must not depend on the queue (the queued-prompts rework) --------------------
+
+test("only ONE component may enumerate the queue", () => {
+  /*
+   * The defect: the composer rendered a row per queued message, so its height was a function of N — and because the
+   * transcript's scroller is a flex sibling above it, every queued message re-shrank the conversation. A reader pinned to
+   * the tail was pushed up the page again for each message they queued.
+   *
+   * Guarding the SYMPTOM would mean measuring the dock, which no test in this repository can do. Guarding the CAUSE is
+   * exact: a component that cannot iterate `.steering` / `.followUp` cannot grow with them. `QueuedPrompts` is the one
+   * place allowed to, because it is the full list inside a bounded sheet.
+   */
+  const enumerators = sources
+    .filter(({ text }) => /\.steering\.map|\.followUp\.map/.test(text))
+    .map(({ file }) => file)
+    .sort();
+  assert.deepEqual(
+    enumerators,
+    ["/components/QueuedPrompts.tsx"],
+    `only the full list may render every queued message; found: ${enumerators.join(", ")}`,
+  );
+});
+
+test("the rail is bounded by KINDS, not by count", () => {
+  // The companion to the check above: the rail exists, and it renders `queueRail`'s rows and nothing else. A `map` over
+  // the queue in the rail would be the defect again, one component away.
+  const rail = sources.find(({ file }) => file === "/components/QueueRail.tsx");
+  assert.ok(rail, "QueueRail.tsx must exist");
+  assert.ok(rail.text.includes("queueRail"), "it renders the bounded rail, not the queue");
+  assert.ok(!/\.steering|\.followUp/.test(rail.text), "it must not read the groups at all");
+});

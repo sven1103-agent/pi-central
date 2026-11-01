@@ -1353,20 +1353,8 @@ button { font: inherit; color: inherit; }
   width: 100%;
 }
 
-.mode-strip {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--fs-xs);
-  background: var(--accent-tint);
-  color: var(--accent-text);
-  border: 1px solid var(--accent);
-  border-radius: var(--r-2);
-  padding: 5px 9px;
-}
-
-/* Kept for the panels that still compose a row (the mode strip and queue render above the input), but the input no
-   longer shares a row with a button. */
+/* The composer no longer composes a row: the input is the only thing beside nothing. Kept as a name because the mode
+   strip and the queue are gone and this is the shape the remaining chrome uses. */
 .composer-row { display: flex; gap: var(--sp-2); align-items: flex-end; }
 /* The textarea takes the room; the button keeps its own width.
  *
@@ -2748,20 +2736,10 @@ select.btn { font-family: var(--sans); }
 /* Only rendered while a run is in progress, where the choice between steering and following up is
    real. Two buttons rather than a <select>: there are exactly two options and both labels fit, so
    a dropdown would hide one of them behind a click. */
-.mode-strip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 0; }
-.mode-choice { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-.mode-option { background: transparent; border: 0; color: inherit; font: inherit; padding: 3px 10px; cursor: pointer; }
-.mode-option + .mode-option { border-left: 1px solid var(--line); }
-.mode-option-on { background: var(--accent); color: var(--accent-ink); }
 .mode-consequence { opacity: 0.85; }
 
 /* The queue's contents. Read-only on purpose: there is no per-item removal in the vocabulary,
    so a `×` would be a control that cannot work. */
-.queue-strip { padding: 4px 0; }
-.queue-head { opacity: 0.85; }
-.queue-rows { list-style: none; margin: 2px 0 0; padding: 0; }
-.queue-rows li { opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.queue-unknown { opacity: 0.7; font-style: italic; }
 
 /* --- Jump to latest (issue #6) ------------------------------------------------------------------ */
 
@@ -3634,3 +3612,183 @@ select.btn { font-family: var(--sans); }
 .settings-updates strong { color: var(--text); font-style: normal; }
 
 .settings .dialog-actions { margin-top: var(--sp-5); }
+
+/* ------------------------------------------------------------------ queued prompts */
+
+/*
+ * THE RAIL: at most two rows, between the scroller and the field.
+ *
+ * Its height is a function of how many KINDS are queued — steering, follow-ups, both — and never of how many messages
+ * are. That is the defect it fixes: the dock used to enumerate the queue, so every queued message re-shrank the
+ * transcript above it.
+ *
+ * No border of its own. It sits inside the composer's dock, and a rule here would draw a second separator between the
+ * conversation and the field.
+ */
+.queue-rail {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: 0 0 var(--sp-2);
+  font-size: var(--fs-xs);
+}
+
+.queue-rail-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/*
+ * One row per KIND. The left edge is the second carrier: SOLID for `now` (it happens inside this run), DASHED for `then`
+ * (it has not begun). Style rather than colour, so `forced-colors` and a reader who cannot distinguish hue both keep it.
+ */
+.queue-rail-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+  /* A fixed height, so the rail cannot grow with a long message — that is the whole invariant. */
+  height: 18px;
+}
+.queue-rail-row.is-steer { border-left: 2px solid var(--accent); padding-left: var(--sp-2); }
+.queue-rail-row.is-followUp { border-left: 2px dashed var(--line-strong); padding-left: var(--sp-2); }
+.queue-rail-row.is-unknown { border-left: 2px dashed var(--line); padding-left: var(--sp-2); color: var(--dim); }
+
+/*
+ * THE TIME-WORD — the primary carrier, and the reason no colour is needed.
+ *
+ * `now` / `then` at a fixed 4ch so the two groups align, in the mono face because it is a value rather than prose. Real
+ * text, not a glyph and not `aria-hidden`: a screen reader must hear it.
+ */
+.queue-when {
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  flex: none;
+  width: 4ch;
+}
+
+.queue-rail-text {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+/* The way to the full list. Quiet, because the rail already answered the first question. */
+.queue-rail-open {
+  /* Alone on a `<button>`, so it declares its own face rather than inheriting the platform's light chrome (#100). */
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: none;
+  border: none;
+  border-radius: var(--r-1);
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--fs-xs);
+  padding: 1px 4px;
+  cursor: pointer;
+  flex: none;
+}
+.queue-rail-open:hover { color: var(--text); background: var(--panel-2); }
+.queue-rail-open:focus-visible { outline: none; box-shadow: var(--focus); }
+.queue-rail-more { font-family: var(--mono); font-size: var(--fs-2xs); }
+.queue-rail-open-label { white-space: nowrap; }
+
+/*
+ * THE SHEET: the full list, anchored to the composer.
+ *
+ * Above the field and to the left, where the rail is. `position: absolute` against `.composer`, which is the nearest
+ * positioned ancestor — so it cannot escape the lane however the window is sized.
+ */
+.composer { position: relative; }
+.queue-sheet {
+  position: absolute;
+  bottom: calc(100% + var(--sp-2));
+  left: 0;
+  right: 0;
+  z-index: 40;
+  max-height: min(420px, 50vh);
+  overflow-y: auto;
+  background: var(--panel-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-3);
+  box-shadow: var(--sh-2);
+  padding: var(--sp-3) var(--sp-4);
+}
+.queue-sheet:focus-visible { outline: none; }
+.queue-sheet-title {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* The arithmetic, in words, before any row is read. */
+.queue-summary { margin: 0 0 var(--sp-3); font-size: var(--fs-xs); color: var(--dim); }
+
+.queue-group { margin-bottom: var(--sp-3); }
+.queue-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-2xs);
+  font-weight: 400;
+  color: var(--dim);
+}
+/* The follow-up group is separated by a RULE, so the two groups read as two moments in time rather than one list. */
+.queue-group + .queue-group {
+  border-top: 1px solid var(--line);
+  padding-top: var(--sp-3);
+}
+
+.queue-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+
+/*
+ * One queued message. The left edge carries the kind again — solid for `now`, dashed for `then` — so a reader scanning
+ * down the sheet sees two blocks without reading a word.
+ */
+.queue-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding-left: var(--sp-2);
+  font-size: var(--fs-xs);
+}
+.queue-item.is-steer { border-left: 2px solid var(--accent); }
+.queue-item.is-follow-up { border-left: 2px dashed var(--line-strong); }
+.queue-item-when { font-family: var(--mono); font-size: var(--fs-2xs); color: var(--dim); flex: none; width: 4ch; }
+/* Wraps, unlike the rail's one line: the sheet exists so the whole message can be read. */
+.queue-item-text { color: var(--text); white-space: pre-wrap; word-break: break-word; min-width: 0; }
+
+/* Texts that never arrived. Named, never invented, and never dressed as a row. */
+.queue-unknown { margin: var(--sp-2) 0 0; font-size: var(--fs-xs); color: var(--dim); font-style: italic; }
+
+.queue-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+  padding-top: var(--sp-2);
+}
+/*
+ * Why there is no per-item control, stated rather than implied. Without the sentence a read-only list reads as a list
+ * that is missing its controls.
+ */
+.queue-note { margin: 0; font-size: var(--fs-2xs); color: var(--dim); }
+.queue-actions { display: flex; align-items: center; gap: var(--sp-2); }
+.queue-clear { color: var(--danger-text); }
+.queue-clear:hover { color: var(--danger-text); background: var(--danger-tint); }

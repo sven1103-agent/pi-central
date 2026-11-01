@@ -325,13 +325,15 @@ transcript. So:
 
 ## 4. The composer
 
-Four honest fates for one Enter, decided by `LiveSession.state`, the draft's first character, and the discovered command list (`get_commands`):
+Four honest fates for one Enter, decided by `LiveSession.state`, the draft's first character, and the discovered command list (`get_commands`).
 
-| Situation | Header strip | Button label | Hint line |
+**There is no mode control and no button.** The destination is the KEY — `Enter` steers, `Alt+Enter` queues for after this run — which is Pi's own binding and therefore what a Pi user already knows. A segmented control was shipped and removed: three elements and 26px of permanent dock height to choose between two things, which the reader's verdict was "too much".
+
+| Situation | Chrome above the field | Placeholder | Hint line |
 |---|---|---|---|
-| `idle`/`stopped`/`failed-with-file` | *(none)* | **Send** | `Enter to sends · Shift+Enter for a new line` |
-| `streaming`, Follow-up selected | `Run in progress · Follow-up \| Steer` + `Queued: starts after this run finishes` | **Queue follow-up** | `Enter to queue · Esc stops the run and clears the queue` |
-| `streaming`, Steer selected | same strip, Steer selected + `Delivered after the current turn's tools finish` | **Send steer** | same |
+| `idle`/`stopped`/`failed-with-file` | *(none)* | `Send a prompt…` | `Enter to send · Shift+Enter for a new line` |
+| `streaming`, nothing queued | *(none)* | `Steer this run…` | `Enter steers · Alt+Enter queues for after this run · Esc stops the run` |
+| `streaming`, queue non-empty | the **queue rail** — at most two rows, one per kind | `Steer this run…` | same |
 | draft starts with a known `/command` | `Command · runs immediately, even mid-run` | **Run command** | `/ for commands · Esc dismisses` |
 | `awaiting-approval` | *(none — the composer is replaced by the dialog dock)* | — | — |
 | `starting` | *(none)* | **Send** (disabled) | `Waiting for the session to start…` |
@@ -347,7 +349,15 @@ The lesson is worth keeping: **"the protocol cannot express it" is a claim about
 
 Esc's ladder is now fully implemented, including the `clear_queue` step: it clears the queue, stops the run, and returns the cleared text to the composer (merged below the draft, once). The order — clear *then* abort — is the behaviour, not an implementation detail: aborting first lets the run settle while messages are still queued, and Pi may deliver one as a real turn in that window.
 
-**4.2 Queue visibility.** `LiveSession.pending` is a *count*; the texts arrive in `queue_update` records (`record.steering`, `record.followUp`), which the client keeps in a per-session buffer. Rules: count from `LiveSession.pending`, texts from the record buffer, keyed by index; if they disagree (after a reload/snapshot, where no texts exist) the strip header reads `2 queued` and rows read `1 message queued before this page loaded` — never invented text. Rows are **read-only**: Pi Central has no per-item removal in its vocabulary, so offering a `×` would be a fake control. One action: `Clear queue and stop run (Esc)`.
+**4.2 Queue visibility: a bounded rail, and a sheet for the rest.** `LiveSession.pending` is a *count*; the texts arrive in `queue_update` records (`record.steering`, `record.followUp`), which the client keeps in a per-session buffer.
+
+The composer renders **at most two rows** — one per KIND, never one per message — so its height does not depend on how much is queued. That bound is the fix for a real defect: the dock used to enumerate the queue, so every queued message re-shrank the transcript above it, and a reader pinned to the tail was pushed up the page once per message. The full list is a sheet, opened from the rail or with `Alt+Q`, and it says the arithmetic before any row is read: "1 steers this run; 2 run after it finishes."
+
+**Which kind a message is, is carried three times**, because the reported confusion was that readers could not tell them apart: a TIME-WORD gutter (`now` / `then`, mono, a fixed 4ch column), ORDER (steering first, since it happens first, with a ruled divider labelled `After this run finishes`), and a left edge (solid for `now`, dashed for `then`). No colour is relied on, and there are no ordinals — nothing can be reordered or removed, so a number would be decoration.
+
+If the count exceeds the texts (after a reconnect, where records are not replayed) the rail says `N queued before this page loaded` and the sheet adds the useful half: clearing returns them to the box, where they can be read. A **partially** known queue shows what it knows and names the remainder — the earlier all-or-nothing `textsKnown` flag discarded known text.
+
+Rows are **read-only**: Pi Central's protocol has no per-item removal, so a `×` would be a fake control. One action exists, `Clear queue and stop run`, inside the sheet, and the sheet says why: "Read-only: Pi Central can clear the whole queue, not one message."
 
 **4.3 Esc precedence ladder** (the spec builders get wrong most often):
 

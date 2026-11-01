@@ -693,37 +693,36 @@ test("the level list is keyed on the model AND the level, so a switch invalidate
 
 // --- The composer's mode strip and Esc (issue #3) ------------------------------------------------
 
-test("the mode strip appears ONLY while a run is in progress", async () => {
-  const init = initialState;
-
+test("there is no mode strip: the destination is a key, not a control", async () => {
+  /*
+   * The strip is deleted, and this asserts the DECISION rather than the absence of a class name.
+   *
+   * Three elements and 26px of permanent dock height existed to choose between two things, and the choice was already
+   * expressible as Pi's own keys: `Enter` steers, `Alt+Enter` queues for after the run. The reader's complaint was that
+   * the bar was "too much", and it was.
+   */
   const streaming = renderToString(createElement(Composer, {
-    session: session({ state: "streaming" }), state: init(),
-    unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
-    onRestored() {}, draft: "", onDraftChange() {},
-  }));
-  assert.match(streaming, /mode-strip/);
-
-  // Idle: only one thing can happen, so a selector would be a lie about complexity.
-  const idle = renderToString(createElement(Composer, {
-    session: session({ state: "idle" }), state: init(),
-    unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
-    onRestored() {}, draft: "", onDraftChange() {},
-  }));
-  assert.ok(!/mode-strip/.test(idle), "an idle composer must not offer a queue choice");
-});
-
-test("the strip offers BOTH modes and states which one is selected", async () => {
-  const html = renderToString(createElement(Composer, {
     session: session({ state: "streaming" }), state: initialState(),
     unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
     onRestored() {}, draft: "", onDraftChange() {},
   }));
-  assert.match(html, /Steer/);
-  assert.match(html, /Follow-up/);
-  // Steer is the default, matching Pi's own Enter binding, and it is stated as selected.
-  assert.match(text(html), /aria-checked="true"[^>]*>Steer/);
-  // The consequence of the SELECTED mode, which is what the issue asks the strip to convey.
-  assert.match(text(html), /Delivered after the current turn's tools finish/);
+  assert.ok(!/mode-strip|mode-choice|mode-option/.test(streaming), "no segmented control");
+  const plainStreaming = streaming.replace(/<!-- -->/g, "").replace(/<[^>]*>/g, "");
+  // …and both destinations are still stated, which is what the strip was FOR.
+  assert.match(plainStreaming, /Enter steers/, "the hint names the steering key");
+  assert.match(plainStreaming, /Alt\+Enter queues for after this run/, "…and the follow-up key");
+  assert.match(plainStreaming, /Esc stops the run/, "…and the escape hatch");
+
+  // The placeholder states one promise at a time, which is what the caption used to do badly.
+  assert.match(streaming, /Steer this run/, "the field says what Enter will do");
+
+  const idle = renderToString(createElement(Composer, {
+    session: session({ state: "idle" }), state: initialState(),
+    unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
+    onRestored() {}, draft: "", onDraftChange() {},
+  }));
+  assert.ok(!/mode-strip/.test(idle), "an idle composer offers no destination choice");
+  assert.match(idle, /Send a prompt/, "…and says what Enter does when there is only one thing");
 });
 
 test("the interim 'steer is not available' copy is gone", async () => {
@@ -756,8 +755,12 @@ test("the composer names the action the selected mode will take, and offers no b
     unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
     onRestored() {}, draft: "hello", onDraftChange() {},
   }));
-  assert.match(steer, /Send steer/, "the steering consequence is still named");
-  assert.match(plain(steer), /Enter to steer/, "…and the hint says which key does it");
+  /*
+   * The label is gone with the button, and with the strip. What remains is the HINT, which is where a keyboard
+   * destination belongs — and the placeholder, which states the one promise the next Enter will keep.
+   */
+  assert.match(plain(steer), /Enter steers/, "the hint says which key does what");
+  assert.match(steer, /Steer this run/, "…and the field states the promise");
   assert.ok(!/btn-send/.test(steer), "no submit button");
   assert.ok(!/<button[^>]*>\s*Send/.test(steer), "…and no control that looks like one");
 
@@ -770,19 +773,35 @@ test("the composer names the action the selected mode will take, and offers no b
   assert.ok(!/btn-send/.test(idle), "no submit button when idle either");
 });
 
-test("the queued texts are listed, and a read-only row has no removal control", async () => {
-  // Rows are read-only because Pi Central has no per-item removal, so a `×` would be a fake
-  // control — the one real action is Esc, which the hint names.
+test("the queue renders as a bounded rail, and offers no per-item control", async () => {
+  /*
+   * Rows are read-only because Pi Central has no per-item removal, so a `\u00d7` would be a fake control. The one real action
+   * is `Clear queue and stop run`, inside the sheet, which says why.
+   *
+   * The rail is BOUNDED: one row per KIND, never one per message. That is the fix for "it changes the canvas of the
+   * transcript" — the dock's height no longer depends on how much is queued.
+   */
   const state = { ...initialState(), queues: { s7: { steering: ["do this instead"], followUp: ["and then"] } } };
   const html = renderToString(createElement(Composer, {
     session: session({ state: "streaming", pending: 2 }), state,
     unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
     onRestored() {}, draft: "", onDraftChange() {},
   }));
-  assert.match(text(html), /2 queued/);
-  assert.match(text(html), /do this instead/);
-  assert.match(text(html), /and then/);
-  assert.ok(!/×|Remove|remove/.test(html), "no per-item removal control may be offered");
+  const plain = html.replace(/<!-- -->/g, "").replace(/<[^>]*>/g, "");
+
+  // Both representatives are there, with their time-words.
+  assert.match(plain, /do this instead/);
+  assert.match(plain, /and then/);
+  assert.match(plain, /now/, "the steering row carries its time-word");
+  assert.match(plain, /then/, "…and the follow-up row carries the other");
+
+  // Exactly two rows, whatever is queued. Counted by KIND rather than by the shared class: an `is-unknown` row (for
+  // texts that never arrived) is a third kind of row and belongs to a different test.
+  const rows = [...html.matchAll(/class="queue-rail-row is-(steer|followUp)/g)].length;
+  assert.equal(rows, 2, `one row per kind, got ${rows}`);
+
+  assert.ok(!/\u00d7|Remove|remove/.test(html), "no per-item removal control may be offered");
+  assert.match(plain, /Show queue/, "there is a way to the full list");
 });
 
 test("a queue count with no texts says so instead of inventing rows", async () => {
@@ -792,7 +811,14 @@ test("a queue count with no texts says so instead of inventing rows", async () =
     unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
     onRestored() {}, draft: "", onDraftChange() {},
   }));
-  assert.match(text(html), /1 message queued before this page loaded/);
+  /*
+   * The rail cannot show an invented row, so it says what it knows — the COUNT — in its own words. The sheet adds the
+   * useful half: clearing returns the text to the box, where it can be read.
+   */
+  const plain = html.replace(/<!-- -->/g, "").replace(/<[^>]*>/g, "");
+  assert.match(plain, /1 queued before this page loaded/);
+  // Never a fabricated row: a placeholder would be a claim about what the reader asked for.
+  assert.equal([...html.matchAll(/class="queue-rail-row is-steer|class="queue-rail-row is-followUp/g)].length, 0);
 });
 
 test("a stopped run says the run stopped rather than claiming text was discarded", async () => {
