@@ -2,7 +2,9 @@
 
 **Next step:** [Detailed implementation plan](focused-workspace-plan.md) — staged delivery, code boundaries, acceptance criteria, and regression coverage.
 
-**References:** [`img_17.png`](../../img_17.png), desktop workspace with inspector hidden; [`img_18.png`](../../img_18.png), a close-up of successive tool calls and thinking summaries. Both reviewed directly.
+**References:** `img_17.png` — the desktop workspace with the inspector hidden; `img_18.png` — a close-up of successive tool calls and thinking summaries. Both reviewed directly.
+
+The captures are named rather than linked: they are working screenshots, gitignored like every other `img*.png`, so a link to one resolves on the machine that took it and fails in CI. That is exactly the kind of authoritative-looking reference `check-docs` exists to refuse.
 **Scope:** Screenshot-based evaluation using the `ui-review` rubric. This replaces the earlier draft that mixed older captures into the findings. No source-code diagnosis or interaction testing is implied; older error banners, modals, and inspector states are deliberately excluded.
 
 ## 1. What I see

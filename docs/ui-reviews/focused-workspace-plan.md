@@ -2,7 +2,7 @@
 
 **Status:** Proposed; no implementation is included in this document.
 **Baseline:** the screenshots and current checkout inspected during planning. The checkout may contain fixes newer than the screenshots.
-**Inputs:** [UI review](focused-workspace-review.md), [overall layout](../../img_17.png), [tool/thinking sequence](../../img_18.png).
+**Inputs:** [UI review](focused-workspace-review.md), and the maintainer's screenshots of the workspace and of a run of tool calls and thinking summaries. The screenshots are not committed — they are working captures, gitignored like every other `img*.png` — so they are named in backticks below rather than linked, because a link to an untracked file resolves here and fails in CI.
 **Scope:** A staged frontend refactor within `packages/ui/`, not a server, protocol, or session-engine rewrite.
 
 ## 1. Outcome and governing decisions
