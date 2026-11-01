@@ -124,14 +124,15 @@ Stated plainly, because a dashboard that overstates itself is worse than one tha
 **Works:** multiple sandboxed sessions in different directories with verified isolation; live transcripts
 reconstructed from Pi's delta-only stream; the approval dock answerable for any session; a bounded tool
 trace with full traversal; a read-only file tree and image viewer confined to the session's directory;
-images shown where they belong in the conversation, including the ones a tool read;
+images shown where they belong in the conversation, including the ones a tool read, and screenshots pasted or
+dropped straight into the composer;
 history searchable by content, with a clear refusal when a session's directory is gone; a session roster
 that survives a restart; agent-scoped credentials with the host's own credentials denied, and commits
 signed as the agent when the store is configured to sign.
 
-**Not yet:** no file editing from the browser, no update checking, no export. Images can be *viewed* in a
-transcript but not yet *pasted* into the composer — Pi accepts them on `prompt`, and Pi Central does not forward
-them. Each is a tracked issue rather than a wish.
+**Not yet:** no file editing from the browser, no update checking, no export. An image reference can be typed as
+`@path` but is not autocompleted, and the two new size caps are untuned against real reading. Each is a tracked issue
+rather than a wish.
 
 ## Working on this project
 

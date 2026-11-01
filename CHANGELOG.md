@@ -72,6 +72,38 @@ text until now.
   replied. A `ResizeObserver` on the transcript lane now follows any height that arrives after paint, which covers the
   same class for lazy images, expanding disclosures and asynchronously highlighted code.
 
+### Added — clipboard images
+
+- **Paste or drop an image into the composer, and send it with the prompt.** ⌘V on a pasted screenshot works with no
+  permission prompt, on `127.0.0.1` (a secure context), and matches Pi's own `ctrl+v` binding so muscle memory carries
+  over. Dropping a file on the composer works too, and it claims the drop before the browser navigates away and loses
+  the draft. A screenshot with no words is a complete prompt — the image is the content — so `Enter` sends it without
+  forcing filler text.
+- **Images are downscaled in the browser before they leave it.** Downscaling is the only end that can do it: the
+  orchestrator receives base64 and cannot re-encode without a decoder it should not grow. The target is Pi's own
+  `inputLimits` default of 1568px on the longest edge, so nothing is lost that a model would have used — the difference
+  is bytes, not information. A PNG stays PNG so transparency survives; everything else becomes JPEG.
+- **Two limits, both stated before sending.** 3 MB per image decoded, and **6 MB encoded in total** for one prompt. The
+  second exists because of a measurement: one image at the per-image cap encodes to 4.19 MB, comfortably inside the
+  transport's 8 MB frame — and **four of them is 16.78 MB**, so `ws` closes the socket with 1009 and the client gets no
+  reply at all. The composer would have emptied itself into a dead connection with no message. A limit on each part does
+  not bound the whole.
+- **The paste affordance only appears where the choice is real.** `ModelOption` now carries Pi's `input` list, so a model
+  that reports `["text"]` does not offer an attachment the provider would reject. An ABSENT list means unknown rather
+  than text-only — Pi omitting the field is not a claim — because `unknown → allowed` costs one provider error while
+  `unknown → hidden` is a feature that silently does not exist.
+
+### Changed — protocol 4 → 5
+
+- **`Control.prompt` carries optional `images`, and `ModelOption` carries `input`.** Both are ADDED FIELDS rather than new
+  wire kinds, which means `packages/protocol/test/wire-surface.test.ts` does **not** fail for either — that test
+  fingerprints kinds, not bodies. The bump is therefore not optional: a v5 UI against a v4 orchestrator would offer the
+  paste affordance and every paste would arrive as a prompt with no image, with the model answering "I don't see any
+  image" and no error anywhere.
+- The wire spelling is `{ mediaType, data }` rather than Pi's `{ type, data, mimeType }`, because `type` is the
+  discriminant of every record on this wire and reusing it inside a payload makes a log ambiguous. The supervisor maps
+  one to the other at the single point where a control becomes Pi's stdin.
+
 ### Tooling
 
 - `scripts/render-session-html.mjs` renders a real session's transcript to one self-contained HTML file, for review

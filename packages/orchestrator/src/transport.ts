@@ -36,6 +36,7 @@ import {
 import { findOwnPackage } from "./package-meta.ts";
 import type { Supervisor } from "./supervisor.ts";
 import type { FileError } from "./files.ts";
+import { acceptImages } from "./prompt-images.ts";
 import { discover, sessionAt } from "./registry.ts";
 import type { Config } from "./config.ts";
 import { createUiRequestHandler, resolveUiDistDir } from "./static-ui.ts";
@@ -388,15 +389,31 @@ export class Transport {
         this.#broadcast({ kind: "session", session: result.session });
         return;
       }
-      case "prompt":
+      case "prompt": {
+        /*
+         * Images are validated HERE, before anything is forwarded.
+         *
+         * A refusal is reported to the client as an `error` event with a sentence the reader can act on, rather than
+         * being dropped: a dropped image is a prompt the model answers as though nothing was attached, and "I don't see
+         * any image" is an error message written by the model about a defect in this process.
+         *
+         * All-or-nothing: see `acceptImages`. A prompt missing one of its four screenshots is worse than one refused.
+         */
+        const accepted = acceptImages(control.images);
+        if (!accepted.ok) {
+          this.#broadcast({ kind: "error", message: `image refused: ${accepted.message}`, sessionId: control.sessionId });
+          return;
+        }
         // `behavior` is forwarded only when the client chose one; the supervisor decides what a
         // missing choice means (see `Supervisor#prompt`).
         await this.#supervisor.prompt(
           control.sessionId,
           control.message,
           ...(control.behavior ? [control.behavior] : []),
+          ...(accepted.images.length > 0 ? [accepted.images] : []),
         );
         return;
+      }
       case "clearQueue": {
         await this.#supervisor.clearQueue(control.sessionId, control.andStop);
         return;

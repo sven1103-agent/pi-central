@@ -22,8 +22,21 @@ import { queuedMessages, type UiState } from "../store.ts";
 import { escalation } from "../queue.ts";
 import { QueueRail } from "./QueueRail.tsx";
 import { QueueSheet } from "./QueueSheet.tsx";
+import { AttachmentRail } from "./AttachmentRail.tsx";
+import { canSend, type Attachment } from "../attachments.ts";
+import { imageFilesFrom } from "../paste.ts";
 
 export type QueueBehavior = "steer" | "followUp";
+
+/*
+ * Stable defaults for the attachment props, so an embedding that knows nothing about images does not have to pass them.
+ *
+ * Module-level constants rather than inline `[]` and `() => {}`: the composer compares `attachments` in `canSend` on every
+ * keystroke, and a fresh array each render would make that comparison false every time for no reason.
+ */
+const noAttachments: readonly Attachment[] = Object.freeze([]);
+const noAttach = () => {};
+const noRemoveAttachment = () => {};
 
 export function Composer({
   session,
@@ -35,6 +48,11 @@ export function Composer({
   restored,
   draft,
   onDraftChange,
+  attachments = noAttachments,
+  onAttach = noAttach,
+  onRemoveAttachment = noRemoveAttachment,
+  canAttach = "unknown",
+  notice,
   follow,
 }: {
   session: LiveSession | undefined;
@@ -50,6 +68,30 @@ export function Composer({
   restored: string[];
   draft: string;
   onDraftChange: (draft: string) => void;
+  /**
+   * Images waiting to be sent with the next prompt.
+   *
+   * Owned by `App` and keyed per session, for the reason drafts are: an attachment that leaked between sessions would be
+   * sent to a different agent in a different directory, and content leaking is worse than text leaking.
+   */
+  attachments?: readonly Attachment[] | undefined;
+  /**
+   * Hand a paste or a drop to the owner, which validates, downscales and stores it.
+   *
+   * The composer deliberately does not own attachment state. It would have to be lifted anyway (the send path needs it),
+   * and a component that both captures and stores would make "what is attached" answerable in two places.
+   */
+  onAttach?: ((files: readonly File[]) => void) | undefined;
+  onRemoveAttachment?: ((id: string) => void) | undefined;
+  /**
+   * Whether the model can accept an image at all — `imageSupport(model.input)`.
+   *
+   * `"no"` suppresses the paste affordance entirely, because offering one would produce a provider error the reader
+   * cannot act on. `"unknown"` keeps it: Pi omitting the field is not a claim that the model is text-only.
+   */
+  canAttach?: "yes" | "no" | "unknown" | undefined;
+  /** A refused paste or drop, or a sent acknowledgement. Rendered in the chrome row, where the eyes already are. */
+  notice?: string | undefined;
   /**
    * The follow toggle, rendered in the composer's own chrome row.
    *
@@ -156,11 +198,62 @@ export function Composer({
 
   const submit = () => {
     const message = draft.trim();
-    if (message.length === 0 || unavailable) return;
+    /*
+     * `canSend`, not `message.length > 0`.
+     *
+     * A screenshot with no words is a complete instruction ("what is this?"), and Pi accepts an empty message when images
+     * are present because the image IS the content. Requiring text would force the reader to type filler.
+     */
+    if (!canSend(message, attachments) || unavailable) return;
     // Plain Enter STEERS while streaming. Sending "steer" for an idle prompt would be harmless to Pi and misleading to a
     // reader of the wire, so the behavior is only claimed when the choice was real.
     onSend(message, "steer");
     onDraftChange("");
+  };
+
+  /**
+   * A paste that carries an image becomes an attachment; a paste that carries only text is left alone.
+   *
+   * `preventDefault` is called ONLY when images were found. A screenshot copy in Chromium puts an image AND its
+   * placeholder text on the clipboard, so an unconditional preventDefault would swallow a text paste from a screenshot's
+   * own alt text — and an unconditional pass-through would let the browser insert a filename into the field.
+   */
+  const onPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (canAttach === "no") return;
+    const files = imageFilesFrom(event.clipboardData);
+    if (files.length === 0) return;
+    event.preventDefault();
+    onAttach(files);
+  };
+
+  /**
+   * Drop, on the whole composer rather than on the textarea.
+   *
+   * A drop aimed at the field's padding or at the rail beside it would otherwise fall through to the page, where the
+   * browser navigates to the file — which loses the draft and is the worst possible outcome of a near miss.
+   */
+  const [dragging, setDragging] = useState(false);
+  const onDragOver = (event: React.DragEvent) => {
+    if (canAttach === "no") return;
+    // Only claim the drop when the payload actually has a file, so dragging text into the field still selects text.
+    if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setDragging(true);
+  };
+  const onDragLeave = (event: React.DragEvent) => {
+    // `relatedTarget` is the element being entered. Without this check a child boundary fires `leave` and the highlight
+    // flickers as the pointer crosses the field.
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    setDragging(false);
+  };
+  const onDrop = (event: React.DragEvent) => {
+    setDragging(false);
+    if (canAttach === "no") return;
+    const files = imageFilesFrom(event.dataTransfer);
+    if (files.length === 0) return;
+    event.preventDefault();
+    onAttach(files);
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -173,7 +266,8 @@ export function Composer({
         // Alt+Enter sends as a follow-up directly. The key MEANS "queue this for after", so making the reader press
         // Enter again would be a second gesture for one intent - and with the toggle gone, the key is the whole choice.
         const message = draft.trim();
-        if (message.length > 0 && !unavailable) {
+        // `canSend` for the same reason `submit` uses it: an image alone is a complete prompt.
+        if (canSend(message, attachments) && !unavailable) {
           onSend(message, "followUp");
           onDraftChange("");
         }
@@ -184,7 +278,12 @@ export function Composer({
   };
 
   return (
-    <div className="composer">
+    <div
+      className={`composer${dragging ? " is-dragging" : ""}`}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       {/*
         THE RAIL. At most two rows, whatever the count — see `queue.ts`. It sits between the transcript's scroller and
         the field, and its height is a function of how many KINDS are queued, never of how many messages are.
@@ -214,6 +313,7 @@ export function Composer({
         value={draft}
         onChange={(event) => onDraftChange(event.target.value)}
         onKeyDown={onKeyDown}
+        onPaste={onPaste}
         placeholder={
           unavailable
             ? unavailableReason ?? "Unavailable"
@@ -232,6 +332,15 @@ export function Composer({
          */
         rows={3}
       />
+
+      {/*
+        THE ATTACHMENTS, above the field.
+
+        Above rather than below, because they are part of the MESSAGE being composed — the field's content follows them in
+        reading order, and a chip strip between the field and the chrome row would sit where the hint belongs and grow the
+        composer's permanent height on every paste.
+      */}
+      <AttachmentRail attachments={attachments} onRemove={onRemoveAttachment} />
 
       {/*
         THE COMPOSER'S CHROME ROW: the hint, and the follow toggle.
@@ -260,6 +369,19 @@ export function Composer({
         </span>
         {follow !== undefined && follow}
       </div>
+
+      {/*
+        A refusal, or the acknowledgement of a sent prompt with images, in the composer's own chrome row.
+
+        `role="status"` rather than `alert`: it is information about the reader's own action, not an interruption, and an
+        alert here would fire while they are typing the next thing. The text is a sentence from `attachments.ts`, so the
+        refusal the composer shows and the one the orchestrator would give cannot be worded differently.
+      */}
+      {notice !== undefined && (
+        <div className="hint attach-notice" role="status">
+          {notice}
+        </div>
+      )}
 
       {justStopped && (
         <div className="hint" role="status">

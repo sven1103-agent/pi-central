@@ -139,6 +139,28 @@ learns nothing new, and the preview is bounded to three paths per message. Detec
 decision (what is worth showing) and containment is a trust decision (what may be read), and they are
 deliberately in different layers.
 
+### Images on a prompt, and the two limits that bound the frame
+
+`Control.prompt` carries optional `images`, each `{ mediaType, data }`. Three facts about that field are
+worth knowing before changing anything about it:
+
+| Fact | Why |
+|---|---|
+| `mediaType` is checked against a four-format allow-list and the LIST's spelling is forwarded | the value reaches a provider; the client's string must not decide what content is |
+| the per-image cap is **decoded** bytes | base64 is 4/3, so a cap on the string length accepts a third more than it announces |
+| the **encoded total** is also capped | 4 images at the per-image cap is 16.78 MB, over the transport's 8 MB frame — measured, and it closes the socket with 1009 rather than replying |
+
+That last row is the one that is easy to miss: a limit on each part does not bound the whole. The
+orchestrator refuses an over-budget prompt with an `error` event naming the total and the limit, never by
+dropping the frame.
+
+A refused image is **all-or-nothing**. Accepting three of four would send a message the reader did not
+write, and they would have no way to know which one went missing — the model simply would not mention it.
+
+The wire spelling is `{ mediaType, data }`, not Pi's `{ type, data, mimeType }`: `type` is the
+discriminant of every record on this wire, and reusing it inside a payload makes a frame ambiguous to
+read and to log. The supervisor maps one to the other where a control becomes Pi's stdin.
+
 A type outside PNG/JPEG/GIF/WebP, or a payload with no data, is **stated** rather than drawn or
 silently dropped: *"this view displays PNG, JPEG, GIF and WebP only"* is a different fact from *"this
 message had no image"*, and the transcript must not report the second while meaning the first.

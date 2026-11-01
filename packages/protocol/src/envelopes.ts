@@ -115,6 +115,18 @@ export interface ModelOption {
   /** The human name, when Pi reports one. Falls back to `id` for display. */
   name?: string | undefined;
   /**
+   * The model's accepted input modalities, as Pi reports them (`input: ["text", "image"]`).
+   *
+   * Carried because the alternative is guessing. A paste affordance offered on a text-only model fails at the provider
+   * with an error the reader cannot act on, and this codebase's own rule is that a control appears only when the choice
+   * is real (see `Composer.tsx` on the mode selector that was removed for the same reason).
+   *
+   * Absent means **unknown**, not "text only". Pi may not report it for every model, and treating absent as "no image
+   * support" would hide the feature on a model that has it — so an absent value leaves the decision to the reader, and a
+   * stated `["text"]` is what actually suppresses the control.
+   */
+  input?: ("text" | "image")[] | undefined;
+  /**
    * Whether the model supports extended thinking.
    *
    * Displayed rather than acted on here: the authoritative constraint is
@@ -140,7 +152,39 @@ export type Control =
    * restart is how a crash loop hides itself.
    */
   | { kind: "retry"; sessionId: string }
-  | { kind: "prompt"; sessionId: string; message: string; behavior?: "steer" | "followUp" }
+  /**
+   * Send a prompt, with optional images.
+   *
+   * ## Why images travel on the prompt rather than as their own control
+   *
+   * An image is not a separate act — it is part of the message. Pi's RPC already models it that way
+   * (`prompt` takes `images: ImageContent[]`), and a separate `attachImage` control would create a
+   * window in which an uploaded image exists but belongs to no message: something to clean up on
+   * abort, to expire, and to reconcile against a session that died mid-attach. There is no such
+   * window here, because there is nothing to reconcile.
+   *
+   * ## Shape, and why it is not Pi's shape
+   *
+   * Pi wants `{ type: "image", data, mimeType }`. This is `{ mediaType, data }` — the same two facts
+   * with a different spelling, chosen because `type` is already the discriminant of every record on
+   * this wire and reusing it inside a payload makes the framing ambiguous to read and to log. The
+   * supervisor maps one to the other at the single point where a command becomes Pi's stdin.
+   *
+   * `mediaType` is validated by the ORCHESTRATOR and never trusted from the client: an allow-list of
+   * four types, a size cap, and a base64 shape check. The browser is not the authority on a limit —
+   * the same argument `files.ts` makes for its 8 MB read cap.
+   *
+   * The message may be EMPTY when images are present. A screenshot with no words is a complete
+   * instruction ("what is this?"), and Pi accepts an empty message with images because the image
+   * itself is content. Without this, the composer would have to invent filler text.
+   */
+  | {
+      kind: "prompt";
+      sessionId: string;
+      message: string;
+      behavior?: "steer" | "followUp";
+      images?: PromptImage[] | undefined;
+    }
   /**
    * Empty Pi's message queue, optionally stopping the run.
    *
@@ -179,6 +223,39 @@ export type Control =
   /** Read one text file, confined the same way. Answered with `file` or `fileError`. */
   | { kind: "readFile"; sessionId: string; path: string }
   | { kind: "resume"; path: string; mode?: "sandboxed" | "direct" };
+
+/**
+ * One image travelling on a prompt, from the UI to Pi.
+ *
+ * ## The type is the orchestrator's decision, not the browser's
+ *
+ * `mediaType` arrives from the client and is CHECKED where the bytes are forwarded, against an allow-list of the four
+ * formats the transcript can also draw (PNG, JPEG, GIF, WebP). Three reasons it is not simply passed through:
+ *
+ *   1. Pi hands `mimeType` to a provider, and a `text/html` in that slot is a claim about content that the browser chose.
+ *   2. The transcript renders a pasted image by the same allow-list, so an accepted-but-undrawable type would send
+ *      something the sender cannot then see — an asymmetry that reads as a bug.
+ *   3. SVG is excluded on purpose. It is the one image format that can carry script, and the file viewer already made
+ *      that call; accepting one here would be a second, weaker decision about the same bytes.
+ *
+ * ## Size, and where the limit lives
+ *
+ * `MAX_PROMPT_IMAGE_BYTES` lives in the orchestrator beside the check that enforces it, not here, for the reason
+ * `bytes.ts` records: the client must never decide what is acceptable, and a second copy of a number is a second thing
+ * to keep in step. What the UI needs is not the number but the CONSEQUENCE, so the orchestrator answers a refusal with
+ * a stated reason rather than a dropped frame.
+ *
+ * That distinction is load-bearing here in a way it is not for a file read. The transport's frame limit is 8 MB, and
+ * base64 inflates by a third — so an image above roughly 6 MB raw does not merely fail a check, it exceeds the frame
+ * and the socket closes with no reply at all. The UI therefore downscales before sending and refuses early, and the
+ * orchestrator refuses anything that still arrives too large. Two limits, both stated, instead of one silent close.
+ */
+export interface PromptImage {
+  /** `image/png`, `image/jpeg`, `image/gif` or `image/webp`. Anything else is refused, not coerced. */
+  mediaType: string;
+  /** Base64 payload, no `data:` prefix. */
+  data: string;
+}
 
 /**
  * Facts about the running installation, for the Settings surface (issue #58).
@@ -439,8 +516,25 @@ export type FileErrorReason =
  *
  * Bumped rather than slipped in: a v3 orchestrator would receive `retry`, ignore it as unknown, and the
  * reader would press a button that does nothing — which is exactly what the handshake exists to catch.
+ *
+ * v5: `prompt` carries optional `images`, and `ModelOption` carries `input`.
+ *
+ * Bumped for two different reasons at once, and both are worth naming because only one of them is
+ * caught by the kind fingerprint:
+ *
+ *   - `ModelOption.input` is an ADDED FIELD on an existing event, which the fingerprint cannot see (it
+ *     records kinds, not bodies). A v4 UI against a v5 orchestrator would simply not offer the paste
+ *     affordance; a v5 UI against a v4 orchestrator would offer it and every paste would arrive as a
+ *     prompt with no image, with the model answering "I don't see any image" and no error anywhere.
+ *     That silent half is why the bump is not optional.
+ *   - `Control.prompt` gains an optional field rather than a new kind, so `packages/protocol/test/
+ *     wire-surface.test.ts` will NOT fail for it either. Relying on that test alone would have shipped
+ *     a v5 client against a v4 orchestrator that drops `images` on the floor.
+ *
+ * A refused image is reported as an `error` event with a stated reason, never a dropped frame: the
+ * transport's 8 MB limit would otherwise close the socket for a shape the client could have avoided.
  */
-export const PROTOCOL_VERSION = 4 as const;
+export const PROTOCOL_VERSION = 5 as const;
 
 /**
  * The first protocol version that understands the `retry` control (issue #11).
