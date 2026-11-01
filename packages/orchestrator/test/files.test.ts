@@ -200,6 +200,39 @@ test("listing returns directories first, then names case-insensitively", () => {
   assert.equal(result.value.entries[0]!.kind, "directory");
 });
 
+test("each entry carries its mtime, so a cached directory can be seen to have moved (issue #189)", () => {
+  // The client re-reads a directory on a timer, and uses this watermark to know that a re-read found
+  // nothing new — without it, every tick would rebuild the tree and every memoised turn with it.
+  //
+  // It comes from the same `lstat` that already decided `kind`, so this asserts both that it is
+  // present and that it is the real time rather than a placeholder: a constant would make every
+  // directory look unchanged forever, which is the defect this fixes wearing a different hat.
+  const root = makeRoot("mtimes");
+  write(root, "a.txt", "a");
+  mkdirSync(join(root, "sub"));
+
+  const result = listDirectory(root, "");
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+
+  const file = result.value.entries.find((e) => e.name === "a.txt");
+  const directory = result.value.entries.find((e) => e.name === "sub");
+  assert.ok(file && directory, "both entries are listed");
+  assert.equal(typeof file.mtimeMs, "number", "a file carries its mtime");
+  assert.equal(typeof directory.mtimeMs, "number", "so does a directory, which is how a NEW file is noticed");
+  // Sanity on the value: a real modification time, within a day of now, not 0 and not undefined.
+  assert.ok(Math.abs(Date.now() - file.mtimeMs!) < 24 * 60 * 60 * 1000, `mtime ${file.mtimeMs} is not plausible`);
+
+  // And it moves when the file is rewritten, which is the whole purpose.
+  const before = file.mtimeMs!;
+  write(root, "a.txt", "changed contents, which is longer");
+  const after = listDirectory(root, "");
+  assert.equal(after.ok, true);
+  if (!after.ok) return;
+  const rewritten = after.value.entries.find((e) => e.name === "a.txt");
+  assert.ok(rewritten?.mtimeMs !== undefined && rewritten.mtimeMs > before, "a rewrite moves the mtime");
+});
+
 test("hidden files are omitted by default and included on request", () => {
   const root = makeRoot("hidden");
   write(root, ".env", "SECRET=1");

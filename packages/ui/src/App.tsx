@@ -27,9 +27,12 @@ import {
   type FileState,
   initialFilesState,
   reduceFiles,
+  newestMtime,
   showsHidden,
   showsWrapped,
   splitFileKey,
+  staleDirectories,
+  TREE_REREAD_MS,
 } from "./files.ts";
 import {
   composerMode,
@@ -417,6 +420,12 @@ export function App() {
               path: event.path,
               entries: event.entries,
               truncated: event.truncated,
+              // Freshness, recorded here because the reducer must stay pure and this is the only
+              // place the read and its answer meet (issue #189). `changedAt` is the newest mtime in
+              // the answer, so a directory the agent wrote to is re-read without waiting out the
+              // window — the case a reader actually notices.
+              readAt: Date.now(),
+              ...(newestMtime(event.entries) === undefined ? {} : { changedAt: newestMtime(event.entries)! }),
             });
             break;
           case "file":
@@ -760,6 +769,52 @@ export function App() {
     // `liveIds` is the change signal; `state.live` is read through the closure fresh on each run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveIds]);
+
+  /*
+   * Keep the file tree and the `@` picker in step with a directory the agent is writing to (issue #189).
+   *
+   * ## The defect
+   *
+   * A listing had no expiry: once a directory answered, that answer was authoritative for the life of
+   * the page. So a file the agent created mid-session never appeared, in the tree OR in the composer's
+   * `@` picker — both read this cache — and the only cure was restarting the app. The tree also never
+   * re-asked, so a file created and then edited showed stale contents.
+   *
+   * ## Why a timer rather than an fs watch
+   *
+   * The orchestrator could `fs.watch` each session's cwd, but the cost is the part that decides it.
+   * macOS FSEvents is **repo-global**: watching one directory reports every git checkout on the
+   * machine, and a project's `.git/index` churns on every `git status`. Filtering that in JavaScript
+   * is a firehose for a directory the reader may not even have open. A bounded re-read of directories
+   * that are already loaded, only while the window is visible, is proportional to what is actually on
+   * screen.
+   *
+   * ## What keeps it from being a flood
+   *
+   *   - `staleDirectories` returns only `loaded` directories past `TREE_REREAD_MS`, or whose mtimes say
+   *     they already moved. `loading` is skipped so an answer in flight is not discarded.
+   *   - The window being hidden stops the whole loop; the reader cannot see an update they are not
+   *     looking at.
+   *   - The interval is deliberately shorter than the window, so a directory read at t=0 is re-read at
+   *     t≈5s rather than at t≈7.5s. A longer interval would make the window the sum of both.
+   *   - The reducer returns the SAME state object when nothing is stale, so a tick that finds nothing
+   *     to do causes no re-render.
+   */
+  useEffect(() => {
+    if (!focusedId) return;
+    const tick = () => {
+      if (document.visibilityState === "hidden") return;
+      const stale = staleDirectories(filesRef.current, focusedId, Date.now());
+      for (const path of stale) listDirectoryFor(focusedId, path, showsHidden(filesRef.current, focusedId));
+    };
+    const timer = setInterval(tick, TREE_REREAD_MS / 2);
+    // A window that was hidden for a while must not stay stale until the next tick after it is shown.
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [focusedId, listDirectoryFor]);
   const transcript = transcriptFor(state, focused?.id);
   const fleet = fleetCounts(state);
   // HOME arrives with the first snapshot, so it is undefined until then. Paths render in full

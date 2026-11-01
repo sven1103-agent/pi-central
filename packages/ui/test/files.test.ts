@@ -24,7 +24,10 @@ import {
   reduceFiles,
   showsHidden,
   showsWrapped,
+  TREE_REREAD_MS,
+  newestMtime,
   splitFileKey,
+  staleDirectories,
 } from "../src/files.ts";
 
 test("a refused LISTING is an error directory, never an empty one", () => {
@@ -347,4 +350,198 @@ test("forgetting a session drops its wrap preference with its tree", () => {
   let state = reduceFiles(initialFilesState(), { kind: "toggleWrap", sessionId: "s1" });
   state = reduceFiles(state, { kind: "forgetSession", sessionId: "s1" });
   assert.equal(showsWrapped(state, "s1"), true);
+});
+
+// --- Freshness (issue #189) ------------------------------------------------------------------
+//
+// The reported defect: a file the agent created during a session never appeared, in the tree or in
+// the composer's `@` picker — both read this cache — and the only cure was restarting the app. A
+// listing had no expiry at all, so an answer from the first read was authoritative for the life of
+// the page.
+//
+// Each test below is one way the fix could be wrong: no expiry, an expiry that discards an answer in
+// flight, a re-read of something refused, a mtime that is believed when it is in the future, and a
+// no-op tick that still re-renders.
+
+/** A loaded listing, with the freshness a real response carries. */
+function loaded(path: string, mtimes: number[], readAt: number) {
+  const entries = mtimes.map((mtimeMs, index) => ({
+    name: `f${index}.txt`,
+    kind: "file" as const,
+    size: 1,
+    mtimeMs,
+    hidden: false,
+  }));
+  return {
+    kind: "filesLoaded" as const,
+    sessionId: "s1",
+    path,
+    entries,
+    truncated: false,
+    readAt,
+    ...(mtimes.length === 0 ? {} : { changedAt: Math.max(...mtimes) }),
+  };
+}
+
+test("a listing older than the window is stale, and a fresh one is not", () => {
+  const now = 1_000_000;
+  let state = initialFilesState();
+  state = reduceFiles(state, loaded("", [now - 60_000], now - 60_000));
+  state = reduceFiles(state, loaded("src", [now - 60_000], now - 1_000));
+
+  assert.deepEqual(staleDirectories(state, "s1", now), [""], "only the aged listing is stale");
+});
+
+test("a listing whose mtime watermark changed is the case age alone cannot see — and is covered by the bound", () => {
+  // An earlier design used the newest mtime as proof that a directory "just moved", so a file the
+  // agent had created would appear without waiting. It cannot work: a listing's newest mtime is
+  // recent BY CONSTRUCTION at the moment it is read, so EVERY directory looks freshly changed for a
+  // full window after every read and the loop re-requests on every tick. The watermark is used for
+  // what it is actually good for — deciding that a re-read changed nothing, so the tree is not
+  // re-rendered (see `filesLoaded`). What is asserted here is the honest contract: within the window.
+  const now = 1_000_000;
+  let state = initialFilesState();
+  state = reduceFiles(state, loaded("", [now - 100], now - 100));
+
+  // Fresh: under the window, so not yet re-read.
+  assert.deepEqual(staleDirectories(state, "s1", now), [], "not stale before the window elapses");
+  // The bound, which is what the user is promised: at the window it is re-read.
+  assert.deepEqual(staleDirectories(state, "s1", now + TREE_REREAD_MS), [""]);
+});
+
+test("an identical re-read keeps the state object, so the timer cannot re-render forever", () => {
+  // Twice a second, for every open directory, forever. Replacing the entries array each time would
+  // rebuild the tree and every memoised turn that keys off the file cache.
+  const now = 1_000_000;
+  let state = initialFilesState();
+  state = reduceFiles(state, loaded("", [now - 60_000], now - 60_000));
+
+  const same = reduceFiles(state, loaded("", [now - 60_000], now));
+  assert.equal(same, state, "an unchanged listing is not new state");
+
+  // A moved directory IS new state, and that is the whole point of the comparison.
+  const moved = reduceFiles(state, loaded("", [now - 1_000], now));
+  assert.notEqual(moved, state);
+  assert.equal(directoryAt(moved, "s1", "").status, "loaded");
+});
+
+test("a `loading` directory is never demoted, so an answer in flight is not discarded", () => {
+  const now = 1_000_000;
+  let state = initialFilesState();
+  state = reduceFiles(state, loaded("", [now - 60_000], now - 60_000));
+  state = reduceFiles(state, { kind: "filesLoading", sessionId: "s1", path: "" });
+
+  assert.deepEqual(staleDirectories(state, "s1", now), [], "loading is not stale");
+  // And the invalidation action agrees: it must not clobber the loading state either.
+  const after = reduceFiles(state, { kind: "invalidateDirectories", sessionId: "s1", paths: [""] });
+  assert.equal(directoryAt(after, "s1", "").status, "loading");
+});
+
+test("a refused listing is not re-asked on every tick", () => {
+  // A reader staring at "permission denied" should not have the same question re-asked forever.
+  const now = 1_000_000;
+  let state = initialFilesState();
+  state = reduceFiles(state, {
+    kind: "filesFailed",
+    sessionId: "s1",
+    path: "",
+    reason: "permission",
+    message: "denied",
+  });
+
+  // Not stale, now or ever: an error is a settled answer, not an old one.
+  assert.deepEqual(staleDirectories(state, "s1", now), []);
+  assert.deepEqual(staleDirectories(state, "s1", now + 10 * TREE_REREAD_MS), []);
+  // And the loop has nothing to ask it, because `staleDirectories` is what drives the requests.
+  // `invalidateDirectories` cannot demote it either, by design: it is not an age problem.
+  const after = reduceFiles(state, { kind: "invalidateDirectories", sessionId: "s1", paths: [""] });
+  assert.equal(directoryAt(after, "s1", "").status, "error", "an error must never become unloaded");
+});
+
+test("an unloaded directory is not reported as stale — it is already going to be read", () => {
+  assert.deepEqual(staleDirectories(initialFilesState(), "s1", 1_000_000), []);
+});
+
+test("a listing with NO recorded read time is re-read once, rather than trusted forever", () => {
+  // A response from an orchestrator that predates `mtimeMs`, or one cached before this change. It has
+  // to be refreshed — but only once, because the answer then carries the freshness fields.
+  let state = initialFilesState();
+  state = reduceFiles(state, {
+    kind: "filesLoaded",
+    sessionId: "s1",
+    path: "",
+    entries: [{ name: "a.txt", kind: "file", hidden: false }],
+    truncated: false,
+  });
+  assert.deepEqual(staleDirectories(state, "s1", 1_000_000), [""]);
+});
+
+test("a READ TIME in the future is treated as fresh, not as permanently stale", () => {
+  // A file server and a browser can disagree about the clock by seconds. Believing a future reading
+  // as "infinitely old" would re-request that directory on every single tick, forever.
+  const now = 1_000_000;
+  let state = initialFilesState();
+  state = reduceFiles(state, loaded("", [now], now + 120_000));
+
+  assert.deepEqual(staleDirectories(state, "s1", now), [], "a future reading is not stale");
+});
+
+test("only the asked session's directories are considered", () => {
+  const now = 1_000_000;
+  let state = initialFilesState();
+  state = reduceFiles(state, { ...loaded("", [now - 60_000], now - 60_000), sessionId: "s2" });
+  assert.deepEqual(staleDirectories(state, "s1", now), [], "another session's tree is not ours");
+});
+
+test("a tick that finds nothing stale returns the SAME state object, so it cannot re-render", () => {
+  // The loop runs twice a second. A fresh object per tick would re-render the tree and the transcript
+  // forever, which is a worse defect than the staleness being fixed.
+  const now = 1_000_000;
+  let state = initialFilesState();
+  state = reduceFiles(state, loaded("", [now - 60_000], now - 60_000));
+
+  const fresh = reduceFiles(state, { kind: "invalidateDirectories", sessionId: "s1", paths: [] });
+  assert.equal(fresh, state, "an empty invalidation is a no-op");
+
+  // And invalidating something already unloaded is a no-op too.
+  const again = reduceFiles(fresh, { kind: "invalidateDirectories", sessionId: "s1", paths: [""] });
+  assert.notEqual(again, fresh, "the first demotion does change state");
+  const third = reduceFiles(again, { kind: "invalidateDirectories", sessionId: "s1", paths: [""] });
+  assert.equal(third, again, "a second demotion of the same path is a no-op");
+});
+
+test("the newest mtime in a listing is its watermark, and `undefined` is not zero", () => {
+  // `undefined` must not become 0: a listing from an orchestrator that reports no mtimes would then
+  // look like a directory from 1970 and be re-read on every tick, forever.
+  assert.equal(newestMtime([{ name: "a", kind: "file", hidden: false, mtimeMs: 5 }]), 5);
+  assert.equal(
+    newestMtime([
+      { name: "a", kind: "file", hidden: false, mtimeMs: 5 },
+      { name: "b", kind: "directory", hidden: false, mtimeMs: 9 },
+    ]),
+    9,
+  );
+  assert.equal(newestMtime([{ name: "a", kind: "file", hidden: false }]), undefined);
+  assert.equal(newestMtime([]), undefined);
+});
+
+test("invalidating a file's contents makes reopening it read the file again", () => {
+  // The tree is not the only stale surface: a file already open in the pane kept the bytes it was
+  // first read with, so a file the agent edited showed its OLD contents indefinitely.
+  let state = initialFilesState();
+  state = reduceFiles(state, {
+    kind: "fileLoaded",
+    sessionId: "s1",
+    path: "a.txt",
+    bytes: 3,
+    content: { kind: "text", text: "old" },
+  });
+  assert.equal(fileAt(state, "s1", "a.txt").status, "loaded");
+
+  state = reduceFiles(state, { kind: "invalidateFile", sessionId: "s1", path: "a.txt" });
+  assert.equal(fileAt(state, "s1", "a.txt").status, "unloaded", "content is dropped, so it re-reads");
+
+  // And the no-op case, for the same reason as the directory tick.
+  const untouched = reduceFiles(state, { kind: "invalidateFile", sessionId: "s1", path: "a.txt" });
+  assert.equal(untouched, state);
 });

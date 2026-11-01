@@ -495,6 +495,19 @@ export interface FileEntry {
   linkTarget?: "file" | "directory" | "other" | "missing" | undefined;
   /** Size in bytes, for regular files only. */
   size?: number | undefined;
+  /**
+   * Modification time in ms, for regular files and directories.
+   *
+   * Carried so the client can tell that a directory it already holds has MOVED, without a second
+   * read to find out (see `staleDirectories`). The alternative — polling every loaded directory on a
+   * timer and comparing entry names — cannot see a file edited in place, and costs the read anyway.
+   *
+   * Optional, and adding it is deliberately NOT a protocol-version change: a receiver that ignores
+   * it still gets a correct (if staler) tree, and an orchestrator that omits it still gets re-reads
+   * on age alone. Millisecond resolution because two writes inside one second are exactly the case a
+   * reader notices (a file created, then immediately appended to).
+   */
+  mtimeMs?: number | undefined;
   hidden: boolean;
   /** `lstat` failed: the entry exists but its type could not be established. */
   unreadable?: boolean | undefined;

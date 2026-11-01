@@ -29,9 +29,13 @@ They are kept because each one is the reason a constraint or an invariant test e
 - Sessions are keyed by canonical path, so one conversation cannot be listed twice (ADR-0004)
   ([#185]).
 - A process that never started no longer makes shutdown wait forever ([#185]).
+- Files created during a session appear in the tree and the `@` picker within five seconds ([#189]).
+- Each listing carries entry mtimes, so a re-read that found nothing new does not re-render ([#189]).
+
 
 [#184]: https://github.com/sven1103-agent/pi-central/issues/184
 [#185]: https://github.com/sven1103-agent/pi-central/issues/185
+[#189]: https://github.com/sven1103-agent/pi-central/issues/189
 
 
 ## [0.7.0] — 2026-11-01
