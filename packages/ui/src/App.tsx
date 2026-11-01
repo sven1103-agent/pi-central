@@ -32,6 +32,12 @@ import {
   transcriptFor,
 } from "./store.ts";
 import { SessionRail } from "./components/SessionRail.tsx";
+import {
+  parseTraceOrder,
+  TRACE_DETAIL_DEFAULT_HEIGHT,
+  TRACE_ORDER_KEY,
+  type TraceOrder,
+} from "./trace.ts";
 
 /**
  * Below this width the rail becomes an overlay drawer.
@@ -146,6 +152,20 @@ export function App() {
   // selection held inside it would be lost exactly when the reader comes back to look at it. The trace is a panel
   // now, so the selection has to outlive both a session switch and the panel being closed and reopened.
   const [openToolBySession, setOpenToolBySession] = useState<Record<string, string | undefined>>({});
+  //
+  // The trace panel's order and detail height, PERSISTED.
+  //
+  // Both are the reader's choices about a surface they use repeatedly, so neither belongs in `SessionView` (which remounts
+  // per session) nor in the component's own state (which dies with the panel). Read through initialisers so a corrupt
+  // stored value cannot throw during the first render — the same rule `parsePanelPrefs` follows.
+  const [traceOrder, setTraceOrder] = useState<TraceOrder>(() => {
+    try {
+      return parseTraceOrder(localStorage.getItem(TRACE_ORDER_KEY));
+    } catch {
+      return "oldest";
+    }
+  });
+  const [traceDetailHeight, setTraceDetailHeight] = useState(TRACE_DETAIL_DEFAULT_HEIGHT);
 
 
   // The right panel's geometry and mode, restored from the last visit (issue #8; #15 generalises
@@ -210,6 +230,15 @@ export function App() {
   useEffect(() => {
     writeTracePrefs({ collapsed: {}, markers: showMarkersBySession });
   }, [showMarkersBySession]);
+
+  // Persisted on change, not on every render: both only change when the reader acts.
+  useEffect(() => {
+    try {
+      localStorage.setItem(TRACE_ORDER_KEY, traceOrder);
+    } catch {
+      // Storage disabled or full. A preference that is not remembered is not an error.
+    }
+  }, [traceOrder]);
 
   const setPanelWidth = useCallback((width: number, userSized: boolean) => {
     setPanel((current) => ({ ...current, width, userSized }));
@@ -895,6 +924,11 @@ export function App() {
                   }))
                 }
                 variant="panel"
+                order={traceOrder}
+                onOrder={setTraceOrder}
+                detailHeight={traceDetailHeight}
+                onDetailHeight={setTraceDetailHeight}
+                onResetDetailHeight={() => setTraceDetailHeight(TRACE_DETAIL_DEFAULT_HEIGHT)}
               />
             ) : (
               // No session, no trace. Said rather than showing an empty list, which would claim nothing ran.

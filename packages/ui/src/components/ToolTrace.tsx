@@ -28,10 +28,22 @@
  * The active tool is pinned into view and highlights, because watching what is running NOW is the one use this
  * view shares with its predecessor.
  */
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { ToolExecution } from "../transcript.ts";
 import { recentTools, toolSummary } from "../transcript.ts";
 import { traceRowLabel } from "../activity.ts";
+import {
+  clampTraceDetailHeight,
+  orderTools,
+  parseTraceOrder,
+  resizeTraceDetailBy,
+  resizeTraceDetailTo,
+  traceDetailMaxHeight,
+  TRACE_DETAIL_DEFAULT_HEIGHT,
+  TRACE_DETAIL_MIN_HEIGHT,
+  TRACE_ORDER_KEY,
+  type TraceOrder,
+} from "../trace.ts";
 
 export function ToolTrace({
   tools,
@@ -42,6 +54,11 @@ export function ToolTrace({
   showMarkers,
   onToggleMarkers,
   variant = "drawer",
+  order: orderProp,
+  onOrder,
+  detailHeight: detailHeightProp,
+  onDetailHeight,
+  onResetDetailHeight,
 }: {
   tools: ToolExecution[];
   selectedId: string | undefined;
@@ -53,12 +70,108 @@ export function ToolTrace({
   showMarkers: boolean;
   onToggleMarkers: () => void;
   variant?: "drawer" | "panel";
+  /**
+   * Which way the list runs.
+   *
+   * Owned by the host when it is persisted (`App`), so it survives a session switch — `SessionView` remounts, and a sort
+   * order that reset every time would be worse than no control. Controlled when provided, local otherwise.
+   */
+  order?: TraceOrder;
+  onOrder?: ((order: TraceOrder) => void) | undefined;
+  /** The detail pane's height, for the same reason: a size the reader chose must outlive the pane that shows it. */
+  detailHeight?: number;
+  onDetailHeight?: ((height: number) => void) | undefined;
+  /** Double-click on the handle, or the app's own reset. */
+  onResetDetailHeight?: (() => void) | undefined;
 }) {
   const inPanel = variant === "panel";
   const listRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
   const active = tools.filter((tool) => tool.running);
   const count = tools.length;
+
+  /*
+   * ORDER and HEIGHT are controlled when the host persists them, local otherwise.
+   *
+   * The local fallback exists so the drawer — which has no preference storage of its own — still works. The trivial
+   * `useState` setters are called only when the host did not supply one, which keeps the controlled path honest: a
+   * component that wrote to its own copy as well would disagree with the persisted value on the next render.
+   */
+  const [localOrder, setLocalOrder] = useState<TraceOrder>(() => {
+    try {
+      return parseTraceOrder(localStorage.getItem(TRACE_ORDER_KEY));
+    } catch {
+      return "oldest";
+    }
+  });
+  const order = orderProp ?? localOrder;
+  const setOrder = useCallback(
+    (next: TraceOrder) => {
+      if (onOrder !== undefined) onOrder(next);
+      else setLocalOrder(next);
+    },
+    [onOrder],
+  );
+
+  /*
+   * THE DETAIL PANE'S HEIGHT IS A PROPERTY OF THE PANEL, NOT OF THE SELECTED CALL.
+   *
+   * It used to be `flex: 0 1 auto`, so its height followed the content: traversing with the arrow keys resized the pane
+   * at every step, shifting the rows and the scroll position under the reader. A fixed height that the reader can drag
+   * means moving through calls changes only what is INSIDE the pane.
+   */
+  const [localHeight, setLocalHeight] = useState(TRACE_DETAIL_DEFAULT_HEIGHT);
+  const detailHeight = detailHeightProp ?? localHeight;
+  const setDetailHeight = useCallback(
+    (next: number) => {
+      if (onDetailHeight !== undefined) onDetailHeight(next);
+      else setLocalHeight(next);
+    },
+    [onDetailHeight],
+  );
+
+  /** The panel's own height, read at drag time: it changes with the window, so it cannot be a constant. */
+  const panelHeightRef = useRef(0);
+  const setPanelBox = useCallback((node: HTMLElement | null) => {
+    if (node === null) return;
+    panelHeightRef.current = node.getBoundingClientRect().height;
+  }, []);
+
+  /**
+   * The DISPLAYED order. Traversal follows it too — an arrow key must move the selection one row on SCREEN, not one row
+   * in the underlying data, or in a reversed list an arrow jumps in the wrong direction.
+   */
+  const ordered = orderTools(tools, order);
+
+  const drag = useRef<{ pointerId: number; startY: number; startHeight: number } | undefined>(undefined);
+
+  function handleDragStart(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current = { pointerId: event.pointerId, startY: event.clientY, startHeight: detailHeight };
+  }
+  function handleDragMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const state = drag.current;
+    if (state === undefined || state.pointerId !== event.pointerId) return;
+    // `startHeight - delta`, not `height - delta`: accumulating against the live value compounds rounding and drifts
+    // away from the pointer.
+    setDetailHeight(resizeTraceDetailBy(state.startHeight, event.clientY - state.startY, panelHeightRef.current));
+  }
+  function handleDragEnd(event: ReactPointerEvent<HTMLDivElement>) {
+    if (drag.current === undefined) return;
+    drag.current = undefined;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+  function handleDragKeys(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const keys = ["ArrowUp", "ArrowDown", "Home", "End"] as const;
+    if (!keys.includes(event.key as (typeof keys)[number])) return;
+    event.preventDefault();
+    setDetailHeight(
+      resizeTraceDetailTo(event.key as (typeof keys)[number], detailHeight, panelHeightRef.current),
+    );
+  }
 
   // Follow the tail only while the reader is already at the bottom. Yanking someone who has
   // scrolled up to inspect an older call is the failure mode to avoid.
@@ -88,15 +201,16 @@ export function ToolTrace({
       // Only when the trace itself has focus: arrow keys belong to the composer otherwise.
       if (!listRef.current?.contains(document.activeElement)) return;
       event.preventDefault();
-      const index = tools.findIndex((tool) => tool.toolCallId === selectedId);
+      // `ordered`, not `tools`: in a reversed list the arrow keys must move one row on SCREEN.
+      const index = ordered.findIndex((tool) => tool.toolCallId === selectedId);
       const next = index === -1
-        ? tools.length - 1
-        : Math.max(0, Math.min(tools.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
-      onSelect(tools[next]?.toolCallId);
+        ? ordered.length - 1
+        : Math.max(0, Math.min(ordered.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
+      onSelect(ordered[next]?.toolCallId);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [tools, selectedId, onSelect, collapsed]);
+  }, [ordered, selectedId, onSelect, collapsed]);
 
   if (count === 0) return null;
 
@@ -105,10 +219,10 @@ export function ToolTrace({
   const recentIds = new Set(recent.map((tool) => tool.toolCallId));
   // The list is the whole trace, so an older call is reachable; the recent window is highlighted
   // so the eye can find "now" without reading the list.
-  const rows = !inPanel && collapsed ? [] : tools;
+  const rows = !inPanel && collapsed ? [] : ordered;
 
   return (
-    <section className={`trace is-${variant}`} aria-label="Tool trace">
+    <section className={`trace is-${variant}`} aria-label="Tool trace" ref={setPanelBox}>
       {/*
         THE HEADER CARRIES ONE THING IN THE PANEL: how many calls there are.
         
@@ -149,6 +263,27 @@ export function ToolTrace({
         )}
         <span className="spacer" />
         {/*
+          THE ORDER, as a control rather than a column of numbers.
+
+          Index numbers were added so rows could be told apart, but the reader does not think in indices and the numbers
+          earned a leading column they did not deserve. What was actually missing is a choice about DIRECTION — "show me
+          the newest first" is a real question when 44 calls have accumulated, and the answer belongs at the top of the
+          list rather than in a per-row label.
+
+          A native `<select>`, so keyboard and screen-reader behaviour come free and the current value is always visible.
+        */}
+        <label className="trace-order">
+          <span className="visually-hidden">Order</span>
+          <select
+            className="trace-order-select"
+            value={order}
+            onChange={(event) => setOrder(event.target.value === "newest" ? "newest" : "oldest")}
+          >
+            <option value="oldest">Oldest first</option>
+            <option value="newest">Newest first</option>
+          </select>
+        </label>
+        {/*
           The toggle that controls the TRANSCRIPT's activity groups.
           
           It lives here only for the DRAWER, which is the inline form where a reader can see the transcript at the same
@@ -180,7 +315,7 @@ export function ToolTrace({
 
       {(inPanel || !collapsed) && (
         <div className="trace-list" ref={listRef} tabIndex={0} aria-label="Tool calls, newest last">
-          {rows.map((tool, index) => (
+          {rows.map((tool) => (
             <button
               key={tool.toolCallId}
               type="button"
@@ -198,17 +333,13 @@ export function ToolTrace({
               aria-current={tool.toolCallId === selectedId ? "true" : undefined}
             >
               {/*
-                THE INDEX IS THE IDENTIFIER.
+                NO INDEX.
                 
-                Rows carried no ordering handle at all — no position, no time — so 44 calls were a list with no way to say
-                "the 17th one". The command was the only identifier, and its distinguishing part was exactly what the
-                ellipsis ate. A number is one column, always present, and it is what a reader uses to talk about a call
-                ("that failed one around 26") or to find it again.
-                
-                `aria-hidden`: the list is already ordered for assistive tech, so the number is a visual aid rather than a
-                second source of truth.
+                A leading number was added so rows could be told apart, but it earned a full column for a value the reader
+                does not think in — and it made the list look like a spreadsheet rather than a log. The label now keeps
+                both ends of the command, which is what actually distinguishes one call from another, and the ORDER is a
+                choice at the top of the list instead.
               */}
-              <span className="t-index mono" aria-hidden="true">{index + 1}</span>
               <span className="t-status" aria-hidden="true">
                 {tool.running ? "●" : tool.isError ? "✕" : tool.unfinished ? "?" : "·"}
               </span>
@@ -262,8 +393,37 @@ export function ToolTrace({
         * invisible while every test and every line of markup looked correct. One rule, in one place,
         * with the hatch written into it.
         */}
+      {inPanel && selected && (
+        /*
+          THE HANDLE. A 6px rule with a wider invisible hit area — the same shape as the panel's own vertical resizer, so
+          there is one resize idiom in the app.
+        */
+        <div
+          className="trace-resizer"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize the call detail"
+          aria-valuenow={detailHeight}
+          aria-valuemin={TRACE_DETAIL_MIN_HEIGHT}
+          aria-valuemax={traceDetailMaxHeight(panelHeightRef.current)}
+          aria-valuetext={`${detailHeight} pixels`}
+          tabIndex={0}
+          onPointerDown={handleDragStart}
+          onPointerMove={handleDragMove}
+          onPointerUp={handleDragEnd}
+          onPointerCancel={handleDragEnd}
+          onKeyDown={handleDragKeys}
+          onDoubleClick={() => onResetDetailHeight?.()}
+        />
+      )}
+
       {(inPanel || !collapsed) && selected && (
-        <div className="trace-detail is-quarantined">
+        <div
+          className="trace-detail is-quarantined"
+          /* A FIXED height in the panel, so traversing rows cannot resize the pane under the reader. The drawer keeps the
+             content-fitted bound it needs to share the reading column. */
+          style={inPanel ? { height: clampTraceDetailHeight(detailHeight, panelHeightRef.current || 900) } : undefined}
+        >
           <div className="trace-detail-head">
             <span className="label">Tool output</span>
             {/* A separator and a weight change, so this reads as a label and a NAME rather than the phrase "Tool output

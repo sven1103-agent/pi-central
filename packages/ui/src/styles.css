@@ -1834,12 +1834,68 @@ select.btn { font-family: var(--sans); }
  */
 .trace.is-panel { height: 100%; }
 /* The panel's proportions are set on the list rule itself (see `.trace-list`), which owns the bound. */
+/*
+ * THE DETAIL'S HEIGHT IS SET BY THE READER, NOT BY THE SELECTED CALL.
+ *
+ * It was `flex: 0 1 auto`, so the pane's height followed its content: a two-line `echo` gave a short box and a
+ * forty-line `ls` a tall one, and traversing with the arrow keys resized the pane at every step — the rows jumped and the
+ * scroll position moved under the reader. Reported as "confusing and mentally exhausting while traversing".
+ *
+ * `flex: none` plus an explicit height from `trace.ts` makes the pane a property of the PANEL: moving through calls
+ * changes only what is inside it. The handle below can change the height, and a double-click restores the default.
+ */
 .trace.is-panel .trace-detail {
-  /* The detail gets the room it needs and then scrolls: `34vh` was a drawer number, and inside a full-height panel it
-     capped the output at a third of the WINDOW rather than of the panel. */
-  flex: 0 1 auto;
-  max-height: 55%;
+  flex: none;
+  max-height: none;
+  /* The pane scrolls its own output, so a long result cannot push the list away. */
+  overflow-y: auto;
 }
+
+/*
+ * The handle between the list and the detail.
+ *
+ * The same shape as the panel's own vertical resizer — one resize idiom in the app, not two. A 1px visible rule with a
+ * 9px invisible hit area: a 1px target is not grabbable, and a 9px rule would read as a border between regions.
+ */
+.trace-resizer {
+  position: relative;
+  flex: none;
+  height: 9px;
+  margin: -4px 0;
+  cursor: row-resize;
+  z-index: 3;
+  background: none;
+  border: none;
+  padding: 0;
+}
+.trace-resizer::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 1px;
+  background: var(--line);
+}
+.trace-resizer:hover::after { background: var(--line-strong); }
+.trace-resizer:focus-visible { outline: none; }
+.trace-resizer:focus-visible::after { background: var(--accent); height: 2px; }
+
+/* The order control, in the header where the list it governs begins. */
+.trace-order { display: inline-flex; align-items: center; flex: none; }
+.trace-order-select {
+  /* Used ALONE on a `<select>`, so it declares its own face rather than inheriting the platform's light chrome (#100). */
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  padding: 1px 4px;
+  cursor: pointer;
+}
+.trace-order-select:hover { color: var(--text); border-color: var(--line-strong); }
+.trace-order-select:focus-visible { outline: none; box-shadow: var(--focus); }
 
 .trace-list {
   /*

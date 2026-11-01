@@ -349,3 +349,53 @@ test("the rail passes through every dot, and no text is drawn behind it", () => 
     "the old 10px inset put the reasoning behind the rail",
   );
 });
+
+test("the trace panel's detail height does not follow the selected call", () => {
+  /*
+   * Reported: "the jumping trace detail window especially while traversing the traces is confusing and mentally
+   * exhausting".
+   *
+   * The pane was `flex: 0 1 auto`, so its height came from its content — a two-line `echo` gave a short box and a
+   * forty-line `ls` a tall one. Traversing with the arrow keys therefore resized the pane at every step, and the rows and
+   * the scroll position moved under the reader.
+   *
+   * The property: in the PANEL, the pane's height is set by the reader (or the default), so switching calls changes only
+   * what is inside it. The drawer keeps a content-fitted bound, because there it must share the reading column.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const panelDetail = /\.trace\.is-panel \.trace-detail\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(panelDetail, /flex:\s*none/, "the pane does not grow or shrink with its content");
+  assert.ok(
+    !/flex:\s*0 1 auto/.test(panelDetail),
+    "`0 1 auto` is the defect: the height came from the content",
+  );
+
+  // And the component supplies an explicit height in the panel, plus a handle to change it.
+  const source = readFileSync(new URL("../src/components/ToolTrace.tsx", import.meta.url), "utf8");
+  assert.match(source, /trace-resizer/, "a drag handle exists");
+  assert.match(source, /role="separator"/, "…described as a separator, like the panel's own resizer");
+  assert.match(source, /aria-orientation="horizontal"/);
+  assert.match(source, /onDoubleClick=\{\(\) => onResetDetailHeight/, "double-click restores the default");
+  assert.match(source, /height: clampTraceDetailHeight/, "the pane is given an explicit height");
+});
+
+test("the trace list is ordered by a control, not by index numbers", () => {
+  /*
+   * Index numbers were added so rows could be told apart, but they earned a leading column for a value the reader does
+   * not think in — and they made the list read as a spreadsheet rather than a log. What was actually missing is a choice
+   * of DIRECTION: "newest first" is a real question when 44 calls have accumulated.
+   */
+  const source = readFileSync(new URL("../src/components/ToolTrace.tsx", import.meta.url), "utf8");
+  assert.ok(!/t-index/.test(source), "no per-row index column");
+  assert.match(source, /trace-order-select/, "an order control in the header");
+  assert.match(source, /Oldest first/, "…with oldest first as the default option");
+  assert.match(source, /Newest first/);
+
+  // Traversal must follow the DISPLAYED order: in a reversed list an arrow key that moved through the underlying data
+  // would jump in the wrong direction.
+  assert.match(source, /const ordered = orderTools\(tools, order\)/);
+  assert.match(source, /ordered\.findIndex/, "the arrow keys walk the displayed order");
+});
