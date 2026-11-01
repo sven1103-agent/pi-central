@@ -20,7 +20,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planEntries, activityStatus, activitySummary, activityTools, messageTexts, stepLabel } from "../src/activity.ts";
+import { planEntries, activityStatus, activitySummary, activityTools, messageTexts, stepLabel, traceRowLabel } from "../src/activity.ts";
 import { emptyTranscript, type Transcript, type TranscriptMessage, type ToolExecution } from "../src/transcript.ts";
 
 function text(value: string, complete = true) {
@@ -354,4 +354,37 @@ test("a long command keeps BOTH ends, because a verb and a path both identify it
 test("a command with no useful argument falls back to the tool name, not an empty label", () => {
   assert.equal(stepLabel(tool("t", 0, { toolName: "list", args: {} })), "list");
   assert.equal(stepLabel(tool("t", 0, { toolName: "list", args: undefined })), "list");
+});
+
+// --- The trace row's label ------------------------------------------------------------------------
+
+test("a trace row keeps BOTH ends, so two similar calls are distinguishable", () => {
+  /*
+   * The reported defect (`img_38.png`): three adjacent rows rendered as the identical string
+   * `cd /Users/sven1103/.local/share/pi-central/workspaces/s1 …`. Every command opened with that `cd`, and the label was
+   * elided at the END — so the distinguishing part was exactly what the ellipsis ate, and a list where every row reads
+   * the same cannot be navigated.
+   */
+  const shared = "cd /Users/sven1103/.local/share/pi-central/workspaces/s1 && ";
+  const a = traceRowLabel(tool("t1", 0, { toolName: "bash", args: { command: `${shared}cat random-notes.md` } }));
+  const b = traceRowLabel(tool("t2", 0, { toolName: "bash", args: { command: `${shared}cat README.md` } }));
+
+  assert.ok(!/^cd /.test(a), `the shared preamble is dropped, got ${a}`);
+  assert.equal(a, "cat random-notes.md");
+  assert.equal(b, "cat README.md");
+  assert.notEqual(a, b, "two different commands must not render identically");
+});
+
+test("a long trace row label is elided in the MIDDLE, keeping the verb and the tail", () => {
+  const command = `rg --glob '*.py' -n 'a rather long search pattern' ${"deep/".repeat(14)}target.py`;
+  const label = traceRowLabel(tool("t", 0, { toolName: "bash", args: { command } }), 70);
+  assert.ok(label.length <= 70, `respects the cap: ${label.length}`);
+  assert.ok(label.includes("\u2026"), "announces the elision");
+  assert.match(label, /^rg /, "the verb at the head survives");
+  assert.match(label, /target\.py$/, "…and so does the file at the tail");
+});
+
+test("a trace row falls back to the tool name when there is nothing to say", () => {
+  assert.equal(traceRowLabel(tool("t", 0, { toolName: "list", args: {} })), "list");
+  assert.equal(traceRowLabel(tool("t", 0, { toolName: "list", args: undefined })), "list");
 });

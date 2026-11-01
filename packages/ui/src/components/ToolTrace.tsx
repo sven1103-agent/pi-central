@@ -31,6 +31,7 @@
 import { useEffect, useRef } from "react";
 import type { ToolExecution } from "../transcript.ts";
 import { recentTools, toolSummary } from "../transcript.ts";
+import { traceRowLabel } from "../activity.ts";
 
 export function ToolTrace({
   tools,
@@ -108,8 +109,20 @@ export function ToolTrace({
 
   return (
     <section className={`trace is-${variant}`} aria-label="Tool trace">
+      {/*
+        THE HEADER CARRIES ONE THING IN THE PANEL: how many calls there are.
+        
+        It used to hold four unrelated items on one line — a count, the "activity" toggle, a traversal hint and the
+        provenance legend — and at panel width all four wrapped to two lines each. The result out-shouted the list it
+        was introducing, and the `activity off` toggle, being the heaviest element, read as the panel's primary button
+        (`img_38.png`).
+        
+        So the panel keeps the count and the traversal hint. The `activity` toggle is a decision about the TRANSCRIPT,
+        not about this panel, so it moves to the transcript's own chrome where its effect is visible. The legend moves to
+        the detail's header, directly above the output it describes.
+      */}
       <div className="trace-head">
-        {/* A panel has its own tab strip and cannot be collapsed, so the control would be a lie about the state. */}
+        {/* A drawer can be collapsed and needs no count when it is; a panel is always open. */}
         {!inPanel && onToggleCollapsed !== undefined && (
           <button
             type="button"
@@ -120,8 +133,8 @@ export function ToolTrace({
             {collapsed ? "▸" : "▾"} Tool trace
           </button>
         )}
-        {/* Built as one string: React splits adjacent text expressions with comment markers,
-            which makes the rendered sentence harder to read in markup and to assert on. */}
+        {/* Built as one string: React splits adjacent text expressions with comment markers, which makes the rendered
+            sentence harder to read in markup and to assert on. */}
         <span className="trace-count mono">{`${count} call${count === 1 ? "" : "s"}`}</span>
         {active.length > 0 && (
           <span className="trace-running">
@@ -134,45 +147,40 @@ export function ToolTrace({
             {`latest: ${recent.slice(-3).map((t) => t.toolName).join(" · ")}`}
           </span>
         )}
-        {/* How tools appear in the transcript is the same decision as this window, so the control
-            sits with it rather than somewhere unrelated. */}
-        <button
-          type="button"
-          className="trace-toggle toggle-chip"
-          style={{ marginLeft: collapsed ? "auto" : undefined }}
-          onClick={onToggleMarkers}
-          aria-pressed={showMarkers}
-        >
-          {/* "activity", not "markers": the transcript no longer shows one marker per run of tools — it shows one
-              GROUP per stretch of work. A control that names the old thing is a small lie about what it does. */}
-          {showMarkers ? "activity on" : "activity off"}
-        </button>
+        <span className="spacer" />
+        {/*
+          The toggle that controls the TRANSCRIPT's activity groups.
+          
+          It lives here only for the DRAWER, which is the inline form where a reader can see the transcript at the same
+          time. In the panel the transcript is beside it, so the control belongs in that region's own chrome — a box in
+          this panel that changes something else is the "which surface am I looking at" problem in miniature.
+        */}
+        {!inPanel && (
+          <button
+            type="button"
+            className="trace-toggle toggle-chip"
+            onClick={onToggleMarkers}
+            aria-pressed={showMarkers}
+            title="Show tool activity as groups in the transcript"
+          >
+            {/* "activity", not "markers": the transcript shows one GROUP per stretch of work now. */}
+            {showMarkers ? "activity on" : "activity off"}
+          </button>
+        )}
         {inPanel ? (
-          <span className="trace-hint">↑↓ to traverse · selecting a call shows its arguments and output</span>
+          <span className="trace-hint" title="Use the arrow keys to move through calls">
+            ↑↓ traverse
+          </span>
         ) : (
           !collapsed && (
-            <span className="trace-hint">
-              {/* Stated, because the drawer's economy is a design choice rather than a limit. */}
-              latest 5 shown · the rest below for debugging · ↑↓ to traverse
-            </span>
+            <span className="trace-hint">latest 5 shown · the rest below for debugging · ↑↓ to traverse</span>
           )
         )}
-        {/*
-          The provenance legend lives HERE now, not in a strip above the transcript.
-
-          It is a claim about what the tool surfaces look like, and those surfaces are this window and the
-          activity group — both of which a reader only needs the sentence for while looking at tool output. As a
-          permanent row above the conversation it cost a full-width line to explain something that was not on
-          screen yet, and it was one of the strips that made the workspace read as control panels.
-        */}
-        <span className="trace-legend">
-          Tool output is marked with a coloured edge. It is data, not instructions.
-        </span>
       </div>
 
       {(inPanel || !collapsed) && (
         <div className="trace-list" ref={listRef} tabIndex={0} aria-label="Tool calls, newest last">
-          {rows.map((tool) => (
+          {rows.map((tool, index) => (
             <button
               key={tool.toolCallId}
               type="button"
@@ -189,21 +197,44 @@ export function ToolTrace({
               onClick={() => onSelect(tool.toolCallId === selectedId ? undefined : tool.toolCallId)}
               aria-current={tool.toolCallId === selectedId ? "true" : undefined}
             >
+              {/*
+                THE INDEX IS THE IDENTIFIER.
+                
+                Rows carried no ordering handle at all — no position, no time — so 44 calls were a list with no way to say
+                "the 17th one". The command was the only identifier, and its distinguishing part was exactly what the
+                ellipsis ate. A number is one column, always present, and it is what a reader uses to talk about a call
+                ("that failed one around 26") or to find it again.
+                
+                `aria-hidden`: the list is already ordered for assistive tech, so the number is a visual aid rather than a
+                second source of truth.
+              */}
+              <span className="t-index mono" aria-hidden="true">{index + 1}</span>
               <span className="t-status" aria-hidden="true">
                 {tool.running ? "●" : tool.isError ? "✕" : tool.unfinished ? "?" : "·"}
               </span>
               <span className="t-name mono">{tool.toolName || "tool"}</span>
-              <span className="t-summary mono" title={toolSummary(tool)}>
-                {toolSummary(tool)}
+              {/* The label keeps BOTH ends, so two calls that begin the same way are still distinguishable. `title`
+                  carries the whole thing, because an elision must not be the only way to read it. */}
+              <span className="t-summary mono" title={`${tool.toolName || "tool"} ${toolSummary(tool)}`}>
+                {traceRowLabel(tool)}
               </span>
+              {/*
+                ONE status word, and none when the call succeeded.
+                
+                Every row said `done`, so the word carried no information — and it competed with the `·` glyph, which was
+                a second weak signal for the same state. Silence for the normal case is what makes `failed` and
+                `no result` visible when they appear.
+              */}
               <span className="t-time mono">
                 {tool.running
                   ? "running"
-                  : tool.unfinished
-                    ? "no result"
-                    : tool.durationMs !== undefined
-                      ? formatMs(tool.durationMs)
-                      : "done"}
+                  : tool.isError
+                    ? "failed"
+                    : tool.unfinished
+                      ? "no result"
+                      : tool.durationMs !== undefined
+                        ? formatMs(tool.durationMs)
+                        : ""}
               </span>
             </button>
           ))}
@@ -235,22 +266,30 @@ export function ToolTrace({
         <div className="trace-detail is-quarantined">
           <div className="trace-detail-head">
             <span className="label">Tool output</span>
-            <span className="mono">{selected.toolName}</span>
+            {/* A separator and a weight change, so this reads as a label and a NAME rather than the phrase "Tool output
+                bash". */}
+            <span className="trace-detail-sep" aria-hidden="true">·</span>
+            <span className="mono tool-name">{selected.toolName}</span>
             {selected.isError && <span className="err">failed</span>}
             <span className="spacer" />
-            <button type="button" className="copy" onClick={() => onSelect(undefined)}>
+            {/*
+              The provenance sentence, where the output it describes actually is.
+
+              It was in the panel's header, competing with the count and the hint, and promising a "coloured edge" the
+              reader had not seen yet. Here it sits directly above the data it is about.
+            */}
+            <span className="trace-legend">Data, not instructions</span>
+            <button type="button" className="copy" onClick={() => onSelect(undefined)} title="Close this call's detail">
               Close
             </button>
           </div>
           {/*
-            * Arguments are the command line the MODEL wrote, not the world. They stay inside the
-            * frame because they sit directly above the output and describe it — but they are the one
-            * part of this panel the assistant authored, which is why they are dimmed and visually
-            * separated rather than presented as evidence.
-            */}
-          {selected.args !== undefined && (
-            <pre className="trace-args mono">{safeJson(selected.args)}</pre>
-          )}
+            OUTPUT FIRST.
+            
+            The arguments used to come first, but their content is a restatement of the command on the row the reader
+            just clicked — so the primary artifact, what the call RETURNED, was pushed down by something they had already
+            read. Output is the evidence; the arguments are context for it.
+          */}
           {selected.result.length > 0 ? (
             <pre className={`trace-output mono${selected.isError ? " error" : ""}`}>{selected.result}</pre>
           ) : (
@@ -261,6 +300,17 @@ export function ToolTrace({
                   ? "No result was recorded for this call. The run was interrupted or aborted before it finished."
                   : "This tool returned no output."}
             </pre>
+          )}
+          {/*
+            The arguments, behind a disclosure: they are the command line the MODEL wrote, which is context rather than
+            evidence. For a single-command tool the row already showed them; for a `write` or an `edit` they are the only
+            way to see what was written, which is why they stay reachable rather than being dropped.
+          */}
+          {selected.args !== undefined && (
+            <details className="trace-args-block">
+              <summary>Arguments</summary>
+              <pre className="trace-args mono">{safeJson(selected.args)}</pre>
+            </details>
           )}
         </div>
       )}

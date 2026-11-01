@@ -1821,13 +1821,52 @@ select.btn { font-family: var(--sans); }
  * The words were already there (`latest 5 shown · the rest below for debugging · ↑↓ to traverse`);
  * this adds the thing a glance can use.
  */
+/*
+ * THE LIST IS A RESIZABLE PANE, not a 5-row window.
+ *
+ * `max-height: 108px` was chosen for the DRAWER, where the trace shared the reading column with the conversation and had
+ * to stay out of its way. As a panel mode it is actively wrong: it showed five rows of 44 and left ~700px of the panel
+ * empty below (`img_38.png`) — re-creating the exact limitation the trace was moved out of the drawer to escape. The
+ * panel solved "show the output properly" and re-created "cannot see the list" one dimension over.
+ *
+ * So the list is a proportional pane: it takes the space it can and the detail keeps a floor. `flex: 1 1 auto` with a
+ * `min-height` of a few rows means a short panel still shows several calls, and a tall one fills itself.
+ */
+.trace.is-panel { height: 100%; }
+/* The panel's proportions are set on the list rule itself (see `.trace-list`), which owns the bound. */
+.trace.is-panel .trace-detail {
+  /* The detail gets the room it needs and then scrolls: `34vh` was a drawer number, and inside a full-height panel it
+     capped the output at a third of the WINDOW rather than of the panel. */
+  flex: 0 1 auto;
+  max-height: 55%;
+}
+
 .trace-list {
+  /*
+   * The bound is the DRAWER's: it shares the reading column with the conversation and must stay out of its way.
+   *
+   * A panel has no such competition, so it grows instead — one rule, because two rules for this selector is the cascade
+   * trap this file documents at `.activity-names`, and it caught me here.
+   */
   max-height: 108px;
   overflow-y: auto;
   padding: 2px 0;
   background: var(--bg);
 }
+.trace.is-panel .trace-list {
+  flex: 1 1 auto;
+  /* A usable handful of rows even in a short panel. */
+  min-height: 132px;
+  max-height: none;
+}
 
+/*
+ * A trace row: index, state, tool, label, outcome.
+ *
+ * The INDEX leads because it is the one identifier that is always present and always distinct. The state glyph and the
+ * outcome word are separate signals for one fact, so the word is only rendered for a non-normal state — see the
+ * component. Budget at panel width: index 2ch, glyph 1ch, tool name (fixed), label (flexible), outcome (auto).
+ */
 .trace-row {
   display: flex;
   align-items: center;
@@ -1913,8 +1952,22 @@ select.btn { font-family: var(--sans); }
   top: 0;
 }
 .trace-detail-head .label { color: var(--quarantine); font-weight: 600; }
+/* A separator and a weight change, so `Tool output · bash` is a label and a NAME rather than one phrase. */
+.trace-detail-sep { color: var(--line-strong); }
+.trace-detail-head .tool-name { color: var(--text); font-weight: 600; }
+/* The provenance claim, small and quiet: it is a footnote to the data, not a heading. */
+.trace-detail-head .trace-legend { color: var(--dim); font-size: var(--fs-2xs); font-style: italic; }
 .trace-detail-head .err { color: var(--danger-text); }
 .trace-detail-head .spacer { flex: 1; }
+/* The arguments, behind a disclosure: context for the output rather than the evidence itself. */
+.trace-args-block { border-top: 1px solid var(--line); }
+.trace-args-block > summary {
+  padding: 4px 10px;
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  cursor: pointer;
+}
+.trace-args-block > summary:hover { color: var(--text); }
 .trace-args {
   margin: 0;
   padding: var(--sp-2) 18px;

@@ -29,9 +29,17 @@ function stripComments(text) {
 
 const css = stripComments(readFileSync(new URL("../src/styles.css", import.meta.url), "utf8"));
 
+/**
+ * The declarations of the rule whose selector is EXACTLY `selector`.
+ *
+ * Anchored at a line start and to the whole selector, because an unanchored match for `.trace-detail` also hits
+ * `.trace.is-panel .trace-detail` — which is how a test asking for the base rule silently read an override, and how a
+ * correct stylesheet looked broken. The same class of mistake this file records for its own earlier version.
+ */
 function rule(selector) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css)?.[1];
+  const matches = [...css.matchAll(new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`, "g"))];
+  return matches.length > 0 ? matches[0][1] : undefined;
 }
 
 test("both inner scrollers carry their own scrollbar, not the platform default", () => {
@@ -71,9 +79,29 @@ test("the trace list reads as a bounded viewport rather than more of the page", 
   assert.match(trace, /background:\s*var\(--panel\)/, "…and the two must differ");
 });
 
-test("the bounds that make the nesting necessary are still in place", () => {
-  // If these ever go, the nesting could be removed — and this test is the reminder to reconsider it
-  // rather than to keep marking a problem that no longer exists.
-  assert.match(rule(".trace-list"), /max-height:\s*108px/, "the list stays bounded by row count");
-  assert.match(rule(".trace-detail"), /max-height:\s*34vh/, "the detail stays bounded so it cannot squeeze the transcript");
+test("each form keeps the bound that makes its nesting necessary", () => {
+  /*
+   * The bounds are now per-FORM, because the two forms have different jobs.
+   *
+   * The DRAWER shares the reading column with the conversation, so its list stays capped at 108px and its detail at
+   * `34vh` — without those it would push the conversation and the composer off the column.
+   *
+   * A PANEL has no such competition. Its 108px cap was the drawer's number carried over, and a screenshot showed what
+   * that costs: five rows of 44 with ~700px of the panel empty below (`img_38.png`) — re-creating the limitation the
+   * trace was moved out of the drawer to escape. So the panel's list grows and the detail takes what it needs.
+   *
+   * This test used to assert both numbers unconditionally, which would have made the panel's fix look like a
+   * regression. It asserts the bound each form actually needs.
+   */
+  assert.match(rule(".trace-list"), /max-height:\s*108px/, "the drawer's list stays bounded by row count");
+  assert.match(rule(".trace-detail"), /max-height:\s*34vh/, "the drawer's detail stays bounded");
+
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const panelList = /\.trace\.is-panel \.trace-list\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(panelList, /flex:\s*1 1 auto/, "the panel's list grows to fill the panel");
+  assert.match(panelList, /max-height:\s*none/, "…and is released from the drawer's cap");
+  assert.match(panelList, /min-height:/, "…but never collapses below a usable handful of rows");
 });

@@ -240,9 +240,20 @@ test("the transcript's legend describes the frame that actually exists", () => {
    * about. The rule is unchanged, and it is the reason this test scans the components rather than `App.tsx`:
    * the claim and the surfaces it describes must be checked where they live.
    */
+  /*
+   * The sentence MOVED AGAIN, and got shorter, for the same reason it moved the first time: it belongs where the output
+   * it describes is, not in a header promising something the reader has not seen yet.
+   *
+   * It is now in the DETAIL header, directly above the data — so "Data, not instructions" is enough, because the coloured
+   * edge is right there to be seen. The full sentence in a panel header competed with the count and the hint, and at
+   * panel width it wrapped to two lines.
+   */
   const trace = stripComments(readFileSync(new URL("../src/components/ToolTrace.tsx", import.meta.url), "utf8"));
-  const legend = /Tool output is marked with a coloured edge[^<]*/.exec(trace)?.[0] ?? "";
-  assert.ok(legend.length > 0, "the provenance legend must exist, next to the trace it describes");
+  const legend = /Data, not instructions/.exec(trace)?.[0] ?? "";
+  assert.ok(legend.length > 0, "the provenance claim must exist, next to the output it describes");
+  // And it must be inside the DETAIL header, not the panel head.
+  const detailHead = /trace-detail-head[\s\S]{0,600}?Data, not instructions/.exec(trace);
+  assert.ok(detailHead, "the claim sits with the output, in the detail header");
 
   const hatched = ["tool-marker", "tool-detail", "quarantine"].some((cls) =>
     /repeating-linear-gradient/.test(rule(`.${cls}`) ?? ""),

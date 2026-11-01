@@ -362,6 +362,47 @@ function clipCommand(command: string): string {
   return `${rest.slice(0, head).trimEnd()}…${rest.slice(rest.length - tail).trimStart()}`;
 }
 
+/**
+ * A trace row's label: the part of the call that IDENTIFIES it, kept from both ends.
+ *
+ * ## The defect this answers
+ *
+ * A screenshot of the trace panel (`img_38.png`) showed three adjacent rows rendered as the identical string
+ * `cd /Users/sven1103/.local/share/pi-central/workspaces/s1 …`. Every command began with that `cd`, and the label was
+ * truncated at the END — so the only distinguishing part, the command itself, was exactly what the ellipsis ate. A list
+ * where every row reads the same cannot be navigated, which defeats the panel's whole purpose.
+ *
+ * So: the `cd … &&` preamble is dropped before measuring (the same rule `stepLabel` uses for the transcript), and what
+ * remains is elided in the MIDDLE so both the verb at the head and the argument at the tail survive.
+ */
+export function traceRowLabel(tool: ToolExecution, max = 120): string {
+  const args = tool.args;
+  const name = tool.toolName || "tool";
+  if (args === undefined || args === null) return name;
+  const record = typeof args === "object" ? (args as Record<string, unknown>) : undefined;
+  const raw =
+    record === undefined
+      ? String(args)
+      : ["command", "path", "file_path", "pattern", "query", "url", "name", "agent"]
+          .map((key) => record[key])
+          .find((value): value is string => typeof value === "string" && value.trim().length > 0) ?? "";
+
+  let text = raw.split("\n")[0]!.replace(/\s+/g, " ").trim();
+  if (text.length === 0) return name;
+  // The same `cd … &&` stripping as `stepLabel`, because an agent opens most commands by changing directory and that
+  // preamble is identical on every row.
+  for (let guard = 0; guard < 4; guard += 1) {
+    const match = /^\s*cd\s+(?:"[^"]*"|'[^']*'|[^&;]+?)\s*(?:&&|;)\s*(.+)$/.exec(text);
+    if (match === null) break;
+    text = match[1]!.trim();
+  }
+  if (text.length <= max) return text;
+  const keep = max - 1;
+  const head = Math.ceil(keep * 0.45);
+  const tail = keep - head;
+  return `${text.slice(0, head).trimEnd()}…${text.slice(text.length - tail).trimStart()}`;
+}
+
 /** The first line of a value, because a multi-line command in one row is a wall, not a label. */
 function firstLine(value: string): string {
   return value.split("\n")[0]!.replace(/\s+/g, " ").trim();
