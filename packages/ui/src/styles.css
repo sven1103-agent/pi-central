@@ -94,13 +94,13 @@
    * the composer — so letting the reading preference write to it would resize the whole application. These
    * two are the transcript's own, and nothing else reads them.
    *
-   * They default to exactly what shipped: 15px prose and a 72ch measure. A reader who never opens Settings
-   * sees no change at all, which is the acceptance criterion.
+   * They default to 15px prose and an 80ch measure — the values a reader who never opens Settings gets. 80 rather
+   * than the classic 72 because a transcript is dense with code and paths, where wrapping is what hurts scanning.
    *
    * Set at runtime on `:root` by `reading.ts`, from `localStorage`.
    */
   --reading-size: 15px;
-  --reading-measure: 72ch;
+  --reading-measure: 80ch;
   --fs-lg: 18px;
 
   --sh-1: 0 1px 0 rgba(255, 255, 255, 0.03);
@@ -1446,6 +1446,8 @@ select.btn { font-family: var(--sans); }
   flex-direction: column;
   justify-content: center;
   padding: var(--sp-6) 18px;
+  /* Was 72ch, which this was never tied to — the empty state has no relationship to the reading measure. Left as it
+     was when the default moved to 80. */
   max-width: 72ch;
   gap: var(--sp-3);
 }
@@ -2487,17 +2489,30 @@ select.btn { font-family: var(--sans); }
 }
 
 /* The block itself: a quiet raised surface, wide enough for the pickers on one line each. */
+/*
+ * The companion, made QUIETER.
+ *
+ * It was a raised card at `--panel` with a border and a 10px radius — the same weight as a panel or a dialog, so it
+ * competed with the conversation it is only annotating. A box that sits beside the reading column should read as a
+ * margin note, not as another region of the app.
+ *
+ * Three changes, all reductions: no fill of its own (the page shows through), no border and no radius (nothing is
+ * enclosed, so nothing looks like a container), and the padding tightens. What remains to say "this is a block" is
+ * its position and the whitespace around it — which is enough, and is the quietest possible answer.
+ *
+ * The text stays at full contrast: subtle is about the SURFACE, never about legibility. A note you cannot read is not
+ * subtle, it is broken.
+ */
 .transcript-header .session-header {
   width: 340px;
   max-width: 100%;
   flex-direction: column;
   align-items: stretch;
   gap: var(--sp-2);
-  padding: var(--sp-3);
-  /* Rounder and lighter than a panel, because it sits ON the page rather than being a region of it. */
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--r-4);
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
 }
 /* In the companion column the identity and the stats stack; the pickers keep their label column. */
 .transcript-header .session-header .title { min-width: 0; }
