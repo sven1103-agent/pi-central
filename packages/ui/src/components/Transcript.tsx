@@ -387,6 +387,61 @@ export function TranscriptView({
   });
 
   /**
+   * Keep following when the content grows AFTER paint.
+   *
+   * ## The bug this fixes, reported from use
+   *
+   * *"when you prompt with an image reference, the rendered message with the thumbnail is not shown completely, even
+   * with auto-follow on. When the assistant starts to work, then the transcript goes back to the end and following."*
+   *
+   * The follow effect above runs on every render, but a render is not when the height arrives. React writes the DOM,
+   * the browser lays it out, and only THEN does it fetch and decode a lazy image — so on the frame where a preview turns
+   * from "Reading…" into a picture, the `<img>` occupies **zero height**. `scrollIntoView` faithfully scrolls to an end
+   * that is about to move down by 12vh, and then nothing else happens: the next render is not due until the agent emits
+   * its first delta. Which is exactly what was seen — an incomplete turn, then a jump to the bottom once work started.
+   *
+   * ## Why an observer rather than a better-timed effect
+   *
+   * No effect runs at the right moment. `useLayoutEffect` is too early (no image yet), `useEffect` is too early (decode
+   * is async), and `img.onload` would have to be plumbed through every image, every collapsed disclosure and every
+   * syntax-highlighted code block — because they ALL change height after paint, and the preview is merely the newest
+   * member of that family. A `ResizeObserver` on the lane covers the whole class: anything that makes the conversation
+   * taller, for any reason, moves the tail and this follows it.
+   *
+   * The cost is that it fires for non-tail changes too — expanding a disclosure far above the reader scrolls the bottom
+   * by the same amount. That is correct behaviour for a pane that is following, and it is the same thing the existing
+   * effect already does on every render.
+   */
+  const laneRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const lane = laneRef.current;
+    if (lane === null || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => {
+      /*
+       * The PINNED flag is read at fire time, not captured.
+       *
+       * A captured value would be the reader's choice as of the observer's first render, so scrolling away would leave
+       * following armed and the pane would keep pulling them back — the opposite defect, and a much worse one. Reading
+       * the ref means "the reader is following RIGHT NOW", which is the only question this should ask.
+       */
+      if (!shouldFollow(autoFollow, pinnedRef.current)) return;
+      // Direct assignment rather than `scrollIntoView`: this fires on layout changes, and `scrollIntoView` can move an
+      // ANCESTOR scroll port too — on a growing transcript that means the whole window jumping, which is a far more
+      // disruptive bug than the one being fixed.
+      const container = containerRef.current;
+      if (container === null) return;
+      container.scrollTop = container.scrollHeight;
+    });
+    observer.observe(lane);
+    return () => observer.disconnect();
+    /*
+     * `autoFollow` is a dependency because the callback closes over it and must respect a change without
+     * re-subscribing being avoidable. `pinnedRef` deliberately is NOT: a ref is stable, and re-subscribing on every
+     * pin change would tear down and rebuild the observer on every scroll.
+     */
+  }, [autoFollow]);
+
+  /**
    * Return to the newest content and start following again.
    *
    * Re-enabling the follow BEFORE scrolling is the load-bearing order: `scrollIntoView` fires a
@@ -529,7 +584,7 @@ export function TranscriptView({
         aria-label={`Transcript for ${sessionLabel}`}
         aria-busy={busy || undefined}
       >
-        <div className="transcript-lane">
+        <div className="transcript-lane" ref={laneRef}>
         {failed ? (
         <div className="empty" style={{ padding: 0 }}>
           <h2>Could not load this session's history</h2>

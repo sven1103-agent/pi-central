@@ -63,6 +63,12 @@ up — see below.
 
 ### Fixed
 
+- **A turn was left half-visible when an image arrived, until the agent started working.** Following ran in a
+  per-render effect, and a render is not when an image gets its height: React writes the DOM, the browser lays out an
+  `<img>` that is still decoding — zero height — and the follow scrolled to an end that was about to move down by 12vh.
+  Nothing ran again until the first streaming delta, which is why the pane jumped to the bottom only once the assistant
+  replied. A `ResizeObserver` on the transcript lane now follows any height that arrives after paint, which covers the
+  same class for lazy images, expanding disclosures and asynchronously highlighted code.
 - **An installed Pi Central kept loading the old version after an upgrade.** The service worker cached every
   same-origin request that was not the app document, including `manifest.webmanifest` and the icons — all of which the
   server deliberately serves `no-cache` because they are not fingerprinted. It now caches only `/assets/`, the one kind

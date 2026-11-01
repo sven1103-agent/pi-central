@@ -227,3 +227,131 @@ test("the control does not take focus", () => {
   });
   assert.equal(document.activeElement, textarea, "the jump control must not steal focus");
 });
+
+// --- Content that grows AFTER paint (the reported "thumbnail is cut off" bug) --------------------
+
+/**
+ * A `ResizeObserver` stand-in that a test can fire by hand.
+ *
+ * jsdom has no `ResizeObserver` at all, and even if it did, it would not model the thing this bug is about: an image
+ * whose height arrives one frame after the DOM write. So the observer is replaced with one that records its callback
+ * and the elements it observes, and the test fires it explicitly at the moment a browser would.
+ */
+function stubResizeObserver() {
+  const instances = [];
+  class Fake {
+    constructor(callback) {
+      this.callback = callback;
+      this.targets = [];
+      instances.push(this);
+    }
+    observe(target) {
+      this.targets.push(target);
+    }
+    disconnect() {
+      this.targets = [];
+    }
+    /** Fire as the browser would: after a layout change made the observed element a different size. */
+    trigger() {
+      act(() => {
+        this.callback([], this);
+      });
+    }
+  }
+  const original = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = Fake;
+  return {
+    instances,
+    restore: () => {
+      globalThis.ResizeObserver = original;
+    },
+  };
+}
+
+test("the lane is OBSERVED, so a height that arrives after paint still moves the tail", () => {
+  /*
+   * The reported bug, in its mechanism.
+   *
+   * Following used to be a per-render effect, and a render is not when an image gets its height: React writes the DOM,
+   * the browser lays out an `<img>` that is still loading — zero height — and the follow scrolls to an end that is
+   * about to move down by 12vh. Nothing runs again until the agent emits a delta, so the reader's own turn sat
+   * half-visible until the assistant started working and "went back to the end".
+   */
+  const observer = stubResizeObserver();
+  try {
+    const { scroller } = mount();
+    stubMetrics(scroller, { scrollHeight: 2000, clientHeight: 500, scrollTop: 1500 });
+
+    assert.equal(observer.instances.length, 1, "exactly one observer, on mount");
+    const lane = container.querySelector(".transcript-lane");
+    assert.ok(lane, "the lane exists");
+    assert.deepEqual(observer.instances[0].targets, [lane], "it observes the LANE, which is what grows");
+
+    // The image decodes: the lane got taller. The pane is following, so it must move with it.
+    stubMetrics(scroller, { scrollHeight: 2600, clientHeight: 500, scrollTop: 1500 });
+    observer.instances[0].trigger();
+    assert.equal(scroller.scrollTop, 2600, "the tail was followed to the new height, without waiting for a render");
+  } finally {
+    observer.restore();
+  }
+});
+
+test("growth does NOT yank a reader who has scrolled away", () => {
+  /*
+   * The opposite defect, and the worse one: a captured `pinned` value would leave following armed after the reader
+   * scrolled up, so an image decoding far below would drag them back. The flag is read at FIRE time for this reason.
+   */
+  const observer = stubResizeObserver();
+  try {
+    const { scroller, scroll } = mount();
+    stubMetrics(scroller, { scrollHeight: 2000, clientHeight: 500, scrollTop: 1500 });
+
+    // The reader scrolls up, which un-pins them.
+    stubMetrics(scroller, { scrollHeight: 2000, clientHeight: 500, scrollTop: 200 });
+    scroll();
+
+    stubMetrics(scroller, { scrollHeight: 2600, clientHeight: 500, scrollTop: 200 });
+    observer.instances[0].trigger();
+    assert.equal(scroller.scrollTop, 200, "the reader stays where they were");
+  } finally {
+    observer.restore();
+  }
+});
+
+test("with auto-follow OFF, growth never moves the pane", () => {
+  // The reader's own setting is respected by the observer exactly as it is by the follow effect; a second code path is
+  // a second place to forget it.
+  const observer = stubResizeObserver();
+  try {
+    const root = createRoot(container);
+    act(() => {
+      root.render(createElement(TranscriptView, {
+        transcript: manyMessages(30),
+        busy: true,
+        autoFollow: false,
+        sessionId: "s1",
+        sessionLabel: "s1",
+      }));
+    });
+    const scroller = container.querySelector(".transcript");
+    stubMetrics(scroller, { scrollHeight: 2000, clientHeight: 500, scrollTop: 1500 });
+
+    stubMetrics(scroller, { scrollHeight: 2600, clientHeight: 500, scrollTop: 1500 });
+    observer.instances[0].trigger();
+    assert.equal(scroller.scrollTop, 1500, "no movement at all");
+  } finally {
+    observer.restore();
+  }
+});
+
+test("the observer is disconnected on unmount, so a session switch cannot leak one", () => {
+  const observer = stubResizeObserver();
+  try {
+    const { root } = mount();
+    assert.equal(observer.instances[0].targets.length, 1);
+    act(() => root.unmount());
+    assert.deepEqual(observer.instances[0].targets, [], "disconnected");
+  } finally {
+    observer.restore();
+  }
+});
