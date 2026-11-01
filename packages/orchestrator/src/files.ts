@@ -123,6 +123,14 @@ export interface DirEntry {
   linkTarget?: "file" | "directory" | "other" | "missing" | undefined;
   /** Size in bytes, for regular files only. */
   size?: number | undefined;
+  /**
+   * Modification time in ms, for regular files and directories.
+   *
+   * Read from the same `lstat` that decided `kind`, so it costs nothing. The client uses it to notice
+   * that a directory it already holds has moved: comparing names alone cannot see a file edited in
+   * place, and a timer alone cannot see a write that happened one second ago.
+   */
+  mtimeMs?: number | undefined;
   /** A dotfile. Returned anyway when `includeHidden` is set; the flag is why. */
   hidden: boolean;
   /**
@@ -379,9 +387,13 @@ function describeEntry(fullPath: string, name: string): DirEntry {
       // an enterable link from a file-like one and from a broken one.
       return { name, kind: "symlink", linkTarget: linkTargetOf(fullPath), hidden: isHidden(name) };
     }
-    if (stats.isDirectory()) return { name, kind: "directory", hidden: isHidden(name) };
-    if (stats.isFile()) return { name, kind: "file", size: stats.size, hidden: isHidden(name) };
-    return { name, kind: "other", hidden: isHidden(name) };
+    // `mtimeMs` comes from the same `lstat` that decided the kind, so it costs nothing and it lets the
+    // client see that a directory it already cached has moved.
+    if (stats.isDirectory()) return { name, kind: "directory", mtimeMs: stats.mtimeMs, hidden: isHidden(name) };
+    if (stats.isFile()) {
+      return { name, kind: "file", size: stats.size, mtimeMs: stats.mtimeMs, hidden: isHidden(name) };
+    }
+    return { name, kind: "other", mtimeMs: stats.mtimeMs, hidden: isHidden(name) };
   } catch {
     return { name, kind: "other", hidden: isHidden(name), unreadable: true };
   }
