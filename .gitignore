@@ -27,6 +27,11 @@ bin/
 # `img*.png` rather than `img_*.png`: the paste tool emits `img.png` as well as `img_1.png`, and the
 # narrower pattern let the un-suffixed one be committed by a `git add -A` while reviewing a slice.
 img*.png
+# macOS screenshots are named `Screenshot 2026-11-01 at 15.20.44.png` — with SPACES — so `img*.png`
+# does not catch them. Same failure as the line above: this release had one in the working tree, and a
+# `git add -A` would have committed a full-desktop capture of a machine into the repository. The real
+# README image is `docs/images/dashboard.png` and is deliberately not matched.
+Screenshot*.png
 # Review reports produced by a subagent while triaging a screenshot. Same failure as the line above:
 # they are working files, and `git add -A` during a slice swept one into a PR twice. Named explicitly
 # rather than as `*.md` so real documentation can never be caught by it.

@@ -126,10 +126,29 @@ cannot show the tool trace's durations, a live `responding` state, or the fleet 
    finished session shows none of the live states, and an empty one shows nothing at all.
 2. Leave the right-hand panel **collapsed**, which is the default. It is the more representative
    state, and it gives the transcript the width the screenshot is about.
-3. Capture the window at roughly **1300×1050**. Wider and the text stops being legible once GitHub
-   scales it down.
+3. Capture the window at whatever size it naturally is on your display — **do not pre-shrink it**.
+   See the note below on why resampling makes a screenshot worse rather than smaller.
 4. Save as `docs/images/dashboard.png` — that path is referenced from the README, and `check:docs`
    fails if it stops resolving.
+
+**Do NOT downscale it.** This instruction used to say to, and following it produced a *worse and
+larger* file: resampling a UI screenshot smears intermediate greys along every glyph edge, and PNG
+compresses those badly — 1639×1131 went in at 354 KB and came out at 1300×897 and **386 KB**. So the
+"optimisation" cost 32 KB and made the text blurry.
+
+GitHub serves the image at the git blob's resolution and lets the browser scale it, so sharpness
+survives and the browser can use the extra pixels on a Retina display. Copy the capture byte for byte:
+
+```bash
+cp "Screenshot 2026-11-01 at 15.20.44.png" docs/images/dashboard.png
+```
+
+The one real constraint is file size, not pixel width: keep a capture under ~500 KB by keeping the
+window modest and the session short.
+
+**The macOS screenshot filename is gitignored.** A capture lands as `Screenshot 2026-11-01 at
+15.20.44.png`, with spaces, which `img*.png` does not match — so `.gitignore` names that pattern too.
+The real image must be copied to `docs/images/dashboard.png`, which is deliberately not ignored.
 
 **Before committing, check the image for things that are not the product**
 
