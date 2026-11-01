@@ -8,43 +8,17 @@ several entries below record **defects that shipped and were fixed** rather than
 They are kept because each one is the reason a constraint or an invariant test exists.
 
 
-## [0.5.0] — 2026-10-31
-
-Increment 4, and the first release with a session roster that survives a restart.
-
-**One protocol change.** `PROTOCOL_VERSION` 3 → 4. A UI and an orchestrator on different versions now refuse
-cleanly instead of misbehaving, so **reload the page after upgrading** — an older UI will not offer actions the
-newer orchestrator has, and vice versa.
-
-### Added
-
-- Retry a failed session from the rail ([#11]).
-- The session roster survives a restart, an update, or a crash, and a stopped session resumes when you send to it ([#89]).
-- Rename a session by double-clicking its name in the header ([#78], [#79]).
-- Every install carries a provenance attestation, and the README says how to check it ([#157], [#158]).
-- `npm audit signatures` in the install path, and `npx` marked as the unverifiable route ([#157], [#158]).
-
-### Changed
-
-- Tool output is inline in the transcript, with one bar per call ([#131]).
-- A long transcript no longer slows switching or streaming; revisiting a session is instant ([#151]).
-
-### Fixed
-
-- The session you start or resume becomes the active one ([#144]).
-- Thinking blocks say when they are still thinking, and show a one-line gist ([#143], [#146]).
-- A tool call reads louder than the reasoning about it ([#144]).
-- Settings: two panes, a preview that shows the setting, and a reset to defaults ([#142]).
-- Following survives a session switch, and a restore only applies when you had scrolled away ([#141]).
-- Resume works beyond the newest 500 sessions ([#153]).
-- Session names follow one rule, so a restart does not rename them ([#89]).
-- History shows a rename immediately, including for sessions over 256 KB ([#164]).
-- The active provider is shown beside the model, not hidden in the dropdown ([#163]).
-
 ## [Unreleased]
+
+<!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
+
+## [0.6.0] — 2026-11-01
 
 A workspace rework, driven by a series of screenshot reviews. The structure was right; the proportions and
 the repeated chrome were not.
+
+**No protocol change**, so a UI and an orchestrator from 0.5.0 still work together — but the workspace is
+substantially different, and the notes below are worth reading even if you only ever use one session.
 
 ### Changed
 
@@ -92,7 +66,38 @@ the repeated chrome were not.
 - A partially known queue discarded its known messages: the flag was all-or-nothing, so one message out of
   three rendered nothing.
 
-<!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
+## [0.5.0] — 2026-10-31
+
+Increment 4, and the first release with a session roster that survives a restart.
+
+**One protocol change.** `PROTOCOL_VERSION` 3 → 4. A UI and an orchestrator on different versions now refuse
+cleanly instead of misbehaving, so **reload the page after upgrading** — an older UI will not offer actions the
+newer orchestrator has, and vice versa.
+
+### Added
+
+- Retry a failed session from the rail ([#11]).
+- The session roster survives a restart, an update, or a crash, and a stopped session resumes when you send to it ([#89]).
+- Rename a session by double-clicking its name in the header ([#78], [#79]).
+- Every install carries a provenance attestation, and the README says how to check it ([#157], [#158]).
+- `npm audit signatures` in the install path, and `npx` marked as the unverifiable route ([#157], [#158]).
+
+### Changed
+
+- Tool output is inline in the transcript, with one bar per call ([#131]).
+- A long transcript no longer slows switching or streaming; revisiting a session is instant ([#151]).
+
+### Fixed
+
+- The session you start or resume becomes the active one ([#144]).
+- Thinking blocks say when they are still thinking, and show a one-line gist ([#143], [#146]).
+- A tool call reads louder than the reasoning about it ([#144]).
+- Settings: two panes, a preview that shows the setting, and a reset to defaults ([#142]).
+- Following survives a session switch, and a restore only applies when you had scrolled away ([#141]).
+- Resume works beyond the newest 500 sessions ([#153]).
+- Session names follow one rule, so a restart does not rename them ([#89]).
+- History shows a rename immediately, including for sessions over 256 KB ([#164]).
+- The active provider is shown beside the model, not hidden in the dropdown ([#163]).
 
 ## [0.4.1] — 2026-10-29
 
