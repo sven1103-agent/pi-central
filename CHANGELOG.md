@@ -12,6 +12,27 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
+## [0.8.0] — 2026-11-01
+
+The release that makes updating stop costing you work. Two things every update used to break — the UI you were
+looking at, and the sessions you had open — now survive it.
+
+**No protocol change. `PROTOCOL_VERSION` stays at 5**, so a 0.7.0 UI and a 0.8.0 orchestrator still talk to each
+other. That is a deliberate consequence of how the first fix is built: `InstallFacts.ui` is an *optional* field, and
+the convention recorded on it is that an added optional field is not a wire change. The one bump-adjacent move is
+`FileEntry.mtimeMs`, optional for the same reason.
+
+The two defects were reported together and are independent. Neither was a caching bug, which is what both looked
+like:
+
+**The installed app never reloaded itself.** Clicking a dock icon *focuses* an installed window; it does not reload
+it. So after `npm install` and a restart, the page still held the previous bundle, and the service-worker cache —
+which `0.6.1` fixed and which is provably not the cause here — was blamed again. When the protocol had changed the
+skew check fired correctly and advised "reload the UI", an action a standalone window has no affordance for.
+
+**Sessions died with the process.** The supervisor held them in memory, so stopping to update emptied the rail. The
+roster kept the *rows* (0.5.0), which is why the symptom was a list of stopped sessions rather than no list at all.
+
 ### Fixed
 
 - An installed Pi Central reloads itself when its window is older than the served bundle ([#184]).
@@ -20,23 +41,19 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The reload is one-shot per target identity; a second verdict is a banner, not a loop ([#184]).
 - A protocol skew takes the same path instead of a dismissible error strip ([#184]).
 - Open sessions are reopened at the next start, in their recorded directories and modes ([#185]).
-- `~/.config/pi-central/open-sessions.json` records each open session, written eagerly and removed only
-  on an explicit stop ([#185]).
-- Restore reuses the existing `resume` path, so a missing directory is refused and no cwd is
-  retargeted (C2, ADR-0008) ([#185]).
+- `open-sessions.json` records each open session, written eagerly and removed only on an explicit stop ([#185]).
+- Restore reuses the existing `resume` path, so a missing directory is refused and no cwd is retargeted
+  (C2, ADR-0008) ([#185]).
 - A session file that is gone is dropped from the list; a directory that is gone is kept ([#185]).
 - Only the long-running server remembers sessions; the one-shot CLI opts out ([#185]).
-- Sessions are keyed by canonical path, so one conversation cannot be listed twice (ADR-0004)
-  ([#185]).
+- Sessions are keyed by canonical path, so one conversation cannot be listed twice (ADR-0004) ([#185]).
 - A process that never started no longer makes shutdown wait forever ([#185]).
 - Files created during a session appear in the tree and the `@` picker within five seconds ([#189]).
 - Each listing carries entry mtimes, so a re-read that found nothing new does not re-render ([#189]).
 
-
 [#184]: https://github.com/sven1103-agent/pi-central/issues/184
 [#185]: https://github.com/sven1103-agent/pi-central/issues/185
 [#189]: https://github.com/sven1103-agent/pi-central/issues/189
-
 
 ## [0.7.0] — 2026-11-01
 
