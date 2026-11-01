@@ -37,6 +37,14 @@ They are kept because each one is the reason a constraint or an invariant test e
   "This view cannot draw a TIFF" and "this message held no picture" are different facts, and the transcript
   does not report the second while meaning the first.
 
+### Tooling
+
+- `scripts/render-session-html.mjs` renders a real session's transcript to one self-contained HTML file, for review
+  without an orchestrator, a browser automation harness, or a sandbox escape. It exists because the agent that wrote
+  the image support could not run the product (C1 stops an orchestrator inside a sandbox, and a headless browser hits
+  the same wall), which left the change with passing tests and nobody having seen it. `node
+  scripts/render-session-html.mjs` picks the newest session containing an image; `--out` chooses the file.
+
 ## [0.6.1] — 2026-11-01
 
 A PWA fix. If you installed Pi Central to the dock before this version, **it will need one clean start** to pick it
