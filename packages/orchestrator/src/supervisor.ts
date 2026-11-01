@@ -43,6 +43,14 @@ import {
 } from "./files.ts";
 import { resolveInstallationRoot } from "./installation-root.ts";
 import { ownInstallationWarning } from "@pi-central/protocol";
+
+/**
+ * What an image-only prompt says, so the session file records words rather than an empty text block.
+ *
+ * The composer's placeholder is "Send a prompt…", which would be a lie in the transcript — this states what the reader
+ * did instead of what they did not type.
+ */
+export const EMPTY_PROMPT_WITH_IMAGES = "See the attached image.";
 import { interpretRecord } from "./state.ts";
 
 export interface StartRequest {
@@ -582,17 +590,30 @@ export class Supervisor extends EventEmitter {
      * has no images", while an absent field is a message that was never about images. Only the second is true for the
      * overwhelming majority of prompts, and a provider request should not carry a claim it need not make.
      */
+    /*
+     * An image-only prompt gets a stated message rather than an empty one.
+     *
+     * Pi accepts `message: ""` with images and builds `[{type:"text", text:""}, ...images]`, which every provider then
+     * receives as an empty text block beside the picture. Measured against the real flow: the model answers, but the
+     * session file records a turn whose text is nothing, and a reader scrolling back sees an image with no words around
+     * it. One sentence saying what the message is costs nothing and makes the transcript legible later.
+     *
+     * The composer's placeholder says the same thing, so this is not inventing an instruction — it is recording the one
+     * the reader was typing under. It is applied HERE rather than in the browser so a transcript written by any client
+     * (or by `pi-central run --prompt`) stays readable.
+     */
+    const text = message.trim().length === 0 && images.length > 0 ? EMPTY_PROMPT_WITH_IMAGES : message;
     const withImages = images.length > 0
       ? { images: images.map((image) => ({ type: "image" as const, data: image.data, mimeType: image.mediaType })) }
       : {};
 
     if (session.state === "streaming") {
       await rpc.send(
-        { type: "prompt", message, streamingBehavior: behavior ?? "followUp", ...withImages },
+        { type: "prompt", message: text, streamingBehavior: behavior ?? "followUp", ...withImages },
         60_000,
       );
     } else {
-      await rpc.send({ type: "prompt", message, ...withImages }, 60_000);
+      await rpc.send({ type: "prompt", message: text, ...withImages }, 60_000);
     }
   }
 

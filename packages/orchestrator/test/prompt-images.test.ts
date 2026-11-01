@@ -204,3 +204,19 @@ test("four ordinary screenshots are accepted, because the total is a budget and 
   const ordinary = Array.from({ length: 4 }, () => ({ mediaType: "image/png", data: "A".repeat(400_000) }));
   assert.equal(acceptImages(ordinary).ok, true);
 });
+
+test("an image-only prompt gets a stated message, so the session records words", () => {
+  /*
+   * Pi accepts `message: ""` with images and builds `[{type:"text", text:""}, ...images]`, which every provider receives
+   * as an empty text block beside the picture. The model answers, but the session file records a turn whose text is
+   * nothing — a reader scrolling back sees an image with no words around it.
+   *
+   * The substitution lives in the SUPERVISOR (not the composer) so a transcript written by any client stays readable.
+   */
+  // The constant is exported for the test and for the composer's placeholder agreement.
+  return import("../src/supervisor.ts").then(({ EMPTY_PROMPT_WITH_IMAGES }) => {
+    assert.equal(typeof EMPTY_PROMPT_WITH_IMAGES, "string");
+    assert.ok(EMPTY_PROMPT_WITH_IMAGES.trim().length > 0, "it must not itself be empty");
+    assert.match(EMPTY_PROMPT_WITH_IMAGES, /image/i, "and must say what the message is about");
+  });
+});

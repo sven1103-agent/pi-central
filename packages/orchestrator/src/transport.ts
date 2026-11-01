@@ -404,14 +404,21 @@ export class Transport {
           this.#broadcast({ kind: "error", message: `image refused: ${accepted.message}`, sessionId: control.sessionId });
           return;
         }
-        // `behavior` is forwarded only when the client chose one; the supervisor decides what a
-        // missing choice means (see `Supervisor#prompt`).
-        await this.#supervisor.prompt(
-          control.sessionId,
-          control.message,
-          ...(control.behavior ? [control.behavior] : []),
-          ...(accepted.images.length > 0 ? [accepted.images] : []),
-        );
+        /*
+         * EXPLICIT arguments, never a positional spread.
+         *
+         * This was `...(control.behavior ? [control.behavior] : []), ...(images.length > 0 ? [images] : [])`, which is
+         * correct only when every earlier optional argument is present. For an IDLE prompt — the normal case — `behavior`
+         * is absent, the spread contributed nothing, and the images array shifted left into the `behavior` parameter.
+         * `Supervisor#prompt` then received a media-type list where it expected "steer" or "followUp", put nothing in
+         * Pi's `images`, and sent an empty message: the transcript showed an empty Assistant box and the prompt looked
+         * like it had not been sent at all.
+         *
+         * Reported from use as "the preview did work, but when I click Enter, nothing happens." The spread looked tidy and
+         * was silently positionally wrong, which is why the arguments are now named at the call site and the regression
+         * test asserts their POSITIONS rather than merely that a third argument arrived.
+         */
+        await this.#supervisor.prompt(control.sessionId, control.message, control.behavior, accepted.images);
         return;
       }
       case "clearQueue": {
