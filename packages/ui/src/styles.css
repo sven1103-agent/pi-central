@@ -1375,9 +1375,8 @@ button { font: inherit; color: inherit; }
 .composer .composer-input,
 .composer textarea {
   width: 100%;
-  min-height: 0;
-  max-height: 40vh;
-  resize: none;
+  /* The field's height is FIXED at three lines; content scrolls inside it. See the note below. */
+  height: calc(1.5em * 3 + 22px);
   background: var(--panel-2);
   border: 1px solid var(--line);
   border-radius: var(--r-3);
@@ -1385,23 +1384,43 @@ button { font: inherit; color: inherit; }
   color: var(--text);
   font: var(--fs-md) / 1.5 var(--sans);
   /*
-   * A THREE-LINE FLOOR, and that number is a requirement rather than a taste.
+   * A FIXED THREE-LINE FIELD. It does not grow; the text scrolls inside it.
    *
-   * It is the size of prompt this app is for: a sentence or two of instruction, not a chat message. The row was briefly
-   * floored at ONE line, following a review note that a single-line draft sat at the top of a tall box — but that note
-   * was about the empty space looking bottom-heavy, and shrinking the box traded it for a worse problem: a prompt field
-   * that shows one line cannot be reviewed before sending, and every prompt then scrolls.
+   * Three lines is the size of prompt this app is for — a sentence or two of instruction. That number has been argued
+   * both ways and is now settled as a FIXED height rather than a floor:
    *
-   * `em` of the input's own font, so it is three lines at any reading size. `field-sizing: content` grows it beyond this
-   * as the reader types, up to the cap; the floor is what guarantees the three lines are there before you start.
+   *   - floored at one line, a prompt could not be reviewed before sending;
+   *   - floored at three and allowed to GROW (`field-sizing: content`), the composer pushed itself up into the transcript
+   *     as the reader typed — the dock's height became a function of the draft, which is the same class of defect as the
+   *     queue enumeration: the canvas moving because of something typed into the box at its foot.
+   *
+   * `em` of the input's own font, so it holds three lines at any reading size. `resize: none` because the height is a
+   * decision rather than a handle to find, and `overflow-y: auto` below gives the whole prompt somewhere to go.
    */
-  min-height: calc(1.5em * 3 + 22px);
-  field-sizing: content;
   resize: none;
   /* The same radius as the message cards above it: two different corner sizes in one column read as two systems. */
   border-radius: var(--r-2);
+  /*
+   * A prompt longer than three lines scrolls HERE rather than pushing the composer up over the conversation. Scoped to
+   * the field, so the opt-in slim scrollbar treatment below applies and the bar is quiet until hovered — a permanent
+   * bright bar beside the caret would be the loudest thing in a surface meant to recede.
+   */
+  overflow-y: auto;
 }
 .composer textarea:focus { border-color: var(--accent); outline: none; }
+/* The same slim overlay the transcript and the panel use, so every scroller in the app dresses alike. */
+.composer textarea {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.composer textarea::-webkit-scrollbar { width: 10px; }
+.composer textarea::-webkit-scrollbar-track { background: transparent; }
+.composer textarea::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--r-pill);
+}
 .composer textarea:disabled { opacity: 0.6; }
 
 

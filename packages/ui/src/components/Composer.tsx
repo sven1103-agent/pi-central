@@ -224,11 +224,11 @@ export function Composer({
         disabled={unavailable}
         aria-label="Prompt"
         /*
-         * THREE LINES before it scrolls.
+         * THREE LINES, FIXED. A longer prompt scrolls inside the field rather than growing the composer.
          *
-         * `rows={2}` plus `field-sizing: content` measured as roughly two lines of usable text in a real window — a
-         * review said the box was too small for the prompts people actually write, which are rarely one line. Three
-         * is the smallest height that shows a short paragraph in full.
+         * `rows` is the fallback for a browser that ignores the stylesheet's `height`; the CSS is the authority, because
+         * the height has to be the same whether or not the browser supports everything else here. Three lines is the
+         * smallest height that shows a short paragraph in full, which is the size of prompt this app is for.
          */
         rows={3}
       />

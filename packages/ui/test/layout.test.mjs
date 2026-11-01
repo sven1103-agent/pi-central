@@ -216,11 +216,31 @@ test("the prompt field holds three lines before it scrolls", () => {
   );
   const field = /\.composer \.composer-input,\s*\n?\.composer textarea\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
   assert.ok(field, "the composer field must have a rule");
+  /*
+   * A FIXED height, not a floor, and that distinction is the whole point.
+   *
+   * The number has been argued both ways. Floored at one line, a prompt could not be reviewed before sending. Floored at
+   * three AND allowed to grow (`field-sizing: content`), the composer pushed itself up into the transcript as the reader
+   * typed — the dock's height became a function of the draft, which is the same class of defect as the queue
+   * enumeration: the canvas moving because of something typed into the box at its foot.
+   *
+   * So: three lines exactly, and a longer prompt scrolls INSIDE the field.
+   */
   assert.match(
     field,
-    /min-height:\s*calc\(1\.5em \* 3/,
-    `the field must hold three lines before scrolling; got ${/min-height:[^;]*/.exec(field)?.[0] ?? "none"}`,
+    /height:\s*calc\(1\.5em \* 3/,
+    `the field's height must be fixed at three lines; got ${/height:[^;]*/.exec(field)?.[0] ?? "none"}`,
   );
-  // And it grows with the content, so three lines is a floor rather than a fixed height.
-  assert.match(field, /field-sizing:\s*content/, "…and grows beyond three lines as the reader types");
+  assert.ok(
+    !/field-sizing:\s*content/.test(field),
+    "the field must NOT grow with its content, or the composer rises into the transcript",
+  );
+  // The prompt needs somewhere to go, and it must not be clipped.
+  assert.match(field, /overflow-y:\s*auto/, "a long prompt scrolls inside the field");
+  // The slim overlay treatment, the same as every other scroller in the app.
+  assert.match(
+    css,
+    /\.composer textarea::-webkit-scrollbar-thumb\s*\{[^}]*--line-strong/,
+    "the field's scrollbar uses the shared slim thumb",
+  );
 });
