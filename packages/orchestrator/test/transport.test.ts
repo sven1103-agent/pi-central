@@ -69,8 +69,14 @@ class FakeSupervisor extends EventEmitter {
     return { ok: true, messages: [{ role: "user", content: `fetch ${this.transcriptFetches}` }] };
   };
 
-  async prompt(id: string, message: string, behavior?: "steer" | "followUp"): Promise<void> {
-    this.calls.push({ method: "prompt", args: behavior ? [id, message, behavior] : [id, message] });
+  async prompt(
+    id: string,
+    message: string,
+    behavior?: "steer" | "followUp",
+    images: readonly { mediaType: string; data: string }[] = [],
+  ): Promise<void> {
+    // Recorded as the ACTUAL argument positions, so a shifted spread cannot pass by looking plausible.
+    this.calls.push({ method: "prompt", args: [id, message, behavior, images] });
   }
   async abort(id: string): Promise<void> {
     this.calls.push({ method: "abort", args: [id] });
@@ -411,7 +417,7 @@ test("a prompt is routed with its exact message, unmodified", async () => {
     const message = "<img src=x onerror=alert(1)> — and a newline\nand a U+2028\u2028";
     client.send({ kind: "prompt", sessionId: "s1", message });
     await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.deepEqual(supervisor.calls.at(-1), { method: "prompt", args: ["s1", message] });
+    assert.deepEqual(supervisor.calls.at(-1), { method: "prompt", args: ["s1", message, undefined, []] });
     client.close();
   } finally {
     await transport.close();
@@ -888,14 +894,14 @@ test("a prompt's streamingBehavior reaches the supervisor, so the choice is not 
     await new Promise((resolve) => setTimeout(resolve, 100));
     assert.deepEqual(supervisor.calls.at(-1), {
       method: "prompt",
-      args: ["s1", "stop and do this instead", "steer"],
+      args: ["s1", "stop and do this instead", "steer", []],
     });
 
     client.send({ kind: "prompt", sessionId: "s1", message: "and then this", behavior: "followUp" });
     await new Promise((resolve) => setTimeout(resolve, 100));
     assert.deepEqual(supervisor.calls.at(-1), {
       method: "prompt",
-      args: ["s1", "and then this", "followUp"],
+      args: ["s1", "and then this", "followUp", []],
     });
     client.close();
   } finally {
@@ -915,7 +921,7 @@ test("a prompt with no behavior is sent WITHOUT one, so an idle prompt is not gi
     await client.next("snapshot");
     client.send({ kind: "prompt", sessionId: "s1", message: "hello" });
     await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.deepEqual(supervisor.calls.at(-1), { method: "prompt", args: ["s1", "hello"] });
+    assert.deepEqual(supervisor.calls.at(-1), { method: "prompt", args: ["s1", "hello", undefined, []] });
     client.close();
   } finally {
     await transport.close();
@@ -1017,6 +1023,66 @@ test("retry reaches the supervisor instead of being rejected as an unknown kind"
       supervisor.calls.some((call) => call.method === "retry"),
       `the supervisor must receive retry, got: ${JSON.stringify(supervisor.calls.map((c) => c.method))}`,
     );
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("an idle prompt WITH IMAGES carries them in the images slot, not the behavior slot", async () => {
+  /*
+   * Reported from use: "the preview did work but when I click enter, nothing happens."
+   *
+   * The cause was a positional spread in `transport.ts`:
+   *
+   *   ...(control.behavior ? [control.behavior] : []),
+   *   ...(accepted.images.length > 0 ? [accepted.images] : []),
+   *
+   * When the reader is idle — the normal case — `behavior` is absent, so the spread contributed nothing and the IMAGES
+   * array landed in the `behavior` parameter. `Supervisor#prompt` then received a media-type list where it expected
+   * "steer" or "followUp", put nothing in Pi's `images`, and sent an empty message. Pi turned that into a text block
+   * with no content: the transcript showed an empty Assistant box and the prompt looked like it had not been sent.
+   *
+   * Asserted against the ACTUAL position, not a plausible shape: a test that accepted "some third argument" would have
+   * passed with the bug in place.
+   */
+  const supervisor = new FakeSupervisor();
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    const images = [{ mediaType: "image/png", data: "iVBORw0KGgo=" }];
+    client.send({ kind: "prompt", sessionId: "s1", message: "", images });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const call = supervisor.calls.at(-1);
+    assert.equal(call?.method, "prompt");
+    assert.equal(call?.args[2], undefined, "an idle prompt claims NO queue mode");
+    assert.deepEqual(call?.args[3], images, "and the images arrive in the images slot");
+    assert.equal(call?.args[1], "", "an image-only prompt keeps its empty message");
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("a STREAMING prompt with images carries both, in the right slots", async () => {
+  // The same spread, the other branch: with `behavior` present the bug did not fire, so this pins that both travel
+  // correctly together rather than only fixing the idle case.
+  const supervisor = new FakeSupervisor();
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    const images = [{ mediaType: "image/webp", data: "AAAA" }];
+    client.send({ kind: "prompt", sessionId: "s1", message: "look", behavior: "steer", images });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const call = supervisor.calls.at(-1);
+    assert.equal(call?.args[2], "steer", "the behavior, in the behavior slot");
+    assert.deepEqual(call?.args[3], images, "and the images, in the images slot");
     client.close();
   } finally {
     await transport.close();

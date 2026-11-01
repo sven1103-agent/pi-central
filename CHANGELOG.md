@@ -72,6 +72,69 @@ text until now.
   replied. A `ResizeObserver` on the transcript lane now follows any height that arrives after paint, which covers the
   same class for lazy images, expanding disclosures and asynchronously highlighted code.
 
+### Added — clipboard images
+
+- **Paste or drop an image into the composer, and send it with the prompt.** ⌘V on a pasted screenshot works with no
+  permission prompt, on `127.0.0.1` (a secure context), and matches Pi's own `ctrl+v` binding so muscle memory carries
+  over. Dropping a file on the composer works too, and it claims the drop before the browser navigates away and loses
+  the draft. A screenshot with no words is a complete prompt — the image is the content — so `Enter` sends it without
+  forcing filler text.
+- **Images are downscaled in the browser before they leave it.** Downscaling is the only end that can do it: the
+  orchestrator receives base64 and cannot re-encode without a decoder it should not grow. The target is Pi's own
+  `inputLimits` default of 1568px on the longest edge, so nothing is lost that a model would have used — the difference
+  is bytes, not information. A PNG stays PNG so transparency survives; everything else becomes JPEG.
+- **Two limits, both stated before sending.** 3 MB per image decoded, and **6 MB encoded in total** for one prompt. The
+  second exists because of a measurement: one image at the per-image cap encodes to 4.19 MB, comfortably inside the
+  transport's 8 MB frame — and **four of them is 16.78 MB**, so `ws` closes the socket with 1009 and the client gets no
+  reply at all. The composer would have emptied itself into a dead connection with no message. A limit on each part does
+  not bound the whole.
+- **The paste affordance only appears where the choice is real.** `ModelOption` now carries Pi's `input` list, so a model
+  that reports `["text"]` does not offer an attachment the provider would reject. An ABSENT list means unknown rather
+  than text-only — Pi omitting the field is not a claim — because `unknown → allowed` costs one provider error while
+  `unknown → hidden` is a feature that silently does not exist.
+
+- **An `@` in the composer completes file paths, including into subdirectories.** Typing `@` opens a picker of the session's
+  files; choosing a directory keeps it open one level down, so `@assets/shot.png` is three keystrokes and two arrows rather
+  than a path typed from memory. Accepting a file inserts it followed by a space; `Esc` dismisses the picker for that one
+  mention without touching the draft. The listing is the SAME cache the file tree uses, so a directory already expanded in
+  the panel costs one lookup rather than a second request.
+- **The `@` picker floats above the composer instead of pushing it.** The first version rendered it in the composer's flex
+  column, so opening it grew the composer by ~216px: the transcript shrank, everything below the field moved down, and —
+  because it sat between the field and the chrome row — the `Enter to send` hint and the auto-follow toggle were pushed
+  past the bottom edge of the window. A review named both as blockers. It now uses the same
+  `position: absolute; bottom: calc(100% + 8px)` anchor the queue sheet already used, which is the convention that was
+  already here. The trade is stated in the code: a floating panel covers the last few lines above it rather than shrinking
+  the transcript, and that is better because `scrollTop` does not move — closing it returns the reader to exactly where
+  they were.
+- **The list scrolls itself to keep the selected row visible.** It is capped at six rows, and nothing tied the selection to
+  the scroll — so arrowing past the sixth row moved the highlight to a row outside the box. The picker looked frozen while
+  Down kept being pressed, and "what will Enter accept?" had no visible answer. The offset is computed in `mentions.ts` and
+  assigned to the list's own `scrollTop`, deliberately NOT via `scrollIntoView`: that scrolls every scrollable ancestor,
+  which here is the transcript, so a keystroke in a helper would jump the whole reading area. The row's position is
+  measured in the LIST's coordinate space rather than taken from `offsetTop`, which is relative to the nearest positioned
+  ancestor — the absolute panel, including its header. That offset cancelled going down and did not going up, which is why
+  the first attempt appeared to work in one direction only.
+- The picker is capped at six rows with an internal scroll (eight made it taller than the field it belongs to), carries a
+  border and shadow so it reads as a panel rather than the field growing a grey tail, and its header names the directory
+  (`in docs`) instead of showing a bare `.`.
+- `node_modules/`, `.git/` and `.svn/` are never offered. `.github/` and `.idea/` deliberately still are: the test for
+  inclusion is "would a person ever type `@` and mean this", and a blanket hide-dotfiles rule would take the useful ones.
+- **Directories are offered before images, which reverses the obvious order.** Measured against this repository's own root: a
+  bare `@` offered eight images and not one directory, because the root holds dozens of `img_*.png` screenshots and the cap
+  is eight — so `assets/` was unreachable in exactly the case the picker exists for. Images are the reason to FINISH a path,
+  not the reason to start one.
+
+### Changed — protocol 4 → 5
+
+- **`Control.prompt` carries optional `images`, and `ModelOption` carries `input`.** Both are ADDED FIELDS rather than new
+  wire kinds, which means `packages/protocol/test/wire-surface.test.ts` does **not** fail for either — that test
+  fingerprints kinds, not bodies. The bump is therefore not optional: a v5 UI against a v4 orchestrator would offer the
+  paste affordance and every paste would arrive as a prompt with no image, with the model answering "I don't see any
+  image" and no error anywhere.
+- The wire spelling is `{ mediaType, data }` rather than Pi's `{ type, data, mimeType }`, because `type` is the
+  discriminant of every record on this wire and reusing it inside a payload makes a log ambiguous. The supervisor maps
+  one to the other at the single point where a control becomes Pi's stdin.
+
 ### Tooling
 
 - `scripts/render-session-html.mjs` renders a real session's transcript to one self-contained HTML file, for review

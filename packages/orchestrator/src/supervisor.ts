@@ -28,6 +28,7 @@ import { retryRefusal } from "./retry.ts";
 import { checkResumable } from "./resume.ts";
 import { isScratch, scratchDirFor, type Config } from "./config.ts";
 import { agentRoutingEnv } from "./env.ts";
+import type { AcceptedImage } from "./prompt-images.ts";
 import { KEYCHAIN_FILE, inspectProviderAuth, readStore } from "./agent-store.ts";
 import { assessAgentCapabilities } from "./capabilities.ts";
 import { renderPolicyFragment } from "./fragment.ts";
@@ -42,6 +43,14 @@ import {
 } from "./files.ts";
 import { resolveInstallationRoot } from "./installation-root.ts";
 import { ownInstallationWarning } from "@pi-central/protocol";
+
+/**
+ * What an image-only prompt says, so the session file records words rather than an empty text block.
+ *
+ * The composer's placeholder is "Send a prompt…", which would be a lie in the transcript — this states what the reader
+ * did instead of what they did not type.
+ */
+export const EMPTY_PROMPT_WITH_IMAGES = "See the attached image.";
 import { interpretRecord } from "./state.ts";
 
 export interface StartRequest {
@@ -553,22 +562,58 @@ export class Supervisor extends EventEmitter {
   }
 
   /**
-   * Send a prompt. The command shape is closed; the message is the only free value.
+   * Send a prompt. The command shape is closed; the message and its images are the only free values.
    *
    * `behavior` decides what a message means mid-run, and it is the caller's choice rather than
    * this method's: Pi REJECTS a streaming `prompt` with no `streamingBehavior` (`"Agent is
    * already processing. Specify streamingBehavior ('steer' or 'followUp')"`), so defaulting it
    * silently would decide for the user something the composer is there to ask (issue #3). When
    * idle there is nothing to steer into, so the flag is dropped rather than sent.
+   *
+   * `images` arrive ALREADY VALIDATED (`prompt-images.ts`) and are mapped to Pi's shape here — the one
+   * place a control becomes Pi's stdin, which is the right place for the spelling to change. Pi wants
+   * `{ type: "image", data, mimeType }`; the wire carries `{ mediaType, data }` because `type` is the
+   * discriminant of every record on that wire and reusing it inside a payload makes a log ambiguous.
    */
-  async prompt(id: string, message: string, behavior?: "steer" | "followUp"): Promise<void> {
+  async prompt(
+    id: string,
+    message: string,
+    behavior?: "steer" | "followUp",
+    images: readonly AcceptedImage[] = [],
+  ): Promise<void> {
     const rpc = this.#processes.get(id);
     const session = this.#sessions.get(id);
     if (!rpc || !session) throw new Error(`no such session: ${id}`);
+
+    /*
+     * Omitted rather than sent empty, because Pi distinguishes the two: `images: []` is a field asserting "this message
+     * has no images", while an absent field is a message that was never about images. Only the second is true for the
+     * overwhelming majority of prompts, and a provider request should not carry a claim it need not make.
+     */
+    /*
+     * An image-only prompt gets a stated message rather than an empty one.
+     *
+     * Pi accepts `message: ""` with images and builds `[{type:"text", text:""}, ...images]`, which every provider then
+     * receives as an empty text block beside the picture. Measured against the real flow: the model answers, but the
+     * session file records a turn whose text is nothing, and a reader scrolling back sees an image with no words around
+     * it. One sentence saying what the message is costs nothing and makes the transcript legible later.
+     *
+     * The composer's placeholder says the same thing, so this is not inventing an instruction — it is recording the one
+     * the reader was typing under. It is applied HERE rather than in the browser so a transcript written by any client
+     * (or by `pi-central run --prompt`) stays readable.
+     */
+    const text = message.trim().length === 0 && images.length > 0 ? EMPTY_PROMPT_WITH_IMAGES : message;
+    const withImages = images.length > 0
+      ? { images: images.map((image) => ({ type: "image" as const, data: image.data, mimeType: image.mediaType })) }
+      : {};
+
     if (session.state === "streaming") {
-      await rpc.send({ type: "prompt", message, streamingBehavior: behavior ?? "followUp" }, 60_000);
+      await rpc.send(
+        { type: "prompt", message: text, streamingBehavior: behavior ?? "followUp", ...withImages },
+        60_000,
+      );
     } else {
-      await rpc.send({ type: "prompt", message }, 60_000);
+      await rpc.send({ type: "prompt", message: text, ...withImages }, 60_000);
     }
   }
 
@@ -642,6 +687,21 @@ export class Supervisor extends EventEmitter {
           id: String(model["id"] ?? ""),
           ...(typeof model["name"] === "string" ? { name: model["name"] } : {}),
           ...(typeof model["reasoning"] === "boolean" ? { reasoning: model["reasoning"] } : {}),
+          /*
+           * `input` decides whether the composer may offer a paste.
+           *
+           * Filtered to the two values the wire declares rather than passed through: Pi's catalogue may grow a
+           * modality this version does not know, and an unrecognised member would widen the UI's type for a capability
+           * nothing here can use. Absent when Pi did not report it — which is "unknown", NOT "text only", and the
+           * difference decides whether the affordance is hidden or merely unflagged.
+           */
+          ...(Array.isArray(model["input"])
+            ? {
+                input: (model["input"] as unknown[]).filter(
+                  (value): value is "text" | "image" => value === "text" || value === "image",
+                ),
+              }
+            : {}),
         }))
         // A model without a provider or an id cannot be selected by `set_model`, which requires
         // both, so offering it would be a control that cannot work.

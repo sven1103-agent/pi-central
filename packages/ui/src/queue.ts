@@ -132,12 +132,29 @@ export function queueSummary(queue: Queued): string {
  * could only be closed with Escape if some other handler happened to swallow it. Stated as data because two components
  * act on Escape (the sheet and the composer) and a ladder implemented twice is a ladder that drifts.
  */
-export type EscapeAction = "close-sheet" | "clear-and-stop" | "noop";
+export type EscapeAction = "close-sheet" | "close-picker" | "clear-and-stop" | "noop";
 
-export function escalation({ sheetOpen, streaming }: { sheetOpen: boolean; streaming: boolean }): EscapeAction {
+export function escalation({
+  sheetOpen,
+  pickerOpen = false,
+  streaming,
+}: {
+  sheetOpen: boolean;
+  /**
+   * The `@` picker is open.
+   *
+   * A NEW STEP, and it goes ABOVE the sheet: a picker is the most recently opened surface, sits on top of everything, and
+   * closing it must not stop a run. Placed here rather than handled ad hoc in the composer for the reason this function
+   * exists — a ladder written in two places drifts, and the drift is invisible until someone presses Escape twice in the
+   * wrong order.
+   */
+  pickerOpen?: boolean;
+  streaming: boolean;
+}): EscapeAction {
   // 1. A dialog open is handled by the dialog dock, which stops propagation before this runs.
   // 2. A popover open closes only itself. The run and the queue are untouched — pressing Escape twice is the reader's
   //    way to say "now the other thing", and the queue is recoverable because its texts return to the composer.
+  if (pickerOpen) return "close-picker";
   if (sheetOpen) return "close-sheet";
   // 3. Streaming: clear the queue and stop the run.
   if (streaming) return "clear-and-stop";

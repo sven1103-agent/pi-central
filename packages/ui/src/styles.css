@@ -3520,6 +3520,216 @@ select.btn { font-family: var(--sans); }
 }
 .turn-image-ref-code { color: var(--line-strong); }
 
+/* --- The @ mention picker -----------------------------------------------------------------------
+
+   Inside the composer's boundary, above the field: it grows the composer by its own height while open rather than floating
+   over the conversation being written about.
+
+   Three rules that are decisions:
+
+   1. `max-height` with a scroll, so a directory of 400 screenshots cannot make the composer taller than the window. The
+      options are already limited to eight; this is the backstop for a short window.
+   2. The selected row is marked by a BACKGROUND plus a left rule, not by colour alone — `forced-colors` drops the tint, and
+      a highlight nobody can see is a picker with no current option.
+   3. The name is monospace and left-aligned on the same edge as the field's text, so the eye does not have to re-find the
+      column. */
+/*
+ * FLOATING, above the composer — the same anchor the queue sheet uses.
+ *
+ * `position: absolute` against `.composer`, which is already `position: relative`. There is deliberately no
+ * `margin-bottom`: this is out of the flow, so a margin here would be spacing around nothing.
+ *
+ * `z-index: 41`, one above the queue sheet's 40: both anchor to the same edge, and if they can ever be open together the
+ * picker is the newer surface — it is opened by typing, after the sheet was opened deliberately.
+ */
+.mention {
+  position: absolute;
+  bottom: calc(100% + var(--sp-2));
+  left: 0;
+  right: 0;
+  z-index: 41;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-3);
+  background: var(--panel-3);
+  box-shadow: var(--sh-2);
+  /*
+   * CAPPED AT SIX ROWS, with an internal scroll.
+   *
+   * Eight rows made the panel taller than the field it belongs to, which is what "the picker dominates the composer"
+   * meant. Six is enough to see that there IS a list and to arrow through it, and the scroll is the signal that more
+   * exist. The list's own `max-height` below is the backstop for a short window.
+   */
+  overflow: hidden;
+}
+.mention-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: 4px var(--sp-2);
+  border-bottom: 1px solid var(--line);
+}
+.mention-dir { font-size: var(--fs-2xs); color: var(--dim); }
+/* The match count: the fact a reader of a filtered list wants, and the middle of the row had room for it. */
+.mention-count { font-size: var(--fs-2xs); color: var(--text); }
+.mention-hint {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+}
+.mention-hint kbd {
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  padding: 0 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+}
+.mention-list {
+  margin: 0;
+  padding: 2px 0;
+  list-style: none;
+  /* Six rows at ~22px, and never more than 45% of the window on a short screen. */
+  max-height: min(132px, 45vh);
+  overflow-y: auto;
+}
+.mention-option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  /*
+   * INSET BY 4px, so the highlight does not run edge-to-edge against the panel's border and then stop. The first version
+   * touched the boundary while its text was padded, which read as a bar sliding under the panel rather than a row being
+   * selected.
+   */
+  margin: 0 4px;
+  padding: 3px var(--sp-2);
+  border-radius: var(--r-2);
+  font-size: var(--fs-xs);
+  color: var(--text);
+  cursor: pointer;
+  /* The left rule is transparent until selected, so the TEXT does not shift by 2px when the highlight moves. */
+  border-left: 2px solid transparent;
+}
+.mention-option.is-selected {
+  background: var(--accent-tint);
+  border-left-color: var(--accent);
+  /* The accent text as well as the tint: on a washed background the default grey was a weak primary state. */
+  color: var(--text);
+}
+/* A directory says "continue into me" twice: by the trailing slash in its name, and by the quieter weight. */
+.mention-option.is-dir .mention-name { color: var(--accent-text); }
+.mention-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mention-empty {
+  margin: 0;
+  padding: var(--sp-2);
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+}
+
+/* --- Images attached to the prompt (clipboard images) --------------------------------------------
+
+   A chip rail above the field, and a drag target around the whole composer.
+
+   Three rules that are decisions rather than decoration:
+
+   1. The rail WRAPS rather than scrolls. Four attachments is the cap, so a row that wraps is at most two lines and every
+      chip stays visible — a horizontally scrolling rail would hide the one the reader wanted to remove.
+   2. The thumbnail is a fixed 34px box with `object-fit: cover`. Chips must be the same height whatever aspect ratio was
+      pasted, or a portrait screenshot and a wide one would make the rail ragged and shove the field down by different
+      amounts on every paste.
+   3. The drag target is the COMPOSER's boundary, not a dropzone drawn inside it. A dashed box that appears mid-drag inside
+      an existing rounded surface reads as a second control; tinting the existing boundary says "this whole thing accepts
+      the file" without adding a shape. */
+.attach-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-2) 0;
+  padding: 0;
+  list-style: none;
+}
+.attach-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: 100%;
+  padding: 4px 6px 4px 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--panel-2);
+}
+.attach-thumb {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  object-fit: cover;
+  border-radius: var(--r-1);
+  background-color: var(--bg);
+}
+/* A thumbnail the browser could not decode: stated in the chip rather than shown as an empty square. */
+.attach-thumb.is-broken {
+  display: grid;
+  place-items: center;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+.attach-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  /* The label truncates rather than the chip growing: a dropped file can have a 120-character name. */
+  overflow: hidden;
+}
+.attach-label {
+  font-size: var(--fs-xs);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.attach-size { font-size: var(--fs-2xs); color: var(--dim); }
+
+/*
+ * The remove control declares its own font and background, because `contrast.test.mjs` holds every single-class button to
+ * that rule: an undeclared control inherits the PLATFORM's face, which on this dark page is a light grey rectangle.
+ */
+.attach-remove {
+  flex: none;
+  padding: 2px 6px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  cursor: pointer;
+  border-radius: var(--r-1);
+}
+.attach-remove:hover { color: var(--danger-text); background: var(--danger-tint); }
+
+/* The cap, stated where it is reached rather than as a disabled button. */
+.attach-limit {
+  align-self: center;
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+}
+
+/* The composer's own boundary, tinted while a file is over it. */
+.composer.is-dragging {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+}
+.attach-notice { margin-top: var(--sp-1); }
+
 /* --- The Reading preference (issue #134) -------------------------------------------------------
 
    Two sliders and a sample. The sample uses the reader's own tokens, so the choice is judged where it is

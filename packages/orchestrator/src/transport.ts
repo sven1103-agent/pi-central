@@ -36,6 +36,7 @@ import {
 import { findOwnPackage } from "./package-meta.ts";
 import type { Supervisor } from "./supervisor.ts";
 import type { FileError } from "./files.ts";
+import { acceptImages } from "./prompt-images.ts";
 import { discover, sessionAt } from "./registry.ts";
 import type { Config } from "./config.ts";
 import { createUiRequestHandler, resolveUiDistDir } from "./static-ui.ts";
@@ -388,15 +389,38 @@ export class Transport {
         this.#broadcast({ kind: "session", session: result.session });
         return;
       }
-      case "prompt":
-        // `behavior` is forwarded only when the client chose one; the supervisor decides what a
-        // missing choice means (see `Supervisor#prompt`).
-        await this.#supervisor.prompt(
-          control.sessionId,
-          control.message,
-          ...(control.behavior ? [control.behavior] : []),
-        );
+      case "prompt": {
+        /*
+         * Images are validated HERE, before anything is forwarded.
+         *
+         * A refusal is reported to the client as an `error` event with a sentence the reader can act on, rather than
+         * being dropped: a dropped image is a prompt the model answers as though nothing was attached, and "I don't see
+         * any image" is an error message written by the model about a defect in this process.
+         *
+         * All-or-nothing: see `acceptImages`. A prompt missing one of its four screenshots is worse than one refused.
+         */
+        const accepted = acceptImages(control.images);
+        if (!accepted.ok) {
+          this.#broadcast({ kind: "error", message: `image refused: ${accepted.message}`, sessionId: control.sessionId });
+          return;
+        }
+        /*
+         * EXPLICIT arguments, never a positional spread.
+         *
+         * This was `...(control.behavior ? [control.behavior] : []), ...(images.length > 0 ? [images] : [])`, which is
+         * correct only when every earlier optional argument is present. For an IDLE prompt — the normal case — `behavior`
+         * is absent, the spread contributed nothing, and the images array shifted left into the `behavior` parameter.
+         * `Supervisor#prompt` then received a media-type list where it expected "steer" or "followUp", put nothing in
+         * Pi's `images`, and sent an empty message: the transcript showed an empty Assistant box and the prompt looked
+         * like it had not been sent at all.
+         *
+         * Reported from use as "the preview did work, but when I click Enter, nothing happens." The spread looked tidy and
+         * was silently positionally wrong, which is why the arguments are now named at the call site and the regression
+         * test asserts their POSITIONS rather than merely that a third argument arrived.
+         */
+        await this.#supervisor.prompt(control.sessionId, control.message, control.behavior, accepted.images);
         return;
+      }
       case "clearQueue": {
         await this.#supervisor.clearQueue(control.sessionId, control.andStop);
         return;

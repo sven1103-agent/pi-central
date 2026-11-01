@@ -52,6 +52,19 @@ import {
  */
 export const RAIL_DRAWER_MAX_WIDTH = 1024;
 import { TranscriptView } from "./components/Transcript.tsx";
+import {
+  ATTACHMENT_TYPES,
+  addAttachment,
+  attachmentBytes,
+  canSend,
+  imageSupport,
+  refuseAttachment,
+  removeAttachment,
+  toPromptImages,
+  type Attachment,
+} from "./attachments.ts";
+import { captureImage } from "./paste.ts";
+import type { Entry } from "./mentions.ts";
 import { ToolTrace } from "./components/ToolTrace.tsx";
 import { Composer, type QueueBehavior } from "./components/Composer.tsx";
 import { DialogDock, type DialogAnswer } from "./components/DialogDock.tsx";
@@ -107,6 +120,25 @@ export function App() {
   // Drafts are per session and in memory, so switching focus never loses typing. Never cleared
   // by Esc: that keystroke belongs to the agent.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+
+  /**
+   * Attached images, per session.
+   *
+   * In memory only, and for a stronger reason than drafts: base64 of a few screenshots is megabytes, so `localStorage`
+   * would blow its ~5 MB quota and throw on the NEXT unrelated write — which is the failure mode a persisted draft would
+   * cause long after the paste that caused it.
+   *
+   * Keyed by session because an attachment leaked across a switch would be sent to a different agent in a different
+   * directory. Content leaking is worse than text leaking.
+   */
+  const [attachments, setAttachments] = useState<Record<string, Attachment[]>>({});
+  /**
+   * The next attachment id. A counter rather than `crypto.randomUUID()` because two pastes of one screenshot must be two
+   * separate attachments with two React keys — identity by content would make the second unremovable.
+   */
+  const attachmentSeq = useRef(0);
+  /** A refusal or acknowledgement, per session, shown in the composer's chrome row. */
+  const [attachNotice, setAttachNotice] = useState<Record<string, string | undefined>>({});
 
   //
   // Incremented on every send. `TranscriptView` watches it to re-arm auto-follow (#86): sending a
@@ -440,6 +472,65 @@ export function App() {
     [focused, listDirectoryFor],
   );
 
+  /**
+   * Take pasted or dropped files, downscale them, and attach them — or say why not.
+   *
+   * ## Why this is async and sequential
+   *
+   * Each file is decoded and re-encoded, which is real work per image. Running them in parallel would hold several
+   * full-size bitmaps at once (a 4000x3000 screenshot is ~48 MB of RGBA) and the browser would allocate all of them before
+   * any were released. Sequential keeps the peak at one.
+   *
+   * ## Why the refusal is per-paste, not per-file
+   *
+   * The first refusal stops the batch and is REPORTED. Continuing would attach some of what was dropped and silently skip
+   * the rest, and the reader would send a set they did not compose — the same all-or-nothing argument as
+   * `acceptImages` in the orchestrator, applied to the browser end.
+   */
+  const attachFiles = useCallback(
+    async (sessionId: string, files: readonly File[]) => {
+      let current = attachmentsRef.current[sessionId] ?? [];
+      for (const file of files) {
+        // A type check before decoding, so a dropped PDF is refused without reading it.
+        const captured = ATTACHMENT_TYPES.includes(file.type) ? await captureImage(file) : null;
+        if (captured === null) {
+          setAttachNotice((previous) => ({
+            ...previous,
+            [sessionId]: refuseAttachment("unsupported-type", { type: file.type || file.name }),
+          }));
+          setAttachments((previous) => ({ ...previous, [sessionId]: current }));
+          return;
+        }
+
+        attachmentSeq.current += 1;
+        const result = addAttachment(current, captured, `a${attachmentSeq.current}`);
+        if (!result.ok) {
+          setAttachNotice((previous) => ({
+            ...previous,
+            [sessionId]: refuseAttachment(result.reason, { bytes: attachmentBytes(captured.data) }),
+          }));
+          setAttachments((previous) => ({ ...previous, [sessionId]: current }));
+          return;
+        }
+        current = result.attachments;
+      }
+      // Committed once at the end, so the rail never shows a half-applied batch.
+      setAttachments((previous) => ({ ...previous, [sessionId]: current }));
+      setAttachNotice((previous) => ({ ...previous, [sessionId]: undefined }));
+    },
+    [],
+  );
+
+  const removeAttached = useCallback((sessionId: string, id: string) => {
+    setAttachments((previous) => ({
+      ...previous,
+      [sessionId]: removeAttachment(previous[sessionId] ?? [], id),
+    }));
+  }, []);
+
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
+
   const openFile = useCallback(
     (path: string) => {
       if (!focused) return;
@@ -483,6 +574,52 @@ export function App() {
     [send],
   );
 
+  /*
+   * The focused session's id, named once.
+   *
+   * Used by several identity-sensitive callbacks below, and hoisted above them because they close over it.
+   */
+  const previewSessionId = focused?.id;
+
+  /**
+   * List a directory for the `@` picker, reusing the SAME cache the file tree uses.
+   *
+   * That reuse is the design: the tree and the picker ask the same question ("what is in this directory"), so a second
+   * request path would be a second cache to keep in step, and a directory the reader had already expanded in the panel would
+   * be re-fetched for a mention. `directoryAt` is the guard, so a listing already in hand costs one lookup.
+   *
+   * Hidden files are EXCLUDED here regardless of the tree's toggle: a picker offering `.env` and `.DS_Store` while someone
+   * types a screenshot's name is noise, and dotfiles are rarely what a mid-sentence `@` is reaching for.
+   */
+  const listMentionDirectory = useCallback(
+    (path: string) => {
+      if (previewSessionId === undefined) return;
+      if (directoryAt(filesRef.current, previewSessionId, path).status !== "unloaded") return;
+      listDirectoryFor(previewSessionId, path, false);
+    },
+    [previewSessionId, listDirectoryFor],
+  );
+
+  /**
+   * The entries of a directory for the `@` picker, or `undefined` when it is not loaded.
+   *
+   * Closing over `files` rather than `filesRef`, for the reason `previewsFor` documents: a reader with a stable identity
+   * would never change, so the picker would never re-render when the listing arrived and would sit on "Reading…" forever.
+   * `undefined` and `[]` are kept distinct — the picker says "Reading…" for one and "No match" for the other, and only one of
+   * those is worth waiting for.
+   */
+  const mentionEntries = useCallback(
+    (path: string): readonly Entry[] | undefined => {
+      if (previewSessionId === undefined) return undefined;
+      const state = directoryAt(files, previewSessionId, path);
+      if (state.status !== "loaded") return undefined;
+      return state.entries
+        .filter((entry) => entry.kind === "file" || entry.kind === "directory")
+        .map((entry) => ({ name: entry.name, kind: entry.kind as "file" | "directory" }));
+    },
+    [previewSessionId, files],
+  );
+
   /**
    * The IDENTITY-STABLE preview request for the focused session.
    *
@@ -492,7 +629,6 @@ export function App() {
    * it hundreds of times a second to prove that is work done to produce an answer already known, so the identity is
    * held steady here instead.
    */
-  const previewSessionId = focused?.id;
   const previewFocused = useCallback(
     (path: string) => {
       if (previewSessionId === undefined) return;
@@ -882,6 +1018,16 @@ export function App() {
               session={focused}
               preview={focused ? previewFocused : noPreview}
               previews={focused ? previewsFor : noPreviews}
+              attachments={focused ? attachments[focused.id] ?? noAttachments : noAttachments}
+              onAttach={(files) => {
+                if (focused) void attachFiles(focused.id, files);
+              }}
+              onRemoveAttachment={(id) => {
+                if (focused) removeAttached(focused.id, id);
+              }}
+              attachNotice={focused ? attachNotice[focused.id] : undefined}
+              listMentionDirectory={focused ? listMentionDirectory : noListDirectory}
+              mentionEntries={focused ? mentionEntries : noMentionEntries}
               showMarkers={focused ? showMarkersBySession[focused.id] !== false : true}
               activityOpen={focused ? activityOpen[focused.id] ?? {} : {}}
               onToggleActivity={toggleActivity}
@@ -931,13 +1077,38 @@ export function App() {
               }}
               onSend={(message, behavior) => {
                 if (!focused) return;
+                const sessionId = focused.id;
+                const images = toPromptImages(attachmentsRef.current[sessionId] ?? []);
                 // Only a streaming prompt carries a behavior; the store's `composerMode` is what
                 // decides that, and the App forwards the choice rather than re-deciding it.
-                send(
-                  focused.state === "streaming"
-                    ? { kind: "prompt", sessionId: focused.id, message, behavior }
-                    : { kind: "prompt", sessionId: focused.id, message },
-                );
+                const sent = send({
+                  kind: "prompt",
+                  sessionId,
+                  message,
+                  ...(focused.state === "streaming" ? { behavior } : {}),
+                  // Omitted rather than sent empty, matching the orchestrator's own rule: an absent field
+                  // is a message that was never about images.
+                  ...(images.length > 0 ? { images } : {}),
+                });
+                /*
+                 * Cleared only after the control is sent.
+                 *
+                 * The order matters: clearing first would leave nothing to attach if `send` returned false (the socket
+                 * was closed), and the reader's screenshots would be gone with the message. `send` reports whether the
+                 * frame left, so this mirrors what the wire received rather than what the UI hoped.
+                 *
+                 * NO "n images sent" NOTICE, and that is a correction rather than an omission. The chips vanishing is the
+                 * whole confirmation: they were the thing that said "these are attached", so their absence says "these
+                 * are gone from the composer". The message then appears in the transcript with the images in it, one
+                 * line below. A notice restating that was a third confirmation for one fact, in the one strip that is
+                 * permanent screen space.
+                 *
+                 * A REFUSAL still uses that strip, because a refusal is the one thing the reader cannot see anywhere
+                 * else: nothing appeared in the composer, and nothing appeared in the transcript.
+                 */
+                if (sent && images.length > 0) {
+                  setAttachments((previous) => ({ ...previous, [sessionId]: [] }));
+                }
                 // After the control, not inside building it: the transcript re-arms following so the
                 // reply scrolls into view whatever the reader had scrolled to before (#86).
                 setFollowToken((n) => n + 1);
@@ -1087,6 +1258,25 @@ const noPreview = () => {};
 const noPreviews = () => ({ status: "unloaded" }) as const;
 
 /**
+ * An empty attachment list with a stable identity.
+ *
+ * Like `noPreview`: the composer's `canSend` and the rail both read this, and a fresh `[]` per render would make every
+ * comparison of it false. A frozen constant is the cheapest way to say "the same emptiness every time".
+ */
+const noAttachments: readonly Attachment[] = Object.freeze([]);
+
+/** Stable no-ops for an embedding with no session: see `noPreview`. */
+const noListDirectory = () => {};
+
+/**
+ * "I know nothing about this directory", for an embedding with no filesystem.
+ *
+ * `undefined` rather than `[]`, because the picker renders `undefined` as "Reading…" and `[]` as "No match". Saying "No
+ * match" about a tree that cannot be read would be a false claim about the session.
+ */
+const noMentionEntries = () => undefined;
+
+/**
  * The render/focus key for a roster row.
  *
  * A live session uses its handle; a session that is not running has only its file. Both are stable and a row can
@@ -1101,6 +1291,12 @@ function SessionView({
   session,
   preview,
   previews,
+  attachments,
+  onAttach,
+  onRemoveAttachment,
+  attachNotice,
+  listMentionDirectory,
+  mentionEntries,
   transcript,
   home,
   historyError,
@@ -1135,6 +1331,16 @@ function SessionView({
   preview: (path: string) => void;
   /** What is known about each named image, so a turn can preview it. */
   previews: (path: string) => FileState;
+  /** Images attached to the prompt being written for this session. */
+  attachments: readonly Attachment[];
+  onAttach: (files: readonly File[]) => void;
+  onRemoveAttachment: (id: string) => void;
+  /** A refused paste, or an acknowledgement. Rendered in the composer's chrome row. */
+  attachNotice: string | undefined;
+  /** List a directory for the `@` picker. */
+  listMentionDirectory: (path: string) => void;
+  /** The entries of a directory for the `@` picker, or `undefined` when not loaded. */
+  mentionEntries: (path: string) => readonly Entry[] | undefined;
   transcript: ReturnType<typeof transcriptFor>;
   home: string | undefined;
   historyError: string | undefined;
@@ -1193,6 +1399,18 @@ function SessionView({
   }
 
   const busy = session.state === "streaming";
+
+  /*
+   * Whether the paste affordance is offered, from the model Pi reported for this session.
+   *
+   * Computed from `models` rather than stored: the list is fetched when the picker opens, so an absent list means the
+   * answer is `unknown` and the affordance stays — see `imageSupport`. Deriving it here means it follows a model change
+   * with no second piece of state to keep in step.
+   */
+  const canAttach = imageSupport(
+    models?.find((model) => model.id === session.model)?.input ??
+      models?.find((model) => model.name === session.model)?.input,
+  );
 
   return (
     <>
@@ -1253,6 +1471,13 @@ function SessionView({
               onRestored={onRestored}
               draft={draft}
               onDraftChange={onDraftChange}
+              attachments={attachments}
+              onAttach={onAttach}
+              onRemoveAttachment={onRemoveAttachment}
+              canAttach={canAttach}
+              notice={attachNotice}
+              listDirectory={listMentionDirectory}
+              directoryEntries={mentionEntries}
               follow={
                 onToggleAutoFollow === undefined ? undefined : (
                   <FollowToggle following={autoFollow} onToggle={onToggleAutoFollow} />
