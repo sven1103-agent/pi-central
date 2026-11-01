@@ -14,51 +14,21 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
-- **An installed Pi Central now picks up an update by itself** ([#184]). The cache was never the problem:
-  `static-ui.ts` serves `index.html` `no-cache` and the worker has cached only fingerprinted `/assets/` since 0.6.1.
-  The PWA window was — clicking the dock icon **focuses** an installed window rather than reloading it, so the
-  previous release's bundle stayed in memory while the new orchestrator came up behind it. When the protocol had
-  changed, the `hello` skew check was right and its advice — *reload the UI* — named an action a standalone window
-  has no affordance for.
-- The orchestrator now reports **which bundle it is serving** (`InstallFacts.ui`: the fingerprinted entry chunk
-  read from the `index.html` on disk), and the page compares that against the entry it was loaded from. Different
-  means stale, and the page reloads itself. This is the follow-up #178 named in its "Not in this PR" section.
-- The comparison is silent when either side has nothing to report — an older orchestrator sends no `ui`, a dev
-  page has no fingerprinted entry, `--no-ui` serves nothing. Only two *present and different* entries are evidence,
-  because "not reported" and "different" must not look alike.
-- Reloading is one-shot per target identity, marked in `sessionStorage`: the second verdict is a banner with a
-  real **Reload now** button and the advice that works (quit with ⌘Q; restart the older half if the halves still
-  disagree). Without the guard, a new page against an old orchestrator — the dev-layout hazard — would loop.
-- A protocol skew takes the same path instead of the dismissible error strip, because a message with no available
-  action is not a recovery.
-- **Open sessions survive a restart, including an update** ([#185]). They did not: the supervisor held them in
-  memory and shutdown stopped them, so the update dance — stop, `npm install`, restart — brought the app back with
-  the rail full of stopped rows. The roster kept the *rows* (issue #89, `localStorage`), but nothing re-spawned
-  anything, so resuming a dozen sessions by hand after every update was the actual work reported.
-- `~/.config/pi-central/open-sessions.json` now records `{sessionFile, mode}` per open session, written
-  **eagerly** — when a session's file becomes known, and removed only on an **explicit** stop. Eager writes are
-  what make an orchestrator killed with SIGKILL restorable, and `stopAll({ forget: false })` on SIGINT is what
-  makes Ctrl-C-because-I-am-updating different from *I am done with this conversation*.
-- Restore happens before the transport listens, through the **existing** `resume` path (`sessionAt`, then
-  `resume`), so it inherits every rule already established there: the file must still be a valid Pi session, the
-  recorded directory must still exist (C2), and the cwd is never retargeted (ADR-0008).
-- Three outcomes, deliberately distinguished: a gone session **file** is dropped from the list, a gone
-  **directory** is reported and kept (a volume remounts; only an explicit stop may forget), and a resumed session
-  says nothing.
-- Only the long-running server remembers. The one-shot CLI (`run`, `resume`) opts out, because it exits
-  immediately — recording its session would leave an entry the web app would faithfully reopen on its next launch,
-  and would rewrite a file the running web app owns.
-- A session file is keyed by its **canonical** path. Found by this change's own suite: `sessionAt` resolves
-  through `realpathSync`, so the same conversation arrived under two spellings and the list held it twice — which
-  on the next launch means two processes appending to one file (ADR-0004).
-- **A process that never started no longer makes shutdown wait forever.** Node's contract for a failed `spawn` is
-  `error` and no `exit`, and every wait in `RpcProcess.stop()` is on `exit`; because those timers are `unref`'d, the
-  event loop could drain first and leave the caller's promise unsettled. Reachable by hand at any time (a host
-  without the binary, C10); the startup restore above made it the normal path, since a restored fleet on such a host
-  is a fleet of failed spawns. A spawn failure is reported ASYNCHRONOUSLY, so `stop()` can also be called in the
-  window before it arrives — the restore path does exactly that — and then it waits for an `exit` that will never
-  come. Both windows are closed: in-flight commands reject with the spawn error instead of waiting out their
-  deadlines, teardown returns immediately, and `#waitForExit` settles on the failure as well as on the exit.
+- An installed Pi Central reloads itself when its window is older than the served bundle ([#184]).
+- `InstallFacts.ui` reports the fingerprinted entry chunk the orchestrator serves ([#184]).
+- The stale-window comparison is silent when either side has nothing to report ([#184]).
+- The reload is one-shot per target identity; a second verdict is a banner, not a loop ([#184]).
+- A protocol skew takes the same path instead of a dismissible error strip ([#184]).
+- Open sessions are reopened at the next start, in their recorded directories and modes ([#185]).
+- `~/.config/pi-central/open-sessions.json` records each open session, written eagerly and removed only
+  on an explicit stop ([#185]).
+- Restore reuses the existing `resume` path, so a missing directory is refused and no cwd is
+  retargeted (C2, ADR-0008) ([#185]).
+- A session file that is gone is dropped from the list; a directory that is gone is kept ([#185]).
+- Only the long-running server remembers sessions; the one-shot CLI opts out ([#185]).
+- Sessions are keyed by canonical path, so one conversation cannot be listed twice (ADR-0004)
+  ([#185]).
+- A process that never started no longer makes shutdown wait forever ([#185]).
 
 [#184]: https://github.com/sven1103-agent/pi-central/issues/184
 [#185]: https://github.com/sven1103-agent/pi-central/issues/185
