@@ -1847,17 +1847,34 @@ test("the jump control floats in a band, anchored to the scroller", () => {
   assert.match(viewport, /position:\s*relative/, "it is the positioned ancestor");
   assert.match(viewport, /padding-bottom:\s*var\(--jump-strip\)/, "…and it reserves the band");
 
+  /*
+   * THE OFFSET MUST BE INSIDE THE BAND, not above it.
+   *
+   * This assertion previously required `var(--jump-strip)` in the offset, on the reasoning that the pill should be
+   * measured from the reservation. That reasoning was wrong in the direction that matters: with a 40px reservation and
+   * `bottom: calc(var(--jump-strip) + 4px)`, a ~30px control sat 44px up — i.e. 4px ABOVE the top of the band it was
+   * meant to occupy — so it floated over the last paragraph and the text visibly wrapped around it (`img_35.png`).
+   *
+   * The real property is arithmetic, so it is asserted as arithmetic: the offset must be smaller than the band, or the
+   * control is not in the band at all.
+   */
   const pill = /(?:^|\n)\.jump-latest\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
   assert.match(pill, /position:\s*absolute/, "the control floats");
-  const bottom = /bottom:\s*([^;]+);/.exec(pill)?.[1] ?? "";
-  assert.match(
-    bottom,
-    /var\(--jump-strip\)/,
-    `the offset must be measured inside the reserved band, got ${bottom}`,
+  assert.match(pill, /z-index:/, "…on its own layer, so it cannot influence the line box beside it");
+
+  const bottom = /bottom:\s*([^;]+);/.exec(pill)?.[1]?.trim() ?? "";
+  const offset = Number(/^(\d+)px$/.exec(bottom)?.[1]);
+  assert.ok(
+    Number.isFinite(offset),
+    `the offset must be a plain length INSIDE the reserved band, not measured from its top; got ${bottom}`,
   );
 
   const strip = Number(/--jump-strip:\s*(\d+)px/.exec(css)?.[1]);
   assert.ok(Number.isFinite(strip), "--jump-strip must be a number, or the reservation is a guess");
+  assert.ok(
+    offset < strip,
+    `the control's ${offset}px offset must sit inside the ${strip}px band, or it is drawn above it — over the text`,
+  );
 
   // And structurally: the pill must be a child of the viewport, not of the column that also holds the composer.
   const source = readFileSync(new URL("../src/components/Transcript.tsx", import.meta.url), "utf8");

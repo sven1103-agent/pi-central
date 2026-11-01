@@ -443,6 +443,26 @@ button { font: inherit; color: inherit; }
   gap: var(--sp-2);
 }
 .btn-quiet:hover { color: var(--text); background: var(--panel-2); }
+/*
+ * A KEYBOARD HINT, styled as one.
+ *
+ * `⌘⇧O` was a bare mono span inheriting the button's colour and size — so it read as a stray glyph floating at the row's
+ * right edge rather than as a shortcut (`img_35.png`). A hint is quieter than the label it belongs to and shaped like a
+ * key, which is what makes it recognisable without a legend.
+ *
+ * `--fs-2xs` and `--dim` on a faint fill: present when looked for, invisible when scanning the action itself.
+ */
+.btn-quiet .mono {
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  padding: 0 4px;
+  /* Never shrink it into an ellipsis: a truncated shortcut is not a shortcut. */
+  flex: none;
+}
 
 .rail-filter { padding: 0 var(--sp-3) var(--sp-2); }
 .rail-filter input,
@@ -541,7 +561,7 @@ button { font: inherit; color: inherit; }
  * The row is a `<div>` now because nesting buttons is invalid HTML that browsers resolve by breaking the inner
  * one. `.rail-row-main` carries the old button's layout so the visual rhythm is unchanged.
  */
-.rail-row { display: flex; flex-direction: column; }
+.rail-row { display: flex; flex-direction: column; position: relative; }
 .rail-row-main {
   display: flex; flex-direction: column;
   background: none; border: 0; padding: 0; margin: 0;
@@ -553,14 +573,33 @@ button { font: inherit; color: inherit; }
  * Forget is deliberately quiet: it is housekeeping, not a primary act. Never red — the session is not being
  * deleted, only taken off the rail, and a danger colour would promise a consequence that does not happen.
  */
+/*
+ * `Forget`: a real control, and it does not change the row's height.
+ *
+ * Two defects from a screenshot review (`img_35.png`). It was plain text with no affordance on a line of its own, which
+ * made a DESTRUCTIVE action look like leaked hover text — and because it was a third line in the row's column layout it
+ * made the selected row taller than its neighbours, so the rail's rhythm broke exactly on the row that matters most.
+ *
+ * `position: absolute` takes it out of that flow: the row height is now decided by its content alone, and the control
+ * floats at the row's trailing edge, appearing on hover and on keyboard focus. Still reachable by Tab, because it is a
+ * real button and `:focus-within` reveals it.
+ */
 .rail-row-forget {
-  align-self: flex-start;
-  background: none; border: 0; padding: 0 0 2px 2px;
+  position: absolute;
+  right: var(--sp-2);
+  bottom: var(--sp-2);
+  background: var(--panel-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  padding: 1px 6px;
   font: inherit; font-size: var(--fs-2xs);
-  color: var(--dim); cursor: pointer; opacity: 0;
+  color: var(--dim); cursor: pointer;
+  /* Hidden until the row is engaged, but never `display: none` — a control that vanishes from the tab order cannot be
+     reached by the keyboard that is the reason it is hidden. */
+  opacity: 0;
 }
 .rail-row:hover .rail-row-forget, .rail-row:focus-within .rail-row-forget { opacity: 1; }
-.rail-row-forget:hover { color: var(--text); text-decoration: underline; }
+.rail-row-forget:hover { color: var(--danger-text); border-color: var(--danger); }
 .rail-row-forget:focus-visible { outline: none; box-shadow: var(--focus); opacity: 1; }
 
 /*
@@ -998,7 +1037,26 @@ button { font: inherit; color: inherit; }
 
 .measure { max-width: var(--reading-measure); }
 
+/*
+ * BLOCK RHYTHM, graded by what the gap MEANS.
+ *
+ * A screenshot review measured ~22px from a user bubble to the next activity row, ~28–30px from an activity row to the
+ * `Assistant` label, and ~40px from prose to the next user bubble. The largest gap sat INSIDE a turn, so turn boundaries
+ * were only implied — the reader could not see where one exchange ended and the next began.
+ *
+ * Three steps now, smallest to largest: steps within a turn (the activity group's own margin), then the turn itself,
+ * then the boundary between turns, which a user turn opens with extra space above it.
+ */
 .turn { margin-bottom: var(--sp-4); }
+/*
+ * A user turn OPENS an exchange, so the first turn is exempt from the extra space above it: the scroller's own top
+ * padding is already there, and doubling it would push the conversation away from the top of the column for no
+ * information.
+ *
+ * The margin itself lives in the `.turn-user` block below, so that selector stays ONE rule — two rules for one selector
+ * is the cascade trap this file documents, and a guard reads the first match.
+ */
+.transcript-lane > .turn-user:first-child { margin-top: 0; }
 
 /*
  * A first-person turn is a LANDMARK (issue #88).
@@ -1023,6 +1081,15 @@ button { font: inherit; color: inherit; }
   background: var(--panel-2);
   border-radius: var(--r-2);
   padding: var(--sp-3);
+  /*
+   * The largest gap in the rhythm, and it goes ABOVE the reader's own turn.
+   *
+   * A review measured the gaps and found the biggest one INSIDE a turn (~28–30px from an activity row to its
+   * `Assistant` label) and the turn boundary at only ~40px spread unevenly — so where one exchange ended and the next
+   * began was implied rather than visible. A prompt is the thing a reader scans for; giving it the most air is what
+   * makes a long transcript navigable.
+   */
+  margin-top: var(--sp-5);
 }
 .turn-user .role {
   color: var(--text);
@@ -2735,20 +2802,26 @@ select.btn { font-family: var(--sans); }
   flex: none;
   /* The fade IS the separation: no border, no fill, no shadow. */
   background: linear-gradient(to bottom, transparent, var(--bg) 12px);
-  /* Room for the hint line and the dock's own breathing space. */
-  padding: 0 0 var(--sp-2);
+  /*
+   * The SAME horizontal inset as the scroller.
+   *
+   * Without it the composer was capped at `--reading-measure` of the COLUMN while the lane was capped at the same
+   * measure of the column MINUS the scroller's 36px of padding — so the input stuck out ~30px past the widest
+   * paragraph and the lane had two right edges (`img_35.png`). The two boxes now resolve the same cap in the same
+   * available width.
+   */
+  padding: 0 18px var(--sp-2);
 }
 .composer-dock {
   /*
-   * The dock shares the lane's axis: same cap, same centre.
+   * The dock fills the footer, which is already the lane's width.
    *
-   * `margin-inline: auto` here and on `.transcript-lane` are the same two declarations, which is what guarantees the
-   * input sits under the paragraph rather than near it. `--lane-inset` is gone: it existed to push the lane off the
-   * column's left edge, and centring replaces that with one symmetrical rule.
+   * It used to carry its own `max-width` + `margin-inline: auto` — the same declarations as `.transcript-lane` — which
+   * was correct in theory and wrong in practice: the footer had no horizontal padding, so the two boxes resolved the
+   * same cap in different available widths and ended up with different right edges. One of them owns the width now,
+   * and it is the footer.
    */
-  max-width: var(--reading-measure);
   width: 100%;
-  margin-inline: auto;
   padding: var(--sp-2) 0 0;
 }
 
@@ -2762,12 +2835,30 @@ select.btn { font-family: var(--sans); }
  * exactly what a review caught (`img_26.png`). The wrapper reserves the band at its foot, so anchoring there is
  * correct: the pill lands in the reserved strip, directly above the composer.
  */
+/*
+ * The pill sits INSIDE the band the viewport reserves for it — not above it.
+ *
+ * The offset was `calc(var(--jump-strip) + 4px)`, which placed a ~30px control 44px up from the viewport's bottom: 4px
+ * ABOVE the top of the 40px reservation it was supposed to occupy. So it floated over the last paragraph and, because
+ * a positioned element still takes part in the line box around it in this flow, the text wrapped around it — "…not a
+ * count —" cut through, then `[ ↓ Jump to latest ]` splitting the second line (`img_35.png`).
+ *
+ * `bottom: 4px` puts it in the band: the reservation is 40px, the control is ~30px, and 4px of air above the viewport's
+ * foot is the whole budget. Nothing can be under it because nothing is drawn there.
+ *
+ * It is centred on the LANE, which is this element's width: `.transcript-viewport` spans the reading column, so
+ * `left: 50%` is the message column's centre. It previously read as off-centre because the elements inside the
+ * visible region are inset by the scroller's own horizontal padding.
+ */
 .jump-latest {
-  position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--jump-strip) + 4px);
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 4px;
   display: inline-flex; align-items: center; gap: 6px;
   padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line);
   background: var(--bg-raised, var(--bg)); color: inherit; font: inherit; cursor: pointer;
   box-shadow: 0 2px 10px rgb(0 0 0 / 0.25);
+  /* An OVERLAY: its own layer, out of the text's way entirely. Without this a positioned box can still influence the
+     line box beside it, which is how the paragraph appeared to wrap around the control. */
+  z-index: 5;
 }
 .jump-latest:hover { border-color: var(--accent); }
 

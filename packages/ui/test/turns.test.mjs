@@ -106,6 +106,9 @@ test("the distinction is not carried by colour alone", () => {
   const turn = /\.turn-user\s*\{([^}]*)\}/.exec(css);
   assert.ok(turn, ".turn-user must have a rule");
   assert.match(turn[1], /background:\s*var\(--panel-2\)/, "a tint, raised rather than recessed");
+  // The turn boundary is the largest gap in the transcript's rhythm, and it belongs ABOVE the reader's own turn: a
+  // prompt is what the eye scans for when navigating back through a long conversation.
+  assert.match(turn[1], /margin-top:\s*var\(--sp-5\)/, "the exchange boundary is the widest gap");
   assert.ok(!/border-left/.test(turn[1]), "no left rule: that vocabulary is the notices' and the trace's");
   assert.ok(!/border:\s/.test(turn[1]), "no frame either: that would read as quarantined output");
 
