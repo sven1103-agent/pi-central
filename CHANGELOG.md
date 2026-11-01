@@ -93,6 +93,16 @@ text until now.
   than text-only — Pi omitting the field is not a claim — because `unknown → allowed` costs one provider error while
   `unknown → hidden` is a feature that silently does not exist.
 
+- **An `@` in the composer completes file paths, including into subdirectories.** Typing `@` opens a picker of the session's
+  files; choosing a directory keeps it open one level down, so `@assets/shot.png` is three keystrokes and two arrows rather
+  than a path typed from memory. Accepting a file inserts it followed by a space; `Esc` dismisses the picker for that one
+  mention without touching the draft. The listing is the SAME cache the file tree uses, so a directory already expanded in
+  the panel costs one lookup rather than a second request.
+- **Directories are offered before images, which reverses the obvious order.** Measured against this repository's own root: a
+  bare `@` offered eight images and not one directory, because the root holds dozens of `img_*.png` screenshots and the cap
+  is eight — so `assets/` was unreachable in exactly the case the picker exists for. Images are the reason to FINISH a path,
+  not the reason to start one.
+
 ### Changed — protocol 4 → 5
 
 - **`Control.prompt` carries optional `images`, and `ModelOption` carries `input`.** Both are ADDED FIELDS rather than new

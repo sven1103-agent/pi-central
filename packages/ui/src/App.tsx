@@ -64,6 +64,7 @@ import {
   type Attachment,
 } from "./attachments.ts";
 import { captureImage } from "./paste.ts";
+import type { Entry } from "./mentions.ts";
 import { ToolTrace } from "./components/ToolTrace.tsx";
 import { Composer, type QueueBehavior } from "./components/Composer.tsx";
 import { DialogDock, type DialogAnswer } from "./components/DialogDock.tsx";
@@ -573,6 +574,52 @@ export function App() {
     [send],
   );
 
+  /*
+   * The focused session's id, named once.
+   *
+   * Used by several identity-sensitive callbacks below, and hoisted above them because they close over it.
+   */
+  const previewSessionId = focused?.id;
+
+  /**
+   * List a directory for the `@` picker, reusing the SAME cache the file tree uses.
+   *
+   * That reuse is the design: the tree and the picker ask the same question ("what is in this directory"), so a second
+   * request path would be a second cache to keep in step, and a directory the reader had already expanded in the panel would
+   * be re-fetched for a mention. `directoryAt` is the guard, so a listing already in hand costs one lookup.
+   *
+   * Hidden files are EXCLUDED here regardless of the tree's toggle: a picker offering `.env` and `.DS_Store` while someone
+   * types a screenshot's name is noise, and dotfiles are rarely what a mid-sentence `@` is reaching for.
+   */
+  const listMentionDirectory = useCallback(
+    (path: string) => {
+      if (previewSessionId === undefined) return;
+      if (directoryAt(filesRef.current, previewSessionId, path).status !== "unloaded") return;
+      listDirectoryFor(previewSessionId, path, false);
+    },
+    [previewSessionId, listDirectoryFor],
+  );
+
+  /**
+   * The entries of a directory for the `@` picker, or `undefined` when it is not loaded.
+   *
+   * Closing over `files` rather than `filesRef`, for the reason `previewsFor` documents: a reader with a stable identity
+   * would never change, so the picker would never re-render when the listing arrived and would sit on "Reading…" forever.
+   * `undefined` and `[]` are kept distinct — the picker says "Reading…" for one and "No match" for the other, and only one of
+   * those is worth waiting for.
+   */
+  const mentionEntries = useCallback(
+    (path: string): readonly Entry[] | undefined => {
+      if (previewSessionId === undefined) return undefined;
+      const state = directoryAt(files, previewSessionId, path);
+      if (state.status !== "loaded") return undefined;
+      return state.entries
+        .filter((entry) => entry.kind === "file" || entry.kind === "directory")
+        .map((entry) => ({ name: entry.name, kind: entry.kind as "file" | "directory" }));
+    },
+    [previewSessionId, files],
+  );
+
   /**
    * The IDENTITY-STABLE preview request for the focused session.
    *
@@ -582,7 +629,6 @@ export function App() {
    * it hundreds of times a second to prove that is work done to produce an answer already known, so the identity is
    * held steady here instead.
    */
-  const previewSessionId = focused?.id;
   const previewFocused = useCallback(
     (path: string) => {
       if (previewSessionId === undefined) return;
@@ -980,6 +1026,8 @@ export function App() {
                 if (focused) removeAttached(focused.id, id);
               }}
               attachNotice={focused ? attachNotice[focused.id] : undefined}
+              listMentionDirectory={focused ? listMentionDirectory : noListDirectory}
+              mentionEntries={focused ? mentionEntries : noMentionEntries}
               showMarkers={focused ? showMarkersBySession[focused.id] !== false : true}
               activityOpen={focused ? activityOpen[focused.id] ?? {} : {}}
               onToggleActivity={toggleActivity}
@@ -1217,6 +1265,17 @@ const noPreviews = () => ({ status: "unloaded" }) as const;
  */
 const noAttachments: readonly Attachment[] = Object.freeze([]);
 
+/** Stable no-ops for an embedding with no session: see `noPreview`. */
+const noListDirectory = () => {};
+
+/**
+ * "I know nothing about this directory", for an embedding with no filesystem.
+ *
+ * `undefined` rather than `[]`, because the picker renders `undefined` as "Reading…" and `[]` as "No match". Saying "No
+ * match" about a tree that cannot be read would be a false claim about the session.
+ */
+const noMentionEntries = () => undefined;
+
 /**
  * The render/focus key for a roster row.
  *
@@ -1236,6 +1295,8 @@ function SessionView({
   onAttach,
   onRemoveAttachment,
   attachNotice,
+  listMentionDirectory,
+  mentionEntries,
   transcript,
   home,
   historyError,
@@ -1276,6 +1337,10 @@ function SessionView({
   onRemoveAttachment: (id: string) => void;
   /** A refused paste, or an acknowledgement. Rendered in the composer's chrome row. */
   attachNotice: string | undefined;
+  /** List a directory for the `@` picker. */
+  listMentionDirectory: (path: string) => void;
+  /** The entries of a directory for the `@` picker, or `undefined` when not loaded. */
+  mentionEntries: (path: string) => readonly Entry[] | undefined;
   transcript: ReturnType<typeof transcriptFor>;
   home: string | undefined;
   historyError: string | undefined;
@@ -1411,6 +1476,8 @@ function SessionView({
               onRemoveAttachment={onRemoveAttachment}
               canAttach={canAttach}
               notice={attachNotice}
+              listDirectory={listMentionDirectory}
+              directoryEntries={mentionEntries}
               follow={
                 onToggleAutoFollow === undefined ? undefined : (
                   <FollowToggle following={autoFollow} onToggle={onToggleAutoFollow} />

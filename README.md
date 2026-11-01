@@ -130,9 +130,8 @@ history searchable by content, with a clear refusal when a session's directory i
 that survives a restart; agent-scoped credentials with the host's own credentials denied, and commits
 signed as the agent when the store is configured to sign.
 
-**Not yet:** no file editing from the browser, no update checking, no export. An image reference can be typed as
-`@path` but is not autocompleted, and the two new size caps are untuned against real reading. Each is a tracked issue
-rather than a wish.
+**Not yet:** no file editing from the browser, no update checking, no export. The image size caps are derived from the
+transport's frame limit rather than tuned against real reading. Each is a tracked issue rather than a wish.
 
 ## Working on this project
 

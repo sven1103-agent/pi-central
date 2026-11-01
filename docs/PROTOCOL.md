@@ -134,7 +134,8 @@ request — it costs a DOM node and a decode, which is why the UI bounds both (`
 `decoding="async"`, and a 24-entry blob-URL cache).
 
 A third source is neither of those: a path the reader's own prose NAMES (`@img_6.png shows…`). The
-client detects it, but the bytes come from the ordinary confined `readFile` request — the orchestrator
+client detects it — and completes it, via the `@` picker, which reuses the same `listFiles` cache the file
+tree uses — but the bytes come from the ordinary confined `readFile` request — the orchestrator
 learns nothing new, and the preview is bounded to three paths per message. Detection is a presentation
 decision (what is worth showing) and containment is a trust decision (what may be read), and they are
 deliberately in different layers.

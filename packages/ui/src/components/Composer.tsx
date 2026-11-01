@@ -25,6 +25,8 @@ import { QueueSheet } from "./QueueSheet.tsx";
 import { AttachmentRail } from "./AttachmentRail.tsx";
 import { canSend, type Attachment } from "../attachments.ts";
 import { imageFilesFrom } from "../paste.ts";
+import { MentionPicker } from "./MentionPicker.tsx";
+import { apply, complete, mentionAt, moveSelection, type Completion, type Entry } from "../mentions.ts";
 
 export type QueueBehavior = "steer" | "followUp";
 
@@ -53,6 +55,8 @@ export function Composer({
   onRemoveAttachment = noRemoveAttachment,
   canAttach = "unknown",
   notice,
+  listDirectory,
+  directoryEntries,
   follow,
 }: {
   session: LiveSession | undefined;
@@ -93,6 +97,20 @@ export function Composer({
   /** A refused paste or drop, or a sent acknowledgement. Rendered in the chrome row, where the eyes already are. */
   notice?: string | undefined;
   /**
+   * Ask the owner to list a directory, for the `@` picker.
+   *
+   * Omitted in an embedding with no filesystem behind it, which makes the picker inert rather than wrongly empty: a reader
+   * who types `@` against a session whose tree cannot be read should get nothing rather than "No match".
+   */
+  listDirectory?: ((path: string) => void) | undefined;
+  /**
+   * The entries of a directory, or `undefined` when it is not loaded.
+   *
+   * `undefined` is load-bearing: it is what makes the picker say "Reading…" rather than "No match". The distinction is the
+   * same one `files.ts` protects for the directory tree.
+   */
+  directoryEntries?: ((path: string) => readonly Entry[] | undefined) | undefined;
+  /**
    * The follow toggle, rendered in the composer's own chrome row.
    *
    * A SLOT rather than a prop pair, because the composer has no opinion about scrolling — the transcript owns that
@@ -114,6 +132,59 @@ export function Composer({
   const [sheetOpen, setSheetOpen] = useState(false);
   const sheetTriggerRef = useRef<HTMLButtonElement>(null);
   const queue = queuedMessages(state, session);
+
+  /*
+   * THE @ PICKER.
+   *
+   * `mention` is the token the caret is in, recomputed from the draft and the caret on every keystroke and every
+   * selection change — not stored as text. Storing the query separately would let the two disagree the moment the reader
+   * moves the caret with an arrow key, and the picker would offer completions for a token that is no longer under it.
+   *
+   * `dismissed` is the one piece of state that must persist: Escape closes the picker for THIS mention, and without it the
+   * next keystroke would reopen it immediately, so Escape would do nothing visible — the bug every autocomplete has.
+   * It is reset by any change to the mention's start offset or by typing a character, so the picker returns as soon as
+   * the reader types something new.
+   */
+  const [caret, setCaret] = useState(0);
+  const [dismissedAt, setDismissedAt] = useState<number | undefined>(undefined);
+  const [selected, setSelected] = useState(0);
+
+  const mention = mentionAt(draft, caret);
+  const pickerOpen =
+    mention !== undefined &&
+    listDirectory !== undefined &&
+    directoryEntries !== undefined &&
+    dismissedAt !== mention.start;
+
+  /** The directory the mention names, or `""` for the session root. */
+  const mentionDirectory = mention === undefined ? "" : (mention.query.includes("/")
+    ? mention.query.slice(0, mention.query.lastIndexOf("/"))
+    : "");
+  const entries = directoryEntries?.(mentionDirectory);
+  const completions = mention === undefined ? [] : complete(mention, entries);
+
+  /*
+   * Ask for the directory the mention names, once.
+   *
+   * An effect rather than a call during render, because it dispatches. The receiver ignores a directory it already has,
+   * so being called again is one map lookup — which matters because this runs on every keystroke.
+   */
+  useEffect(() => {
+    if (!pickerOpen || listDirectory === undefined) return;
+    if (entries !== undefined) return;
+    listDirectory(mentionDirectory);
+  }, [pickerOpen, listDirectory, mentionDirectory, entries]);
+
+  /*
+   * The highlight resets when the OPTIONS change, not when the mention does.
+   *
+   * Widening the query can shrink the list under the highlight, and index 3 of a two-item list would render nothing
+   * selected — a picker where Enter accepts an invisible row.
+   */
+  const optionKey = completions.map((completion) => completion.value).join("\u0000");
+  useEffect(() => {
+    setSelected(0);
+  }, [optionKey]);
 
   /**
    * Put cleared text back, once.
@@ -149,7 +220,19 @@ export function Composer({
       // The ladder lives in ONE place (`queue.ts`), because two components act on Escape - this one and the sheet - and a
       // ladder implemented twice is a ladder that drifts. Step 1 (a dialog open) is handled by the dialog dock, which
       // stops propagation before this runs.
-      const action = escalation({ sheetOpen, streaming });
+      const action = escalation({ sheetOpen, pickerOpen, streaming });
+      if (action === "close-picker") {
+        event.preventDefault();
+        /*
+         * Dismissed for THIS mention only.
+         *
+         * `dismissedAt` is the mention's start offset, so typing `@` again later — at a different offset — opens the picker
+         * as if it had never been dismissed. Resetting to `undefined` instead would reopen on the very next keystroke, which
+         * makes Escape look broken.
+         */
+        setDismissedAt(mention?.start);
+        return;
+      }
       if (action === "close-sheet") {
         event.preventDefault();
         setSheetOpen(false);
@@ -256,7 +339,66 @@ export function Composer({
     onAttach(files);
   };
 
+  /** Accept one completion: replace the mention, move the caret, and keep the picker open for a directory. */
+  const accept = (completion: Completion) => {
+    if (mention === undefined) return;
+    const next = apply(draft, mention, completion, caret);
+    onDraftChange(next.text);
+    // A directory leaves the mention open (its value ends in `/`), so the dismissal must be cleared for the NEW offset or
+    // the picker would stay closed after descending into a folder.
+    setDismissedAt(undefined);
+    setSelected(0);
+    /*
+     * The caret is restored AFTER React has written the new value.
+     *
+     * Setting `selectionStart` during the event would apply to the old string, and the browser would then move the caret to
+     * the end when the controlled value changed — so the reader's cursor would jump to the end of the draft after every
+     * completion. `requestAnimationFrame` is the smallest correct delay: the value is committed, and the caret lands where
+     * the inserted text ends.
+     */
+    requestAnimationFrame(() => {
+      const field = textareaRef.current;
+      if (field === null) return;
+      field.focus();
+      field.setSelectionRange(next.caret, next.caret);
+      setCaret(next.caret);
+    });
+  };
+
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    /*
+     * THE PICKER CLAIMS FOUR KEYS, and only while it is open.
+     *
+     * They are checked BEFORE Enter's send behaviour, because with a picker open Enter means "accept the highlighted file",
+     * not "send a half-typed path". `preventDefault` on each so the field does not also act on them.
+     */
+    if (pickerOpen) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        setSelected((current) => moveSelection(current, completions.length, event.key === "ArrowDown" ? 1 : -1));
+        return;
+      }
+      if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey && !event.altKey)) {
+        const chosen = completions[selected];
+        if (chosen !== undefined) {
+          event.preventDefault();
+          accept(chosen);
+          return;
+        }
+        /*
+         * No options: Enter falls THROUGH to sending.
+         *
+         * The reader may have finished typing a path that matches nothing — perhaps the file was created after the listing
+         * was cached — and swallowing Enter there would make the composer feel broken. Tab is swallowed instead, because
+         * leaving the field on Tab with a picker open is worse than doing nothing.
+         */
+        if (event.key === "Tab") {
+          event.preventDefault();
+          return;
+        }
+      }
+    }
+
     // Enter sends; Shift+Enter is a newline. Matches every chat surface the user already knows.
     // Mid-run, Alt+Enter picks the other queue mode, which is Pi's own binding
     // (`interactive-mode.js`: Alt+Enter queues a follow-up).
@@ -311,9 +453,29 @@ export function Composer({
         ref={textareaRef}
         className="composer-input"
         value={draft}
-        onChange={(event) => onDraftChange(event.target.value)}
+        onChange={(event) => {
+          onDraftChange(event.target.value);
+          // The caret after the change, not before it. `selectionStart` on the event target is already the new position.
+          setCaret(event.target.selectionStart);
+          /*
+           * Typing un-dismisses the picker.
+           *
+           * Escape closes it for one mention; without this, the very next character would leave it closed because the
+           * mention's START offset has not changed — and the reader would have to retype the `@` to get it back.
+           */
+          setDismissedAt(undefined);
+        }}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
+        /*
+         * Arrow keys, Home/End and a click all move the caret without changing the value, and the mention under the caret
+         * changes with it. `onSelect` is the one event that covers all of them.
+         */
+        onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
+        aria-autocomplete={pickerOpen ? "list" : undefined}
+        aria-expanded={pickerOpen || undefined}
+        aria-controls={pickerOpen ? "mention-options" : undefined}
+        aria-activedescendant={pickerOpen && completions.length > 0 ? `mention-option-${selected}` : undefined}
         placeholder={
           unavailable
             ? unavailableReason ?? "Unavailable"
@@ -332,6 +494,24 @@ export function Composer({
          */
         rows={3}
       />
+
+      {/*
+        THE @ PICKER, above the field and below the attachments.
+
+        Placed INSIDE the composer's boundary rather than floating over the transcript: a popover positioned absolutely would
+        need to know the field's viewport offset, and it would cover the conversation it is being written about. Inside the
+        boundary it grows the composer by its own height while open, which is the honest trade for a surface that exists for
+        a few keystrokes.
+      */}
+      {pickerOpen && (
+        <MentionPicker
+          directory={mentionDirectory}
+          completions={completions}
+          loading={entries === undefined}
+          selected={selected}
+          onChoose={accept}
+        />
+      )}
 
       {/*
         THE ATTACHMENTS, above the field.
