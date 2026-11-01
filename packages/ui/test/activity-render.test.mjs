@@ -288,3 +288,64 @@ test("each step row is marked by a DOT on a rail, not by a number", () => {
   assert.match(html, />running</, "…for running too");
   assert.ok(!/activity-step-index/.test(html), "no numeric column");
 });
+test("the rail passes through every dot, and no text is drawn behind it", () => {
+  /*
+   * Two defects from one screenshot (`img_37.png`), and both came from the same cause: the two kinds of ledger row
+   * computed their dot positions differently.
+   *
+   *   - a TOOL row centred its dot with a `margin-left` derived from the dot column;
+   *   - a THOUGHT row overrode that margin to `0`, because its dot lives inside a nested `<summary>` with its own
+   *     padding.
+   *
+   * The results were 18px and 13.5px, so the rail ran through the thinking dots instead of through their centres. And
+   * the thinking BODY was padded 10px from the row's left edge — left of the rail at 18px — so opening a thinking block
+   * rendered the reasoning BEHIND the rail.
+   *
+   * The fix is one geometry, declared on the list and inherited: both row kinds take their padding, their dot column and
+   * their text offset from the same variables, and the dot is a fixed-width COLUMN with the visible dot painted at its
+   * centre. This asserts the arithmetic, because the arithmetic is what was wrong.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+
+  const steps = /(?:^|\n)\.activity-steps\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  const stepPad = Number(/--step-pad:\s*(\d+)px/.exec(steps)?.[1]);
+  assert.ok(Number.isFinite(stepPad), "the ledger must declare its own padding as a number");
+
+  // Both row kinds must use the SAME padding value — no override, or the dots diverge exactly as they did.
+  const toolRow = /(?:^|\n)\.activity-step\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(toolRow, /padding:\s*\d+px var\(--step-pad\)/, "the tool row reads the shared padding");
+  const thoughtHead = /\.activity-step\.is-thought \.activity-thought-head\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(thoughtHead, /padding:\s*\d+px var\(--step-pad\)/, "the thought row reads the same padding");
+
+  // No margin arithmetic on the dot: it is a fixed-width column painted at its centre.
+  assert.ok(
+    !/\.activity-dot\s*\{[^}]*margin-left/.test(css),
+    "the dot must not be positioned by margin, which is how the two row kinds diverged",
+  );
+  assert.ok(
+    !/\.activity-dot\s*\{[^}]*width:\s*7px/.test(css),
+    "the dot element is the COLUMN; the visible 7px dot is painted by ::after",
+  );
+  const dot = /(?:^|\n)\.activity-dot\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(dot, /width:\s*var\(--dot-column\)/, "the dot's box is the full column");
+
+  // The rail is derived from the same two numbers, so it cannot drift from the dots.
+  const rail = /\.activity-steps::before\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(rail, /left:\s*calc\(var\(--step-pad\) \+ \(var\(--dot-column\) \/ 2\)/,
+    "the rail is centred on the dot column, not on a number that happens to match it");
+
+  // The reasoning starts at the row's TEXT column, never left of the rail.
+  const body = /(?:^|\n)\.activity-thought-body\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(
+    body,
+    /padding:[^;]*var\(--step-text-x\)/,
+    `the thinking body must start at the ledger's text column, not at the row's padding; got ${body}`,
+  );
+  assert.ok(
+    !/padding:\s*var\(--sp-2\) 10px/.test(body),
+    "the old 10px inset put the reasoning behind the rail",
+  );
+});

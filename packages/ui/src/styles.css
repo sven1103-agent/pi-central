@@ -2063,7 +2063,16 @@ select.btn { font-family: var(--sans); }
 }
 .activity-thought-body {
   margin: 0;
-  padding: var(--sp-2) 10px;
+  /*
+   * Indented to the ledger's TEXT column, not to the row's padding.
+   *
+   * It was `padding: var(--sp-2) 10px`, so the reasoning began at x=10 — left of the rail at x=18 — and the opened
+   * thinking block rendered BEHIND the rail (`img_37.png`). Text that crosses the rail reads as a rendering fault.
+   *
+   * `--step-text-x` is where every row's label starts, so the reasoning lines up with the `Thinking` label it belongs to
+   * and nothing is drawn left of the rail except the dots.
+   */
+  padding: var(--sp-2) var(--step-pad) var(--sp-2) var(--step-text-x);
   max-height: 320px;
   overflow: auto;
   white-space: pre-wrap;
@@ -2085,18 +2094,11 @@ select.btn { font-family: var(--sans); }
  * The index is the sequence. It is `aria-hidden` because the list is an `<ol>`, which already announces position
  * to assistive tech — the number is a visual aid, not a second source of truth.
  */
-.activity-steps {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
 .activity-step {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: 5px 10px;
-  /* A fixed dot column, so every row's label starts at the same x whether or not it has a dot of that width. */
-  --dot-column: var(--sp-4);
+  padding: 5px var(--step-pad);
   font-size: var(--fs-xs);
   color: var(--dim);
   border-top: 1px solid var(--line);
@@ -2113,12 +2115,38 @@ select.btn { font-family: var(--sans); }
  * The line lives on the LIST and the dots break it, so a row's background cannot hide it and the rail reads as
  * continuous across rows of different states.
  */
-.activity-steps { position: relative; }
+.activity-steps {
+  /* ONE rule for this selector — list reset and geometry together. Two rules for one selector is the cascade trap this
+     file documents at `.activity-names`, and a guard that reads the first match silently guards the wrong one. */
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+  /*
+   * THE LEDGER'S GEOMETRY, declared once and inherited by both row kinds.
+   *
+   * Before this the two rows computed their dot positions differently — a tool row centred its dot with a `margin-left`
+   * derived from the column, and a thought row overrode that margin to `0` because its dot lives inside a nested
+   * `<summary>` with its own padding. The results were 18px and 13.5px: the rail ran through the thinking dots instead
+   * of through their centres (`img_37.png`).
+   *
+   * One number, inherited, cannot disagree with itself.
+   */
+  --step-pad: 10px;
+  --dot-column: var(--sp-4);
+  /* Where a row's TEXT starts: past the dot column and the gap. Used by the thought body too. */
+  --step-text-x: calc(var(--step-pad) + var(--dot-column) + var(--sp-2));
+}
 .activity-steps::before {
   content: "";
   position: absolute;
-  /* Centred under the dots: the dot column is `--sp-4` wide starting at the row's 10px padding. */
-  left: calc(10px + (var(--sp-4) / 2) - 0.5px);
+  /*
+   * Centred under the DOT COLUMN — not under a number that happens to match it.
+   *
+   * The dot is now a fixed-width box at the start of every row, so its centre is `--step-pad + --dot-column / 2` in both
+   * kinds of row. Expressed that way the rail and the dots cannot drift apart, whatever padding a row later needs.
+   */
+  left: calc(var(--step-pad) + (var(--dot-column) / 2) - 0.5px);
   top: 0;
   bottom: 0;
   width: 1px;
@@ -2126,23 +2154,40 @@ select.btn { font-family: var(--sans); }
   pointer-events: none;
 }
 
-/* One dot per step. State is the dot's colour; POSITION is the rail. */
+/*
+ * One dot per step. State is the dot's colour; POSITION is the rail.
+ *
+ * The element is a fixed-width COLUMN and the visible dot is painted at its centre by `::after`. That is what makes the
+ * rail pass through every dot: the column's centre is `--dot-column / 2`, so the rail's own offset — computed from the
+ * same two numbers — lands on it in a tool row and in a thought row alike.
+ *
+ * The alternative, sizing the element to the dot and centring it with margins, is what produced the 4.5px mismatch: the
+ * two row kinds had different paddings, so the same margin expression resolved to different centres.
+ */
 .activity-dot {
   flex: none;
+  width: var(--dot-column);
+  height: var(--dot-column);
+  display: grid;
+  place-items: center;
+  position: relative;
+  z-index: 1;
+}
+.activity-dot::after {
+  content: "";
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--line-strong);
   /* The ring is the page behind it, so the dot appears to sit ON the rail rather than beside it. */
   box-shadow: 0 0 0 3px var(--panel);
-  position: relative;
-  z-index: 1;
 }
-.activity-dot.is-thought { background: var(--dim); }
-.activity-dot.is-live { background: var(--ok); }
-.activity-dot.is-live { animation: pulse 1.6s ease-in-out infinite; }
-.activity-dot.is-failed { background: var(--danger); }
-.activity-dot.is-missing { background: var(--warn); }
+/* State colours the DOT, not the column. */
+.activity-dot.is-thought::after { background: var(--dim); }
+.activity-dot.is-live::after { background: var(--ok); }
+.activity-dot.is-live::after { animation: pulse 1.6s ease-in-out infinite; }
+.activity-dot.is-failed::after { background: var(--danger); }
+.activity-dot.is-missing::after { background: var(--warn); }
 .activity-step-kind {
   color: var(--quarantine);
   font-weight: 600;
@@ -2186,7 +2231,9 @@ select.btn { font-family: var(--sans); }
 .activity-step.is-thought:first-child { border-top: none; }
 .activity-step.is-thought .activity-thought { width: 100%; }
 .activity-step.is-thought .activity-thought-head {
-  padding: 5px 10px;
+  /* The same padding and gap as a tool row, from the same variables — that is what puts its dot column, and therefore
+     its dot, exactly where a tool row's is. */
+  padding: 5px var(--step-pad);
   min-height: 30px;
   gap: var(--sp-2);
   font-size: var(--fs-xs);
@@ -2194,9 +2241,6 @@ select.btn { font-family: var(--sans); }
 
 .activity-step.is-thought .activity-step-kind { min-width: 8.5ch; color: var(--dim); }
 /* The thought row's dot sits where a tool row's does, so the rail reads straight through both kinds. */
-.activity-step.is-thought .activity-dot { margin-left: 0; }
-/* The dot sits centred in its column, in both row kinds, so the rail passes exactly through each one. */
-.activity-dot { margin-left: calc((var(--dot-column) - 7px) / 2); }
 
 
 /* A call whose result was never recorded: worth noticing, not worth alarming. */
