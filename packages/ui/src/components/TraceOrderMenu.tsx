@@ -1,11 +1,17 @@
 /**
- * The order control: a filter glyph that opens a small menu.
+ * The order control: a SORT glyph that opens a small menu.
  *
  * ## Why a menu and not a `<select>`
  *
  * A native select was the first answer, and it works — but it reads as a FORM FIELD in a strip of chrome, and at
  * `--fs-2xs` its platform-drawn arrow is the heaviest mark in the header. The control is not filling in a value, it is
- * asking "which calls do you want to see"; a filter glyph says that, and the menu says the rest.
+ * choosing an ORDER; a sort glyph says that, and the menu says the rest.
+ *
+ * ## Why a sort glyph and not a filter funnel
+ *
+ * A funnel means FILTER: narrow the set down. This control reorders the same set and hides nothing, so a funnel promised
+ * something the menu does not do. The glyph is now three bars of decreasing length with an arrow — the ordinary "sort"
+ * mark — and the filled/inactive distinction is carried by the ARROW rather than by the body of the shape.
  *
  * ## Why it is built rather than imported
  *
@@ -117,15 +123,26 @@ export function TraceOrderMenu({
       >
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
           {/*
-            A funnel. Drawn with strokes rather than a path fill so it inherits `currentColor` and works at 14px, and
-            filled when active — the shape carries the state, so it does not depend on colour alone.
+            A SORT mark: three bars of decreasing length, with a direction arrow.
+            
+            The bars carry the idea (a list being ordered) and the arrow carries the STATE — it points down for oldest
+            first and up for newest first. So the current order is legible without opening the menu, and it is a shape,
+            not a colour, so `forced-colors` cannot remove it.
           */}
           <path
-            d="M2.5 3.5h11l-4.2 5v4.2l-2.6 1.3V8.5L2.5 3.5z"
-            fill={order !== "oldest" ? "currentColor" : "none"}
+            d="M2 3.5h7M2 8h5M2 12.5h3"
             stroke="currentColor"
-            stroke-width="1.2"
+            stroke-width="1.3"
+            stroke-linecap="round"
+            fill="none"
+          />
+          <path
+            d={order === "oldest" ? "M12.5 2.5v11m0 0-2.2-2.2m2.2 2.2 2.2-2.2" : "M12.5 13.5v-11m0 0-2.2 2.2m2.2-2.2 2.2 2.2"}
+            stroke="currentColor"
+            stroke-width="1.3"
+            stroke-linecap="round"
             stroke-linejoin="round"
+            fill="none"
           />
         </svg>
       </button>

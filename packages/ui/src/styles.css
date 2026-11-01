@@ -1910,15 +1910,19 @@ select.btn { font-family: var(--sans); }
 .trace-order-trigger:focus-visible { outline: none; box-shadow: var(--focus); }
 
 /*
- * The menu: positioned against its trigger, rising from the header.
+ * The menu: positioned against its trigger, opening DOWN and to the RIGHT.
  *
- * `z-index` above the list rows — it is the one floating surface in this panel, and a menu drawn under the thing it
- * filters would be the worst possible arrangement. `top: 100%` keeps it attached however the header wraps.
+ * It was anchored `right: 0`, which resolves against the trigger's right edge — and the trigger is a ~22px icon sitting
+ * mid-header, so a 230px menu grew LEFTWARD out of the panel and was clipped. The trigger is near the panel's left side,
+ * so the menu opens rightward from its left edge, where the room actually is.
+ *
+ * `z-index` above the list rows: it is the one floating surface in this panel, and a menu drawn under the thing it orders
+ * would be the worst possible arrangement. `top: 100%` keeps it attached however the header wraps.
  */
 .trace-order-menu {
   position: absolute;
   top: calc(100% + 4px);
-  right: 0;
+  left: 0;
   z-index: 20;
   min-width: 230px;
   background: var(--panel-3);

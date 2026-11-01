@@ -413,10 +413,43 @@ test("the trace list is ordered by a control, not by index numbers", () => {
   assert.match(menu, /addEventListener\("pointerdown", onPointerDown, true\)/, "an outside click closes it");
   // The active state must be visible without opening the menu, and not by colour alone: the glyph fills.
   assert.match(menu, /data-active=/, "the trigger carries its state");
-  assert.match(menu, /fill=\{order !== "oldest" \? "currentColor" : "none"\}/, "the glyph fills when filtered");
+  // The GLYPH must show the current order without opening the menu, and by SHAPE rather than colour so
+  // `forced-colors` cannot remove it: the arrow points down for oldest-first and up for newest-first.
+  assert.match(
+    menu,
+    /order === "oldest" \? "M12\.5 2\.5v11/,
+    "the sort arrow points down for oldest-first and up for newest-first",
+  );
+  // A funnel means FILTER — narrow the set. This reorders and hides nothing, so the mark must be the sort bars.
+  assert.ok(!/M2\.5 3\.5h11l-4\.2 5/.test(menu), "no funnel glyph: this control does not filter");
 
   // Traversal must follow the DISPLAYED order: in a reversed list an arrow key that moved through the underlying data
   // would jump in the wrong direction.
   assert.match(source, /const ordered = orderTools\(tools, order\)/);
   assert.match(source, /ordered\.findIndex/, "the arrow keys walk the displayed order");
+});
+
+test("the order menu opens where there is room, not off the panel's edge", () => {
+  /*
+   * Reported: "the menu that opens is opening to the left, which means it gets cut off".
+   *
+   * It was anchored `right: 0`, which resolves against the TRIGGER's right edge. The trigger is a ~22px icon sitting
+   * mid-header, so a 230px menu grew leftward out of the panel and was clipped. The trigger is near the panel's left
+   * side, so the menu must open RIGHTWARD from its left edge.
+   *
+   * Asserted as arithmetic on the declaration, because the failure is geometric: a right anchor on a small element near
+   * the left edge can only produce a menu that leaves the panel.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const menu = /(?:^|\n)\.trace-order-menu\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(menu, /position:\s*absolute/, "the menu is positioned against its trigger");
+  assert.match(menu, /left:\s*0/, "it opens rightward from the trigger's LEFT edge");
+  assert.ok(
+    !/right:\s*0/.test(menu),
+    "a right anchor on a small trigger near the left edge can only grow the menu off the panel",
+  );
+  assert.match(menu, /top:\s*calc\(100%/, "…and downward, below the header");
 });
