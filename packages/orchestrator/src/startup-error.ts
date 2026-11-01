@@ -1,5 +1,6 @@
-import { readFileSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import { join } from "node:path";
+import { servedUiIdentity } from "./static-ui.ts";
 
 /**
  * Startup failures, said in terms a person can act on (issue #114).
@@ -70,15 +71,17 @@ export function explainStartupError(error: unknown, host: string, port: number):
  * (it reports "no built UI"), and a log line must not be able to fail a start.
  */
 export function describeBuiltUi(uiDir: string): string {
+  // `statSync` decides which failure this is: an `index.html` that cannot be read is "(unreadable)",
+  // one that reads but names no bundle is a different defect and says so.
+  let readable = true;
   try {
-    const html = readFileSync(join(uiDir, "index.html"), "utf8");
-    const entry = /assets\/index-[A-Za-z0-9_-]+\.js/.exec(html)?.[0];
-    if (entry === undefined) return "(no entry bundle named in index.html)";
-    const { mtime } = statSync(join(uiDir, "index.html"));
-    // The asset name and the file's mtime together: the name distinguishes builds, the time tells you
-    // whether it predates your last edit.
-    return `${entry} (built ${mtime.toISOString().slice(0, 16).replace("T", " ")})`;
+    statSync(join(uiDir, "index.html"));
   } catch {
-    return "(unreadable)";
+    readable = false;
   }
+  const identity = servedUiIdentity(uiDir);
+  if (identity === undefined) return readable ? "(no entry bundle named in index.html)" : "(unreadable)";
+  // The asset name and the file's mtime together: the name distinguishes builds, the time tells you
+  // whether it predates your last edit.
+  return `${identity.entry} (built ${identity.builtAt.slice(0, 16).replace("T", " ")})`;
 }

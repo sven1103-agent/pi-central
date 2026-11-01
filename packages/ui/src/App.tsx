@@ -9,8 +9,16 @@
  * rather than inferring "streaming" from having seen a delta (C8).
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { supportsRetry, type Control, type HistoricalSession, type LiveSession, type ModelOption } from "@pi-central/protocol";
+import { PROTOCOL_VERSION, supportsRetry, type Control, type HistoricalSession, type LiveSession, type ModelOption } from "@pi-central/protocol";
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
+import {
+  SKEW_PREFIX,
+  assessProtocolSkew,
+  assessServedUi,
+  noteProtocolAgreement,
+  ownEntry,
+  safeSessionStorage,
+} from "./update-check.ts";
 import logoIcon from "./assets/logo-icon.svg";
 import { readTracePrefs, writeTracePrefs, type SessionScroll } from "./scroll.ts";
 import {
@@ -343,9 +351,60 @@ export function App() {
 
   const connectionRef = useRef<Connection | undefined>(undefined);
 
+  /**
+   * The stale-page banner (issue #184). Set when the one-shot reload was already spent on this
+   * exact disagreement, so reloading again would loop — the banner carries a real Reload button
+   * and names the fix that works (restart the older half; ⌘Q in an installed app).
+   */
+  const [updateNotice, setUpdateNotice] = useState<string | undefined>(undefined);
+
+  // Which bundle THIS page was loaded from, computed once. `undefined` on a dev server, which
+  // silences the comparison deliberately — see `ownEntry`.
+  const pageEntry = useMemo(() => ownEntry(), []);
+  // Storage that cannot throw (private mode, full quota): refusal degrades to per-tab memory.
+  const updateMarks = useMemo(() => safeSessionStorage(), []);
+
   useEffect(() => {
     const connection = new Connection(socketUrl(), {
       onEvent: (event) => {
+        /*
+         * Stale-page detection runs BEFORE the store (issue #184).
+         *
+         * A snapshot reports which bundle the orchestrator is serving NOW; this page knows which
+         * bundle it was loaded from. If they differ, the page in memory is the old release — the
+         * PWA-update case, where clicking the dock icon focused a window that was never reloaded.
+         * Reloading is safe here: sessions live in the orchestrator, and a reconnect re-fetches
+         * every transcript, so nothing the page holds is lost. In dev (`import.meta.env.PROD`
+         * false) the reload is NOT automatic — a dev server legitimately serves a different UI
+         * than the orchestrator's disk — and the verdict becomes the banner instead.
+         */
+        if (event.kind === "snapshot") {
+          const verdict = assessServedUi(pageEntry, event.install, updateMarks);
+          if (verdict.action === "reload" && import.meta.env.PROD) {
+            location.reload();
+            return;
+          }
+          if (verdict.action === "banner") setUpdateNotice(verdict.message);
+          // A matching protocol re-arms the skew one-shot for this tab's next update.
+          noteProtocolAgreement(event.install, PROTOCOL_VERSION, updateMarks);
+        }
+        /*
+         * A `hello` skew is the same class of event with the same cure, and it is NOT routed to
+         * the dismissible error strip: "reload the UI" is advice a PWA window cannot act on, so
+         * the app does it (once), and only the loop case becomes a banner.
+         */
+        if (event.kind === "error" && event.message.startsWith(SKEW_PREFIX)) {
+          const verdict = assessProtocolSkew(event.message, updateMarks);
+          if (verdict.action === "reload") {
+            // Attempted once in dev too: a skew means the halves disagree about the WIRE, which
+            // no amount of running old code can work around. The one-shot mark is what keeps the
+            // dev reverse-skew (new files, old orchestrator) from looping into the banner.
+            location.reload();
+            return;
+          }
+          if (verdict.action === "banner") setUpdateNotice(verdict.message);
+          return;
+        }
         dispatch(event);
         // File messages drive their own reducer (issue #8). They are routed here rather than inside
         // `store.ts` because a directory tree is keyed by `(session, path)` and grows on demand,
@@ -933,6 +992,21 @@ export function App() {
             These sessions run pi with your account's access. Everything else in Pi Central is
             unaffected; start new sessions with the sandbox to change it.
           </span>
+        </div>
+      )}
+
+      {/*
+        The stale-page banner sits above the error strip (issue #184): it names a condition about
+        the WINDOW, not about a session, and its Reload button is the one recovery action a
+        standalone PWA window does not otherwise have.
+      */}
+      {updateNotice !== undefined && (
+        <div className="direct-banner" role="alert">
+          <strong>Update available</strong>
+          <span>{updateNotice}</span>
+          <button type="button" className="btn" onClick={() => location.reload()}>
+            Reload now
+          </button>
         </div>
       )}
 

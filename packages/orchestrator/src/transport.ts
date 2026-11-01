@@ -39,7 +39,7 @@ import type { FileError } from "./files.ts";
 import { acceptImages } from "./prompt-images.ts";
 import { discover, sessionAt } from "./registry.ts";
 import type { Config } from "./config.ts";
-import { createUiRequestHandler, resolveUiDistDir } from "./static-ui.ts";
+import { createUiRequestHandler, resolveUiDistDir, servedUiIdentity } from "./static-ui.ts";
 
 export interface TransportOptions {
   host?: string;
@@ -242,6 +242,21 @@ export class Transport {
     return this.#install;
   }
 
+  /**
+   * The install facts for ONE snapshot, with the served-UI identity read live (issue #184).
+   *
+   * `#installFacts` is cached because a package walk cannot change under a running process; the UI
+   * directory CAN — a dev `vite build` replaces it while the orchestrator runs, and reading it is
+   * one small file — so `ui` is resolved per snapshot rather than frozen into the cached facts. A
+   * stale `ui` here would be the one value issue #184 exists for, reported wrong.
+   */
+  #snapshotInstallFacts(): InstallFacts {
+    const facts = this.#installFacts();
+    if (this.#options.uiDir === null) return facts;
+    const ui = servedUiIdentity(this.#options.uiDir);
+    return ui === undefined ? facts : { ...facts, ui };
+  }
+
   async #sendSnapshot(socket: WebSocket): Promise<void> {
     let history: HistoricalSession[] = [];
     let historyTotal = 0;
@@ -261,7 +276,7 @@ export class Transport {
       historyTotal,
       home: this.#config.home,
       installationRoot: this.#config.installationRoot,
-      install: this.#installFacts(),
+      install: this.#snapshotInstallFacts(),
     });
 
     // Then the CURRENT conversation for each live session, FETCHED rather than replayed.
@@ -328,6 +343,10 @@ export class Transport {
           historyTotal: discovered.total,
           home: this.#config.home,
           installationRoot: this.#config.installationRoot,
+          // `install` here as well as on the connect snapshot (issue #184): a page that never
+          // reconnects still learns the orchestrator was replaced the next time it lists, rather
+          // than only when the socket happens to drop.
+          install: this.#snapshotInstallFacts(),
         });
         return;
       }

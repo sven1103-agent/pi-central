@@ -33,10 +33,11 @@
  * that asks. That is the same grant the WebSocket already carries, which is why it must not be
  * bound beyond `127.0.0.1` — the transport guarantees that, not this module.
  */
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, posix, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ServedUiIdentity } from "@pi-central/protocol";
 import { findOwnPackage } from "./package-meta.ts";
 
 /**
@@ -368,4 +369,33 @@ function sendFile(res: ServerResponse, method: string, path: string, csp: string
 /** Does a built UI exist at `root`? Used by the entry point to say so at startup. */
 export function hasBuiltUi(root: string): boolean {
   return existsSync(resolve(root, "index.html"));
+}
+
+/**
+ * The identity of the bundle this directory would serve to a fresh load (issues #114, #184).
+ *
+ * Read from the emitted `index.html`, because that is the file which names the current fingerprint
+ * set — so the entry asset's hash IS the build's identity, and it is the same string a `curl` of the
+ * running page would show. Two consumers compare against it: the startup log (`describeBuiltUi`,
+ * #114) and the snapshot's `InstallFacts.ui` (#184), which is how a page that outlived an update
+ * learns that the bundle in memory is not the bundle on disk.
+ *
+ * `undefined` rather than a throw or a placeholder: a missing or malformed `index.html` is
+ * `hasBuiltUi`'s business (it reports "no built UI"), and neither a log line nor an install fact
+ * may be able to fail a start. Absent is the honest answer — "not reported" — and the UI treats it
+ * as such rather than as "different".
+ */
+export function servedUiIdentity(root: string): ServedUiIdentity | undefined {
+  let html: string;
+  let mtime: Date;
+  try {
+    const indexPath = resolve(root, "index.html");
+    html = readFileSync(indexPath, "utf8");
+    mtime = statSync(indexPath).mtime;
+  } catch {
+    return undefined;
+  }
+  const entry = /assets\/index-[A-Za-z0-9_-]+\.js/.exec(html)?.[0];
+  if (entry === undefined) return undefined;
+  return { entry, builtAt: mtime.toISOString() };
 }

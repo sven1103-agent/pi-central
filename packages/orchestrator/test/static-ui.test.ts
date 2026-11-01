@@ -26,6 +26,7 @@ import {
   isInside,
   resolveStaticPath,
   resolveUiDistDir,
+  servedUiIdentity,
 } from "../src/static-ui.ts";
 
 const root = mkdtempSync(join(tmpdir(), "pi-central-static-ui-"));
@@ -396,6 +397,32 @@ test("the UI directory is derived from this module's URL, not configured", () =>
 test("hasBuiltUi distinguishes a built tree from an unbuilt one", () => {
   assert.equal(hasBuiltUi(root), true);
   assert.equal(hasBuiltUi(join(root, "nope")), false);
+});
+
+test("servedUiIdentity names the fingerprinted entry, from index.html (issue #184)", () => {
+  // A fixture whose index.html names an entry bundle the way Vite writes it. The entry name IS
+  // the build's identity — the comparison a stale page cannot make about itself.
+  const built = mkdtempSync(join(tmpdir(), "pi-central-ui-identity-"));
+  try {
+    writeFileSync(
+      join(built, "index.html"),
+      '<!doctype html><script type="module" crossorigin src="/assets/index-D8opqHSQ.js"></script>\n',
+    );
+    const identity = servedUiIdentity(built);
+    assert.ok(identity, "an index.html naming an entry bundle must yield an identity");
+    assert.equal(identity.entry, "assets/index-D8opqHSQ.js");
+    assert.match(identity.builtAt, /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    rmSync(built, { recursive: true, force: true });
+  }
+});
+
+test("servedUiIdentity is undefined when there is nothing honest to report", () => {
+  // Absence, not a placeholder: the snapshot's `ui` field is optional precisely so "not reported"
+  // and "different" cannot be confused (issue #184).
+  assert.equal(servedUiIdentity(join(root, "definitely-missing")), undefined);
+  // The shared fixture's index.html names NO entry bundle — a build Vite would never emit.
+  assert.equal(servedUiIdentity(root), undefined);
 });
 
 test("the test's own root is a fixture, so the guard is not accidentally testing the real dist", () => {

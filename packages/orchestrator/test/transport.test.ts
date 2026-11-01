@@ -388,6 +388,47 @@ test("the snapshot carries the installation facts the Settings surface renders (
   }
 });
 
+test("the snapshot names the UI build being served, so a stale page can tell (issue #184)", async () => {
+  // The whole mechanism: the orchestrator is the only side that knows which bundle is on disk
+  // NOW, so it says so. A page holding an older bundle compares its own entry against this and
+  // reloads itself. With `--no-ui` there is nothing to report and the field is ABSENT — "not
+  // reported" must never look like "different".
+  const uiDir = mkdtempSync(join(tmpdir(), "pi-central-transport-ui-"));
+  try {
+    writeFileSync(
+      join(uiDir, "index.html"),
+      '<!doctype html><script type="module" crossorigin src="/assets/index-D8opqHSQ.js"></script>\n',
+    );
+    const supervisor = new FakeSupervisor();
+    const transport = new Transport(supervisor as never, emptyConfig(), { uiDir });
+    const address = await transport.listen();
+    try {
+      const client = await TestClient.connect(address.url);
+      const snapshot = await client.next("snapshot");
+      const install = snapshot.kind === "snapshot" ? snapshot.install : undefined;
+      assert.equal(install?.ui?.entry, "assets/index-D8opqHSQ.js");
+      client.close();
+    } finally {
+      await transport.close();
+    }
+
+    // And the negative: no UI directory, no `ui` field.
+    const bare = new Transport(new FakeSupervisor() as never, emptyConfig(), { uiDir: null });
+    const bareAddress = await bare.listen();
+    try {
+      const client = await TestClient.connect(bareAddress.url);
+      const snapshot = await client.next("snapshot");
+      const install = snapshot.kind === "snapshot" ? snapshot.install : undefined;
+      assert.equal(install?.ui, undefined);
+      client.close();
+    } finally {
+      await bare.close();
+    }
+  } finally {
+    rmSync(uiDir, { recursive: true, force: true });
+  }
+});
+
 test("a start command is routed to the supervisor and its session broadcast", async () => {
   const supervisor = new FakeSupervisor();
   const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
