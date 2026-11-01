@@ -3371,6 +3371,155 @@ select.btn { font-family: var(--sans); }
 }
 .imagepane-meta { margin: 0; font-family: var(--mono); font-size: var(--fs-xs); color: var(--dim); }
 
+/* --- An image inside a turn (transcript images) -------------------------------------------------
+
+   Three decisions, and the third is the one that keeps a conversation with forty screenshots usable.
+
+   1. A **per-turn height BUDGET**, not a per-image cap. The first image of a message gets `--image-lead` (40vh); every
+      image after it gets `--image-rest` (18vh). This replaced a flat `max-height: 40vh`, which was wrong in a way only
+      arithmetic shows: five pasted screenshots took 220vh — 2.2 screens — and pushed the next turn off the bottom. With
+      the budget the same five take about 1.1 screens: a long message rather than a lost conversation.
+
+      The FIRST image keeps the larger cap because a message with one image is the common case and its picture is
+      usually the whole point ("what is wrong with this spacing?"). Shrinking that to a thumbnail to serve a case that
+      has not happened yet would trade the likely reader for the unlikely one.
+
+      The mechanism is `:first-of-type` — "an image with no image before it in its parent" — so it needs no counter, no
+      prop and no state, and it cannot drift out of step with the render order.
+   2. The checkerboard, for the same reason as the file viewer: a PNG with transparency on this background reads as
+      a picture with holes in it.
+   3. `margin-inline: 0` and `max-width: 100%`, so the image sits on the SAME left edge as the prose above it. A
+      centred image would break the lane the whole workspace is built on (`--measure`).
+
+   `contain` on the figure is deliberately absent: `content-visibility` and friends would make `scrollHeight` an
+   estimate, and the transcript's follow-the-tail arithmetic reads it directly (`scroll.ts`). */
+.turn-image { margin: var(--sp-2) 0 0 0; }
+.turn-image-img {
+  display: block;
+  max-width: 100%;
+  max-height: var(--image-rest, 18vh);
+  object-fit: contain;
+  border-radius: var(--r-2);
+  background-color: var(--panel-2);
+  background-image:
+    linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%),
+    linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+/* The budget's first slot. See the note above: this is the whole mechanism. */
+.turn-image:first-of-type .turn-image-img { max-height: var(--image-lead, 40vh); }
+.turn-image-meta {
+  margin: 4px 0 0 0;
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+}
+/*
+ * A refusal is a NOTE, not a placeholder box: the words carry the whole message, so there is nothing to frame. It
+ * gets the quarantine gutter the transcript's legend promises for anything that came from the session rather than
+ * from the assistant — the same signal a tool result carries, for the same reason.
+ *
+ * It also must not claim the LEAD slot's 40vh: a note is two lines of text, and reserving image height for text would
+ * open a hole in the conversation where a picture was not drawn.
+ */
+.turn-image.is-refused {
+  border-left: 3px solid var(--quarantine);
+  padding-left: var(--sp-2);
+}
+.turn-image.is-refused .turn-image-img { max-height: var(--image-rest, 18vh); }
+.turn-image-note { margin: 0; font-size: var(--fs-xs); color: var(--dim); }
+
+/*
+ * Images a tool call returned, in the trace panel's detail.
+ *
+ * A column with a gap, so two images from one call (a before/after pair) are told apart as two pictures rather than read
+ * as one collage. The panel is narrow, so `max-height` here is SMALLER than a turn's: the detail pane's job is to show
+ * that the picture exists and let the reader recognise it, and a full-height screenshot in a 300px column would put the
+ * output text — which is what the pane is actually scrollable for — below an unscrollable image.
+ */
+.trace-images { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.trace-images .turn-image-img,
+.trace-images .turn-image:first-of-type .turn-image-img { max-height: 30vh; }
+
+/* --- An image the reader's message NAMES by path ------------------------------------------------
+
+   A REFERENCE, not content, and the styling is where that distinction becomes visible.
+
+   A pasted image is drawn at turn size because it IS what the reader sent. This is an annotation of a sentence that
+   still reads `@img_6.png`, so it is capped at `--image-ref` (12vh) and expands on click. At 40vh, naming a 4000px
+   screenshot once would push the next two turns off the screen — for a picture the reader may already know.
+
+   The `is-expanded` modifier lifts the cap but not the width, so an expanded preview still sits inside the reading lane
+   rather than widening the column and reflowing the prose around it. */
+.turn-image-ref {
+  margin: var(--sp-2) 0 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.turn-image-ref-button {
+  padding: 0;
+  border: 0;
+  /*
+   * `background` and `font` are declared even though nothing inside the button is text and the background is the
+   * picture itself. An undeclared control inherits the PLATFORM's face, which on this dark page is a light grey
+   * rectangle around the image — and `contrast.test.mjs` holds every single-class button to that rule for exactly this
+   * reason. `font: inherit` is the honest value: there is no typography here to set, only a default to suppress.
+   */
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: zoom-in;
+  border-radius: var(--r-2);
+  /* The focus ring must be visible on a picture, where the default outline can vanish. */
+  outline-offset: 2px;
+}
+.turn-image-ref.is-expanded .turn-image-ref-button { cursor: zoom-out; }
+.turn-image-ref-img {
+  display: block;
+  max-width: 100%;
+  max-height: var(--image-ref, 12vh);
+  object-fit: contain;
+  border-radius: var(--r-2);
+  background-color: var(--panel-2);
+  background-image:
+    linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%),
+    linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+/* Expanded: the same ceiling as a pasted image, so one giant view is possible but not the resting state. */
+.turn-image-ref.is-expanded .turn-image-ref-img { max-height: var(--image-expanded, 60vh); }
+
+.turn-image-ref-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+}
+.turn-image-ref-hint { font-family: var(--mono); color: var(--line-strong); }
+
+/* The three non-image states are sentences, not pictures, so they read as quietly as the meta line. */
+.turn-image-ref.is-pending,
+.turn-image-ref.is-refused {
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  margin: var(--sp-1) 0 0 0;
+}
+/*
+ * A refusal takes the quarantine gutter: it describes something the SESSION says about a file, not something the
+ * assistant wrote, and the same signal distinguishes a tool result for the same reason.
+ */
+.turn-image-ref.is-refused {
+  border-left: 3px solid var(--quarantine);
+  padding-left: var(--sp-2);
+}
+.turn-image-ref-code { color: var(--line-strong); }
+
 /* --- The Reading preference (issue #134) -------------------------------------------------------
 
    Two sliders and a sample. The sample uses the reader's own tokens, so the choice is judged where it is

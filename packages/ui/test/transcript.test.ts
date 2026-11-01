@@ -11,8 +11,10 @@ import assert from "node:assert/strict";
 import {
   applyRecord,
   assistantText,
+  base64Bytes,
   emptyTranscript,
   hasProse,
+  imageKey,
   noticeIsOpen,
   groupToolsByAfterMessage,
   leadingTools,
@@ -407,17 +409,91 @@ test("system messages are not rendered as conversation", () => {
   assert.equal(t.messages[0]!.role, "user");
 });
 
-test("image blocks are skipped rather than rendered as garbage", () => {
-  // No image viewer exists, and 3 of these are in the real session.
+test("image blocks are KEPT, because a pasted screenshot is a turn (the old decision reversed)", () => {
+  /*
+   * This test used to assert the opposite, under the title "image blocks are skipped rather than rendered as
+   * garbage", with the reasoning that no image viewer existed and inventing one from base64 was worse than omitting
+   * it. That was right, and it stopped being right when a screenshot could be pasted into the composer: an image-only
+   * message then produced NO planned entry at all, so the reader's own turn was invisible in the conversation they had
+   * just sent. The base64 now survives the parse because it is what Pi sends and there is no second request to make.
+   */
   const t = fold([
     { type: "message_end", message: { role: "user", content: [
       { type: "text", text: "look at this" },
       { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
     ] } },
   ]);
-  assert.equal(t.messages[0]!.blocks.length, 1);
+  assert.equal(t.messages[0]!.blocks.length, 2, "the text AND the image");
   assert.equal(assistantText(t.messages[0]!), "look at this");
-  assert.ok(!JSON.stringify(t).includes("iVBORw0KGgo"), "base64 image data must not leak into the transcript");
+
+  const image = t.messages[0]!.blocks[1];
+  assert.equal(image?.kind, "image");
+  assert.ok(image?.kind === "image");
+  assert.equal(image.type, "image/png");
+  assert.equal(image.base64, "iVBORw0KGgo=");
+  assert.equal(image.contentIndex, 1, "the address streaming would have used");
+  assert.equal(image.refused, undefined, "a PNG with data is displayable");
+});
+
+test("an unsupported image type is recorded and REFUSED, not silently dropped", () => {
+  // The refusal is decided in the reducer so that a component must handle it. An SVG or a TIFF reaches the transcript
+  // as an image block carrying a stated reason, which renders as a note. Dropping it would put the message back to
+  // being invisible, which is the defect the image support exists to fix.
+  const t = fold([
+    { type: "message_end", message: { role: "user", content: [
+      { type: "image", data: "R0lGODlhAQAB", mimeType: "image/tiff" },
+    ] } },
+  ]);
+  const image = t.messages[0]!.blocks[0];
+  assert.ok(image?.kind === "image");
+  assert.equal(image.refused, "unsupported-type");
+  assert.equal(image.type, "image/tiff", "the recorded type is reported, not lowercased away");
+});
+
+test("an image with no payload is refused as `no-payload`, which is not a missing image", () => {
+  const t = fold([
+    { type: "message_end", message: { role: "user", content: [
+      { type: "image", mimeType: "image/png" },
+    ] } },
+  ]);
+  const image = t.messages[0]!.blocks[0];
+  assert.ok(image?.kind === "image");
+  assert.equal(image.refused, "no-payload");
+});
+
+test("a provider-shaped image payload is read too, rather than vanishing", () => {
+  // The same decision `blocksFromContent` already makes for `arguments` vs `input`: a snake_case spelling from another
+  // writer must render, because a session file is not only ever written by one code path.
+  const t = fold([
+    { type: "message_end", message: { role: "user", content: [
+      { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "AAAA" } },
+    ] } },
+  ]);
+  const image = t.messages[0]!.blocks[0];
+  assert.ok(image?.kind === "image");
+  assert.equal(image.type, "image/jpeg");
+  assert.equal(image.base64, "AAAA");
+  assert.equal(image.refused, undefined);
+});
+
+test("base64Bytes reports the decoded size, not the encoded one", () => {
+  // The caption says what the image IS; quoting the base64 length would overstate it by a third, and a size that
+  // disagrees with the same image in the file pane is the two-formats-one-value defect `bytes.ts` exists to prevent.
+  assert.equal(base64Bytes(""), 0);
+  assert.equal(base64Bytes("AAAA"), 3, "4 chars, no padding → 3 bytes");
+  assert.equal(base64Bytes("AAA="), 2, "one padding char is not a byte");
+  assert.equal(base64Bytes("AA=="), 1);
+  // A real screenshot from this machine's store: 97 500 base64 chars.
+  assert.equal(base64Bytes("A".repeat(97_500)), 73_125);
+});
+
+test("imageKey namespaces by session, because message ids are minted per transcript", () => {
+  // `m0` exists in EVERY session: the id is a counter over the transcript, not a uuid. A cache keyed without the
+  // session would hand one conversation another's screenshot — a wrong picture, which is worse than a missing one.
+  assert.notEqual(imageKey("s1", "m0", 0), imageKey("s2", "m0", 0));
+  assert.notEqual(imageKey("s1", "m0", 0), imageKey("s1", "m1", 0));
+  assert.notEqual(imageKey("s1", "m0", 0), imageKey("s1", "m0", 1));
+  assert.equal(imageKey("s1", "m0", 0), imageKey("s1", "m0", 0), "stable for the same image");
 });
 
 test("an unknown role does not become a literal label", () => {
@@ -951,4 +1027,87 @@ test("the single pass groups tools exactly as the per-message scan did", () => {
       `after message ${index + 1}`,
     );
   }
+});
+
+// --- Images a TOOL returned, which is where every real one lives ---------------------------------
+
+test("a `read` of a PNG keeps its image, and keeps its text result too", () => {
+  /*
+   * The shape verified in this machine's store: 447 image-bearing messages across 885 sessions, and ALL of them are
+   * `toolResult`s of a `read`. So this path — not the composer's paste — is what makes the feature visible at all.
+   *
+   * `stringifyResult` flattens content to text and deliberately drops base64 from it, so the image has to travel
+   * separately or it is lost. Both are asserted: the text is still what the output pane shows, and the picture is what
+   * the reader opens the detail for.
+   */
+  const t = fold([
+    {
+      type: "message_end",
+      message: {
+        role: "toolResult",
+        toolCallId: "call_1",
+        toolName: "read",
+        isError: false,
+        content: [
+          { type: "text", text: "Read image file [image/png]" },
+          { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
+        ],
+      },
+    },
+  ]);
+
+  const tool = t.tools[0];
+  assert.ok(tool);
+  assert.equal(tool.result, "Read image file [image/png]", "the text result is unchanged");
+  assert.equal(tool.images?.length, 1, "and the picture is kept beside it");
+  assert.equal(tool.images?.[0]?.type, "image/png");
+  assert.equal(tool.images?.[0]?.base64, "iVBORw0KGgo=");
+  assert.ok(!tool.result.includes("iVBOR"), "base64 never reaches the output text");
+});
+
+test("a tool result with no image carries no `images` field at all", () => {
+  // `undefined` rather than `[]`: the overwhelming majority of calls return no picture, and an empty array on every one
+  // of 4 041 calls would be four thousand allocations that say nothing.
+  const t = fold([
+    { type: "message_end", message: { role: "toolResult", toolCallId: "c1", toolName: "bash", content: "ok" } },
+  ]);
+  assert.equal(t.tools[0]?.images, undefined);
+});
+
+test("one call seen by BOTH routes does not draw its screenshot twice", () => {
+  /*
+   * A tool call reaches the transcript twice — live `tool_execution_end` and the persisted `toolResult` — and both carry
+   * the same image. `upsertTool` merges them, and the image must not be concatenated: two identical pictures under one
+   * tool row would look like the call returned two images.
+   */
+  const content = [
+    { type: "text", text: "Read image file [image/png]" },
+    { type: "image", data: "AAAA", mimeType: "image/png" },
+  ];
+  const t = fold([
+    { type: "tool_execution_end", toolCallId: "c1", toolName: "read", result: content, isError: false },
+    { type: "message_end", message: { role: "toolResult", toolCallId: "c1", toolName: "read", content } },
+  ]);
+  assert.equal(t.tools.length, 1, "one call, one row");
+  assert.equal(t.tools[0]?.images?.length, 1, "and one image on it");
+});
+
+test("a live tool result that carries an image is captured from the event too", () => {
+  // The live route matters as much as the history one: without it the picture would appear only after a reload.
+  const t = fold([
+    { type: "tool_execution_start", toolCallId: "c1", toolName: "read", args: { path: "a.png" } },
+    {
+      type: "tool_execution_end",
+      toolCallId: "c1",
+      toolName: "read",
+      result: [
+        { type: "text", text: "Read image file [image/jpeg]" },
+        { type: "image", data: "AAAA", mimeType: "image/jpeg" },
+      ],
+      isError: false,
+    },
+  ]);
+  assert.equal(t.tools[0]?.images?.length, 1);
+  assert.equal(t.tools[0]?.images?.[0]?.type, "image/jpeg");
+  assert.equal(t.tools[0]?.running, false);
 });

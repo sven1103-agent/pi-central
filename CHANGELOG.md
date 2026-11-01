@@ -12,6 +12,74 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
+## [0.7.0] — 2026-11-01
+
+Images, where the conversation puts them. A picture a tool read, a screenshot you paste, and a file your own prompt
+names by path now all appear in the transcript — each in the place that matches what it is.
+
+**No protocol change.** `PROTOCOL_VERSION` stays at 4, because nothing new crosses the wire: the bytes were already
+arriving in the `transcript` frame that every client parses on connect. Rendering them costs a DOM node and a decode,
+not a transfer.
+
+The measured premise, from this machine's own session store: **447 image-bearing messages across 885 sessions, and
+every single one is a tool result** — a `read` of a PNG. None was a paste. So the placement that had to work first was
+the tool detail, not the composer; a UI that handled only pasted images would have looked correct and shown nothing.
+Separately, **181 of 5 912 user prompts name an image file by path** (`@img_6.png shows…`), which rendered as literal
+text until now.
+
+### Added
+
+- **Images are shown in the transcript, where they belong in the conversation.** A tool that reads a
+  picture (`read` on a PNG) now shows it above its output in the tool detail, and an image in a message
+  is drawn inside the turn it belongs to. Before this the blocks were dropped on purpose, which was right
+  while nothing could draw one and wrong once a screenshot could reach a session: an image-only message
+  planned **no entry at all**, so the turn disappeared. Measured across 885 sessions on this machine, 447
+  messages carry an image and **all of them are tool results** — so the tool path, not the composer, is
+  the one that had to work.
+- No extra transfer: Pi's `get_messages` already carries the base64 in the `transcript` frame every
+  client parses on connect. What changed is that the block survives the parse.
+
+### Changed
+
+- A message whose only content is an image now produces a turn. Its blob URL is identified by
+  `(session, message, block)` rather than by the planned entry, because the transcript re-plans on every
+  streaming record — a URL rebuilt per render would be revoked and recreated dozens of times a second for
+  an image that is not changing.
+- **An image a message NAMES by path is previewed in that message.** 181 of the 5 912 user messages in this machine's
+  store point at a screenshot — `@img_6.png shows the latest screenshot…` — and until now that rendered as literal text
+  while the picture appeared only if the agent happened to `read` it later, inside a collapsed activity group. The
+  reference and the referent were in different places with a disclosure between them. Detection is conservative (four
+  extensions, relative paths only, no URLs, no `..`, at most three per message) and the bytes come from the
+  orchestrator's existing confined `readFile`, so no new trust surface was added. A referenced image is capped at 12vh
+  and expands on click: it is an annotation of a sentence, not content, and at turn size one `@` mention of a 4000px
+  screenshot would push the next two turns off the screen.
+- **A turn's images are budgeted, not just capped.** The first image of a message gets 40vh and every one after it 18vh,
+  which turns five pasted screenshots from 2.2 screens into about 1.1. The flat 40vh per image was wrong in a way only
+  arithmetic shows.
+- `Turn` in the transcript is memoized by an explicit comparison. Its props included a freshly allocated
+  entry object, so `memo` had never once short-circuited; that was invisible for headings and text, and
+  is not invisible for images.
+- An image type outside PNG/JPEG/GIF/WebP, or a payload with no data, is **stated** rather than omitted.
+  "This view cannot draw a TIFF" and "this message held no picture" are different facts, and the transcript
+  does not report the second while meaning the first.
+
+### Fixed
+
+- **A turn was left half-visible when an image arrived, until the agent started working.** Following ran in a
+  per-render effect, and a render is not when an image gets its height: React writes the DOM, the browser lays out an
+  `<img>` that is still decoding — zero height — and the follow scrolled to an end that was about to move down by 12vh.
+  Nothing ran again until the first streaming delta, which is why the pane jumped to the bottom only once the assistant
+  replied. A `ResizeObserver` on the transcript lane now follows any height that arrives after paint, which covers the
+  same class for lazy images, expanding disclosures and asynchronously highlighted code.
+
+### Tooling
+
+- `scripts/render-session-html.mjs` renders a real session's transcript to one self-contained HTML file, for review
+  without an orchestrator, a browser automation harness, or a sandbox escape. It exists because the agent that wrote
+  the image support could not run the product (C1 stops an orchestrator inside a sandbox, and a headless browser hits
+  the same wall), which left the change with passing tests and nobody having seen it. `node
+  scripts/render-session-html.mjs` picks the newest session containing an image; `--out` chooses the file.
+
 ## [0.6.1] — 2026-11-01
 
 A PWA fix. If you installed Pi Central to the dock before this version, **it will need one clean start** to pick it

@@ -25,7 +25,7 @@ globalThis.window = dom.window;
 globalThis.document = dom.window.document;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 
-let server, TranscriptView;
+let server, TranscriptView, clearImageCache, liveImageCount;
 
 before(async () => {
   server = await createServer({
@@ -35,6 +35,7 @@ before(async () => {
     logLevel: "error",
   });
   ({ TranscriptView } = await server.ssrLoadModule("/src/components/Transcript.tsx"));
+  ({ clearImageCache, liveImageCount } = await server.ssrLoadModule("/src/images.ts"));
 });
 
 after(async () => {
@@ -66,12 +67,13 @@ function tool(id, afterMessage, overrides = {}) {
   };
 }
 
-function render({ messages = [], tools = [], busy = false, showMarkers = true, activityOpen = {}, onToggleActivity }) {
+function render({ messages = [], tools = [], busy = false, showMarkers = true, activityOpen = {}, onToggleActivity }, sessionId = "s1") {
   return renderToString(
     createElement(TranscriptView, {
       transcript: { messages, tools, notices: [] },
       busy,
-      sessionLabel: "s1",
+      sessionId,
+      sessionLabel: sessionId,
       showMarkers,
       activityOpen,
       onToggleActivity,
@@ -452,4 +454,379 @@ test("the order menu opens where there is room, not off the panel's edge", () =>
     "a right anchor on a small trigger near the left edge can only grow the menu off the panel",
   );
   assert.match(menu, /top:\s*calc\(100%/, "…and downward, below the header");
+});
+
+// --- Images in a turn ---------------------------------------------------------------------------
+
+/** A 1x1 transparent PNG, base64. Real bytes, so `atob` and `Blob` get something valid. */
+const PIXEL =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhQGAWjR9awAAAABJRU5ErkJggg==";
+
+/**
+ * Run `body` with `URL.createObjectURL` stubbed and the blob-URL cache EMPTY.
+ *
+ * Both halves matter. jsdom has no `createObjectURL`, so it must be stubbed. The cache must also be cleared, because
+ * it is module-level by design (that is what makes a re-render free) and would otherwise carry an entry from an earlier
+ * test — which is the cache doing its job, and a test that then counted Blob creations would be asserting on misses.
+ */
+function withBlobs(body) {
+  const original = URL.createObjectURL;
+  const created = [];
+  clearImageCache();
+  URL.createObjectURL = (blob) => {
+    created.push(blob.type);
+    return `blob:test/${created.length}`;
+  };
+  try {
+    body(created);
+  } finally {
+    URL.createObjectURL = original;
+    clearImageCache();
+  }
+}
+
+const image = (overrides = {}) => ({
+  kind: "image",
+  contentIndex: 0,
+  type: "image/png",
+  base64: PIXEL,
+  ...overrides,
+});
+
+test("a pasted screenshot RENDERS, in the reader's own turn (the blank-turn defect)", () => {
+  /*
+   * Before this, an image-only user message produced no planned entry at all and the transcript showed nothing where
+   * the reader's message was. This asserts the whole path end to end: block → plan → `<img src>`.
+   */
+  withBlobs((created) => {
+    const html = render(
+      {
+        messages: [{ id: "u1", role: "user", blocks: [image()], complete: true, streaming: false }],
+      },
+      "render-basic",
+    );
+
+    assert.match(html, /<span>You<\/span>/, "the turn is labelled, so the image has an owner");
+    assert.match(html, /<img[^>]*class="turn-image-img"/, "an image element, not a note");
+    assert.match(html, /src="blob:test\/1"/, "…pointing at a blob URL");
+    // SSR separates adjacent expressions with `<!-- -->`, so the caption is matched across them rather than as one
+    // literal string. The SIZE asserted is 70 B: base64 length 96 decodes to 70 bytes, not 96.
+    assert.match(html, /image\/png[\s\S]{0,40}70 B/, "captioned with the type and the DECODED size");
+    assert.deepEqual(created, ["image/png"], "the Blob carries Pi's type, not a sniffed guess");
+  });
+});
+
+test("two images get two URLs, and a re-render of the same one gets none", () => {
+  /*
+   * Both halves of the cache contract, in one test, because the failure modes are opposite:
+   *
+   *   - two DIFFERENT images sharing one URL would draw the wrong picture;
+   *   - the SAME image getting a fresh URL on every render is the decode storm this cache exists to prevent — the
+   *     transcript re-plans once per streaming record, so that would be dozens of Blob creations a second.
+   */
+  withBlobs((created) => {
+    const messages = [
+      { id: "u1", role: "user", blocks: [image()], complete: true, streaming: false },
+      { id: "u2", role: "user", blocks: [image({ base64: "QUJDREVG" })], complete: true, streaming: false },
+    ];
+    const first = render({ messages }, "render-two");
+    assert.equal(created.length, 2, "each image is its own picture");
+    const urls = [...first.matchAll(/src="([^"]+)"/g)].map((match) => match[1]);
+    assert.deepEqual(urls, ["blob:test/1", "blob:test/2"], "and they are told apart");
+
+    // A re-render of the SAME conversation — which is what every streaming record causes.
+    const again = render({ messages }, "render-two");
+    assert.equal(created.length, 2, "no new Blobs for an unchanged conversation");
+    assert.deepEqual(
+      [...again.matchAll(/src="([^"]+)"/g)].map((match) => match[1]),
+      urls,
+      "and the very same URLs, so nothing is re-decoded",
+    );
+    assert.equal(liveImageCount(), 2);
+  });
+});
+
+test("the image is lazy and async-decoded, which is what keeps a 37-image conversation usable", () => {
+  /*
+   * `lazy` defers both the fetch and the decode for an image that is not near the viewport; `async` keeps whatever
+   * raster remains off the main thread. Without them, opening a conversation with 37 screenshots decodes all of them
+   * at once — ~130 MB of RGBA and a visible stall on the exact interaction this feature exists for (a reload while a
+   * run streams).
+   */
+  withBlobs(() => {
+    const html = render(
+      {
+        messages: [
+          { id: "u1", role: "user", blocks: [image()], complete: true, streaming: false },
+          { id: "u2", role: "user", blocks: [image({ base64: "QUJDREVG" })], complete: true, streaming: false },
+        ],
+      },
+      "render-lazy",
+    );
+    const images = [...html.matchAll(/<img[^>]*class="turn-image-img"[^>]*>/g)].map((match) => match[0]);
+    assert.equal(images.length, 2);
+    for (const img of images) {
+      assert.match(img, /loading="lazy"/, "offscreen images are not fetched or decoded on open");
+      assert.match(img, /decoding="async"/, "raster never blocks the main thread mid-stream");
+    }
+  });
+});
+
+test("an unsupported image type is STATED rather than drawn or silently omitted", () => {
+  const html = render({
+    messages: [
+      { id: "u1", role: "user", blocks: [image({ type: "image/tiff", refused: "unsupported-type" })], complete: true, streaming: false },
+    ],
+  });
+  assert.ok(!/<img/.test(html), "nothing is handed to the browser that it may refuse to draw");
+  assert.match(html, /image\/tiff/, "the recorded type is named");
+  assert.match(html, /not shown/, "and the reader is told, rather than shown a blank space");
+  assert.match(html, /the agent can still see it/, "a refusal here is not a claim that the model lacks the image");
+});
+
+test("an image with no payload says so, and does not accuse the browser", () => {
+  // "no data recorded" and "your browser could not decode it" are different facts. Collapsing them would tell the
+  // reader to try another browser over a session that genuinely holds nothing.
+  const html = render({
+    messages: [
+      { id: "u1", role: "user", blocks: [image({ base64: "", refused: "no-payload" })], complete: true, streaming: false },
+    ],
+  });
+  assert.match(html, /no data/, "the payload's absence is stated");
+  assert.match(html, /empty payload/, "…and attributed to the session, not the browser");
+  assert.ok(!/could not display/i.test(html), "no false accusation about decoding");
+});
+
+test("text and an image in one turn render BOTH, prose first", () => {
+  const created = [];
+  const original = URL.createObjectURL;
+  URL.createObjectURL = () => {
+    created.push(true);
+    return "blob:test/pixel";
+  };
+  try {
+    const html = render({
+      messages: [
+        {
+          id: "u1",
+          role: "user",
+          blocks: [{ kind: "text", text: "what is wrong here?", complete: true }, image({ contentIndex: 1 })],
+          complete: true,
+          streaming: false,
+        },
+      ],
+    });
+    const prose = html.indexOf("what is wrong here?");
+    const img = html.indexOf("turn-image-img");
+    assert.ok(prose >= 0 && img >= 0, "both are present");
+    assert.ok(prose < img, "the prose comes first: the image is the thing it refers to");
+  } finally {
+    URL.createObjectURL = original;
+  }
+});
+
+test("a payload that cannot be decoded is STATED, and the rest of the conversation survives", () => {
+  /*
+   * A corrupt or truncated base64 throws in `atob`, and the whole component must not throw with it — the transcript is
+   * the reading surface, and one bad screenshot cannot be allowed to blank a conversation. `images.ts` returns
+   * `undefined` instead, and the component states the reason rather than rendering an empty box, which would read as
+   * "there is no image here".
+   *
+   * The same distinction `ImageViewer.tsx` documents for the file pane: a refusal is reported, never silently turned
+   * into emptiness.
+   */
+  withBlobs(() => {
+    const html = render(
+      {
+        messages: [
+          { id: "u1", role: "user", blocks: [{ kind: "text", text: "before", complete: true }], complete: true, streaming: false },
+          // Padding in the middle of a base64 string is not valid: `atob` throws "Invalid character".
+          { id: "u2", role: "user", blocks: [image({ base64: `${PIXEL}AAAA` })], complete: true, streaming: false },
+          { id: "u3", role: "user", blocks: [{ kind: "text", text: "after", complete: true }], complete: true, streaming: false },
+        ],
+      },
+      "render-broken",
+    );
+    assert.match(html, /before/, "a turn before the bad image still renders");
+    assert.match(html, /after/, "…and so does one after it");
+    assert.match(html, /Could not display this image/, "the failure is named");
+    assert.match(html, /The session holds it/, "…without claiming the image is lost");
+  });
+});
+
+test("the live-URL cache is BOUNDED, so a long conversation cannot hold every decode at once", () => {
+  /*
+   * The number that actually threatens a tab is decoded pixels, not transfer: 37 images at ~1100x800 is ~130 MB of
+   * RGBA. The cache evicts the least recently used URL past `MAX_LIVE_IMAGES`, which is safe because the base64 stays
+   * in the transcript — an evicted image simply re-materialises if the reader scrolls back to it.
+   */
+  withBlobs(() => {
+    clearImageCache();
+    const count = 40;
+    for (let index = 0; index < count; index += 1) {
+      // Distinct base64 per image, so each is its own entry rather than a cache hit on identical bytes. The unit is 4
+      // characters ("QUJD" = "ABC"), because a base64 string whose length is not a multiple of four is invalid and the
+      // component would report a decode failure instead of an image.
+      const payload = "QUJD".repeat(1 + index);
+      const html = render(
+        {
+          messages: [{ id: `m${index}`, role: "user", blocks: [image({ base64: payload })], complete: true, streaming: false }],
+        },
+        "render-bound",
+      );
+      assert.match(html, /turn-image-img/);
+    }
+    assert.ok(liveImageCount() <= 24, `bounded, got ${liveImageCount()}`);
+    clearImageCache();
+  });
+});
+
+// --- Images a message NAMES by path -------------------------------------------------------------
+
+const imageState = (overrides = {}) => ({
+  status: "loaded",
+  bytes: 70,
+  content: { kind: "image", type: "image/png", base64: PIXEL },
+  ...overrides,
+});
+
+/**
+ * Render one user turn that names a path, with a stated file state.
+ *
+ * `previews` is passed as a function so the component reads exactly the state the test set up; `preview` records the
+ * requests so a test can assert that a path was ASKED for rather than merely mentioned.
+ */
+function renderReference(state, { text = "@shot.png what is wrong here?", requests = [] } = {}) {
+  const html = renderToString(
+    createElement(TranscriptView, {
+      transcript: {
+        messages: [{ id: "u1", role: "user", blocks: [{ kind: "text", text, complete: true }], complete: true, streaming: false }],
+        tools: [],
+        notices: [],
+      },
+      busy: false,
+      sessionId: "ref",
+      sessionLabel: "ref",
+      preview: (path) => requests.push(path),
+      previews: () => state,
+    }),
+  );
+  return html;
+}
+
+test("a message that names an image gets a preview of THAT image, in the turn", () => {
+  withBlobs(() => {
+    const html = renderReference(imageState());
+    assert.match(html, /turn-image-ref-img/, "an image element for the reference");
+    assert.match(html, /shot\.png/, "named in the caption, so the reader knows which file it is");
+    assert.match(html, /click to enlarge/, "and that it is a control, not a decoration");
+    assert.match(html, /<button[^>]*aria-expanded="false"/, "a disclosure button, closed by default");
+  });
+});
+
+test("a reference preview is SMALLER than a pasted image, and expands on demand", () => {
+  /*
+   * The distinction the whole placement turns on. A pasted image is content and is drawn at turn size; a reference is
+   * an annotation of a sentence, so at pasted size one `@` mention of a 4000px screenshot would push the next two turns
+   * off the screen — for a picture the reader may already know.
+   *
+   * Asserted as CSS arithmetic, because it is a geometric claim: `--image-ref` is the resting cap and `--image-expanded`
+   * is what clicking lifts it to, and the resting cap must be strictly smaller than a pasted image's lead cap.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\s+/g, " ");
+  const refCap = /--image-ref, (\d+)vh/.exec(css)?.[1];
+  const expandedCap = /--image-expanded, (\d+)vh/.exec(css)?.[1];
+  const leadCap = /--image-lead, (\d+)vh/.exec(css)?.[1];
+  assert.ok(refCap !== undefined && expandedCap !== undefined && leadCap !== undefined, "all three caps are declared");
+  assert.ok(Number(refCap) < Number(leadCap), `resting (${refCap}vh) must be smaller than a pasted image (${leadCap}vh)`);
+  assert.ok(Number(expandedCap) > Number(refCap), "expanding must actually get bigger");
+});
+
+test("an unrequested file renders NOTHING, so a mention costs no layout until bytes arrive", () => {
+  /*
+   * `unloaded` is the state of every named path on the first frame. Rendering a placeholder there would be a layout
+   * shift in the middle of the conversation a moment later — the same defect `loading="lazy"` on pasted images avoids.
+   */
+  const html = renderReference({ status: "unloaded" });
+  assert.ok(!/turn-image-ref/.test(html), `nothing at all, got: ${html.slice(0, 300)}`);
+  assert.match(html, /what is wrong here\?/, "the prose is unaffected");
+});
+
+test("a pending reference says so in a word, not with a spinner", () => {
+  const html = renderReference({ status: "loading" });
+  assert.match(html, /Reading/, "the state is named");
+  assert.match(html, /shot\.png/, "…and says which file");
+});
+
+test("a refused reference states the orchestrator's reason, never a blank space", () => {
+  /*
+   * "No such file", "not an image", "permission denied" and "too large" need different fixes, so the note distinguishes
+   * them. A blank space would read as "there is no image", which is a different fact from "this one could not be read".
+   */
+  const missing = renderReference({ status: "error", reason: "not-found", message: "no such file", code: "ENOENT" });
+  // SSR separates adjacent expressions with `<!-- -->`, so the sentence is matched across them.
+  assert.match(missing, /not in the session[\s\S]{0,20}s directory/, "the missing case is named");
+  assert.match(missing, /ENOENT/, "and the OS code is shown, because it identifies the fix");
+
+  const escape = renderReference({ status: "error", reason: "escapes-cwd", message: "refused" });
+  assert.match(escape, /outside the session[\s\S]{0,20}s directory/, "a containment refusal is not mistakable for a missing file");
+  assert.ok(!/not in the session[\s\S]{0,20}s directory/.test(escape));
+
+  const large = renderReference({ status: "error", reason: "too-large", message: '"shot.png" is 4.2 MB, above the 8.0 MB limit' });
+  assert.match(large, /4\.2 MB/, "the orchestrator's own sentence is reused, so a size cannot disagree with itself");
+});
+
+test("a named file that turns out to be TEXT says so rather than showing nothing", () => {
+  // `@notes.png` that is not a picture: silent absence is indistinguishable from a broken feature.
+  const html = renderReference({ status: "loaded", bytes: 12, content: { kind: "text", text: "hello" } });
+  assert.match(html, /this file is text, not an image/);
+  assert.ok(!/turn-image-ref-img/.test(html));
+});
+
+test("the paths a message names are the ones DETECTED, and only for user turns", () => {
+  /*
+   * SSR renders no effects, so the REQUEST cannot be observed here — it is made in `useEffect`, and asserting on it
+   * would mean driving a client render nobody can do in this suite. What is observable is the half that decides WHICH
+   * paths reach the effect: `previewsFor` over the message text. That is asserted directly in
+   * `references.test.ts`, and the effect itself is a two-line loop over its result.
+   *
+   * The assistant case below is the part that only a render can show: the filter lives in `TranscriptView`, so a turn's
+   * own turn must not produce a preview.
+   */
+  const requests = [];
+  const html = renderReference(imageState(), { text: "look at @a.png and also b.jpeg", requests });
+  assert.match(html, /<img[^>]*class="turn-image-ref-img"/, "a preview is rendered for what the message names");
+  // The caption names each file the message mentioned — TWO previews for two paths, each with its own caption.
+  assert.match(html, /<span class="mono">a\.png<\/span>/, "the caption names the first file");
+  assert.match(html, /<span class="mono">b\.jpeg<\/span>/, "…and the second, separately");
+  assert.equal([...html.matchAll(/class="turn-image-ref-img"/g)].length, 2, "one preview per named file");
+});
+
+test("an ASSISTANT message that names an image is not previewed", () => {
+  /*
+   * The assistant saying "I looked at img_17.png" is describing its own work, and the picture is already inside the
+   * activity group for the `read` that produced it. Previewing it here too would draw the same screenshot twice in one
+   * conversation and attribute the second copy to prose that merely mentions it.
+   */
+  const requests = [];
+  const html = renderToString(
+    createElement(TranscriptView, {
+      transcript: {
+        messages: [
+          { id: "a1", role: "assistant", blocks: [{ kind: "text", text: "I looked at img_17.png.", complete: true }], complete: true, streaming: false },
+        ],
+        tools: [],
+        notices: [],
+      },
+      busy: false,
+      sessionId: "ref",
+      sessionLabel: "ref",
+      preview: (path) => requests.push(path),
+      previews: () => imageState(),
+    }),
+  );
+  assert.deepEqual(requests, [], "no request for the assistant's own mention");
+  assert.ok(!/turn-image-ref/.test(html), "and no preview in its turn");
 });

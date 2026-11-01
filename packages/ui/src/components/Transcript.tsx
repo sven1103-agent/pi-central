@@ -23,8 +23,13 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Transcript as TranscriptModel } from "../transcript.ts";
 import type { TranscriptMessage } from "../transcript.ts";
-import { messageTexts, planEntries, showActivity, type PlannedEntry } from "../activity.ts";
+import { imageKey } from "../transcript.ts";
+import { previewsFor } from "../references.ts";
+import { fileAt, type FileState } from "../files.ts";
+import { messageImages, messageTexts, planEntries, showActivity, type PlannedEntry } from "../activity.ts";
 import { MessageBody } from "./MessageBody.tsx";
+import { TranscriptImage } from "./TranscriptImage.tsx";
+import { ReferencePreview } from "./ReferencePreview.tsx";
 import { ActivityGroup } from "./ActivityGroup.tsx";
 import {
   decideOnSessionChange,
@@ -76,6 +81,9 @@ export function TranscriptView({
   onScrollMemory,
   transcript,
   busy,
+  sessionId,
+  preview,
+  previews,
   sessionLabel,
   followToken = 0,
   autoFollow = true,
@@ -103,6 +111,28 @@ export function TranscriptView({
   onScrollMemory?: (state: SessionScroll) => void;
   transcript: TranscriptModel;
   busy: boolean;
+  /**
+   * Which session this transcript belongs to.
+   *
+   * Required rather than optional, because it is half of an image's identity (`imageKey`) and a default would have to
+   * be invented. The reason it cannot be inferred from the transcript is that message ids are minted per transcript by
+   * counting — every session has an `m0` — so a cache keyed without it would show one session another's screenshot.
+   */
+  sessionId: string;
+  /**
+   * Ask for an image a turn names by path, so the turn can preview it.
+   *
+   * Called from an effect rather than during render, because it dispatches: rendering must stay a pure function of
+   * state. The receiver is expected to ignore a path it already knows, so a repeated call is cheap.
+   */
+  preview?: ((path: string) => void) | undefined;
+  /**
+   * What is known about each named image.
+   *
+   * Absent means the caller does not preview references at all — the correct behaviour for an embedding with no
+   * filesystem access behind it, where showing "Reading…" would be a permanent promise nobody would keep.
+   */
+  previews?: ((path: string) => FileState) | undefined;
   sessionLabel: string;
   /**
    * Changes when the reader sends a prompt, which re-arms following (#86).
@@ -357,6 +387,61 @@ export function TranscriptView({
   });
 
   /**
+   * Keep following when the content grows AFTER paint.
+   *
+   * ## The bug this fixes, reported from use
+   *
+   * *"when you prompt with an image reference, the rendered message with the thumbnail is not shown completely, even
+   * with auto-follow on. When the assistant starts to work, then the transcript goes back to the end and following."*
+   *
+   * The follow effect above runs on every render, but a render is not when the height arrives. React writes the DOM,
+   * the browser lays it out, and only THEN does it fetch and decode a lazy image — so on the frame where a preview turns
+   * from "Reading…" into a picture, the `<img>` occupies **zero height**. `scrollIntoView` faithfully scrolls to an end
+   * that is about to move down by 12vh, and then nothing else happens: the next render is not due until the agent emits
+   * its first delta. Which is exactly what was seen — an incomplete turn, then a jump to the bottom once work started.
+   *
+   * ## Why an observer rather than a better-timed effect
+   *
+   * No effect runs at the right moment. `useLayoutEffect` is too early (no image yet), `useEffect` is too early (decode
+   * is async), and `img.onload` would have to be plumbed through every image, every collapsed disclosure and every
+   * syntax-highlighted code block — because they ALL change height after paint, and the preview is merely the newest
+   * member of that family. A `ResizeObserver` on the lane covers the whole class: anything that makes the conversation
+   * taller, for any reason, moves the tail and this follows it.
+   *
+   * The cost is that it fires for non-tail changes too — expanding a disclosure far above the reader scrolls the bottom
+   * by the same amount. That is correct behaviour for a pane that is following, and it is the same thing the existing
+   * effect already does on every render.
+   */
+  const laneRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const lane = laneRef.current;
+    if (lane === null || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => {
+      /*
+       * The PINNED flag is read at fire time, not captured.
+       *
+       * A captured value would be the reader's choice as of the observer's first render, so scrolling away would leave
+       * following armed and the pane would keep pulling them back — the opposite defect, and a much worse one. Reading
+       * the ref means "the reader is following RIGHT NOW", which is the only question this should ask.
+       */
+      if (!shouldFollow(autoFollow, pinnedRef.current)) return;
+      // Direct assignment rather than `scrollIntoView`: this fires on layout changes, and `scrollIntoView` can move an
+      // ANCESTOR scroll port too — on a growing transcript that means the whole window jumping, which is a far more
+      // disruptive bug than the one being fixed.
+      const container = containerRef.current;
+      if (container === null) return;
+      container.scrollTop = container.scrollHeight;
+    });
+    observer.observe(lane);
+    return () => observer.disconnect();
+    /*
+     * `autoFollow` is a dependency because the callback closes over it and must respect a change without
+     * re-subscribing being avoidable. `pinnedRef` deliberately is NOT: a ref is stable, and re-subscribing on every
+     * pin change would tear down and rebuild the observer on every scroll.
+     */
+  }, [autoFollow]);
+
+  /**
    * Return to the newest content and start following again.
    *
    * Re-enabling the follow BEFORE scrolling is the load-bearing order: `scrollIntoView` fires a
@@ -394,6 +479,62 @@ export function TranscriptView({
    * session's streaming) re-renders the tree. It was a plain call, so the plan was rebuilt on every render.
    */
   const entries = useMemo(() => planEntries(transcript), [transcript]);
+
+  /**
+   * The image paths the reader's own messages NAME, in message order.
+   *
+   * Only USER messages are scanned. An assistant message that says "I looked at img_17.png" is describing its own work,
+   * and the picture is already inside the activity group for the `read` that produced it — previewing it here as well
+   * would draw the same screenshot twice in one conversation and attribute the second copy to prose that merely
+   * mentions it.
+   */
+  const referenced = useMemo(() => {
+    const found: { messageId: string; paths: string[] }[] = [];
+    for (const message of transcript.messages) {
+      if (message.role !== "user") continue;
+      const text = messageTexts(message, message.blocks.map((_, index) => index).filter((index) => {
+        const block = message.blocks[index];
+        return block?.kind === "text";
+      })).join("\n");
+      const paths = previewsFor(text);
+      if (paths.length > 0) found.push({ messageId: message.id, paths });
+    }
+    return found;
+  }, [transcript]);
+
+  /**
+   * The paths one message names, or `undefined`.
+   *
+   * A linear scan of a list that is almost always EMPTY, over at most a handful of entries — measured against the
+   * alternative rather than assumed: this is cheaper than building a `Map` per render for a lookup that nearly always
+   * misses, and it keeps the pane free of a store. The list being empty for almost every session is the fact that
+   * decides it; a `Map` here would be an allocation to make the common case slower.
+   *
+   * `Transcript.tsx` is also held by a structural test that forbids a per-session store in this file (the pane remounts
+   * on every session switch), so the absence of a cache is a documented property rather than an oversight.
+   */
+  const pathsFor = useCallback(
+    (messageId: string): readonly string[] | undefined =>
+      referenced.find((entry) => entry.messageId === messageId)?.paths,
+    [referenced],
+  );
+
+  /**
+   * Ask for what is not known yet.
+   *
+   * An effect rather than a call during planning because the receiver dispatches, and rendering must be pure. The
+   * request is idempotent at the receiver (`unloaded` check), so the only cost of an extra run is one map lookup —
+   * which matters because this runs on every record while a session streams.
+   *
+   * A session that is merely being READ (not running) still resolves these: `readFile` is served by the orchestrator
+   * from its own process, and the history view is exactly where a reader names old screenshots.
+   */
+  useEffect(() => {
+    if (preview === undefined) return;
+    for (const { paths } of referenced) {
+      for (const path of paths) preview(path);
+    }
+  }, [referenced, preview]);
 
   return (
     // The scroller and the control are SIBLINGS rather than parent and child, and that is
@@ -443,7 +584,7 @@ export function TranscriptView({
         aria-label={`Transcript for ${sessionLabel}`}
         aria-busy={busy || undefined}
       >
-        <div className="transcript-lane">
+        <div className="transcript-lane" ref={laneRef}>
         {failed ? (
         <div className="empty" style={{ padding: 0 }}>
           <h2>Could not load this session's history</h2>
@@ -487,7 +628,13 @@ export function TranscriptView({
                 />
               ) : null
             ) : (
-              <Turn key={entry.key} entry={entry} />
+              <Turn
+                key={entry.key}
+                entry={entry}
+                sessionId={sessionId}
+                previews={previews}
+                referenced={pathsFor(entry.message.id)}
+              />
             ),
           )}
         </>
@@ -581,10 +728,35 @@ export function TranscriptView({
  *
  * Without this, a delta in the LAST message re-rendered every turn above it — with streaming that is dozens of
  * times a second, over the whole conversation. `message` is replaced only for the message being written to, so
- * reference equality is the right comparison. There is no custom `areEqual`: the props are the message and
- * nothing else, and a hand-written comparison is how memoization silently stops working.
+ * reference equality is the right comparison.
+ *
+ * ## Why the comparison is now written down, which it deliberately was not
+ *
+ * The note above used to say *"there is no custom `areEqual`: the props are the message and nothing else, and a
+ * hand-written comparison is how memoization silently stops working"*. That was true when it was written and it
+ * stopped being true when `planEntries` grew a second block list: the entry object is allocated FRESH on every
+ * re-plan (`activity.ts`), and `Transcript.tsx` re-plans whenever the transcript object changes — during a run,
+ * once per streaming record. So `{ entry }` was reference-unequal every time and `memo` never once short-circuited.
+ *
+ * That was invisible while a turn was a heading plus some text, and it is not invisible with an image in it: a child
+ * that rebuilt its blob URL per render would revoke and recreate it dozens of times a second, and every
+ * `loading="lazy"` decode in the conversation would be restarted. So the comparison is written down, and it compares
+ * the things that actually change what is drawn: the message (for prose), and the two index lists (for which blocks
+ * this entry owns).
  */
-const Turn = memo(function Turn({ entry }: { entry: Extract<PlannedEntry, { kind: "message" }> }) {
+const Turn = memo(function Turn({
+  entry,
+  sessionId,
+  previews,
+  referenced,
+}: {
+  entry: Extract<PlannedEntry, { kind: "message" }>;
+  /** Namespaces the blob-URL identity: message ids are minted per transcript, so `m0` exists in every session. */
+  sessionId: string;
+  previews?: ((path: string) => FileState) | undefined;
+  /** Image paths THIS message names. Undefined when it names none, which is almost every message. */
+  referenced?: readonly string[] | undefined;
+}) {
   const { message } = entry;
   const label = message.role === "user" ? "You" : message.role === "assistant" ? "Assistant" : message.role;
   /*
@@ -595,10 +767,11 @@ const Turn = memo(function Turn({ entry }: { entry: Extract<PlannedEntry, { kind
    * planner, which is the only place that ordering rule is written down.
    */
   const texts = messageTexts(message, entry.textIndexes);
+  const images = messageImages(message, entry.imageIndexes);
 
   // The planner never emits an empty message entry; this keeps a heading above nothing impossible even if
   // a future caller builds one by hand.
-  if (texts.length === 0) return null;
+  if (texts.length === 0 && images.length === 0) return null;
 
   return (
     // The ROLE is a class, so the two kinds of turn can be told apart by looking (issue #88). Before
@@ -626,6 +799,80 @@ const Turn = memo(function Turn({ entry }: { entry: Extract<PlannedEntry, { kind
           streaming={message.streaming && index === texts.length - 1}
         />
       ))}
+
+      {/*
+        Images, after the prose they accompany and in recorded order.
+
+        The image's identity is built from the SESSION, the message and the block index — never from the entry, which
+        is a fresh object on every re-plan. That is what lets the URL cache answer without work on a re-render.
+      */}
+      {images.map(({ index, block }) => (
+        <TranscriptImage
+          key={`${entry.key}:image:${index}`}
+          block={block}
+          identity={imageKey(sessionId, message.id, index)}
+          role={message.role}
+        />
+      ))}
+
+      {/*
+        The images this message NAMES, previewed after the prose that names them.
+
+        After rather than before, because the sentence is the point and the picture is the annotation: "what is wrong
+        with this spacing?" followed by the spacing. `ReferencePreview` renders nothing while a file is unrequested, so
+        a turn that mentions a path costs no layout until the bytes arrive.
+      */}
+      {referenced !== undefined &&
+        previews !== undefined &&
+        referenced.map((path) => (
+          <ReferencePreview
+            key={`${entry.key}:ref:${path}`}
+            path={path}
+            state={previews(path)}
+            identity={`${sessionId}\u0000${message.id}\u0000ref\u0000${path}`}
+          />
+        ))}
     </article>
   );
-});
+}, sameTurn);
+
+/**
+ * The comparison this file used to argue against, now that the argument no longer holds.
+ *
+ * `entry.message` is the only thing whose CONTENT this component reads for prose, and it is reference-stable except
+ * for the message being streamed into — so the common case is one cheap identity check. The two index arrays are
+ * compared by length and element, because `planEntries` re-allocates them on every plan while their VALUES are
+ * almost always identical; that is exactly the case a hand-written comparison exists for.
+ *
+ * `sessionId` is compared too, because a different session means a different namespace for the same message id.
+ */
+function sameTurn(previous: TurnProps, next: TurnProps): boolean {
+  if (previous.sessionId !== next.sessionId) return false;
+  if (previous.entry.message !== next.entry.message) return false;
+  if (previous.previews !== next.previews) return false;
+  /*
+   * `referenced` is compared by REFERENCE, not by element.
+   *
+   * `referencedPaths` in `TranscriptView` is a `useMemo` over the transcript, so a message's array identity changes
+   * only when the transcript does — which is exactly when this component should reconsider. Comparing elements would be
+   * work done per turn per record to prove something the memo already guarantees.
+   */
+  if (previous.referenced !== next.referenced) return false;
+  return (
+    sameIndexes(previous.entry.textIndexes, next.entry.textIndexes) &&
+    sameIndexes(previous.entry.imageIndexes, next.entry.imageIndexes)
+  );
+}
+
+type TurnProps = {
+  entry: Extract<PlannedEntry, { kind: "message" }>;
+  sessionId: string;
+  previews?: ((path: string) => FileState) | undefined;
+  referenced?: readonly string[] | undefined;
+};
+
+function sameIndexes(a: readonly number[], b: readonly number[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  return a.every((value, index) => value === b[index]);
+}

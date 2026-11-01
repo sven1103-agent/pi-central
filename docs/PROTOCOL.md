@@ -102,10 +102,46 @@ the streaming events suggest:
 | `{ type: "toolCall" }` | 1121 | **camelCase.** Not `tool_use` or `tool_call` |
 | `{ role: "toolResult" }` | 1120 | a separate **message role**, not a content block |
 | `content: "a plain string"` | 2 | a user message's content need not be an array |
-| `{ type: "image" }` | 3 | base64; skip it rather than render garbage |
+| `{ type: "image" }` | 3 | base64; **render it** — see the note below |
 | `content: []` + `stopReason: "error"` | 10 | a provider failure — must not render as a blank turn |
 
 The tool-call payload is named `arguments`, not `input`.
+
+### Image blocks are rendered, in both places they occur
+
+This round of the table used to say *"skip it rather than render garbage"*, which was right while
+the transcript had no way to draw one. It stopped being right the moment a screenshot could reach a
+session, because a skipped block is not neutral: an image-only message planned **no entry at all**,
+so the turn vanished from the conversation entirely.
+
+Two placements, because the block arrives in two different containers:
+
+| Where | Shape | Placement |
+|---|---|---|
+| a message's `content` | `{ type: "image", data, mimeType }` | inside the turn, after its prose |
+| a `toolResult`'s `content` | same, alongside a `text` part | in the **tool detail**, above the output text |
+
+The second row is the one that matters in practice. Measured across this machine's session store —
+885 sessions, **447 image-bearing messages, and every single one is a `toolResult`** produced by
+`read` on an image file. A `read` returns
+`[{ type: "text", text: "Read image file [image/png]" }, { type: "image", … }]`, and because
+`stringifyResult` flattens content to text, the picture has to travel on its own field or it is lost.
+A client that handles only the first row would look correct and show nothing.
+
+The bytes are **already on the wire**: `get_messages` carries the base64 in the `transcript` frame
+that every client parses on connect. Rendering an image therefore costs no transfer and no extra
+request — it costs a DOM node and a decode, which is why the UI bounds both (`loading="lazy"`,
+`decoding="async"`, and a 24-entry blob-URL cache).
+
+A third source is neither of those: a path the reader's own prose NAMES (`@img_6.png shows…`). The
+client detects it, but the bytes come from the ordinary confined `readFile` request — the orchestrator
+learns nothing new, and the preview is bounded to three paths per message. Detection is a presentation
+decision (what is worth showing) and containment is a trust decision (what may be read), and they are
+deliberately in different layers.
+
+A type outside PNG/JPEG/GIF/WebP, or a payload with no data, is **stated** rather than drawn or
+silently dropped: *"this view displays PNG, JPEG, GIF and WebP only"* is a different fact from *"this
+message had no image"*, and the transcript must not report the second while meaning the first.
 
 Getting any of these wrong fails **silently**: the transcript is merely shorter than it should
 be, which is indistinguishable from a quiet session.

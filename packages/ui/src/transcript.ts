@@ -24,7 +24,24 @@
  *    calls are keyed by `toolCallId`, because parallel tool calls interleave.
  */
 
-export type BlockKind = "text" | "thinking" | "toolcall";
+export type BlockKind = "text" | "thinking" | "toolcall" | "image";
+
+/**
+ * The image types this UI will hand to a browser, as an allow-list rather than a deny-list.
+ *
+ * `mimeType` comes from Pi, which took it from a tool result or from the model's own message. A value
+ * outside this list is **refused and stated**, never passed to `<img>`: an SVG is the case that matters,
+ * because it is the one image type that can carry script. It cannot execute inside an `<img>` (browsers
+ * treat an image document as inert), but relying on that as the *only* guard would be a promise about
+ * browser behaviour instead of a decision of ours — and the file viewer already made this choice for the
+ * same reason (`ImageViewer.tsx`).
+ */
+export const DISPLAYABLE_IMAGE_TYPES: readonly string[] = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+];
 
 export interface TextBlock {
   kind: "text" | "thinking";
@@ -47,7 +64,63 @@ export interface ToolCallBlock {
   complete: boolean;
 }
 
-export type Block = TextBlock | ToolCallBlock;
+/**
+ * An image recorded in a message (a pasted screenshot, or a `read` of an image file).
+ *
+ * ## Why this used to be skipped, and why that is no longer defensible
+ *
+ * `blocksFromContent` dropped `{ type: "image" }` outright, with the note *"the transcript has no image
+ * viewer, and inventing one from a base64 payload is worse than omitting it"*. That was right while the
+ * transcript could not show one. It stopped being right the moment a person could paste a screenshot into
+ * the composer: from then on a real turn renders as **nothing**, which is the same class of defect
+ * `transcriptError` was introduced to fix — an absence that reads as a fact ("the user sent no message")
+ * when the truth is "there is content here we chose not to draw".
+ *
+ * ## The bytes are already here
+ *
+ * Nothing about this costs a transfer. Pi's `get_messages` already carries the base64 in the `transcript`
+ * frame the UI parses on every reload; the only thing that changes is that the block survives the parse and
+ * reaches a DOM node. Measured on the largest session in this machine's store (8 497 messages, 37 images,
+ * 4.09 MB of base64): the frame is 24.5 MB either way and `JSON.parse` costs ~39 ms either way.
+ */
+export interface ImageBlock {
+  kind: "image";
+  /**
+   * The block's address within its message.
+   *
+   * Part of the blob-URL key (`imageKey`), so an image keeps one identity across re-plans and re-renders.
+   * The transcript's own comment says it: *"`contentIndex` is the address"* — position in the array is not.
+   */
+  contentIndex: number;
+  /** The media type as recorded. Shown in words even when it cannot be displayed. */
+  type: string;
+  /** Base64 payload, as recorded. An empty string means Pi recorded an image with no data. */
+  base64: string;
+  /**
+   * Why this image will not be drawn. Absent means it will be.
+   *
+   * A closed set, for the reason every other refusal in this codebase is closed: a component has to handle
+   * each case rather than print whatever prose it was handed, and "unsupported type" and "no payload are
+   * entirely different facts about the session.
+   */
+  refused?: "unsupported-type" | "no-payload" | undefined;
+}
+
+export type Block = TextBlock | ToolCallBlock | ImageBlock;
+
+/**
+ * The decoded size of a base64 payload, without decoding it.
+ *
+ * Base64 is 4 characters per 3 bytes, so this is arithmetic rather than a `Buffer`/`atob` round trip — which
+ * matters because this is called during render for the image's caption. Padding is subtracted rather than
+ * approximated: a 96 KB screenshot and a `96 KB` caption that disagree by one byte is the kind of small lie
+ * this project treats as a defect.
+ */
+export function base64Bytes(base64: string): number {
+  if (base64.length === 0) return 0;
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.floor((base64.length * 3) / 4) - padding;
+}
 
 export interface TranscriptMessage {
   id: string;
@@ -68,6 +141,19 @@ export interface ToolExecution {
   args: unknown;
   /** Latest partial or final result. */
   result: string;
+  /**
+   * Images the call RETURNED, which `result` cannot carry.
+   *
+   * A `read` of a PNG comes back as `[{ type: "text", text: "Read image file [image/png]" }, { type: "image", … }]`,
+   * and `stringifyResult` deliberately keeps only the text parts — flattening base64 into the output pane would put a
+   * megabyte of opaque characters where the reader expects a result. That decision left the image with nowhere to go:
+   * **every one of the 447 image-bearing messages in this machine's session store is a `toolResult`**, so without this
+   * field the feature would be invisible on the evidence that actually exists (all of it a `read`, none of it a paste).
+   *
+   * Optional, because the overwhelming majority of calls return none — and `undefined` says that more precisely than an
+   * empty array would, which is also what `notices` above relies on.
+   */
+  images?: ImageBlock[] | undefined;
   isError: boolean;
   running: boolean;
   durationMs?: number | undefined;
@@ -183,8 +269,10 @@ export function emptyTranscript(): Transcript {
  *   - Tool results are not content blocks at all: they are separate messages with role
  *     `toolResult`. They are handled in `applyRecord`, not here.
  *
- * `image` blocks are deliberately skipped: the transcript has no image viewer, and inventing
- * one from a base64 payload is worse than omitting it.
+ * `image` blocks are now KEPT (see `ImageBlock`). They used to be skipped, which was correct while nothing
+ * could draw one and wrong the moment a screenshot could be pasted: an image-only turn rendered as no turn
+ * at all. The base64 is carried in the block because that is how Pi sends it — there is no second request to
+ * make, and inventing one would add a failure mode to save nothing.
  */
 function blocksFromContent(content: unknown): Block[] {
   if (typeof content === "string") {
@@ -202,11 +290,16 @@ function blocksFromContent(content: unknown): Block[] {
       name?: string;
       arguments?: unknown;
       input?: unknown;
+      data?: unknown;
+      mimeType?: unknown;
+      source?: unknown;
     };
     if (piece.type === "text" && typeof piece.text === "string") {
       blocks.push({ kind: "text", text: piece.text, complete: true });
     } else if (piece.type === "thinking" && typeof piece.thinking === "string") {
       blocks.push({ kind: "thinking", text: piece.thinking, complete: true });
+    } else if (piece.type === "image") {
+      blocks.push(imageBlock(piece, blocks.length));
     } else if (piece.type === "toolCall" || piece.type === "tool_use" || piece.type === "tool_call") {
       // Pi names the payload `arguments`; the snake_case spellings are accepted so a
       // provider-shaped payload still renders rather than vanishing.
@@ -223,6 +316,100 @@ function blocksFromContent(content: unknown): Block[] {
     }
   }
   return blocks;
+}
+
+/**
+ * One recorded image block, with the two refusals decided HERE rather than in a component.
+ *
+ * `contentIndex` is `blocks.length` at the point of insertion, which is the block's index in the finished
+ * array — the same address the streaming path uses (`update.contentIndex`), so a key built from it is stable
+ * across re-plans of one message.
+ *
+ * Two shapes of payload are accepted, because Pi is not the only writer of a session file:
+ * `{ data, mimeType }` (Pi's `ImageContent`) and `{ source: { type: "base64", media_type, data } }`
+ * (the provider-shaped spelling). Accepting both is the same decision `blocksFromContent` already makes for
+ * `arguments` vs `input`: a snake_case payload should render rather than vanish.
+ */
+function imageBlock(
+  piece: { data?: unknown; mimeType?: unknown; source?: unknown },
+  contentIndex: number,
+): ImageBlock {
+  const source =
+    typeof piece.source === "object" && piece.source !== null
+      ? (piece.source as { data?: unknown; media_type?: unknown; mimeType?: unknown })
+      : undefined;
+  const base64 =
+    typeof piece.data === "string" ? piece.data : typeof source?.data === "string" ? source.data : "";
+  const recorded =
+    typeof piece.mimeType === "string"
+      ? piece.mimeType
+      : typeof source?.media_type === "string"
+        ? source.media_type
+        : typeof source?.mimeType === "string"
+          ? source.mimeType
+          : "image/unknown";
+
+  const type = recorded.toLowerCase();
+  const refused =
+    base64.length === 0
+      ? ("no-payload" as const)
+      : DISPLAYABLE_IMAGE_TYPES.includes(type)
+        ? undefined
+        : ("unsupported-type" as const);
+
+  return {
+    kind: "image",
+    contentIndex,
+    // The type is reported as RECORDED, not lowercased: it is displayed, and a caption that silently
+    // rewrites what the session says is a small claim of its own.
+    type: recorded,
+    base64,
+    ...(refused !== undefined ? { refused } : {}),
+  };
+}
+
+/**
+ * The identity of one image across re-plans, re-renders and session switches.
+ *
+ * Built from `(message id, contentIndex)` — the two things the transcript says are addresses — rather than from
+ * the base64 or from the planned-entry object. That distinction is load-bearing and not stylistic:
+ *
+ *   `planEntries` allocates a FRESH entry object on every call (`activity.ts`), and `Transcript.tsx` re-plans
+ *   whenever the transcript object changes — which, while a run streams, is once per record. A blob URL keyed
+ *   on the entry (or on content equality of a 100 KB string) would therefore be revoked and recreated dozens of
+ *   times a second during a run, turning a still conversation into a decode storm. Keyed on this, a re-render
+ *   finds the URL that already exists and does no work.
+ *
+ * The session id is part of the key even though message ids already look unique: `m0` is minted per transcript
+ * by counting (`transcript.ts`), so two sessions BOTH have an `m0` — and a shared URL cache keyed without the
+ * session would hand one session another's screenshot.
+ */
+export function imageKey(sessionId: string, messageId: string, contentIndex: number): string {
+  return `${sessionId}\u0000${messageId}\u0000${contentIndex}`;
+}
+
+/**
+ * The images inside a tool result's content, if any.
+ *
+ * `stringifyResult` cannot carry these: it flattens content to TEXT, deliberately, because putting a megabyte of base64
+ * in the output pane is worse than useless. So the same content array is walked a second time for the blocks that are
+ * pictures, and they travel on `ToolExecution.images` instead.
+ *
+ * Verified against the real store on this machine: a `read` of a PNG yields
+ * `[{ type: "text", text: "Read image file [image/png]" }, { type: "image", data, mimeType }]`, and ALL 447
+ * image-bearing messages in 885 sessions are this shape. A `toolResult` is therefore the case that has to work for the
+ * feature to be visible at all — not the edge case it looks like from the composer's side.
+ */
+function imagesFromContent(content: unknown): ImageBlock[] {
+  if (!Array.isArray(content)) return [];
+  const images: ImageBlock[] = [];
+  for (const part of content) {
+    if (typeof part !== "object" || part === null) continue;
+    const piece = part as { type?: string; data?: unknown; mimeType?: unknown; source?: unknown };
+    if (piece.type !== "image") continue;
+    images.push(imageBlock(piece, images.length));
+  }
+  return images;
 }
 
 /**
@@ -254,6 +441,18 @@ function upsertTool(tools: ToolExecution[], incoming: ToolExecution): ToolExecut
       args: tool.args ?? incoming.args,
       // The richer result wins: a live partial can arrive before the final text.
       result: incoming.result.length > tool.result.length ? incoming.result : tool.result,
+      /*
+       * Images: the FIRST sighting that has any wins, and it is not merged from both.
+       *
+       * Merging would duplicate: the live `tool_execution_end` and the persisted `toolResult` describe the SAME call, so
+       * each carries the same image, and concatenating them would draw one screenshot twice under one tool row. Taking
+       * the first non-empty list is the same "the first sighting is the accurate one" rule `afterMessage` follows below.
+       */
+      ...(tool.images !== undefined && tool.images.length > 0
+        ? {}
+        : incoming.images !== undefined && incoming.images.length > 0
+          ? { images: incoming.images }
+          : {}),
       isError: tool.isError || incoming.isError,
       // Completion is inferred from EVIDENCE rather than from which route the entry came by:
       // a duration, or any result at all, means the call finished. Neither a live `end` nor a
@@ -482,6 +681,7 @@ export function applyRecord(transcript: Transcript, record: Record<string, unkno
       // model did not author belongs.
       if (role === "toolResult" || role === "bashExecution") {
         const toolCallId = message?.toolCallId ?? `history-${next.tools.length}`;
+        const images = imagesFromContent(message?.content);
         next.tools = upsertTool(next.tools, {
           toolCallId,
           toolName: message?.toolName ?? (role === "bashExecution" ? "bash" : "tool"),
@@ -489,6 +689,7 @@ export function applyRecord(transcript: Transcript, record: Record<string, unkno
           // `toolCall` block in `attachHistoricalArgs`.
           args: message?.command !== undefined ? { command: message.command } : undefined,
           result: stringifyResult(message?.content) || String(message?.output ?? ""),
+          ...(images.length > 0 ? { images } : {}),
           isError: message?.isError === true,
           running: false,
           startedAt: Date.now(),
@@ -555,6 +756,7 @@ export function applyRecord(transcript: Transcript, record: Record<string, unkno
 
     case "tool_execution_end": {
       const toolCallId = String(record.toolCallId ?? "");
+      const images = imagesFromContent(record.result);
       let matched = false;
       next.tools = next.tools.map((tool) => {
         if (tool.toolCallId !== toolCallId) return tool;
@@ -562,6 +764,7 @@ export function applyRecord(transcript: Transcript, record: Record<string, unkno
         return {
           ...tool,
           result: stringifyResult(record.result),
+          ...(images.length > 0 ? { images } : {}),
           isError: record.isError === true,
           running: false,
           ...(typeof record.durationMs === "number" ? { durationMs: record.durationMs } : {}),
@@ -575,6 +778,7 @@ export function applyRecord(transcript: Transcript, record: Record<string, unkno
           toolName: String(record.toolName ?? ""),
           args: record.args,
           result: stringifyResult(record.result),
+          ...(images.length > 0 ? { images } : {}),
           isError: record.isError === true,
           running: false,
           ...(typeof record.durationMs === "number" ? { durationMs: record.durationMs } : {}),
