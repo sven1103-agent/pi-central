@@ -260,3 +260,28 @@ test("the TOTAL budget matches the orchestrator's, across packages", () => {
   assert.ok(value !== undefined, "the orchestrator's total budget is findable");
   assert.equal(MAX_TOTAL_ENCODED_BYTES, Function(`return ${value}`)(), "the two totals must be equal");
 });
+
+test("only a REFUSAL reaches the composer's notice strip, never a success", () => {
+  /*
+   * Corrected from use: "below the composer users see 'x images sent', which is not required, since they see it in the
+   * transcript anyway."
+   *
+   * Right. The chips vanishing IS the confirmation — they were the thing that said "these are attached", so their
+   * absence says "these are gone from the composer" — and the message then appears in the transcript with the images in
+   * it, one line below. A notice restating that was a third confirmation for one fact, in the one strip that is permanent
+   * screen space.
+   *
+   * A refusal still belongs there, and this assertion is about the RULE rather than about the wording: a refusal is the
+   * only outcome the reader cannot see anywhere else. Nothing appeared in the composer, and nothing appeared in the
+   * transcript, so the strip is the single place it can be said.
+   */
+  const side = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const strip = /if \(sent && images\.length > 0\) \{([\s\S]{0,600}?)\n                \}/.exec(side)?.[1] ?? "";
+  assert.ok(strip.length > 0, "the clear-on-send block is findable");
+  assert.match(strip, /setAttachments/, "it clears the attachments");
+  assert.ok(!/setAttachNotice/.test(strip), "and says NOTHING — no 'n images sent'");
+
+  // The refusal path still sets one, so the strip is not dead code.
+  assert.match(side, /setAttachNotice\(/, "a refusal still notifies");
+  assert.match(side, /refuseAttachment\(/, "…through the shared sentence");
+});

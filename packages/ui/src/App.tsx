@@ -1033,7 +1033,7 @@ export function App() {
                 const images = toPromptImages(attachmentsRef.current[sessionId] ?? []);
                 // Only a streaming prompt carries a behavior; the store's `composerMode` is what
                 // decides that, and the App forwards the choice rather than re-deciding it.
-                send({
+                const sent = send({
                   kind: "prompt",
                   sessionId,
                   message,
@@ -1043,18 +1043,23 @@ export function App() {
                   ...(images.length > 0 ? { images } : {}),
                 });
                 /*
-                 * Cleared only after the control is sent, and only for what was actually sent.
+                 * Cleared only after the control is sent.
                  *
                  * The order matters: clearing first would leave nothing to attach if `send` returned false (the socket
                  * was closed), and the reader's screenshots would be gone with the message. `send` reports whether the
                  * frame left, so this mirrors what the wire received rather than what the UI hoped.
+                 *
+                 * NO "n images sent" NOTICE, and that is a correction rather than an omission. The chips vanishing is the
+                 * whole confirmation: they were the thing that said "these are attached", so their absence says "these
+                 * are gone from the composer". The message then appears in the transcript with the images in it, one
+                 * line below. A notice restating that was a third confirmation for one fact, in the one strip that is
+                 * permanent screen space.
+                 *
+                 * A REFUSAL still uses that strip, because a refusal is the one thing the reader cannot see anywhere
+                 * else: nothing appeared in the composer, and nothing appeared in the transcript.
                  */
-                if (images.length > 0) {
+                if (sent && images.length > 0) {
                   setAttachments((previous) => ({ ...previous, [sessionId]: [] }));
-                  setAttachNotice((previous) => ({
-                    ...previous,
-                    [sessionId]: `${images.length} image${images.length === 1 ? "" : "s"} sent`,
-                  }));
                 }
                 // After the control, not inside building it: the transcript re-arms following so the
                 // reply scrolls into view whatever the reader had scrolled to before (#86).
