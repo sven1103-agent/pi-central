@@ -110,7 +110,10 @@ text until now.
   the scroll — so arrowing past the sixth row moved the highlight to a row outside the box. The picker looked frozen while
   Down kept being pressed, and "what will Enter accept?" had no visible answer. The offset is computed in `mentions.ts` and
   assigned to the list's own `scrollTop`, deliberately NOT via `scrollIntoView`: that scrolls every scrollable ancestor,
-  which here is the transcript, so a keystroke in a helper would jump the whole reading area.
+  which here is the transcript, so a keystroke in a helper would jump the whole reading area. The row's position is
+  measured in the LIST's coordinate space rather than taken from `offsetTop`, which is relative to the nearest positioned
+  ancestor — the absolute panel, including its header. That offset cancelled going down and did not going up, which is why
+  the first attempt appeared to work in one direction only.
 - The picker is capped at six rows with an internal scroll (eight made it taller than the field it belongs to), carries a
   border and shadow so it reads as a panel rather than the field growing a grey tail, and its header names the directory
   (`in docs`) instead of showing a bare `.`.

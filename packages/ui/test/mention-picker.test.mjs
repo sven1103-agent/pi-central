@@ -185,3 +185,25 @@ test("a row that is already visible does not move the list", () => {
   );
   assert.match(source, /if \(offset === undefined\) return;/, "no assignment when nothing needs to move");
 });
+
+test("the row is measured in the LIST's coordinates, not from the positioned panel", () => {
+  /*
+   * The asymmetric bug — "it works when traversing down, but not up" — in one assertion.
+   *
+   * `row.offsetTop` is relative to the nearest POSITIONED ancestor, which is `.mention` (the absolute panel), not
+   * `.mention-list` (the scroll container). Every row's position therefore included the header above the list: harmless
+   * going down, where the constant cancelled on both sides of the comparison, and wrong going up, where a row near the top
+   * looked 26px lower than it was and was never scrolled to.
+   *
+   * Asserted structurally because the fix is about DOM coordinate spaces, which jsdom does not compute.
+   */
+  const source = readFileSyncUrl(new URL("../src/components/MentionPicker.tsx", import.meta.url)).replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  assert.ok(
+    !/top:\s*row\.offsetTop/.test(source),
+    "the raw offsetTop must not be used directly: it is measured from the wrong ancestor",
+  );
+  assert.match(source, /list\.offsetTop/, "the list's own offset is subtracted, giving the row's position inside it");
+});

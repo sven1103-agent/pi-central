@@ -68,8 +68,32 @@ export function MentionPicker({
     if (list === null || selected < 0 || selected >= optionCount) return;
     const row = list.children[selected] as HTMLElement | undefined;
     if (row === undefined) return;
+    /*
+     * `offsetTop` is measured from the nearest POSITIONED ancestor — and that is NOT the list.
+     *
+     * The DOM here is:
+     *
+     *     .mention            position: absolute   ← the offsetParent for everything inside it
+     *       .mention-head       (the header, ~26px)
+     *       .mention-list     overflow-y: auto, NOT positioned   ← the real scroll container
+     *         li.mention-option
+     *
+     * So `row.offsetTop` is the distance from `.mention`'s top edge, which INCLUDES the header. Using it directly made
+     * every row look ~26px further down than it was, and the failure was asymmetric — which is exactly how it was
+     * reported: *"it works when traversing down, but not up."*
+     *
+     * Down happened to work because the same offset was added on both sides of the comparison, so the "scroll down" branch
+     * was off by a constant that the reader could not see. Up did not, because "the row is above the band" was evaluated
+     * against a position 26px too large — a row near the top looked comfortably visible when it was not, so it was never
+     * scrolled to. Scrolling back to the first row settled on 24 rather than 0, leaving it under the header.
+     *
+     * The fix is to measure in the LIST's coordinate space: a row's position relative to the list is its distance from the
+     * list's top edge, which is `offsetTop - list.offsetTop` when the two share an offsetParent.
+     */
+    const offsetParent = row.offsetParent;
+    const rowTop = list.offsetParent === offsetParent ? row.offsetTop - list.offsetTop : row.offsetTop;
     const offset = scrollToShow(
-      { top: row.offsetTop, height: row.offsetHeight },
+      { top: rowTop, height: row.offsetHeight },
       { scrollTop: list.scrollTop, height: list.clientHeight },
       // The list's own vertical padding, so a row aligned to the edge is not flush against it and clipped-looking.
       2,

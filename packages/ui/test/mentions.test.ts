@@ -320,3 +320,53 @@ test("an unmeasured list does not scroll, so a render before layout cannot throw
   // `clientHeight` is 0 before layout and in jsdom; dividing or comparing against it would invent a huge offset.
   assert.equal(scrollToShow({ top: 22, height: 22 }, { scrollTop: 0, height: 0 }), undefined);
 });
+
+test("the selected row stays VISIBLE at every step, walking down and back up", () => {
+  /*
+   * The property, stated as the reader's experience rather than as four branches: after each arrow press, the highlighted row
+   * overlaps the visible box. Asserted as a full round trip, because the reported defect was ASYMMETRIC — "it works when
+   * traversing down, but not up" — and a test that only walked downwards would have passed with the bug in place.
+   */
+  const ROW = 22;
+  const VISIBLE = 132;
+  let scrollTop = 0;
+  const visited = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+
+  for (const row of visited) {
+    const top = row * ROW;
+    const offset = scrollToShow({ top, height: ROW }, { scrollTop, height: VISIBLE }, 2);
+    if (offset !== undefined) scrollTop = offset;
+
+    const hiddenAbove = top < scrollTop;
+    const clippedBelow = top + ROW > scrollTop + VISIBLE;
+    assert.ok(
+      !hiddenAbove && !clippedBelow,
+      `row ${row} must be visible: row spans ${top}..${top + ROW}, box is ${scrollTop}..${scrollTop + VISIBLE}`,
+    );
+  }
+});
+
+test("returning to the FIRST row scrolls the list fully back, not to a header's offset", () => {
+  /*
+   * The bug this pins, and the reason it was invisible going down.
+   *
+   * `row.offsetTop` is measured from the nearest POSITIONED ancestor — `.mention`, the absolute panel — not from the list
+   * that scrolls. So every row's position included the ~26px header above the list. Going DOWN, the same constant was added
+   * on both sides of the comparison, so the offset cancelled and it worked. Going UP it did not: a row near the top looked
+   * 26px lower than it was, appeared comfortably visible, and was never scrolled to. Coming back to the first row settled on
+   * 24 rather than 0, leaving it tucked under the header.
+   *
+   * The component now measures in the list's own coordinate space (`row.offsetTop - list.offsetTop`). This asserts the
+   * ARITHMETIC that fix produces, which is the part that can be tested here.
+   */
+  const ROW = 22;
+  const VISIBLE = 132;
+
+  // Scrolled to the bottom of a long list, then back to the first row.
+  let scrollTop = 88;
+  const offset = scrollToShow({ top: 0, height: ROW }, { scrollTop, height: VISIBLE }, 2);
+  assert.equal(offset, 0, "the first row brings the list to the very top");
+
+  scrollTop = offset ?? scrollTop;
+  assert.equal(scrollTop, 0, "…leaving nothing above it, so no part is hidden under the header");
+});
