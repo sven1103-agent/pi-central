@@ -13,7 +13,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { apply, complete, mentionAt, moveSelection, type Entry } from "../src/mentions.ts";
+import { apply, complete, mentionAt, moveSelection, scrollToShow, type Entry } from "../src/mentions.ts";
 import { previewsFor } from "../src/references.ts";
 
 /** The mention at the end of a string, which is where the caret is in most tests. */
@@ -263,4 +263,60 @@ test("node_modules/.git are never offered, at any query", () => {
   }
   // …and the useful dot-directory survives, which a "hide dotfiles" rule would have taken.
   assert.deepEqual(complete(mustMention("@", 1), entries).map((o) => o.label), [".github/", "docs/"]);
+});
+
+// --- Keeping the selected row visible -----------------------------------------------------------
+
+test("a row already fully visible does not scroll the list", () => {
+  /*
+   * The property that keeps typing from jittering: if the highlighted row is inside the box, nothing moves. Without it, every
+   * keystroke that did not change the selection would still nudge the list.
+   */
+  const viewport = { scrollTop: 0, height: 132 };
+  assert.equal(scrollToShow({ top: 22, height: 22 }, viewport), undefined);
+  assert.equal(scrollToShow({ top: 0, height: 22 }, viewport), undefined);
+  assert.equal(scrollToShow({ top: 110, height: 22 }, viewport), undefined, "last fully visible row");
+});
+
+test("a row BELOW the box scrolls just enough to show it", () => {
+  /*
+   * The reported defect: the list is capped at six rows, so arrowing past the sixth put the highlight outside the box and the
+   * picker looked frozen while Down kept being pressed.
+   */
+  const viewport = { scrollTop: 0, height: 132 };
+  // Row 6 starts at 132 — exactly one row past the box.
+  assert.equal(scrollToShow({ top: 132, height: 22 }, viewport), 22, "scroll by exactly the overflow");
+  // Row 8, further down.
+  assert.equal(scrollToShow({ top: 176, height: 22 }, viewport), 66);
+});
+
+test("a row ABOVE the box scrolls back to its top", () => {
+  // ArrowUp from a scrolled position must bring the row back, not leave it clipped above.
+  const viewport = { scrollTop: 88, height: 132 };
+  assert.equal(scrollToShow({ top: 22, height: 22 }, viewport), 22);
+  assert.equal(scrollToShow({ top: 0, height: 22 }, viewport), 0);
+});
+
+test("padding is respected at both ends, so the first and last rows are reachable", () => {
+  /*
+   * The list has vertical padding; without allowing for it a row aligned to `scrollTop` sits flush against the box edge and
+   * reads as clipped, and the LAST row becomes impossible to show fully.
+   */
+  const viewport = { scrollTop: 0, height: 132 };
+  assert.equal(scrollToShow({ top: 2, height: 22 }, viewport, 2), undefined, "the first row is visible past the padding");
+  // The bottom, with padding: the band ends 2px above the box's bottom edge.
+  assert.equal(scrollToShow({ top: 112, height: 22 }, viewport, 2), 4);
+  // Never negative, however the caller rounds.
+  assert.ok((scrollToShow({ top: 0, height: 22 }, { scrollTop: 50, height: 132 }, 2) ?? 0) >= 0);
+});
+
+test("a row taller than the box scrolls to its TOP, which is the part that identifies it", () => {
+  // Cannot be fully shown; showing the start is the only useful choice, and the alternative (aligning the bottom) shows the
+  // tail of a long label and hides the name.
+  assert.equal(scrollToShow({ top: 40, height: 300 }, { scrollTop: 0, height: 132 }, 2), 38);
+});
+
+test("an unmeasured list does not scroll, so a render before layout cannot throw", () => {
+  // `clientHeight` is 0 before layout and in jsdom; dividing or comparing against it would invent a huge offset.
+  assert.equal(scrollToShow({ top: 22, height: 22 }, { scrollTop: 0, height: 0 }), undefined);
 });

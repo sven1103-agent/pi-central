@@ -20,7 +20,8 @@
  * Collapsing them is the defect `files.ts` was written to prevent: an empty list where the truth is "loading" tells the
  * reader to give up.
  */
-import type { Completion } from "../mentions.ts";
+import { useEffect, useRef } from "react";
+import { scrollToShow, type Completion } from "../mentions.ts";
 
 export function MentionPicker({
   directory,
@@ -38,6 +39,45 @@ export function MentionPicker({
   selected: number;
   onChoose: (completion: Completion) => void;
 }) {
+  const listRef = useRef<HTMLUListElement>(null);
+
+  /**
+   * Keep the selected row inside the list, scrolling the LIST and nothing else.
+   *
+   * ## The reported defect
+   *
+   * *"when the auto-complete helper is opened, the window shall scroll if users use the arrow keys to navigate the list down.
+   * Otherwise the selected files / directories cannot be seen."* Correct: the list is capped at six rows and scrolls, but
+   * nothing tied the SELECTION to the SCROLL — so arrowing past the sixth row moved the highlight to a row outside the box.
+   * The picker looked frozen while Down kept being pressed, and "what will Enter accept?" had no visible answer.
+   *
+   * ## Why `scrollIntoView` is not used, and this is the important part
+   *
+   * `scrollIntoView` scrolls every scrollable ANCESTOR. Here that is the transcript — so a keystroke in a helper would jump
+   * the whole reading area, which on a conversation pinned to the tail is a far worse bug than the one being fixed.
+   *
+   * Instead `scrollToShow` returns HOW FAR to move (or `undefined` when the row is already visible), and that number is
+   * assigned to this list's own `scrollTop`. Arithmetic in `mentions.ts`, one assignment here.
+   *
+   * The effect depends on `selected` and the option count, not on the rows: the geometry is read at the moment the selection
+   * changes, which is the only time it matters.
+   */
+  const optionCount = completions.length;
+  useEffect(() => {
+    const list = listRef.current;
+    if (list === null || selected < 0 || selected >= optionCount) return;
+    const row = list.children[selected] as HTMLElement | undefined;
+    if (row === undefined) return;
+    const offset = scrollToShow(
+      { top: row.offsetTop, height: row.offsetHeight },
+      { scrollTop: list.scrollTop, height: list.clientHeight },
+      // The list's own vertical padding, so a row aligned to the edge is not flush against it and clipped-looking.
+      2,
+    );
+    if (offset === undefined) return;
+    list.scrollTop = offset;
+  }, [selected, optionCount]);
+
   return (
     <div className="mention" role="presentation">
       {/*
@@ -66,7 +106,7 @@ export function MentionPicker({
       </div>
 
       {completions.length > 0 ? (
-        <ul className="mention-list" role="listbox" id="mention-options" aria-label="Files to mention">
+        <ul className="mention-list" role="listbox" id="mention-options" aria-label="Files to mention" ref={listRef}>
           {completions.map((completion, index) => (
             <li
               key={completion.value}

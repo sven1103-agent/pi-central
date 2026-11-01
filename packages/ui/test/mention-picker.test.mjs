@@ -149,3 +149,39 @@ function readFileSyncUrl(url) {
   // Local helper so this file needs no second import line for one call.
   return globalThis.process.getBuiltinModule("node:fs").readFileSync(url, "utf8");
 }
+
+test("the list scrolls ITSELF to the selected row, and never the transcript", () => {
+  /*
+   * Reported from use: arrowing down past the sixth row moved the highlight to a row outside the capped box, so the selected
+   * item could not be seen and the picker looked frozen.
+   *
+   * The rule that matters and that a naive fix gets wrong: `scrollIntoView` scrolls every scrollable ANCESTOR, which here is
+   * the transcript — so a keystroke in a helper would jump the whole reading area. The component must assign to the list's
+   * own `scrollTop` and use no `scrollIntoView` at all.
+   *
+   * Asserted structurally because a static render cannot measure a scroll: jsdom reports `clientHeight` and `offsetTop` as 0,
+   * so driving the real effect would be asserting on a DOM that cannot scroll. The arithmetic it calls is tested directly in
+   * `mentions.test.ts`.
+   */
+  const source = readFileSyncUrl(new URL("../src/components/MentionPicker.tsx", import.meta.url))
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+
+  assert.match(source, /useRef<HTMLUListElement>/, "the list is reachable");
+  assert.match(source, /ref=\{listRef\}/, "…and the ref is attached to it");
+  assert.match(source, /scrollToShow\(/, "the offset comes from the tested arithmetic");
+  assert.match(source, /list\.scrollTop = offset/, "and is assigned to the LIST's own scrollTop");
+  assert.ok(
+    !/scrollIntoView/.test(source),
+    "no scrollIntoView: it would scroll the transcript, which is a worse bug than the one being fixed",
+  );
+});
+
+test("a row that is already visible does not move the list", () => {
+  // The property that keeps typing from jittering. `scrollToShow` returns undefined for a visible row; the component returns
+  // early on undefined rather than assigning, so no scroll event fires at all.
+  const source = readFileSyncUrl(new URL("../src/components/MentionPicker.tsx", import.meta.url)).replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  assert.match(source, /if \(offset === undefined\) return;/, "no assignment when nothing needs to move");
+});

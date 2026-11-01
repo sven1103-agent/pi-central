@@ -106,6 +106,11 @@ text until now.
   already here. The trade is stated in the code: a floating panel covers the last few lines above it rather than shrinking
   the transcript, and that is better because `scrollTop` does not move — closing it returns the reader to exactly where
   they were.
+- **The list scrolls itself to keep the selected row visible.** It is capped at six rows, and nothing tied the selection to
+  the scroll — so arrowing past the sixth row moved the highlight to a row outside the box. The picker looked frozen while
+  Down kept being pressed, and "what will Enter accept?" had no visible answer. The offset is computed in `mentions.ts` and
+  assigned to the list's own `scrollTop`, deliberately NOT via `scrollIntoView`: that scrolls every scrollable ancestor,
+  which here is the transcript, so a keystroke in a helper would jump the whole reading area.
 - The picker is capped at six rows with an internal scroll (eight made it taller than the field it belongs to), carries a
   border and shadow so it reads as a panel rather than the field growing a grey tail, and its header names the directory
   (`in docs`) instead of showing a bare `.`.

@@ -220,6 +220,60 @@ export function apply(
 }
 
 /**
+ * How far to scroll a list so the selected row is fully inside it.
+ *
+ * ## The defect this fixes
+ *
+ * Reported from use: *"when the auto-complete helper is opened, the window shall scroll if users use the arrow keys to
+ * navigate the list down. Otherwise the selected files / directories cannot be seen."*
+ *
+ * The list is capped at six rows and scrolls, but nothing tied the SELECTION to the SCROLL. Arrowing past the sixth row moved
+ * the highlight to a row that was outside the box, so the picker looked frozen while the reader kept pressing Down — and
+ * because the highlight was invisible, so was the answer to "what will Enter accept?"
+ *
+ * ## Why this is arithmetic rather than `scrollIntoView`
+ *
+ * `scrollIntoView` scrolls every scrollable ANCESTOR, not just the list. In this app that means the transcript — and on a
+ * conversation pinned to the tail, that is a jump of the whole reading area for a keystroke in a helper. So the decision of
+ * HOW FAR to move is made here, as a number, and the component assigns it to the list's own `scrollTop`.
+ *
+ * ## The four cases, and why each returns what it does
+ *
+ *   - the row is already fully visible → `undefined`, so the caller does nothing and typing does not jitter the list
+ *   - the row is ABOVE the viewport → align its top to the top
+ *   - the row is BELOW the viewport → align its bottom to the bottom
+ *   - the row is taller than the viewport → align its top, which is the only part that can be usefully shown
+ *
+ * A `padding` parameter exists because the list has vertical padding: without it, a row aligned to `scrollTop` sits flush
+ * against the box edge and reads as clipped. The same inset is applied at the end, so the last row can be reached.
+ */
+export function scrollToShow(
+  selected: { top: number; height: number },
+  viewport: { scrollTop: number; height: number },
+  padding = 0,
+): number | undefined {
+  if (viewport.height <= 0) return undefined;
+  const rowTop = selected.top;
+  const rowBottom = selected.top + selected.height;
+
+  // Where the visible band actually starts and ends, allowing for the list's own padding.
+  const bandTop = viewport.scrollTop + padding;
+  const bandBottom = viewport.scrollTop + viewport.height - padding;
+
+  // Fully visible: do nothing. This is what stops a keystroke that did not change the selection from scrolling the list.
+  if (rowTop >= bandTop && rowBottom <= bandBottom) return undefined;
+
+  // Taller than the band: show its top, the only part that identifies it.
+  if (selected.height > viewport.height - padding * 2) return Math.max(0, rowTop - padding);
+
+  // Above: bring the top into view.
+  if (rowTop < bandTop) return Math.max(0, rowTop - padding);
+
+  // Below: bring the bottom into view.
+  return Math.max(0, rowBottom - viewport.height + padding);
+}
+
+/**
  * Which completion is highlighted, after a key.
  *
  * Wraps rather than clamping, so pressing Down at the end of a short list returns to the first — the behaviour every
