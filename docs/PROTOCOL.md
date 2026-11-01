@@ -133,6 +133,12 @@ that every client parses on connect. Rendering an image therefore costs no trans
 request — it costs a DOM node and a decode, which is why the UI bounds both (`loading="lazy"`,
 `decoding="async"`, and a 24-entry blob-URL cache).
 
+A third source is neither of those: a path the reader's own prose NAMES (`@img_6.png shows…`). The
+client detects it, but the bytes come from the ordinary confined `readFile` request — the orchestrator
+learns nothing new, and the preview is bounded to three paths per message. Detection is a presentation
+decision (what is worth showing) and containment is a trust decision (what may be read), and they are
+deliberately in different layers.
+
 A type outside PNG/JPEG/GIF/WebP, or a payload with no data, is **stated** rather than drawn or
 silently dropped: *"this view displays PNG, JPEG, GIF and WebP only"* is a different fact from *"this
 message had no image"*, and the transcript must not report the second while meaning the first.

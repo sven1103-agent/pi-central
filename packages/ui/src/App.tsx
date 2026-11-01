@@ -15,6 +15,8 @@ import logoIcon from "./assets/logo-icon.svg";
 import { readTracePrefs, writeTracePrefs, type SessionScroll } from "./scroll.ts";
 import {
   directoryAt,
+  fileAt,
+  type FileState,
   initialFilesState,
   reduceFiles,
   showsHidden,
@@ -453,6 +455,74 @@ export function App() {
   );
 
   /**
+   * Fetch an image a turn NAMES by path, so the turn can preview the thing it is talking about.
+   *
+   * ## Why this is separate from `openFile`
+   *
+   * `openFile` also opens the file in the right panel — it changes what the reader is looking at. This does not: a
+   * preview inside a turn must not move the panel, steal focus, or mark a file as "open", because it fires on its own
+   * as messages scroll into view. Two intents, two functions; folding them together would make rendering a message a
+   * navigation event.
+   *
+   * ## Why the cache check is here rather than in the effect
+   *
+   * The effect runs for every rendered turn on every transcript change, which during a run is once per streaming
+   * record. The `unloaded` check means a path is requested exactly once per session, and the `files` reducer's existing
+   * `fileLoading` / `fileLoaded` states do the rest — so there is no second cache to keep in step, and no counter to
+   * hold "already asked".
+   *
+   * A refusal is not retried: `error` is a settled answer, unlike `unloaded`. Retrying would turn one missing file into
+   * a request on every record for the life of the session.
+   */
+  const previewFile = useCallback(
+    (sessionId: string, path: string) => {
+      if (fileAt(filesRef.current, sessionId, path).status !== "unloaded") return;
+      dispatchFiles({ kind: "fileLoading", sessionId, path });
+      send({ kind: "readFile", sessionId, path });
+    },
+    [send],
+  );
+
+  /**
+   * The IDENTITY-STABLE preview request for the focused session.
+   *
+   * `SessionView` remounts on every session switch, but `TranscriptView` re-renders on every record — and the effect
+   * that asks for previews lists this function as a dependency. A fresh closure per render would re-run that effect on
+   * every streaming delta. The `unloaded` check inside `previewFile` makes a re-run cheap and correct, but re-running
+   * it hundreds of times a second to prove that is work done to produce an answer already known, so the identity is
+   * held steady here instead.
+   */
+  const previewSessionId = focused?.id;
+  const previewFocused = useCallback(
+    (path: string) => {
+      if (previewSessionId === undefined) return;
+      previewFile(previewSessionId, path);
+    },
+    [previewSessionId, previewFile],
+  );
+
+  /**
+   * What is known about one named image, for the focused session.
+   *
+   * ## Why this one is deliberately NOT identity-stable
+   *
+   * Every other callback here is memoised to keep `Turn`'s comparison cheap. This one is the exception, and reading
+   * through `files` rather than `filesRef` is the whole point: `Turn` is memoised on its props, and a reader with a
+   * stable identity would be a prop that never changes — so the turn would be skipped when the image arrived and the
+   * preview would stay invisible forever. The bug is invisible in a type check and invisible in a test that only
+   * asserts the request was made.
+   *
+   * Closing over `files` makes the identity change exactly when the file cache does, which is exactly when a turn
+   * holding a preview must reconsider. The cost is that every turn re-renders on any file response for the session —
+   * and that is the correct cost, because the alternative is a preview that never appears.
+   */
+  const previewsFor = useCallback(
+    (path: string): FileState =>
+      previewSessionId === undefined ? { status: "unloaded" } : fileAt(files, previewSessionId, path),
+    [previewSessionId, files],
+  );
+
+  /**
    * Flip the dotfile toggle, and re-request every directory that is currently on screen.
    *
    * Re-requesting rather than re-filtering is the point: the cached listing was produced with the
@@ -810,6 +880,8 @@ export function App() {
             <SessionView
               key={focused?.id}
               session={focused}
+              preview={focused ? previewFocused : noPreview}
+              previews={focused ? previewsFor : noPreviews}
               showMarkers={focused ? showMarkersBySession[focused.id] !== false : true}
               activityOpen={focused ? activityOpen[focused.id] ?? {} : {}}
               onToggleActivity={toggleActivity}
@@ -998,6 +1070,23 @@ export function App() {
 }
 
 /**
+ * A preview request when there is no focused session.
+ *
+ * A named constant rather than an inline `() => {}` because it must keep one identity across renders: the transcript
+ * holds it in an effect's dependency list, and a fresh arrow every render would re-run that effect on every record —
+ * the exact cost the `unloaded` cache check exists to avoid, reintroduced at the call site.
+ */
+const noPreview = () => {};
+
+/**
+ * The same, for the preview STATE reader.
+ *
+ * Returning `{ status: "unloaded" }` rather than `undefined` keeps `ReferencePreview`'s contract honest: unloaded means
+ * "nothing to draw yet", which is precisely true when there is no session to ask.
+ */
+const noPreviews = () => ({ status: "unloaded" }) as const;
+
+/**
  * The render/focus key for a roster row.
  *
  * A live session uses its handle; a session that is not running has only its file. Both are stable and a row can
@@ -1010,6 +1099,8 @@ function rowKeyOf(row: RosterRow): string {
 
 function SessionView({
   session,
+  preview,
+  previews,
   transcript,
   home,
   historyError,
@@ -1040,6 +1131,10 @@ function SessionView({
   onDraftChange,
 }: {
   session: LiveSession | undefined;
+  /** Ask the orchestrator for an image a turn names. See `previewFile` in `App`. */
+  preview: (path: string) => void;
+  /** What is known about each named image, so a turn can preview it. */
+  previews: (path: string) => FileState;
   transcript: ReturnType<typeof transcriptFor>;
   home: string | undefined;
   historyError: string | undefined;
@@ -1111,6 +1206,8 @@ function SessionView({
         transcript={transcript}
         busy={busy}
         sessionId={session.id}
+        preview={preview}
+        previews={previews}
         sessionLabel={displayName(session)}
         expectedCount={session.messageCount}
         showMarkers={showMarkers}

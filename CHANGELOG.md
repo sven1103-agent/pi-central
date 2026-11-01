@@ -30,6 +30,17 @@ They are kept because each one is the reason a constraint or an invariant test e
   `(session, message, block)` rather than by the planned entry, because the transcript re-plans on every
   streaming record — a URL rebuilt per render would be revoked and recreated dozens of times a second for
   an image that is not changing.
+- **An image a message NAMES by path is previewed in that message.** 181 of the 5 912 user messages in this machine's
+  store point at a screenshot — `@img_6.png shows the latest screenshot…` — and until now that rendered as literal text
+  while the picture appeared only if the agent happened to `read` it later, inside a collapsed activity group. The
+  reference and the referent were in different places with a disclosure between them. Detection is conservative (four
+  extensions, relative paths only, no URLs, no `..`, at most three per message) and the bytes come from the
+  orchestrator's existing confined `readFile`, so no new trust surface was added. A referenced image is capped at 12vh
+  and expands on click: it is an annotation of a sentence, not content, and at turn size one `@` mention of a 4000px
+  screenshot would push the next two turns off the screen.
+- **A turn's images are budgeted, not just capped.** The first image of a message gets 40vh and every one after it 18vh,
+  which turns five pasted screenshots from 2.2 screens into about 1.1. The flat 40vh per image was wrong in a way only
+  arithmetic shows.
 - `Turn` in the transcript is memoized by an explicit comparison. Its props included a freshly allocated
   entry object, so `memo` had never once short-circuited; that was invisible for headings and text, and
   is not invisible for images.

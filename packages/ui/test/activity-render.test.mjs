@@ -680,3 +680,153 @@ test("the live-URL cache is BOUNDED, so a long conversation cannot hold every de
     clearImageCache();
   });
 });
+
+// --- Images a message NAMES by path -------------------------------------------------------------
+
+const imageState = (overrides = {}) => ({
+  status: "loaded",
+  bytes: 70,
+  content: { kind: "image", type: "image/png", base64: PIXEL },
+  ...overrides,
+});
+
+/**
+ * Render one user turn that names a path, with a stated file state.
+ *
+ * `previews` is passed as a function so the component reads exactly the state the test set up; `preview` records the
+ * requests so a test can assert that a path was ASKED for rather than merely mentioned.
+ */
+function renderReference(state, { text = "@shot.png what is wrong here?", requests = [] } = {}) {
+  const html = renderToString(
+    createElement(TranscriptView, {
+      transcript: {
+        messages: [{ id: "u1", role: "user", blocks: [{ kind: "text", text, complete: true }], complete: true, streaming: false }],
+        tools: [],
+        notices: [],
+      },
+      busy: false,
+      sessionId: "ref",
+      sessionLabel: "ref",
+      preview: (path) => requests.push(path),
+      previews: () => state,
+    }),
+  );
+  return html;
+}
+
+test("a message that names an image gets a preview of THAT image, in the turn", () => {
+  withBlobs(() => {
+    const html = renderReference(imageState());
+    assert.match(html, /turn-image-ref-img/, "an image element for the reference");
+    assert.match(html, /shot\.png/, "named in the caption, so the reader knows which file it is");
+    assert.match(html, /click to enlarge/, "and that it is a control, not a decoration");
+    assert.match(html, /<button[^>]*aria-expanded="false"/, "a disclosure button, closed by default");
+  });
+});
+
+test("a reference preview is SMALLER than a pasted image, and expands on demand", () => {
+  /*
+   * The distinction the whole placement turns on. A pasted image is content and is drawn at turn size; a reference is
+   * an annotation of a sentence, so at pasted size one `@` mention of a 4000px screenshot would push the next two turns
+   * off the screen — for a picture the reader may already know.
+   *
+   * Asserted as CSS arithmetic, because it is a geometric claim: `--image-ref` is the resting cap and `--image-expanded`
+   * is what clicking lifts it to, and the resting cap must be strictly smaller than a pasted image's lead cap.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\s+/g, " ");
+  const refCap = /--image-ref, (\d+)vh/.exec(css)?.[1];
+  const expandedCap = /--image-expanded, (\d+)vh/.exec(css)?.[1];
+  const leadCap = /--image-lead, (\d+)vh/.exec(css)?.[1];
+  assert.ok(refCap !== undefined && expandedCap !== undefined && leadCap !== undefined, "all three caps are declared");
+  assert.ok(Number(refCap) < Number(leadCap), `resting (${refCap}vh) must be smaller than a pasted image (${leadCap}vh)`);
+  assert.ok(Number(expandedCap) > Number(refCap), "expanding must actually get bigger");
+});
+
+test("an unrequested file renders NOTHING, so a mention costs no layout until bytes arrive", () => {
+  /*
+   * `unloaded` is the state of every named path on the first frame. Rendering a placeholder there would be a layout
+   * shift in the middle of the conversation a moment later — the same defect `loading="lazy"` on pasted images avoids.
+   */
+  const html = renderReference({ status: "unloaded" });
+  assert.ok(!/turn-image-ref/.test(html), `nothing at all, got: ${html.slice(0, 300)}`);
+  assert.match(html, /what is wrong here\?/, "the prose is unaffected");
+});
+
+test("a pending reference says so in a word, not with a spinner", () => {
+  const html = renderReference({ status: "loading" });
+  assert.match(html, /Reading/, "the state is named");
+  assert.match(html, /shot\.png/, "…and says which file");
+});
+
+test("a refused reference states the orchestrator's reason, never a blank space", () => {
+  /*
+   * "No such file", "not an image", "permission denied" and "too large" need different fixes, so the note distinguishes
+   * them. A blank space would read as "there is no image", which is a different fact from "this one could not be read".
+   */
+  const missing = renderReference({ status: "error", reason: "not-found", message: "no such file", code: "ENOENT" });
+  // SSR separates adjacent expressions with `<!-- -->`, so the sentence is matched across them.
+  assert.match(missing, /not in the session[\s\S]{0,20}s directory/, "the missing case is named");
+  assert.match(missing, /ENOENT/, "and the OS code is shown, because it identifies the fix");
+
+  const escape = renderReference({ status: "error", reason: "escapes-cwd", message: "refused" });
+  assert.match(escape, /outside the session[\s\S]{0,20}s directory/, "a containment refusal is not mistakable for a missing file");
+  assert.ok(!/not in the session[\s\S]{0,20}s directory/.test(escape));
+
+  const large = renderReference({ status: "error", reason: "too-large", message: '"shot.png" is 4.2 MB, above the 8.0 MB limit' });
+  assert.match(large, /4\.2 MB/, "the orchestrator's own sentence is reused, so a size cannot disagree with itself");
+});
+
+test("a named file that turns out to be TEXT says so rather than showing nothing", () => {
+  // `@notes.png` that is not a picture: silent absence is indistinguishable from a broken feature.
+  const html = renderReference({ status: "loaded", bytes: 12, content: { kind: "text", text: "hello" } });
+  assert.match(html, /this file is text, not an image/);
+  assert.ok(!/turn-image-ref-img/.test(html));
+});
+
+test("the paths a message names are the ones DETECTED, and only for user turns", () => {
+  /*
+   * SSR renders no effects, so the REQUEST cannot be observed here — it is made in `useEffect`, and asserting on it
+   * would mean driving a client render nobody can do in this suite. What is observable is the half that decides WHICH
+   * paths reach the effect: `previewsFor` over the message text. That is asserted directly in
+   * `references.test.ts`, and the effect itself is a two-line loop over its result.
+   *
+   * The assistant case below is the part that only a render can show: the filter lives in `TranscriptView`, so a turn's
+   * own turn must not produce a preview.
+   */
+  const requests = [];
+  const html = renderReference(imageState(), { text: "look at @a.png and also b.jpeg", requests });
+  assert.match(html, /<img[^>]*class="turn-image-ref-img"/, "a preview is rendered for what the message names");
+  // The caption names each file the message mentioned — TWO previews for two paths, each with its own caption.
+  assert.match(html, /<span class="mono">a\.png<\/span>/, "the caption names the first file");
+  assert.match(html, /<span class="mono">b\.jpeg<\/span>/, "…and the second, separately");
+  assert.equal([...html.matchAll(/class="turn-image-ref-img"/g)].length, 2, "one preview per named file");
+});
+
+test("an ASSISTANT message that names an image is not previewed", () => {
+  /*
+   * The assistant saying "I looked at img_17.png" is describing its own work, and the picture is already inside the
+   * activity group for the `read` that produced it. Previewing it here too would draw the same screenshot twice in one
+   * conversation and attribute the second copy to prose that merely mentions it.
+   */
+  const requests = [];
+  const html = renderToString(
+    createElement(TranscriptView, {
+      transcript: {
+        messages: [
+          { id: "a1", role: "assistant", blocks: [{ kind: "text", text: "I looked at img_17.png.", complete: true }], complete: true, streaming: false },
+        ],
+        tools: [],
+        notices: [],
+      },
+      busy: false,
+      sessionId: "ref",
+      sessionLabel: "ref",
+      preview: (path) => requests.push(path),
+      previews: () => imageState(),
+    }),
+  );
+  assert.deepEqual(requests, [], "no request for the assistant's own mention");
+  assert.ok(!/turn-image-ref/.test(html), "and no preview in its turn");
+});

@@ -140,6 +140,24 @@ const { ToolTrace } = await server.ssrLoadModule("/src/components/ToolTrace.tsx"
 const transcript = seedTranscript(messagesOf(path));
 
 /*
+ * Preview state for the named references, stubbed from bytes already in the session.
+ *
+ * The real path resolves a named file through the orchestrator's confined `readFile`, which cannot run here. So this
+ * looks the name up in the images the session already contains and, when it finds one, reports it loaded — which is
+ * exactly the state the component sees in the product. A name with no match reports `not-found`, the state a genuinely
+ * missing file produces, so the refusal note is on screen too.
+ */
+const byName = new Map();
+for (const tool of transcript.tools) {
+  const path = tool.args && typeof tool.args === "object" ? tool.args.path : undefined;
+  const image = (tool.images ?? [])[0];
+  if (typeof path === "string" && image !== undefined) {
+    byName.set(path.split("/").pop(), image);
+  }
+}
+
+
+/*
  * Object URLs → `data:` URIs.
  *
  * Ordered, because `createObjectURL` is called in render order and the payloads are collected in the same order the
@@ -189,12 +207,53 @@ if (sample !== undefined) {
   ];
 }
 
+// A turn that NAMES an image, which is the other half of the feature and the case the store's own messages show
+// (`@img_6.png shows the latest screenshot…`). One name resolves to a real picture and one does not, so both states of
+// the reference preview are on screen.
+const named = [...byName.keys()].slice(0, 2);
+if (named.length > 0) {
+  transcript.messages = [
+    {
+      id: "synthetic-reference",
+      role: "user",
+      complete: true,
+      streaming: false,
+      blocks: [
+        {
+          kind: "text",
+          text: `@${named[0]} — is the spacing above the composer right? And @missing-screenshot.png is the one I meant before.`,
+          complete: true,
+        },
+      ],
+    },
+    ...transcript.messages,
+  ];
+}
+
 const css = readFileSync(join(UI_ROOT, "src", "styles.css"), "utf8");
+const previewStateFor = (path) => {
+  const image = byName.get(path.split("/").pop());
+  if (image === undefined) {
+    return { status: "error", reason: "not-found", message: "not found", code: "ENOENT" };
+  }
+  // Registered now, because this will be requested during the render below.
+  payloads.push(image.base64);
+  return {
+    status: "loaded",
+    bytes: Math.floor((image.base64.length * 3) / 4),
+    content: { kind: "image", type: image.type, base64: image.base64 },
+  };
+};
+
 const transcriptHtml = renderToString(
   createElement(TranscriptView, {
     transcript,
     busy: false,
     sessionId: "review",
+    // The request half is a no-op here: this render is static and there is no orchestrator to ask. The STATE half is
+    // what the component draws, so it is supplied in full.
+    preview: () => {},
+    previews: previewStateFor,
     sessionLabel: "review",
   }),
 );
