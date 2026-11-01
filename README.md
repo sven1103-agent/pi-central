@@ -25,6 +25,13 @@ own working directory, each inside its own sandbox.** /paɪ ˈsɛntrəl/
 **Who this is for.** People who already run `pi` and want more than one session at a time.
 Contributors: jump to [Working on this project](#working-on-this-project).
 
+![Pi Central's dashboard: a session rail on the left listing one running, one idle and one stopped
+session with their working directories and context burn; the transcript in the middle showing the
+assistant's prose, a first-person turn containing a pasted screenshot rendered inline with its type
+and size, and a collapsed "Thinking…" group below it; the session header on the right with the model
+and thinking pickers; the composer at the foot with its key hints and an auto-follow toggle; and a
+topbar reading two sessions, one running, one scratch and connected.](docs/images/dashboard.png)
+
 **Status: works end to end, verified, and published.** The version is deliberately not written here —
 `pi-central --version` reports the version of the package it shipped in. See
 [docs/RELEASING.md](docs/RELEASING.md).

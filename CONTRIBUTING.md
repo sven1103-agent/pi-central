@@ -131,6 +131,14 @@ cannot show the tool trace's durations, a live `responding` state, or the fleet 
 4. Save as `docs/images/dashboard.png` — that path is referenced from the README, and `check:docs`
    fails if it stops resolving.
 
+**Resize before committing.** A Retina capture comes out at 1639px or more; `sips -Z 1300
+docs/images/dashboard.png --out docs/images/dashboard.png` brings it to the documented width. GitHub
+scales the image down anyway, so the extra pixels cost repository size and buy no legibility.
+
+**The macOS screenshot filename is gitignored.** A capture lands as `Screenshot 2026-11-01 at
+15.20.44.png`, with spaces, which `img*.png` does not match — so `.gitignore` names that pattern too.
+The real image must be copied to `docs/images/dashboard.png`, which is deliberately not ignored.
+
 **Before committing, check the image for things that are not the product**
 
 - **Paths.** Pi Central shortens `$HOME` to `~` in the rail and the header, so a normal window is
