@@ -2670,9 +2670,38 @@ select.btn { font-family: var(--sans); }
 .recent-dir-count { grid-row: 1 / span 2; grid-column: 2; align-self: center; font-size: var(--fs-xs); color: var(--dim); }
 .recent-dir:disabled .recent-dir-count { color: var(--warn-text); }
 
-/* "New session here", beside the location it acts on (issue #149). Quiet: it is a secondary action, and the
- * header's one loud control is the composer below it. */
-.new-in-dir { margin-left: var(--sp-3); font-size: var(--fs-xs); padding: 2px 8px; }
+/*
+ * The location line and "New session here", in one row (issue #149).
+ *
+ * `.title` is a flex COLUMN, so the button used to be its next child and therefore a second full-width block under
+ * the path — reported from a screenshot as looking like a text input, and it pushed the meter and cost onto another
+ * line. This wrapper is the row they actually share. `min-width: 0` lets the path truncate instead of pushing the
+ * button out of the header, which is the same rule `.title` itself follows.
+ */
+.where-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.where-row .where { min-width: 0; }
+
+/*
+ * "New session here". Quiet and small: it is a secondary action beside a path, and the header's one loud control is
+ * the composer below it. `flex: none` so it keeps its label rather than being squeezed by a long directory name —
+ * a control clipped to `New sessi` reads as broken, and the path is the thing that can afford to truncate.
+ */
+.new-in-dir {
+  flex: none;
+  font-size: var(--fs-xs);
+  padding: 2px 8px;
+  /* The `.btn-quiet` face, one step quieter still: this sits inside the identity block, not in the header's
+     control band, so it must not read as another picker. */
+  background: none;
+  border-color: transparent;
+  color: var(--dim);
+}
+.new-in-dir:hover { color: var(--text); background: var(--panel-3); border-color: var(--line); }
 
 /*
  * The header's stats group: the meter and the cost, held together and against the right edge.
@@ -3190,7 +3219,10 @@ select.btn { font-family: var(--sans); }
   }
   /* The identity keeps one line: the name truncates, the chips stay. */
   .transcript-header .session-header .title { flex: 1 1 12ch; min-width: 0; }
-  .transcript-header .session-header .where { display: none; }
+  /* At narrow widths the location line goes; the action that acts on it goes WITH it. Leaving "New session here"
+     visible with no path beside it would be an unlabelled button in a row of its own — it is only unambiguous
+     next to the directory it names. The sheet's "Used before" list is the same affordance one click away. */
+  .transcript-header .session-header .where-row { display: none; }
   /* Labels go, controls stay. `display: none` rather than `visibility`: a hidden label must not reserve a column. */
   .transcript-header .picker-label { display: none; }
   .transcript-header .picker-grid { flex-direction: row; align-items: center; gap: var(--sp-2); margin-left: auto; }

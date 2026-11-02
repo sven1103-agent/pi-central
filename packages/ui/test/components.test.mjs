@@ -1019,6 +1019,54 @@ test("a project session offers one click to a new task in the SAME directory", a
   assert.match(text(html), /New session here/, "the frequent action is visible, not in an overflow menu");
 });
 
+test("the action shares a ROW with the path, never a block below it", async () => {
+  // Reported from a screenshot: "New session here" rendered as a full-width block under the path, looking like a
+  // text input and pushing the meter and cost onto another line. `.title` is a flex COLUMN, so a button placed as
+  // its next child is a second row — visually a field, because a block on its own line at that width is exactly
+  // what a field looks like.
+  //
+  // Asserted structurally rather than by class name alone: the button must be inside the element that also holds
+  // `.where`, so that a future change to the wrapper cannot silently restore the block.
+  const { SessionHeader } = await server.ssrLoadModule("/src/components/SessionHeader.tsx");
+  const html = renderToString(createElement(SessionHeader, {
+    session: session({ cwd: "/Users/x/git/project", scratch: false }),
+    home: "/Users/x",
+    models: [],
+    modelError: undefined,
+    onRequestModels() {}, onSelectModel() {},
+    thinking: { levels: undefined, error: undefined },
+    onRequestThinkingLevels() {}, onSelectThinkingLevel() {},
+    onRename() {},
+    onNewInDirectory() {},
+  }));
+  const doc = new JSDOM(`<body>${html}</body>`).window.document;
+  const button = doc.querySelector(".new-in-dir");
+  assert.ok(button, "the affordance renders");
+  const row = button.closest(".where-row");
+  assert.ok(row, "it sits in the location row, not directly in the column");
+  assert.ok(row.querySelector(".where"), "and that row is the one holding the path it acts on");
+  // It must not be a direct child of the column, which is what made it a block.
+  assert.notEqual(button.parentElement?.className, "title", "a direct child of .title becomes its own row");
+});
+
+test("its accessible name carries the directory, since the label alone is ambiguous", async () => {
+  // "New session here" is unambiguous NEXT TO a path. As an accessible name it needs the directory, and the button
+  // announces on its own.
+  const { SessionHeader } = await server.ssrLoadModule("/src/components/SessionHeader.tsx");
+  const html = renderToString(createElement(SessionHeader, {
+    session: session({ cwd: "/Users/x/git/project", scratch: false }),
+    home: "/Users/x",
+    models: [],
+    modelError: undefined,
+    onRequestModels() {}, onSelectModel() {},
+    thinking: { levels: undefined, error: undefined },
+    onRequestThinkingLevels() {}, onSelectThinkingLevel() {},
+    onRename() {},
+    onNewInDirectory() {},
+  }));
+  assert.match(html, /aria-label="New session in \/Users\/x\/git\/project"/);
+});
+
 test("a SCRATCH session does not offer it — its directory belongs to that one session", async () => {
   // Offering it would start a session in the app-owned workspace of a different session, which is not a project
   // the reader recognises, and would pile up workspaces named s7, s8, s9.

@@ -16,6 +16,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 - The directory sheet lists directories used before, one click each, derived from session history ([#149]).
 - A project session offers "New session here", which starts an empty session in the same directory ([#149]).
+- An unnamed session is labelled by its handle, not by its directory, which looked like a title ([#149]).
 
 ### Changed
 

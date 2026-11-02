@@ -160,7 +160,21 @@ test("a named session keeps its name, scratch or not", () => {
 });
 
 test("a non-scratch session with a bare-id name keeps it rather than inventing a title", () => {
+  // This is what an UNNAMED session looks like since #149's follow-up: the orchestrator stopped naming a session
+  // after its directory (three tasks in one project gave three rows called `pi-central` — a name that looks
+  // chosen, and a duplicate). It reports the handle instead, and the rail must show it as-is so the reader can
+  // see the label is provisional. "Scratch session" would be wrong here (that label is for scratch sessions),
+  // and inventing a title is exactly what was rejected: a generated name looks intentional.
   assert.equal(displayName(session({ scratch: false, name: "s7" })), "s7");
+  // The handle is also NOT collapsed the way a scratch session's is, so two unnamed project sessions stay
+  // distinguishable — #78's defect, which a shared label would reintroduce.
+  // Each session's handle is its own, so the labels differ. (`id` is overridden as well as `name`: the helper's
+  // default id is fixed, and two calls with the same id are the same session, not two.)
+  assert.notEqual(
+    displayName(session({ scratch: false, id: "s7", name: "s7" })),
+    displayName(session({ scratch: false, id: "s8", name: "s8" })),
+    "two unnamed sessions must not share a label",
+  );
 });
 
 test("scratch sessions hide their internal workspace path", () => {

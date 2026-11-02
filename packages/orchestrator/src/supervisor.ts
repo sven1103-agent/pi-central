@@ -432,7 +432,7 @@ export class Supervisor extends EventEmitter {
 
     const session: LiveSession = {
       id: input.id,
-      name: input.name?.trim() || defaultName(input.cwd, input.id),
+      name: input.name?.trim() || handleName(input.id),
       cwd: input.cwd,
       state: "starting",
       mode: input.mode,
@@ -1090,10 +1090,33 @@ export function boundedTail(stderr: string): string {
   return `… ${omitted} earlier line${omitted === 1 ? "" : "s"} of output omitted\n${kept.join("\n")}`;
 }
 
-/** Only used so a display name is never a bare id. */
-function defaultName(cwd: string, id: string): string {
-  const base = cwd.split("/").filter(Boolean).pop();
-  return base && base.length > 0 ? base : id;
+/**
+ * A session with no name of its own is named by its HANDLE, not by its directory.
+ *
+ * ## Why not the directory name
+ *
+ * It was the directory name, and it looked like a title somebody chose. Reported from use: *"the new session gets
+ * the name of the directory as it seems. I think we should stick to the Undefined session, because otherwise it
+ * looks intentional."*
+ *
+ * That is the same principle #77 settled for generated names — *"a generated name looks chosen"*, which removes the
+ * nudge to ever name the session. A directory-derived name is worse than a random one, because it is also
+ * **duplicated**: three tasks in one project gave three rows called `pi-central`. With many sessions per directory
+ * now the intended workflow (#149), that is three identical labels in the rail, which is the #78 defect arriving
+ * from a new direction.
+ *
+ * The handle is honest — `s12` says "unnamed, and here is which one" — and it is what `nameLabel` in the UI already
+ * treats as a placeholder, so the rail shows it as-is rather than mistaking it for a chosen name.
+ *
+ * The session is NOT nameless, though: Pi titles it from the first message (the `session_info` record
+ * `registry.ts` reads back), and `refreshState` adopts that name as soon as it exists. So this label is genuinely
+ * provisional, which is exactly what it should look like.
+ *
+ * Considered and rejected: `"<old session name (n)>"` when starting from an existing session. It reads as a name
+ * the user chose, and it inherits a name they may not have chosen either.
+ */
+export function handleName(id: string): string {
+  return id;
 }
 
 /**
