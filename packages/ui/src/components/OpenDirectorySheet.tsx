@@ -117,7 +117,20 @@ export function OpenDirectorySheet({
                       arrive as an unexplained crash instead of a stated reason.
                     */
                     disabled={!entry.cwdExists}
-                    title={entry.cwdExists ? entry.cwd : `${entry.cwd} — no longer exists`}
+                    /*
+                      The reason, not just "no longer exists" (issue #196).
+
+                      `cwdExists: false` from an orchestrator that predates `cwdMissing` keeps the old wording — a
+                      missing cause must not be invented. When the reason IS known, it decides the sentence, because
+                      "unreadable" is often fixable now and "gone" is not.
+                    */
+                    title={
+                      entry.cwdExists
+                        ? entry.cwd
+                        : entry.cwdMissing === "unreadable"
+                          ? `${entry.cwd} — exists but cannot be read`
+                          : `${entry.cwd} — no longer exists`
+                    }
                     onClick={() => onOpen(entry.cwd)}
                   >
                     <span className="recent-dir-name">{baseName(entry.cwd)}</span>
@@ -125,7 +138,9 @@ export function OpenDirectorySheet({
                     <span className="recent-dir-count">
                       {entry.cwdExists
                         ? `${entry.sessions} session${entry.sessions === 1 ? "" : "s"}`
-                        : "missing"}
+                        : entry.cwdMissing === "unreadable"
+                          ? "unreadable"
+                          : "missing"}
                     </span>
                   </button>
                 </li>

@@ -120,3 +120,42 @@ test("the row's bold label is the last segment", () => {
   assert.equal(baseName("/Users/x/git/project/"), "project");
   assert.equal(baseName("/"), "/", "the root has no segment, and says so rather than becoming empty");
 });
+
+// --- Gone vs unreadable, aggregated (issue #196) ------------------------------------------------
+
+test("one directory's reason survives aggregation, so the sheet can name it", () => {
+  // The sheet disables the row either way; the reason decides whether it says "missing" or "unreadable", and those
+  // need different actions from the reader.
+  const rows = recentDirectories([
+    session({ cwd: "/mnt/gone", cwdExists: false, cwdMissing: "missing" }),
+    session({ cwd: "/mnt/gone", path: "/s/2", cwdExists: false, cwdMissing: "missing" }),
+  ]);
+  assert.equal(rows[0]!.cwdMissing, "missing");
+});
+
+test("DISAGREEING reasons are dropped rather than one of them being asserted", () => {
+  // One session saw EPERM, another saw ENOENT: the state is genuinely unclear, and picking either would be the same
+  // overconfidence the boolean had.
+  const rows = recentDirectories([
+    session({ cwd: "/x", cwdExists: false, cwdMissing: "unreadable" }),
+    session({ cwd: "/x", path: "/s/2", cwdExists: false, cwdMissing: "missing" }),
+  ]);
+  assert.equal(rows[0]!.cwdMissing, undefined, "neither cause is claimed");
+});
+
+test("a PRESENT directory carries no reason at all", () => {
+  const rows = recentDirectories([session({ cwd: "/ok", cwdExists: true })]);
+  assert.equal(rows[0]!.cwdMissing, undefined, "no cause is invented for a directory that is there");
+});
+
+test("a directory seen ONLY through unreadable sessions keeps that reason", () => {
+  // Exercises the second-occurrence branch, which a single-session directory never reaches: the first sets the
+  // field, and every later one must AGREE before the reason stands.
+  const rows = recentDirectories([
+    session({ cwd: "/Users/x/Downloads", cwdExists: false, cwdMissing: "unreadable" }),
+    session({ cwd: "/Users/x/Downloads", path: "/s/2", cwdExists: false, cwdMissing: "unreadable" }),
+    session({ cwd: "/Users/x/Downloads", path: "/s/3", cwdExists: false, cwdMissing: "unreadable" }),
+  ]);
+  assert.equal(rows[0]!.cwdMissing, "unreadable", "three agreeing reports keep the reason");
+  assert.equal(rows[0]!.sessions, 3);
+});

@@ -960,7 +960,8 @@ test("code text is escaped, so a fence cannot inject markup", async () => {
 
 const sampleRecent = [
   { cwd: "/Users/x/git/project", sessions: 4, lastUsedMs: 900, cwdExists: true },
-  { cwd: "/mnt/unmounted", sessions: 2, lastUsedMs: 500, cwdExists: false },
+  { cwd: "/mnt/unmounted", sessions: 2, lastUsedMs: 500, cwdExists: false, cwdMissing: "missing" },
+  { cwd: "/Users/x/Downloads", sessions: 1, lastUsedMs: 400, cwdExists: false, cwdMissing: "unreadable" },
 ];
 
 async function sheetWith(recent) {
@@ -979,9 +980,9 @@ test("used directories are one click each, most recent first, with the count", a
   assert.match(text(html), /Used before/, "the list is named for what it is");
   assert.match(html, /~/ && /project/, "the path is abbreviated");
   assert.match(text(html), /4 sessions/, "a directory says how many sessions ran there");
-  // One button per directory, and the click target is the whole row — including the missing one, which is
-  // rendered DISABLED rather than omitted (see the next test for why it must stay visible).
-  assert.equal((html.match(/class="recent-dir"/g) ?? []).length, 2, "one row per directory");
+  // One button per directory, and the click target is the whole row — including the unavailable ones, which are
+  // rendered DISABLED rather than omitted (see the next test for why they must stay visible).
+  assert.equal((html.match(/class="recent-dir"/g) ?? []).length, 3, "one row per directory");
   // Order: the recent one precedes the missing one.
   assert.ok(html.indexOf("project") < html.indexOf("unmounted"), "most recently used comes first");
 });
@@ -994,6 +995,41 @@ test("a directory that no longer exists is shown, DISABLED, and says why", async
   assert.match(missing, /disabled/, "the button cannot be pressed");
   assert.match(missing, /missing/, "and it states the reason rather than looking broken");
   assert.match(missing, /no longer exists/, "the title carries the full path and the reason");
+});
+
+test("the sheet distinguishes a MISSING directory from an UNREADABLE one (issue #196)", async () => {
+  // Both rows are disabled, but they are different problems: one needs the directory restored, the other needs
+  // access granted — and the second is often fixable right now. Saying "missing" for both is what History did.
+  const html = await sheetWith(sampleRecent);
+  const doc = new JSDOM(`<body>${html}</body>`).window.document;
+  const rows = [...doc.querySelectorAll(".recent-dir")];
+
+  const gone = rows.find((row) => row.textContent.includes("unmounted"));
+  assert.ok(gone?.disabled, "a genuinely missing directory is disabled");
+  assert.match(gone.textContent, /missing/, "and says so");
+  assert.match(gone.title, /no longer exists/);
+
+  const unreadable = rows.find((row) => row.textContent.includes("Downloads"));
+  assert.ok(unreadable?.disabled, "an unreadable directory is also disabled — it cannot be entered either");
+  assert.match(unreadable.textContent, /unreadable/, "but it does NOT claim to be missing");
+  assert.match(unreadable.title, /cannot be read/, "the title states the recoverable problem");
+});
+
+test("the sheet is fed by the REAL derivation, so an unreadable directory survives the trip", async () => {
+  // Found by falsifying the previous test: it passed `recent` rows directly, so disabling the aggregation in
+  // `recentDirectories` left it green. That is the seam that matters — history in, rows out — because it is where
+  // `cwdMissing` could be dropped on the way from the orchestrator's session records to the sheet.
+  const { recentDirectories } = await server.ssrLoadModule("/src/recent.ts");
+  const base = { created: "", bytes: 10, messageCount: 1, firstMessage: "x", scratch: false, cwdExists: false };
+  const history = [
+    { ...base, path: "/s/a.jsonl", id: "a", cwd: "/Users/x/Downloads", modifiedMs: 900, cwdMissing: "unreadable", cwdError: "EPERM" },
+    { ...base, path: "/s/b.jsonl", id: "b", cwd: "/Volumes/old", modifiedMs: 800, cwdMissing: "missing", cwdError: "ENOENT" },
+  ];
+  const html = await sheetWith(recentDirectories(history));
+  const doc = new JSDOM(`<body>${html}</body>`).window.document;
+  const rows = [...doc.querySelectorAll(".recent-dir")];
+  assert.match(rows[0].textContent, /unreadable/, "the unreadable directory keeps its reason end to end");
+  assert.match(rows[1].textContent, /missing/, "and the missing one keeps its own");
 });
 
 test("no recent directories means no empty list furniture", async () => {

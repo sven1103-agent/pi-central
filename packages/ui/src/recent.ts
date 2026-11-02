@@ -44,6 +44,18 @@ export interface RecentDirectory {
   lastUsedMs: number;
   /** Whether the directory exists NOW, as discovery last checked (D-4). */
   cwdExists: boolean;
+  /**
+   * Why it cannot be used, when it cannot — the same distinction History makes (issue #196).
+   *
+   * A directory that is merely **unreadable** is a different situation from one that is gone, and the recovery is
+   * different (grant access or remount, versus restore a directory). Aggregated across the sessions that share this
+   * path, and kept only while they agree: if one session saw `EPERM` and another saw `ENOENT`, the state is genuinely
+   * unclear and claiming either with confidence would be the same lie the boolean told.
+   *
+   * Absent when the directory is present, and absent from an orchestrator that predates the field — in which case the
+   * sheet falls back to the vaguer `missing` wording rather than inventing a cause.
+   */
+  cwdMissing?: "missing" | "unreadable" | undefined;
 }
 
 /**
@@ -75,6 +87,7 @@ export function recentDirectories(
         sessions: 1,
         lastUsedMs: session.modifiedMs,
         cwdExists: session.cwdExists,
+        ...(session.cwdMissing === undefined ? {} : { cwdMissing: session.cwdMissing }),
       });
       continue;
     }
@@ -83,6 +96,15 @@ export function recentDirectories(
     // One session's directory still existing is enough: a stale `false` from a directory that has since
     // been restored must not mark the row unavailable.
     existing.cwdExists = existing.cwdExists || session.cwdExists;
+    // The reason survives only while every unreadable report agrees — see the field's comment.
+    if (!existing.cwdExists && session.cwdMissing !== undefined) {
+      if (existing.cwdMissing === undefined || existing.cwdMissing === session.cwdMissing) {
+        existing.cwdMissing = session.cwdMissing;
+      } else {
+        // Disagreement: the two sessions could not reach it for different reasons, so neither is asserted.
+        delete existing.cwdMissing;
+      }
+    }
   }
 
   return [...byCwd.values()]
