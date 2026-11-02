@@ -12,6 +12,8 @@ import {
   formatAge,
   CONTEXT_PRESSURE_PERCENT,
   formatContext,
+  titleFromPrompt,
+  TITLE_FROM_PROMPT_MAX,
   isNearFull,
   formatCost,
   formatElapsed,
@@ -175,6 +177,87 @@ test("a non-scratch session with a bare-id name keeps it rather than inventing a
     displayName(session({ scratch: false, id: "s8", name: "s8" })),
     "two unnamed sessions must not share a label",
   );
+});
+
+// --- The label for an UNNAMED session (issue #149 follow-up) -----------------------------------
+//
+// Reported from use: "when creating a new session it gets the handle name like s4, which means nothing to users."
+// Measured before deciding: of 888 sessions in the store, only 9 carry a name — so `s4` would be what the rail showed
+// for 99% of them. 885 of 888 have a first prompt, which is the option #77 named when it weighed generated names.
+
+test("an unnamed session is labelled by its first prompt, not its handle", () => {
+  assert.equal(displayName(session({ name: "s4" }), "Fix the login redirect"), '\u201cFix the login redirect\u201d');
+  // The handle is NOT what the reader sees — that is the defect.
+  assert.notEqual(displayName(session({ name: "s4" }), "Fix the login redirect"), "s4");
+});
+
+test("the prompt label is an EXCERPT: quoted, so it does not look like a chosen name", () => {
+  // #77 rejected generated names because "a generated name looks chosen", which removes the nudge to name a session.
+  // A truncated question in quotes reads as a preview, not as a title somebody gave it.
+  const label = displayName(session({ name: "s4" }), "Hello");
+  assert.match(label, /^\u201c.*\u201d$/, "wrapped in typographic quotes");
+});
+
+test("a long prompt truncates at a WORD boundary, with an ellipsis", () => {
+  const label = titleFromPrompt(
+    "For an improved userflow, is it possible to include information from the transcript in the composer",
+  )!;
+  assert.ok(label.length <= TITLE_FROM_PROMPT_MAX + 3, `too long: ${label.length}`);
+  assert.match(label, /\u2026\u201d$/, "it ends with an ellipsis inside the closing quote");
+  assert.ok(!/\s\u2026/.test(label), "no dangling space before the ellipsis");
+  /*
+   * Cut between words, not through one.
+   *
+   * Asserted against the SOURCE prompt rather than by eyeballing the tail: the label's last visible word must be one
+   * of the prompt's whole words. A hard cut at the limit lands mid-word, and the first version of this assertion
+   * ("the tail has more than one character") did not catch that — falsifying the word-boundary logic left it green.
+   */
+  const visible = label.replace(/^\u201c/, "").replace(/\u2026\u201d$/, "").trim();
+  const words = visible.split(" ");
+  const whole = "For an improved userflow, is it possible to include information from the transcript in the composer".split(" ");
+  assert.ok(
+    whole.includes(words.at(-1)!),
+    `the last visible word must be complete, got "${words.at(-1)}" from ${JSON.stringify(visible.slice(-24))}`,
+  );
+  // And the label must not simply be the first 48 characters, which is what a hard cut produces.
+  const hard = "For an improved userflow, is it possible to include information from the transcript in the composer".slice(0, TITLE_FROM_PROMPT_MAX);
+  assert.notEqual(visible, hard.trimEnd(), "a word-boundary cut differs from a hard cut");
+});
+
+test("one long unbroken token is cut hard, since there is no word boundary to use", () => {
+  const url = "https://github.com/sven1103-agent/pi-central/blob/main/packages/ui/src/components/History.tsx";
+  const label = titleFromPrompt(url)!;
+  assert.ok(label.length <= TITLE_FROM_PROMPT_MAX + 3, `too long: ${label}`);
+  assert.match(label, /\u2026/, "still marked as truncated");
+});
+
+test("leading Markdown noise is stripped, so the label does not start with punctuation", () => {
+  assert.equal(titleFromPrompt("# Fix the header"), '\u201cFix the header\u201d');
+  assert.equal(titleFromPrompt("- one thing"), '\u201cone thing\u201d');
+  assert.equal(titleFromPrompt("> quoted ask"), '\u201cquoted ask\u201d');
+});
+
+test("whitespace collapses, because a prompt is full of newlines and the rail is one line", () => {
+  assert.equal(titleFromPrompt("Fix\n\n  the   header\nplease"), '\u201cFix the header please\u201d');
+});
+
+test("a session with NEITHER a name nor a prompt falls back to the handle", () => {
+  // Last resort, and still addressable: an empty label would make the row unusable.
+  // The helper's default id is `s7`; the LABEL must be the handle of THIS session, which is its id.
+  assert.equal(displayName(session({ name: "s7", id: "s7" }), undefined), "s7", "the handle, because nothing better exists");
+  assert.equal(titleFromPrompt(undefined), undefined);
+  assert.equal(titleFromPrompt("   "), undefined);
+  assert.equal(titleFromPrompt("# "), undefined, "a prompt that is only markup yields nothing");
+});
+
+test("a name a person CHOSE always wins over the prompt", () => {
+  assert.equal(displayName(session({ name: "Heavy Lifting" }), "do some thinking"), "Heavy Lifting");
+});
+
+test("scratch sessions keep their label rather than borrowing a prompt", () => {
+  // A scratch session's directory is app-owned and its handle is the only identity it has; showing the prompt for
+  // ones and "Scratch session" for others would make the group inconsistent for no gain.
+  assert.equal(displayName(session({ scratch: true, name: "s7" }), "do a thing"), "Scratch session");
 });
 
 test("scratch sessions hide their internal workspace path", () => {

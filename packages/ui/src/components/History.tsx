@@ -12,7 +12,7 @@
  */
 import { useState } from "react";
 import type { HistoricalSession } from "@pi-central/protocol";
-import { formatAge } from "../format.ts";
+import { formatAge, nameLabel } from "../format.ts";
 import { searchHistory } from "../store.ts";
 import { CopyButton } from "./CopyButton.tsx";
 
@@ -109,7 +109,14 @@ function HistoryRow({
   return (
     <button type="button" className="history-row" onClick={onSelect}>
       <span className="h1">
-        <strong>{session.name ?? "Untitled session"}</strong>
+        {/*
+          The same labelling rule the rail uses (issue #149 follow-up).
+
+          It read `session.name ?? "Untitled session"` — so a session Pi has not named showed a constant, and the
+          reader had no way to tell one from another. The prompt is available for essentially every session (885 of
+          888 measured) and is what the reader would have recognised it by.
+        */}
+        <strong>{nameLabel(session.name, session.scratch, session.id, session.firstMessage)}</strong>
         {session.scratch && <span className="chip chip-scratch">scratch</span>}
         {/*
           The chip distinguishes GONE from UNREADABLE (issue #196).

@@ -1103,6 +1103,32 @@ test("its accessible name carries the directory, since the label alone is ambigu
   assert.match(html, /aria-label="New session in \/Users\/x\/git\/project"/);
 });
 
+test("the action LOOKS like a control at rest, not like the path beside it", async () => {
+  // Reported from a screenshot: the button rendered as `~/git/data-manager   New session here`, which reads as one
+  // sentence. Stripping the border to keep it quiet removed the only thing saying "this half is clickable" — and
+  // DESIGN §5.1 says "nothing depends on hover to be discoverable", which applies most of all to the affordance
+  // whose purpose is being noticed.
+  //
+  // Asserted on the stylesheet, because the defect is a STYLE outcome: the markup was correct both times, and a
+  // rendered-HTML assertion cannot see a missing border.
+  const css = readCss();
+  const rule = (selector) => {
+    const normalised = css.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, " ");
+    const wanted = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const all = [...normalised.matchAll(new RegExp(`(?<![\\w-])${wanted} ?\\{([^}]*)\\}`, "g"))];
+    return all.length > 0 ? all[all.length - 1][1] : undefined;
+  };
+
+  const resting = rule(".new-in-dir");
+  assert.ok(resting, ".new-in-dir must have a rule");
+  // A visible border at REST. `transparent` or `none` is the defect.
+  const border = /border:\s*([^;]+);/.exec(resting)?.[1] ?? "";
+  assert.ok(border.length > 0, "the button declares a border");
+  assert.ok(!/transparent|none/.test(border), `the resting border must be visible, got "${border}"`);
+  // And a background, so it reads as a surface rather than as bare text.
+  assert.ok(/(?:^|;)\s*background:\s*var\(--panel-\d\)/.test(resting), "it has a resting surface");
+});
+
 test("a SCRATCH session does not offer it — its directory belongs to that one session", async () => {
   // Offering it would start a session in the app-owned workspace of a different session, which is not a project
   // the reader recognises, and would pile up workspaces named s7, s8, s9.

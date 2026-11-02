@@ -2687,21 +2687,31 @@ select.btn { font-family: var(--sans); }
 .where-row .where { min-width: 0; }
 
 /*
- * "New session here". Quiet and small: it is a secondary action beside a path, and the header's one loud control is
- * the composer below it. `flex: none` so it keeps its label rather than being squeezed by a long directory name —
- * a control clipped to `New sessi` reads as broken, and the path is the thing that can afford to truncate.
+ * "New session here". Quiet, but VISIBLE — and that distinction was learned the hard way.
+ *
+ * The first version stripped the border and the background so it would not compete with the pickers. Rendered, it
+ * became indistinguishable from the path beside it: `~/git/data-manager   New session here` read as one sentence,
+ * with no sign that the second half was a control. That is DESIGN §5.1's rule — *"nothing depends on hover to be
+ * discoverable"* — and it applied to exactly the affordance whose whole purpose is being noticed.
+ *
+ * So it keeps a resting edge: the hairline `--line` at rest, `--line-strong` on hover, in the same shape family as
+ * the chips on the line above. `flex: none` so it keeps its label rather than being squeezed by a long directory
+ * name — a control clipped to `New sessi` reads as broken, and the path is the thing that can afford to truncate.
  */
 .new-in-dir {
   flex: none;
   font-size: var(--fs-xs);
   padding: 2px 8px;
-  /* The `.btn-quiet` face, one step quieter still: this sits inside the identity block, not in the header's
-     control band, so it must not read as another picker. */
-  background: none;
-  border-color: transparent;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
   color: var(--dim);
+  white-space: nowrap;
 }
-.new-in-dir:hover { color: var(--text); background: var(--panel-3); border-color: var(--line); }
+/* At rest the label is quiet; the EDGE is what makes it a control, so waking the text is the SECOND signal, not
+   the first. */
+.new-in-dir:hover { color: var(--text); background: var(--panel-3); border-color: var(--line-strong); }
+.new-in-dir:focus-visible { outline: none; box-shadow: var(--focus); }
 
 /*
  * The header's stats group: the meter and the cost, held together and against the right edge.

@@ -527,6 +527,27 @@ export function transcriptFor(state: UiState, sessionId: string | undefined): Tr
   return state.transcripts[sessionId] ?? emptyTranscript();
 }
 
+/**
+ * The first thing the reader asked this session, for a label (`titleFromPrompt`).
+ *
+ * Read from the LIVE TRANSCRIPT rather than from discovery, because a session started a moment ago has a prompt in
+ * memory and no file worth re-reading yet — and the rail must not show `s4` for a session the reader can already see
+ * a question in. Returns `undefined` until the first user message arrives, which is the honest answer for a session
+ * nothing has been asked yet.
+ */
+export function firstPromptFor(state: UiState, sessionId: string | undefined): string | undefined {
+  if (!sessionId) return undefined;
+  const transcript = state.transcripts[sessionId];
+  if (transcript === undefined) return undefined;
+  for (const message of transcript.messages) {
+    if (message.role !== "user") continue;
+    for (const block of message.blocks) {
+      if (block.kind === "text" && block.text.trim().length > 0) return block.text;
+    }
+  }
+  return undefined;
+}
+
 export function scratchSessions(state: UiState): LiveSession[] {
   return state.live.filter((s) => s.scratch);
 }
