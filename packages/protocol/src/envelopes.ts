@@ -39,8 +39,26 @@ export interface HistoricalSession {
   /**
    * Whether the recorded cwd still exists. Validated at discovery time for display, and
    * again before every resume (D-4), because a directory can vanish between the two.
+   *
+   * **This is kept, and `cwdMissing` is what disambiguates it** (issue #196). `false` here means "could not
+   * `stat` it", which is two different situations that used to be reported as one: the directory is gone, or
+   * it is there but unreadable (`EPERM`/`EACCES`, an unmounted volume, macOS denying `~/Downloads`). The
+   * boolean stays because every existing consumer asks "can I resume this", and `false` is the right answer
+   * to that either way — the *reason* is what the reader needs, and that is the optional field.
    */
   cwdExists: boolean;
+  /**
+   * Why `cwdExists` is false, when it is.
+   *
+   * `"missing"` when the path is not there (`ENOENT`, `ENOTDIR`); `"unreadable"` when it exists but this
+   * process may not look (`EPERM`, `EACCES`), with the OS code in `cwdError`.
+   *
+   * Absent when the directory is present, and — deliberately — absent for a page produced by an orchestrator
+   * that predates this field, which the UI renders as the old, vaguer wording rather than guessing.
+   */
+  cwdMissing?: "missing" | "unreadable" | undefined;
+  /** The OS code behind `cwdMissing`, e.g. `EPERM`. Never invented: absent when there was no error. */
+  cwdError?: string | undefined;
   /** True when this session lives in the app-owned default workspace (US-3). */
   scratch: boolean;
 }

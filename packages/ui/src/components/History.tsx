@@ -111,7 +111,30 @@ function HistoryRow({
       <span className="h1">
         <strong>{session.name ?? "Untitled session"}</strong>
         {session.scratch && <span className="chip chip-scratch">scratch</span>}
-        {!session.cwdExists && <span className="chip chip-awaiting-approval">directory is gone</span>}
+        {/*
+          The chip distinguishes GONE from UNREADABLE (issue #196).
+
+          It said "directory is gone" for both, because the orchestrator reported them as one boolean. A
+          permissions denial on a directory that is present is often fixable right now (grant access, remount,
+          reopen the terminal), and telling the reader it is gone sends them to restore something that is
+          already there — the exact defect `resume.ts` records having fixed once, still living in discovery.
+
+          The wording matches what the refusal dialog says for the SAME session, because both now come from
+          one classification: `directory is gone` only when it is gone, `directory unreadable` when it exists
+          but cannot be read.
+        */}
+        {!session.cwdExists && (
+          <span
+            className="chip chip-awaiting-approval"
+            title={
+              session.cwdMissing === "unreadable"
+                ? `${session.cwd} — exists but cannot be read${session.cwdError === undefined ? "" : ` (${session.cwdError})`}`
+                : session.cwd
+            }
+          >
+            {session.cwdMissing === "unreadable" ? "directory unreadable" : "directory is gone"}
+          </span>
+        )}
       </span>
       <span className="project" title={session.cwd}>
         {abbreviate(session.cwd, home)}
@@ -140,6 +163,14 @@ function ResumeRefusal({
   session: HistoricalSession;
   onDismiss: () => void;
 }) {
+  /*
+   * The dialog follows the SAME field as the chip (issue #196).
+   *
+   * The orchestrator answers `checkResumable` on the click and words its own refusal, but the dialog is drawn
+   * before that request returns — so if it hard-coded "gone" it would flash the wrong reason for an unreadable
+   * directory. Reading `cwdMissing` means the chip and this dialog say the same thing, from one fact.
+   */
+  const unreadable = session.cwdMissing === "unreadable";
   return (
     <div className="modal-backdrop" onClick={onDismiss} role="presentation">
       <div
@@ -149,16 +180,24 @@ function ResumeRefusal({
         aria-labelledby="refusal-title"
         onClick={(event) => event.stopPropagation()}
       >
-        <h3 id="refusal-title">This session's directory is gone</h3>
+        <h3 id="refusal-title">
+          {unreadable ? "This session's directory cannot be read" : "This session's directory is gone"}
+        </h3>
         <p style={{ marginBottom: 12 }}>
-          The directory this session worked in no longer exists:
+          {unreadable
+            ? "The directory this session worked in exists, but this process may not read it:"
+            : "The directory this session worked in no longer exists:"}
         </p>
         <pre className="cmd" style={{ marginBottom: 12 }}>
           {session.cwd}
         </pre>
         <p style={{ marginBottom: 16 }}>
-          Restore it, or start a new session in the directory you want to work in. Pi Central
-          does not move a session between directories.
+          {/* A different action for each, because they are different problems. */}
+          {unreadable
+            ? `Check that you can enter it — it may be owned by another user, a parent directory may deny access${
+                session.cwdError === undefined ? "" : ` (${session.cwdError})`
+              }, or a volume may not be mounted. Pi Central does not move a session between directories.`
+            : "Restore it, or start a new session in the directory you want to work in. Pi Central does not move a session between directories."}
         </p>
         <div className="dialog-actions" style={{ marginTop: 0 }}>
           <button type="button" className="btn" onClick={onDismiss}>

@@ -55,6 +55,35 @@ test("decodeSessionDir round-trips a simple path", () => {
   assert.equal(decodeSessionDir(encodeSessionDir("/Users/x/git/repo")), "/Users/x/git/repo");
 });
 
+test("a discovered session carries WHY its directory is missing (issue #196)", async () => {
+  // The wire fields, asserted at the producer. The UI can only render `cwdMissing` if discovery sets it, and the
+  // defect was precisely that discovery answered with one boolean and no reason.
+  const gone = join(root, "never-existed-project");
+  const path = writeSession(join(root, "proj"), "gone.jsonl", [
+    { type: "session", version: 3, id: "id-gone", cwd: gone, timestamp: "2026-11-01T10:00:00.000Z" },
+  ]);
+
+  const found = await sessionAt(config(), path);
+  assert.ok(found, "the session is still discoverable");
+  assert.equal(found.cwdExists, false, "the boolean is unchanged: it cannot be entered");
+  assert.equal(found.cwdMissing, "missing", "and the reason distinguishes it from unreadable");
+  assert.equal(found.cwdError, "ENOENT", "with the OS code, so the UI can name it");
+});
+
+test("a session whose directory EXISTS says nothing about missing", async () => {
+  // Absence of `cwdMissing` is the honest report for a present directory — not `"missing"`, and not an empty code.
+  const here = mkdtempSync(join(root, "present-"));
+  const path = writeSession(join(root, "proj"), "present.jsonl", [
+    { type: "session", version: 3, id: "id-present", cwd: here, timestamp: "2026-11-01T10:00:00.000Z" },
+  ]);
+
+  const found = await sessionAt(config(), path);
+  assert.ok(found);
+  assert.equal(found.cwdExists, true);
+  assert.equal(found.cwdMissing, undefined, "no reason is invented for a directory that is there");
+  assert.equal(found.cwdError, undefined);
+});
+
 test("discovers a session, its name, first message, and message count", async () => {
   const dir = join(root, "proj-a");
   writeSession(dir, "s1.jsonl", [

@@ -25,6 +25,60 @@ export type ResumeReadiness =
   | { ok: true; cwd: string }
   | { ok: false; reason: ResumeBlocker; message: string; cwd: string };
 
+/**
+ * Whether a directory can be entered, and why not when it cannot.
+ *
+ * Extracted from `checkResumable` so **discovery and resume share one answer** (issue #196). They did not:
+ * `registry.ts` had its own `directoryExists` that collapsed every failure to `false`, so History said a
+ * directory was "gone" while the refusal dialog for the SAME session correctly said it was unreadable. Two
+ * `statSync` calls that can disagree, described to the reader as two facts.
+ *
+ * The distinction is the whole point, and `checkResumable` already recorded why:
+ *
+ * > an EACCES on an ancestor directory — the path was present and fine — reported as a missing directory,
+ * > which sends the reader off to restore something that is already there.
+ *
+ * A permissions problem is often recoverable *now* (grant access, remount); a deleted directory is not. So
+ * the difference decides what the reader does next, which makes it worth a type rather than a boolean.
+ */
+export type DirectoryState =
+  | { ok: true }
+  | { ok: false; reason: "missing" | "unreadable" | "not-a-directory"; code?: string };
+
+/**
+ * Classify one directory. Never throws, and never guesses: an unrecognised error code is reported as
+ * `missing` with the code attached, so an unfamiliar failure still reaches the reader rather than being
+ * swallowed into a bare boolean.
+ */
+export function inspectDirectory(dir: string): DirectoryState {
+  if (dir === "") return { ok: false, reason: "missing" };
+  let stats;
+  try {
+    stats = statSync(dir);
+  } catch (error) {
+    return { ok: false, ...classifyStatFailure((error as NodeJS.ErrnoException).code) };
+  }
+  if (!stats.isDirectory()) return { ok: false, reason: "not-a-directory" };
+  return { ok: true };
+}
+
+/**
+ * The error code → reason mapping, as a pure function.
+ *
+ * Split out **so it can be tested without a filesystem that refuses**. A test for this needs a real `EPERM`,
+ * which means a directory owned by another user or a sandbox — environment-dependent, and therefore the kind of
+ * test that skips in CI and passes only where it was written. The mapping is the whole decision; `statSync` is
+ * the part that cannot be arranged portably.
+ *
+ * `EPERM`/`EACCES` are permission denials on a path that may well be there. Everything else — `ENOENT`,
+ * `ENOTDIR`, an unmounted volume's `EIO` — is reported as `missing`, which is the honest answer to "why can I
+ * not see it". An unrecognised code keeps its code attached rather than being swallowed.
+ */
+export function classifyStatFailure(code: string | undefined): { reason: "missing" | "unreadable"; code?: string } {
+  const unreadable = code === "EACCES" || code === "EPERM";
+  return { reason: unreadable ? "unreadable" : "missing", ...(code === undefined ? {} : { code }) };
+}
+
 export type ResumeBlocker = "missing-directory" | "not-a-directory" | "unreadable" | "unknown-cwd";
 
 /**
@@ -44,33 +98,33 @@ export function checkResumable(session: Pick<HistoricalSession, "cwd" | "path">)
     };
   }
 
-  let stats;
-  try {
-    stats = statSync(session.cwd);
-  } catch (error) {
-    // The error CODE decides the message, and this was originally a bare `catch` that always
-    // claimed "no longer exists". Observed in practice: an EACCES on an ancestor directory — the
-    // path was present and fine — reported as a missing directory, which sends the reader off to
-    // restore something that is already there. `unreadable` existed as a blocker for exactly this
-    // case and could never be produced by this branch.
-    const code = (error as NodeJS.ErrnoException).code;
-    const unreadable = code === "EACCES" || code === "EPERM";
-    return {
-      ok: false,
-      reason: unreadable ? "unreadable" : "missing-directory",
-      cwd: session.cwd,
-      message: unreadable
-        ? `The directory this session worked in cannot be read (${code}):\n  ${session.cwd}\n\nThis is a permissions problem, not a missing directory. Check that you can enter it: it may be owned by another user, or a parent directory may deny access.`
-        : `The directory this session worked in no longer exists:\n  ${session.cwd}\n\nRestore it, or start a new session in the directory you want to work in. Pi Central does not move a session between directories.`,
-    };
-  }
+  /*
+   * The classification comes from `inspectDirectory`, which is where the error CODE is read.
+   *
+   * It used to be inline here, and duplicated in `registry.ts` in a worse form that threw the code away —
+   * so History said "gone" for a directory this function correctly called unreadable. One implementation now,
+   * so the chip and this message cannot disagree.
+   */
+  const state = inspectDirectory(session.cwd);
 
-  if (!stats.isDirectory()) {
+  if (!state.ok && state.reason === "not-a-directory") {
     return {
       ok: false,
       reason: "not-a-directory",
       cwd: session.cwd,
       message: `The directory this session recorded is no longer a directory:\n  ${session.cwd}`,
+    };
+  }
+
+  if (!state.ok) {
+    const unreadable = state.reason === "unreadable";
+    return {
+      ok: false,
+      reason: unreadable ? "unreadable" : "missing-directory",
+      cwd: session.cwd,
+      message: unreadable
+        ? `The directory this session worked in cannot be read (${state.code ?? "permission denied"}):\n  ${session.cwd}\n\nThis is a permissions problem, not a missing directory. Check that you can enter it: it may be owned by another user, or a parent directory may deny access.`
+        : `The directory this session worked in no longer exists:\n  ${session.cwd}\n\nRestore it, or start a new session in the directory you want to work in. Pi Central does not move a session between directories.`,
     };
   }
 
