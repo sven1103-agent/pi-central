@@ -2630,6 +2630,51 @@ select.btn { font-family: var(--sans); }
 .context-bar.is-full .context-bar-fill { background: var(--warn); }
 
 /*
+ * Recent directories in the open sheet (issue #149).
+ *
+ * A list of BUTTONS rather than a `<select>`: each row carries three facts (name, path, how many sessions), and a
+ * native select cannot show three. A list also keeps the row whole as one click target, which matters because the
+ * whole point is that this is faster than typing a path.
+ */
+.recent-dirs { margin-bottom: var(--sp-3); }
+.recent-dirs-label {
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 var(--sp-2);
+}
+.recent-dirs ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.recent-dir {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 0 var(--sp-2);
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.recent-dir:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-tint); }
+.recent-dir:focus-visible { box-shadow: var(--focus); outline: none; }
+/* A directory that no longer exists stays VISIBLE and unclickable: hiding it would make the list look like Pi
+   Central forgot a project whose volume is merely unmounted. */
+.recent-dir:disabled { opacity: 0.55; cursor: not-allowed; }
+.recent-dir-name { font-weight: 600; font-size: var(--fs-sm); }
+.recent-dir-path { grid-column: 1; font-size: var(--fs-xs); color: var(--dim); }
+.recent-dir-count { grid-row: 1 / span 2; grid-column: 2; align-self: center; font-size: var(--fs-xs); color: var(--dim); }
+.recent-dir:disabled .recent-dir-count { color: var(--warn-text); }
+
+/* "New session here", beside the location it acts on (issue #149). Quiet: it is a secondary action, and the
+ * header's one loud control is the composer below it. */
+.new-in-dir { margin-left: var(--sp-3); font-size: var(--fs-xs); padding: 2px 8px; }
+
+/*
  * The header's stats group: the meter and the cost, held together and against the right edge.
  *
  * `flex: none` so it never wraps away from the pickers, and `margin-left: auto` so it is pushed right even when the

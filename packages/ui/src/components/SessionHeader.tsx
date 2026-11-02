@@ -52,6 +52,7 @@ export function SessionHeader({
   onRequestThinkingLevels,
   onSelectThinkingLevel,
   onRename,
+  onNewInDirectory,
   busy = false,
   warnings = [],
 }: {
@@ -65,6 +66,15 @@ export function SessionHeader({
   onRequestThinkingLevels: () => void;
   onSelectThinkingLevel: (level: string) => void;
   onRename: (name: string) => void;
+  /**
+   * Start a NEW session in this session's directory (issue #149).
+   *
+   * Beside the location line, because that is the thing it acts on: the reader looking at
+   * `~/git/project` is the reader who wants a second task in it. Absent for a scratch session, whose
+   * directory is app-owned and per-session — offering it there would produce a session in the workspace of
+   * a different one, which is not a project.
+   */
+  onNewInDirectory?: ((cwd: string) => void) | undefined;
   /**
    * Is a run in progress? The 2px progress rule lives here now.
    *
@@ -112,6 +122,25 @@ export function SessionHeader({
           <span className="where" title={session.cwd}>
             {headerLocation(session, home)}
           </span>
+        )}
+        {/*
+          One click from the session you are in to a NEW task in the SAME directory (issue #149).
+
+          This is the gesture issue #149 exists for, and it is deliberately NEXT TO the path rather than in an
+          overflow menu: many sessions per directory is the intended workflow (one task, one session), so the
+          action is frequent, and hiding a frequent action behind a menu is how the retyping habit survived.
+
+          It starts EMPTY. `fork`/`clone` is #12 and is the opposite action — it copies a transcript.
+        */}
+        {onNewInDirectory !== undefined && session.scratch === false && session.cwd !== undefined && (
+          <button
+            type="button"
+            className="btn btn-quiet new-in-dir"
+            title={`Start a new session in ${session.cwd}`}
+            onClick={() => onNewInDirectory(session.cwd)}
+          >
+            New session here
+          </button>
         )}
       </div>
 

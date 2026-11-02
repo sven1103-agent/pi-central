@@ -97,6 +97,7 @@ import {
 } from "./panel.ts";
 import { ModelPicker } from "./components/ModelPicker.tsx";
 import { OpenDirectorySheet } from "./components/OpenDirectorySheet.tsx";
+import { recentDirectories } from "./recent.ts";
 import { InlineRename } from "./components/InlineRename.tsx";
 import { ThinkingPicker } from "./components/ThinkingPicker.tsx";
 import { SessionHeader } from "./components/SessionHeader.tsx";
@@ -1184,6 +1185,7 @@ export function App() {
               models={focused ? state.models[focused.id] : undefined}
               modelError={focused ? state.modelErrors[focused.id] : undefined}
               onRename={renameFocused}
+              onNewInDirectory={onOpenDirectory}
               onAnswer={onAnswer}
               onRequestModels={() => {
                 if (focused) send({ kind: "listModels", sessionId: focused.id });
@@ -1350,6 +1352,10 @@ export function App() {
       {sheetOpen && (
         <OpenDirectorySheet
           installationRoot={state.installationRoot}
+          home={state.home}
+          /* Derived from history, not stored (issue #149). `state.history` is the newest page, which is
+             exactly the right input: "recent" cannot be older than the page it is drawn from. */
+          recent={recentDirectories(state.history)}
           onClose={() => setSheetOpen(false)}
           onOpen={onOpenDirectory}
         />
@@ -1433,6 +1439,7 @@ function SessionView({
   modelError,
   onAnswer,
   onRename,
+  onNewInDirectory,
   onRequestModels,
   onSelectModel,
   thinking,
@@ -1478,6 +1485,8 @@ function SessionView({
   onAnswer: (dialogId: string, answer: DialogAnswer) => void;
   /** Rename this session (issues #78, #79). */
   onRename: (name: string) => void;
+  /** Start a NEW session in this session's directory (issue #149). */
+  onNewInDirectory?: ((cwd: string) => void) | undefined;
   onRequestModels: () => void;
   onSelectModel: (provider: string, modelId: string) => void;
   thinking: { levels: string[] | undefined; error: string | undefined };
@@ -1584,6 +1593,7 @@ function SessionView({
             onRequestThinkingLevels={onRequestThinkingLevels}
             onSelectThinkingLevel={onSelectThinkingLevel}
             onRename={onRename}
+            onNewInDirectory={onNewInDirectory}
             busy={busy}
             warnings={session.warnings}
           />

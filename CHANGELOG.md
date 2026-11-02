@@ -12,6 +12,11 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
+### Added
+
+- The directory sheet lists directories used before, one click each, derived from session history ([#149]).
+- A project session offers "New session here", which starts an empty session in the same directory ([#149]).
+
 ### Changed
 
 - Every rail row draws the context-usage bar, so pressure is compared across sessions by eye ([#13]).
@@ -24,6 +29,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - Both context gauges are sized from one token, so widening one widens the other ([#13]).
 
 [#13]: https://github.com/sven1103-agent/pi-central/issues/13
+[#149]: https://github.com/sven1103-agent/pi-central/issues/149
 [#196]: https://github.com/sven1103-agent/pi-central/issues/196
 
 ## [0.8.0] — 2026-11-01
