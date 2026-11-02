@@ -451,6 +451,52 @@ test("a session whose directory is gone is marked before it is clicked", () => {
   assert.match(html, /directory is gone/);
 });
 
+test("a session whose directory merely cannot be READ says so, instead of 'gone' (issue #196)", () => {
+  // The defect: History reported 274 of 500 sessions as "directory is gone" on a real machine, and half of those
+  // were present-but-unreadable (`EPERM`, an unmounted volume, macOS denying ~/Downloads). A permissions problem is
+  // often fixable right now; "gone" tells the reader to stop looking and restore something that is already there.
+  //
+  // The two cases must be distinguishable from the CHIP alone, because the chip is what the reader scans.
+  const unreadable = renderToString(createElement(HistoryView, {
+    history: [{
+      path: "/s.jsonl", id: "h", cwd: "/Users/x/Downloads", created: "", modifiedMs: 0, bytes: 10,
+      messageCount: 1, firstMessage: "hello", cwdExists: false, cwdMissing: "unreadable", cwdError: "EPERM",
+      scratch: false,
+    }],
+    onResume() {}, home: undefined,
+  }));
+  assert.match(unreadable, /directory unreadable/, "the words say which problem it is");
+  assert.ok(!/directory is gone/.test(unreadable), "and not the wrong one");
+  assert.match(unreadable, /EPERM/, "the OS code reaches the title, so the reader can act on it");
+});
+
+test("a session whose directory is GENUINELY gone still reads as gone", () => {
+  // The counterpart, so the new branch cannot swallow the old one.
+  const html = renderToString(createElement(HistoryView, {
+    history: [{
+      path: "/s.jsonl", id: "h", cwd: "/Volumes/archive/gone", created: "", modifiedMs: 0, bytes: 10,
+      messageCount: 1, firstMessage: "hello", cwdExists: false, cwdMissing: "missing", cwdError: "ENOENT",
+      scratch: false,
+    }],
+    onResume() {}, home: undefined,
+  }));
+  assert.match(html, /directory is gone/);
+  assert.ok(!/directory unreadable/.test(html));
+});
+
+test("a page from an OLDER orchestrator keeps the vaguer wording rather than guessing", () => {
+  // `cwdMissing` is optional and absent for a page produced before it existed. Guessing "unreadable" from a bare
+  // `cwdExists: false` would be inventing a cause; the old wording is what is actually known.
+  const html = renderToString(createElement(HistoryView, {
+    history: [{
+      path: "/s.jsonl", id: "h", cwd: "/Volumes/archive/gone", created: "", modifiedMs: 0, bytes: 10,
+      messageCount: 1, firstMessage: "hello", cwdExists: false, scratch: false,
+    }],
+    onResume() {}, home: undefined,
+  }));
+  assert.match(html, /directory is gone/);
+});
+
 test("history search is present, since searching by content is the point (US-4)", () => {
   const html = renderToString(createElement(HistoryView, { history: [], onResume() {}, home: undefined }));
   assert.match(html, /type="search"/);

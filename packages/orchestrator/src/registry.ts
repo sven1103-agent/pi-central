@@ -30,6 +30,7 @@ import { createReadStream, readdirSync, realpathSync, statSync, type Stats } fro
 import { basename, dirname, join, resolve, sep } from "node:path";
 import type { HistoricalSession } from "@pi-central/protocol";
 import { isScratch, type Config } from "./config.ts";
+import { inspectDirectory } from "./resume.ts";
 
 /** Pi's session header. Versioned; asserted on read. */
 export interface SessionHeader {
@@ -274,6 +275,7 @@ async function describeSessionFile(
     return { ok: false, reason: `unknown session version ${parsed.header.version}` };
   }
   const cwd = parsed.header.cwd || decodeSessionDir(projectDir);
+  const cwdState = inspectDirectory(cwd);
   return {
     ok: true,
     session: {
@@ -287,7 +289,21 @@ async function describeSessionFile(
       bytes: stats.size,
       messageCount: parsed.messageCount,
       firstMessage: parsed.firstMessage,
-      cwdExists: directoryExists(cwd),
+      /*
+       * `cwdExists` plus WHY, from one classification (issue #196).
+       *
+       * It used to be a boolean produced by a local `directoryExists` that swallowed every error code, so a
+       * directory denied by `EPERM` was indistinguishable from a deleted one and History told the reader it was
+       * "gone". `inspectDirectory` is the same function `resume` uses, so the chip and the refusal dialog cannot
+       * disagree about the same session.
+       */
+      cwdExists: cwdState.ok,
+      ...(cwdState.ok
+        ? {}
+        : {
+            cwdMissing: cwdState.reason === "unreadable" ? "unreadable" : "missing",
+            ...(cwdState.code === undefined ? {} : { cwdError: cwdState.code }),
+          }),
       scratch: isScratch(config, cwd),
     },
   };
@@ -404,10 +420,3 @@ export async function discover(config: Config, limit = 500): Promise<DiscoveryRe
   return { sessions: sessions.slice(0, limit), total: sessions.length, skipped };
 }
 
-function directoryExists(dir: string): boolean {
-  try {
-    return statSync(dir).isDirectory();
-  } catch {
-    return false;
-  }
-}

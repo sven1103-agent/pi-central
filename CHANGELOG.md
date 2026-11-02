@@ -18,10 +18,13 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- History says a directory is unreadable when it exists but cannot be read, instead of calling it gone ([#196]).
+- Discovery and resume share one directory classification, so the History chip and the refusal dialog agree ([#196]).
 - The context-pressure threshold is one shared constant instead of three separate `80`s ([#13]).
 - Both context gauges are sized from one token, so widening one widens the other ([#13]).
 
 [#13]: https://github.com/sven1103-agent/pi-central/issues/13
+[#196]: https://github.com/sven1103-agent/pi-central/issues/196
 
 ## [0.8.0] — 2026-11-01
 
