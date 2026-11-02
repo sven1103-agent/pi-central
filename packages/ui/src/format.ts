@@ -34,14 +34,14 @@ export function formatTokens(tokens: number | null): string {
 /**
  * Where context pressure stops being trivia and starts being a warning.
  *
- * This lives here, in the display module, because **three** surfaces need the same number and each
- * used to carry its own literal: `formatContext`'s word `full`, `ContextMeter`'s amber fill, and — from
- * issue #13 — the fleet summary's "n near full" count.
+ * This lives here, in the display module, because **three** surfaces need the same number and each used
+ * to carry its own literal: `formatContext`'s word `full`, `ContextMeter`'s amber fill, and the rail
+ * row's warning class (issue #13).
  *
  * It was already duplicated twice, and the comment on `ContextMeter`'s copy claimed the two "can never
- * disagree". They could: they were two independent `80`s in two files, and nothing would have failed
- * if one moved. Prose about an invariant is not the invariant, so there is one constant now and the
- * meter imports it.
+ * disagree". They could: they were two independent `80`s in two files, and nothing would have failed if
+ * one moved. Prose about an invariant is not the invariant, so there is one constant now, the meter
+ * imports it, and the rail's comparison goes through `isNearFull` below.
  *
  * 80% is where compaction becomes likely within the next turn or two — the point at which the reader
  * has a decision to make (compact now, or finish the thought first).
