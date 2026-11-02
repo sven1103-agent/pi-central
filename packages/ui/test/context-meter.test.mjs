@@ -137,3 +137,41 @@ test("the header cannot scatter into four rows", () => {
   const base = /(?:^|\n)\.session-header\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
   assert.match(base, /flex-wrap:\s*nowrap/, "the wide form does not wrap freely");
 });
+
+// --- The gauge's width is one value, wherever it is drawn (issue #13) -----------------------------
+
+/**
+ * The `:root` custom property, read out of the stylesheet.
+ *
+ * These two surfaces are the same gauge at two sizes, and they had two independent widths — the rail's
+ * `max-width: 120px` beside the header's `width: 76px`. Widening one and not the other is exactly what a
+ * maintainer asked for after seeing them together, which is the point: nothing failed, so nothing stopped it.
+ * Prose claiming "same gauge" is not a mechanism; this is.
+ */
+function token(name) {
+  const declared = new RegExp(`${name}:\\s*([^;]+);`).exec(css);
+  assert.ok(declared, `${name} must be declared in :root`);
+  return declared[1].trim();
+}
+
+test("both gauges are sized from ONE token, so neither can be widened alone", () => {
+  const width = token("--gauge-width");
+  assert.match(width, /^\d+px$/, `--gauge-width should be a concrete length, got ${width}`);
+
+  // The header meter takes the token directly.
+  assert.match(rule(".context-meter-track"), /width:\s*var\(--gauge-width\)/);
+
+  // The rail bar is flexible, capped by the same token — it may shrink in a narrow rail, but its maximum is the
+  // shared width, so at the sizes both are normally seen they agree.
+  assert.match(rule(".context-bar"), /max-width:\s*var\(--gauge-width\)/);
+
+  // And neither may reintroduce a literal of its own: a hard `width` on the bar would defeat the flexibility,
+  // and a `max-width` on the header meter would silently cap the token.
+  //
+  // Matched as a DECLARATION, i.e. after `;`/start — a bare `width: \d+px` pattern also matches inside
+  // `min-width: 42px`, which is a legitimate floor rather than a fixed size, and flagging it would have been a
+  // false positive (found by this test failing on its own first draft).
+  const barWidth = /(?:^|;)\s*width:\s*\d+px/.exec(rule(".context-bar"));
+  assert.equal(barWidth, null, `the bar's width is flexible, not fixed (found ${barWidth?.[0]?.trim()})`);
+  assert.doesNotMatch(rule(".context-meter-track"), /max-width:/, "the header meter takes the token without a cap");
+});

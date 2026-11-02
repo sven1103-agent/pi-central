@@ -81,6 +81,16 @@
   --r-2: 6px;
   --r-3: 8px;
   --r-pill: 999px;
+  /*
+   * How wide a context gauge is drawn, wherever it appears (issue #13).
+   *
+   * One value rather than a literal per surface, for the reason the threshold is one constant: the header meter and
+   * the rail bar are the SAME gauge at two sizes, and two independent widths would drift the moment one is adjusted —
+   * which is exactly what happened when the rail's was widened and the header's was not. The bar is the one that
+   * needs the room: its job in a row is to be compared against its neighbours, and 76px was too short to read a
+   * fifth of a difference.
+   */
+  --gauge-width: 120px;
 
   --fs-2xs: 10px;
   --fs-xs: 11px;
@@ -2558,7 +2568,7 @@ select.btn { font-family: var(--sans); }
 .context-meter-track {
   position: relative;
   display: block;
-  width: 76px;
+  width: var(--gauge-width);
   height: 6px;
   border-radius: var(--r-pill);
   background: var(--panel-3);
@@ -2585,9 +2595,10 @@ select.btn { font-family: var(--sans); }
 /*
  * The rail's compact context bar (issue #13).
  *
- * Same gauge, sized for a row. 4px tall and as wide as its container: a row already carries a percentage as text,
- * and the bar's job is to be COMPARED across rows rather than read, so it wants width and almost no height. The
- * 6px/76px header meter would be a second fixed-width column competing with the name.
+ * Same gauge, sized for a row. 4px tall and as wide as the row allows, up to `--gauge-width` — the same width the
+ * header's meter uses, because the two are one gauge at two sizes and two literals would drift. A row already
+ * carries the percentage as text, so the bar wants width and almost no height: it is read by comparing fills, not
+ * by reading a value.
  *
  * `--warn` (not `--warn-text`) past the threshold: this is a non-text fill and takes the saturated hue, the same
  * choice the header meter makes (DESIGN §8). The amber is never the only carrier — the label beside it says `ctx
@@ -2595,9 +2606,11 @@ select.btn { font-family: var(--sans); }
  */
 .context-bar {
   display: inline-block;
+  /* Flexible by default, capped by the shared gauge width — so the row's bar is as long as the header's, and a
+     narrow rail shrinks it instead of overflowing. */
   flex: 1;
   min-width: 42px;
-  max-width: 120px;
+  max-width: var(--gauge-width);
   height: 4px;
   border-radius: var(--r-pill);
   background: var(--panel-3);
