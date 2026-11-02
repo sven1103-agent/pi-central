@@ -46,6 +46,21 @@ from looking at a screenshot after every automated check had passed — the misl
 misplaced tool calls, the mislabelled session id. An increment is not done until its manual slices
 have been looked at.
 
+Two scripts make that cheap, and both render the **real** components rather than a mock-up. They
+exist because a headless browser cannot run in a sandbox (C1 fails every engine, not only Chromium),
+which used to mean the look-at-it step was simply skipped:
+
+```bash
+node scripts/render-ui.mjs            # rail and header scenes → /tmp/pi-central-ui.html
+node scripts/render-ui.mjs --list     # the scenes that exist
+node scripts/render-session-html.mjs  # a real session's transcript → /tmp/pi-transcript.html
+```
+
+Neither captures a screenshot — they write one self-contained file with the shipped stylesheet, and
+you open it. What they cannot show is motion: a hover, a transition, a focus ring, a drag. What they
+can show is the thing the manual checks have actually been about — whether a summary is readable,
+whether a bar has room, whether ten rows can be scanned.
+
 ## Increment 1 — Verified foundation ✅
 
 **Delivered as v0.1.0.** The premise is proven and the first three layers exist.

@@ -12,6 +12,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
+### Added
+
+- `scripts/render-ui.mjs` renders the rail and header to one HTML file, so a UI change can be looked at ([#13]).
+
 ### Changed
 
 - Every rail row draws the context-usage bar, so pressure is compared across sessions by eye ([#13]).
