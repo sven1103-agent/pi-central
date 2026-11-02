@@ -36,6 +36,7 @@ export function SessionRail({
   focusedId,
   onFocusRow,
   onForgetRow,
+  onDeleteRow,
   onRetryRow,
   retryAvailable,
   onStartSession,
@@ -64,6 +65,17 @@ export function SessionRail({
    * is a different action with its own confirmation.
    */
   onForgetRow: (row: RosterRow) => void;
+  /**
+   * Delete a STOPPED session's transcript from disk (issue #150).
+   *
+   * Distinct from `onForgetRow` next to it, and the two are deliberately side by side: `Forget` hides a row and
+   * deletes nothing, `Delete` removes bytes and cannot be undone. The rail's own comment on `onForgetRow` promised
+   * "deleting is #150 … a different action with its own confirmation", and this is that action.
+   *
+   * Absent means the affordance is not rendered — so a UI connected to an orchestrator that predates the control does
+   * not offer a button that would fail.
+   */
+  onDeleteRow?: ((row: RosterRow) => void) | undefined;
   /**
    * Retry a FAILED session (issue #11).
    *
@@ -169,6 +181,7 @@ export function SessionRail({
                   focused={rowKey(row) === focusedId}
                   onFocus={() => onFocusRow(row)}
                   onForget={() => onForgetRow(row)}
+                  onDelete={onDeleteRow === undefined ? undefined : () => onDeleteRow(row)}
                   onRetry={() => onRetryRow(row)}
                   retryAvailable={retryAvailable}
                   home={home}
@@ -234,6 +247,17 @@ function rowName(row: RosterRow, firstPrompt?: string | undefined): string {
   return nameLabel(row.entry.name, row.entry.scratch === true, filenameOf(row.entry.path), firstPrompt);
 }
 
+/**
+ * A row's label, exported so the DELETE dialog can name the same session the row named.
+ *
+ * One rule: a dialog asking "delete this session?" about a row that said something else is exactly the ambiguity a
+ * destructive confirmation cannot afford. `firstPrompt` is forwarded for the same reason — the row may be labelled
+ * by its prompt, and the dialog must say the same thing.
+ */
+export function rowLabel(row: RosterRow, firstPrompt?: string | undefined): string {
+  return rowName(row, firstPrompt);
+}
+
 /** The first line of a message — the reason, as opposed to everything the process printed. */
 function firstLine(text: string): string {
   return text.split("\n")[0] ?? text;
@@ -251,6 +275,7 @@ function RailRow({
   focused,
   onFocus,
   onForget,
+  onDelete,
   onRetry,
   retryAvailable,
   home,
@@ -259,6 +284,8 @@ function RailRow({
   focused: boolean;
   onFocus: () => void;
   onForget: () => void;
+  /** Absent when the connected orchestrator cannot delete sessions (older protocol). */
+  onDelete?: (() => void) | undefined;
   onRetry: () => void;
   retryAvailable: boolean;
   home: string | undefined;
@@ -412,14 +439,31 @@ function RailRow({
         <span className="rail-row-earlier">last failure: {firstLine(session.previousError)}</span>
       )}
       {session === undefined && (
-        <button
-          type="button"
-          className="rail-row-forget"
-          onClick={onForget}
-          title="Remove from the rail. The session file is not deleted."
-        >
-          Forget
-        </button>
+        <span className="rail-row-actions rail-row-stopped-actions">
+          <button
+            type="button"
+            className="rail-row-forget"
+            onClick={onForget}
+            /*
+              The two controls are ADJACENT and their labels say the difference, because the difference is the whole
+              point: Forget hides a row and keeps the file; Delete removes the file and cannot be undone. A single
+              ambiguous "Remove" is how one of them gets used for the other.
+            */
+            title="Remove from the rail. The session file is not deleted."
+          >
+            Forget
+          </button>
+          {onDelete !== undefined && (
+            <button
+              type="button"
+              className="rail-row-forget rail-row-delete"
+              onClick={onDelete}
+              title="Delete this session's transcript from disk. This cannot be undone."
+            >
+              Delete
+            </button>
+          )}
+        </span>
       )}
     </div>
   );

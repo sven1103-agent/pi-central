@@ -18,6 +18,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 - A project session offers "New session here", which starts an empty session in the same directory ([#149]).
 - The sheet's recent list says "unreadable" rather than "missing" when a directory exists but cannot be read ([#196]).
 - An unnamed session is labelled by its first prompt, so the rail shows the task instead of a handle ([#149]).
+- A stopped session can be deleted from the rail and from History, behind a confirmation that names its directory ([#150]).
+- Deleting removes the session's transcript and its subagent sidecar; a sidecar that cannot be removed is reported ([#150]).
 
 ### Changed
 
@@ -32,7 +34,9 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 [#13]: https://github.com/sven1103-agent/pi-central/issues/13
 [#149]: https://github.com/sven1103-agent/pi-central/issues/149
+[#150]: https://github.com/sven1103-agent/pi-central/issues/150
 [#196]: https://github.com/sven1103-agent/pi-central/issues/196
+[#150]: https://github.com/sven1103-agent/pi-central/issues/150
 
 ## [0.8.0] — 2026-11-01
 
@@ -99,6 +103,9 @@ Separately, **181 of 5 912 user prompts name an image file by path** (`@img_6.pn
 text until now.
 
 ### Added
+
+- A stopped session can be deleted from the rail and from History, behind a confirmation that names its directory ([#150]).
+- Deleting removes the session's transcript and its subagent sidecar; a sidecar that cannot be removed is reported ([#150]).
 
 
 - **Images are shown in the transcript, where they belong in the conversation.** A tool that reads a

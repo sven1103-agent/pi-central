@@ -280,6 +280,16 @@ export class Supervisor extends EventEmitter {
     return spawned;
   }
 
+  /**
+   * The live session using one session file, if any.
+   *
+   * Public because deleting a transcript has to refuse while a process holds it open (issue #150), and that decision
+   * belongs with the component that knows what is running (C3) rather than with the transport.
+   */
+  listedByFile(sessionPath: string): LiveSession | undefined {
+    return this.#findLiveByPath(sessionPath);
+  }
+
   #findLiveByPath(sessionPath: string): LiveSession | undefined {
     for (const session of this.#sessions.values()) {
       if (session.sessionFile === sessionPath && session.state !== "stopped" && session.state !== "failed") {

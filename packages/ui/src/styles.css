@@ -625,6 +625,39 @@ button { font: inherit; color: inherit; }
      reached by the keyboard that is the reason it is hidden. */
   opacity: 0;
 }
+/*
+ * The stopped row's two controls share ONE absolutely-positioned box (issue #150).
+ *
+ * `Forget` and `Delete` were each `position: absolute; right; bottom` — the same corner — so a second one would
+ * stack on top of the first. The wrapper takes the position and lays them out in a row, which keeps the row's height
+ * decided by its content (the reason `absolute` was chosen in the first place) and makes the pair's order explicit
+ * rather than accidental.
+ */
+.rail-row-stopped-actions {
+  position: absolute;
+  right: var(--sp-2);
+  bottom: var(--sp-2);
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-1);
+  /* Hidden until the row is engaged, exactly as the single control was. */
+  opacity: 0;
+}
+.rail-row:hover .rail-row-stopped-actions,
+.rail-row:focus-within .rail-row-stopped-actions { opacity: 1; }
+/* Inside the wrapper the buttons are ordinary flex children, so they must not re-position themselves. */
+.rail-row-stopped-actions .rail-row-forget {
+  position: static;
+  opacity: 1;
+}
+/* Deleting is the irreversible one, so it carries the danger colour on hover while `Forget` stays neutral: the
+   difference between them is the whole point of having both. */
+.rail-row-stopped-actions .rail-row-delete:hover {
+  color: var(--danger-text);
+  border-color: var(--danger);
+  background: var(--danger-tint);
+}
+
 .rail-row:hover .rail-row-forget, .rail-row:focus-within .rail-row-forget { opacity: 1; }
 .rail-row-forget:hover { color: var(--danger-text); border-color: var(--danger); }
 .rail-row-forget:focus-visible { outline: none; box-shadow: var(--focus); opacity: 1; }
@@ -654,6 +687,23 @@ button { font: inherit; color: inherit; }
  * action that helps behind a hover would mean the reader has to discover it. It is also never red — the
  * session is not being destroyed, it is being tried again.
  */
+/*
+ * A History row hosts two controls now, so it is a `<div>` wrapper (issue #150) — the same restructuring the rail
+ * needed in #89, because nested buttons are invalid HTML and browsers resolve them by breaking the inner one.
+ */
+.history-row-wrap { display: flex; align-items: stretch; gap: 1px; }
+.history-row-wrap .history-row-main { flex: 1; min-width: 0; }
+.history-delete {
+  flex: none;
+  align-self: center;
+  font-size: var(--fs-xs);
+  padding: 4px 8px;
+  margin-right: var(--sp-2);
+  color: var(--dim);
+}
+.history-delete:hover { color: var(--danger-text); background: var(--danger-tint); }
+.history-delete:focus-visible { outline: none; box-shadow: var(--focus); }
+
 .rail-row-actions { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
 .rail-row-retry {
   background: none; border: 0; padding: 0 0 2px 2px;

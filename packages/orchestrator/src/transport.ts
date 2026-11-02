@@ -38,6 +38,7 @@ import type { Supervisor } from "./supervisor.ts";
 import type { FileError } from "./files.ts";
 import { acceptImages } from "./prompt-images.ts";
 import { discover, sessionAt } from "./registry.ts";
+import { deleteSessionFile } from "./delete-session.ts";
 import type { Config } from "./config.ts";
 import { createUiRequestHandler, resolveUiDistDir, servedUiIdentity } from "./static-ui.ts";
 
@@ -83,6 +84,7 @@ const CONTROL_KINDS: Record<Control["kind"], true> = {
   abort: true,
   stop: true,
   rename: true,
+  deleteSession: true,
   setModel: true,
   listModels: true,
   setThinkingLevel: true,
@@ -453,6 +455,57 @@ export class Transport {
       case "rename":
         await this.#supervisor.rename(control.sessionId, control.name);
         return;
+      case "deleteSession": {
+        /*
+         * Refused for a LIVE session, before anything is touched (issue #150).
+         *
+         * The file is open and Pi will keep appending to it, so deleting underneath a running process would leave it
+         * writing to an unlinked inode: the transcript the reader can still see would be gone from disk, and the
+         * session would look alive until it next flushed. The reader must stop it first, and the refusal says so
+         * rather than being a silent no-op.
+         *
+         * Keyed on the FILE, because that is what identifies the conversation — a resumed session has a different
+         * handle but the same path.
+         */
+        const live = this.#supervisor.listedByFile(control.path);
+        if (live !== undefined) {
+          this.#broadcast({
+            kind: "error",
+            message:
+              `Stop this session before deleting it — ${live.name} is still running and its transcript is open. ` +
+              `Deleting it now would remove a file the process is still writing to.`,
+            sessionId: live.id,
+          });
+          return;
+        }
+        const result = deleteSessionFile(this.#config, control.path);
+        if (!result.ok) {
+          // The failure names the OS reason, and the session stays visible because nothing was removed.
+          this.#broadcast({ kind: "error", message: result.message });
+          return;
+        }
+        /*
+         * The sidecar's own failure is a SEPARATE report even though the delete succeeded: silence there would leave
+         * the store growing through sidecars while the reader believes the session is gone.
+         */
+        if (result.sidecarFailure !== undefined) {
+          this.#broadcast({ kind: "error", message: result.sidecarFailure });
+        }
+        // Re-discover and re-broadcast, so both the rail and History drop the row from one authoritative answer
+        // rather than each removing it locally and possibly disagreeing.
+        const after = await discover(this.#config);
+        this.#broadcast({ kind: "history", history: after.sessions, total: after.total });
+        this.#broadcast({
+          kind: "snapshot",
+          live: this.#supervisor.list(),
+          history: after.sessions,
+          historyTotal: after.total,
+          home: this.#config.home,
+          installationRoot: this.#config.installationRoot,
+          install: this.#snapshotInstallFacts(),
+        });
+        return;
+      }
       case "listModels": {
         const result = await this.#supervisor.listModels(control.sessionId);
         // "empty" and "failed" are different events: an empty picker would claim the session has

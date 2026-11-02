@@ -13,6 +13,7 @@
 import { useState } from "react";
 import type { HistoricalSession } from "@pi-central/protocol";
 import { formatAge, nameLabel } from "../format.ts";
+import { ConfirmDelete } from "./ConfirmDelete.tsx";
 import { searchHistory } from "../store.ts";
 import { CopyButton } from "./CopyButton.tsx";
 
@@ -20,16 +21,31 @@ export function HistoryView({
   history,
   historyTotal,
   onResume,
+  onDelete,
   home,
 }: {
   history: HistoricalSession[];
   /** Total on disk, which may exceed the loaded page. */
   historyTotal: number;
   onResume: (session: HistoricalSession) => void;
+  /**
+   * Delete a session's transcript (issue #150).
+   *
+   * A callback rather than the request itself, so the confirmation dialog — which lives here, next to the row that was
+   * clicked — is the only path to it. Nothing deletes without passing through a dialog the reader has read.
+   */
+  onDelete?: ((session: HistoricalSession) => void) | undefined;
   home: string | undefined;
 }) {
   const [query, setQuery] = useState("");
   const [refused, setRefused] = useState<HistoricalSession | undefined>(undefined);
+  /**
+   * The session awaiting a delete confirmation (issue #150).
+   *
+   * Held here rather than in the row, because the dialog outlives the row: after a delete the list re-renders without
+   * that session, and a dialog owned by the row would unmount mid-interaction.
+   */
+  const [deleting, setDeleting] = useState<HistoricalSession | undefined>(undefined);
   const results = searchHistory(history, query);
 
   return (
@@ -87,12 +103,25 @@ export function HistoryView({
                 }
                 onResume(session);
               }}
+              onDelete={onDelete === undefined ? undefined : () => setDeleting(session)}
             />
           ))}
         </>
       )}
 
       {refused && <ResumeRefusal session={refused} onDismiss={() => setRefused(undefined)} />}
+
+      {deleting !== undefined && onDelete !== undefined && (
+        <ConfirmDelete
+          label={nameLabel(deleting.name, deleting.scratch, deleting.id)}
+          cwd={deleting.cwd}
+          onCancel={() => setDeleting(undefined)}
+          onConfirm={() => {
+            onDelete(deleting);
+            setDeleting(undefined);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -101,14 +130,25 @@ function HistoryRow({
   session,
   home,
   onSelect,
+  onDelete,
 }: {
   session: HistoricalSession;
   home: string | undefined;
   onSelect: () => void;
+  /** Present only when deletion is available; absent means the affordance is not rendered at all. */
+  onDelete?: (() => void) | undefined;
 }) {
   return (
-    <button type="button" className="history-row" onClick={onSelect}>
-      <span className="h1">
+    /*
+      A `<div>` hosting two controls, not one `<button>` — the same restructuring the rail needed in #89.
+
+      Nested buttons are invalid HTML and browsers resolve them by breaking the inner one, so a Delete control inside a
+      button row would silently not work. `.history-row-main` carries the row's layout so the visual rhythm is
+      unchanged.
+    */
+    <div className={`history-row-wrap${onDelete === undefined ? "" : " has-delete"}`}>
+      <button type="button" className="history-row history-row-main" onClick={onSelect}>
+        <span className="h1">
         {/*
           The same labelling rule the rail uses (issue #149 follow-up).
 
@@ -147,12 +187,28 @@ function HistoryRow({
         {abbreviate(session.cwd, home)}
       </span>
       <p className="first">{session.firstMessage || "(no messages)"}</p>
-      <span className="meta">
-        <span>{formatAge(session.modifiedMs)}</span>
-        <span>{session.messageCount} msgs</span>
-        <span>{formatBytes(session.bytes)}</span>
-      </span>
-    </button>
+        <span className="meta">
+          <span>{formatAge(session.modifiedMs)}</span>
+          <span>{session.messageCount} msgs</span>
+          <span>{formatBytes(session.bytes)}</span>
+        </span>
+      </button>
+      {onDelete !== undefined && (
+        <button
+          type="button"
+          className="btn btn-quiet history-delete"
+          /*
+            Labeled for the session, not just "Delete". A list of ten rows each announcing "Delete" is unusable to a
+            screen-reader user, and this is the one control whose target matters more than most.
+          */
+          aria-label={`Delete the session ${nameLabel(session.name, session.scratch, session.id)}`}
+          title="Delete this session's transcript from disk"
+          onClick={onDelete}
+        >
+          Delete
+        </button>
+      )}
+    </div>
   );
 }
 
