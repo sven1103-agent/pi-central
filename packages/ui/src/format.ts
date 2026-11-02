@@ -31,12 +31,34 @@ export function formatTokens(tokens: number | null): string {
   return `${(tokens / 1_000_000).toFixed(1)}M`;
 }
 
+/**
+ * Where context pressure stops being trivia and starts being a warning.
+ *
+ * This lives here, in the display module, because **three** surfaces need the same number and each
+ * used to carry its own literal: `formatContext`'s word `full`, `ContextMeter`'s amber fill, and — from
+ * issue #13 — the fleet summary's "n near full" count.
+ *
+ * It was already duplicated twice, and the comment on `ContextMeter`'s copy claimed the two "can never
+ * disagree". They could: they were two independent `80`s in two files, and nothing would have failed
+ * if one moved. Prose about an invariant is not the invariant, so there is one constant now and the
+ * meter imports it.
+ *
+ * 80% is where compaction becomes likely within the next turn or two — the point at which the reader
+ * has a decision to make (compact now, or finish the thought first).
+ */
+export const CONTEXT_PRESSURE_PERCENT = 80;
+
+/** Is this session's context under pressure? `false` for unknown, which is not "fine" but is not a warning. */
+export function isNearFull(percent: number | null): boolean {
+  return percent !== null && Number.isFinite(percent) && percent >= CONTEXT_PRESSURE_PERCENT;
+}
+
 /** Context usage, or an em dash rather than a fabricated 0%. */
 export function formatContext(percent: number | null): string {
   if (percent === null || !Number.isFinite(percent)) return "ctx —";
   const rounded = Math.round(percent);
-  // At 80%+ the number is joined by a word, so pressure is never conveyed by colour alone.
-  return rounded >= 80 ? `ctx ${rounded}% full` : `ctx ${rounded}%`;
+  // At the threshold the number is joined by a word, so pressure is never conveyed by colour alone.
+  return isNearFull(percent) ? `ctx ${rounded}% full` : `ctx ${rounded}%`;
 }
 
 export function formatThinking(level: string | undefined): string {

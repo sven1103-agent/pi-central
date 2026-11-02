@@ -12,6 +12,17 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
+### Changed
+
+- Every rail row draws the context-usage bar, so pressure is compared across sessions by eye ([#13]).
+
+### Fixed
+
+- The context-pressure threshold is one shared constant instead of three separate `80`s ([#13]).
+- Both context gauges are sized from one token, so widening one widens the other ([#13]).
+
+[#13]: https://github.com/sven1103-agent/pi-central/issues/13
+
 ## [0.8.0] — 2026-11-01
 
 The release that makes updating stop costing you work. Two things every update used to break — the UI you were

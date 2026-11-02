@@ -2138,6 +2138,72 @@ test("a roster row with no live session appears under Stopped, and claims no met
   assert.ok(!/\$0\.0000/.test(html), `no fabricated cost: ${html}`);
 });
 
+// --- The rail's context bar (issue #13) --------------------------------------------------------
+//
+// The reader's own suggestion, after the fleet SUMMARY was rejected as "just more verbose text": put the gauge the
+// header already draws into each row, because a bar is magnitude and can be compared at a glance where a number has
+// to be read ten times. These assertions are about the two things that make it trustworthy: it agrees with the label
+// beside it, and it never draws a bar for a context nobody measured.
+
+/** The rail with one session at `percent`, for reading the bar and its label together. */
+function railWithContext(percent) {
+  return renderToString(createElement(SessionRail, {
+    rows: rowsOf([session({ contextPercent: percent, name: "the row" })]),
+    focusedId: undefined, onFocusRow() {}, onForgetRow() {}, onRetryRow() {}, retryAvailable: true,
+    onStartSession() {}, onOpenDirectory() {}, home: "/Users/x", historyTotal: 0,
+  }));
+}
+
+test("a row draws a meter whose value matches the percentage printed beside it", () => {
+  // The bar and the label are two renderings of one fact. If they could disagree, the bar would be worse than no
+  // bar: a reader who scans fills would be told something the number contradicts.
+  for (const percent of [12, 41, 79, 80, 96]) {
+    const html = railWithContext(percent);
+    const meter = /role="meter"[^>]*aria-valuenow="(\d+)"/.exec(html)
+      // Attributes are emitted in source order, so accept either order rather than pinning it.
+      ?? /aria-valuenow="(\d+)"[^>]*role="meter"/.exec(html);
+    assert.ok(meter, `a measured context must render a meter: ${percent}%`);
+    assert.equal(Number(meter[1]), percent, "the bar's value is the reported percentage");
+    assert.match(html, new RegExp(`ctx ${percent}%`), "the label states the same number");
+  }
+});
+
+test("the bar turns amber at exactly the point the label says `full`", () => {
+  // Both come from CONTEXT_PRESSURE_PERCENT. Colour is never the only carrier (DESIGN §9): past the threshold the
+  // words change too, and this asserts they change on the same row the fill does.
+  const under = railWithContext(79);
+  assert.ok(!/context-bar is-full/.test(under), "below the threshold the fill is not amber");
+  assert.ok(!/ctx 79% full/.test(under), "and the word is absent");
+
+  const at = railWithContext(80);
+  assert.ok(/context-bar is-full/.test(at), "at the threshold the fill is amber");
+  assert.match(at, /ctx 80% full/, "and the word appears — the amber is reinforcement, not the message");
+});
+
+test("an UNMEASURED context draws no bar at all", () => {
+  // An empty track in a row reads as "0% used" for a session nobody has measured — the fabricated zero that
+  // `formatContext` already refuses. The row says `ctx —` and shows no gauge.
+  const html = railWithContext(null);
+  assert.ok(!/role="meter"/.test(html), `no meter for an unknown context: ${html}`);
+  assert.match(html, /ctx —/, "and it still says so rather than rendering nothing");
+  assert.ok(!/context-bar/.test(html), "not even an empty track");
+});
+
+test("each row's meter is named for its session, so ten of them are distinguishable", () => {
+  // The header's single meter is labelled "Context usage". Ten of those in a list are indistinguishable to a
+  // screen-reader user moving through the rail, so the rail passes the session's own name.
+  const html = renderToString(createElement(SessionRail, {
+    rows: rowsOf([
+      session({ id: "a", name: "alpha", contextPercent: 30 }),
+      session({ id: "b", name: "beta", contextPercent: 70 }),
+    ]),
+    focusedId: undefined, onFocusRow() {}, onForgetRow() {}, onRetryRow() {}, retryAvailable: true,
+    onStartSession() {}, onOpenDirectory() {}, home: "/Users/x", historyTotal: 0,
+  }));
+  assert.match(html, /aria-label="Context usage for alpha"/);
+  assert.match(html, /aria-label="Context usage for beta"/);
+});
+
 test("a roster row with no live session still carries its directory on hover", () => {
   const html = renderToString(createElement(SessionRail, {
     rows: [{ entry: { path: "/s/a/x.jsonl", cwd: "/Users/x/git/proj" } }],

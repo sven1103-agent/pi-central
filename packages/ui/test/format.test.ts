@@ -10,7 +10,9 @@ import assert from "node:assert/strict";
 import {
   displayName,
   formatAge,
+  CONTEXT_PRESSURE_PERCENT,
   formatContext,
+  isNearFull,
   formatCost,
   formatElapsed,
   formatModel,
@@ -84,6 +86,23 @@ test("context pressure is stated in words at 80% and above", () => {
   assert.equal(formatContext(80), "ctx 80% full");
   assert.equal(formatContext(99), "ctx 99% full");
   assert.equal(formatContext(null), "ctx —");
+});
+
+test("the pressure threshold is ONE constant shared by every surface that shows it (issue #13)", () => {
+  // It used to be two independent `80`s — one here, one in `ContextMeter` — and the comment on the
+  // meter's copy claimed the two "can never disagree". Prose about an invariant is not the invariant:
+  // moving one would have made the bar amber at a different point from the word `full` with nothing
+  // failing. There are three consumers now (the word, the bar, the fleet's near-full count), so the
+  // agreement is asserted rather than described.
+  //
+  // Asserted at the boundary rather than at 80 specifically, so changing the constant does not break
+  // this test — changing a CONSUMER to a literal does.
+  assert.equal(formatContext(CONTEXT_PRESSURE_PERCENT - 1), `ctx ${CONTEXT_PRESSURE_PERCENT - 1}%`);
+  assert.equal(formatContext(CONTEXT_PRESSURE_PERCENT), `ctx ${CONTEXT_PRESSURE_PERCENT}% full`);
+  assert.equal(isNearFull(CONTEXT_PRESSURE_PERCENT - 1), false);
+  assert.equal(isNearFull(CONTEXT_PRESSURE_PERCENT), true);
+  // Unknown is not "fine", but it is not a warning either — it must never be counted as pressure.
+  assert.equal(isNearFull(null), false);
 });
 
 test("thinking level is truncated to three characters", () => {

@@ -81,6 +81,16 @@
   --r-2: 6px;
   --r-3: 8px;
   --r-pill: 999px;
+  /*
+   * How wide a context gauge is drawn, wherever it appears (issue #13).
+   *
+   * One value rather than a literal per surface, for the reason the threshold is one constant: the header meter and
+   * the rail bar are the SAME gauge at two sizes, and two independent widths would drift the moment one is adjusted —
+   * which is exactly what happened when the rail's was widened and the header's was not. The bar is the one that
+   * needs the room: its job in a row is to be compared against its neighbours, and 76px was too short to read a
+   * fifth of a difference.
+   */
+  --gauge-width: 120px;
 
   --fs-2xs: 10px;
   --fs-xs: 11px;
@@ -359,8 +369,25 @@ button { font: inherit; color: inherit; }
   color: var(--dim);
 }
 
-.fleet { display: flex; gap: var(--sp-3); }
+/* Item separation WITHOUT whitespace between the spans (issue #13).
+   `gap` is invisible to `textContent`, so the rendered summary read `2 sessions1 scratch` — fine on
+   screen, and unreadable to assistive tech with CSS dropped. A visual separator carried in a
+   pseudo-element gives the same spacing and keeps the DOM's text contiguous; it is also not a
+   separator character, so it is not announced twice with the gap. */
+/* Spacing AND separation both come from the text, not from `gap` alone (issue #13).
+   `gap` is invisible to `textContent`, so the rendered summary read `2 sessions1 scratch` — fine on
+   screen, unreadable with CSS dropped. A pseudo-element does not fix that either: it is not in the
+   text. The separator is therefore a real character between counters (rendered by the component), and
+   the gap is dropped so the separation is not doubled. */
+.fleet { display: flex; gap: 0; }
 .fleet-needs { color: var(--warn-text); font-weight: 600; }
+/* Pressure on the NEXT interruption rather than the current one (issue #13). One tint quieter than
+   `need you`, because a nearly-full context is a decision to make soon, not a session waiting on you
+   now — and two equally loud warnings in one row stop being scanned. */
+.fleet-warn { color: var(--warn-text); }
+/* The breakdown ("1 blocked, 1 failed"). Regexped in the summary's own test; kept lighter so the
+   aggregate stays the thing that catches the eye. */
+.fleet-detail { font-weight: 400; opacity: 0.85; }
 
 .conn { display: inline-flex; align-items: center; gap: 6px; }
 .conn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
@@ -2541,7 +2568,7 @@ select.btn { font-family: var(--sans); }
 .context-meter-track {
   position: relative;
   display: block;
-  width: 76px;
+  width: var(--gauge-width);
   height: 6px;
   border-radius: var(--r-pill);
   background: var(--panel-3);
@@ -2564,6 +2591,43 @@ select.btn { font-family: var(--sans); }
 .context-meter.is-full .context-meter-fill { background: var(--warn); }
 .context-meter.is-full .context-meter-label { color: var(--warn-text); }
 .context-meter-label { font-size: var(--fs-xs); }
+
+/*
+ * The rail's compact context bar (issue #13).
+ *
+ * Same gauge, sized for a row. 4px tall and as wide as the row allows, up to `--gauge-width` — the same width the
+ * header's meter uses, because the two are one gauge at two sizes and two literals would drift. A row already
+ * carries the percentage as text, so the bar wants width and almost no height: it is read by comparing fills, not
+ * by reading a value.
+ *
+ * `--warn` (not `--warn-text`) past the threshold: this is a non-text fill and takes the saturated hue, the same
+ * choice the header meter makes (DESIGN §8). The amber is never the only carrier — the label beside it says `ctx
+ * 84% full`, so a reader who cannot see the colour still gets the fact (DESIGN §9).
+ */
+.context-bar {
+  display: inline-block;
+  /* Flexible by default, capped by the shared gauge width — so the row's bar is as long as the header's, and a
+     narrow rail shrinks it instead of overflowing. */
+  flex: 1;
+  min-width: 42px;
+  max-width: var(--gauge-width);
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--panel-3);
+  /* A hairline edge so the track is visible at 0, where "empty" and "not rendered" would otherwise look alike. */
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+  /* Centred against the mono label's cap height rather than its baseline box. */
+  align-self: center;
+}
+.context-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+  transition: width 240ms ease-out;
+}
+.context-bar.is-full .context-bar-fill { background: var(--warn); }
 
 /*
  * The header's stats group: the meter and the cost, held together and against the right edge.
