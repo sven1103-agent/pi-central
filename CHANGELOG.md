@@ -19,6 +19,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 ### Fixed
 
 - The context-pressure threshold is one shared constant instead of three separate `80`s ([#13]).
+- Both context gauges are sized from one token, so widening one widens the other ([#13]).
 
 [#13]: https://github.com/sven1103-agent/pi-central/issues/13
 
