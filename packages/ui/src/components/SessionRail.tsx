@@ -9,9 +9,10 @@
  */
 import { useMemo, useState } from "react";
 import type { LiveSession } from "@pi-central/protocol";
-import { displayName, formatContext, nameLabel, shortenPath, whereLine } from "../format.ts";
+import { displayName, formatContext, isNearFull, nameLabel, shortenPath, whereLine } from "../format.ts";
 import { stateLabel } from "../store.ts";
 import { groupRows, rowActivity, type RosterRow } from "../roster.ts";
+import { ContextBar } from "./ContextMeter.tsx";
 
 /**
  * Section headings, in attention order.
@@ -311,7 +312,16 @@ function RailRow({
       {session !== undefined && (
         <>
           <span className="r3">
-            <span className={session.contextPercent !== null && session.contextPercent >= 80 ? "warn" : ""}>
+            {/*
+              The bar, before the metrics line, because it is read at a glance and the line is read on purpose.
+              `ContextBar` renders nothing when the percentage is unknown, so the row cannot show a fabricated 0%.
+
+              The percentage stays in the label beside it: a bar alone cannot say 84, and this row is where a reader
+              decides whether to compact. The formatter is the same one the header uses, so the word `full` and the
+              amber fill turn at the same threshold.
+            */}
+            <ContextBar percent={session.contextPercent} label={rowName(row)} />
+            <span className={isNearFull(session.contextPercent) ? "warn" : ""}>
               {formatContext(session.contextPercent)}
             </span>
             {session.pending > 0 && <span>+{session.pending} queued</span>}
