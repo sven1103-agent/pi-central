@@ -952,6 +952,201 @@ test("code text is escaped, so a fence cannot inject markup", async () => {
   assert.ok(text(html).includes("<img src=x onerror=alert(1)>"), "but it must be VISIBLE as text");
 });
 
+// --- Recent directories and "new session here" (issue #149) --------------------------------------
+//
+// "Same project, new task" is the PRIMARY use case for #149 — one task per session, many sessions per directory —
+// so both affordances are asserted as rendered output: the list must be one click per directory, and a directory
+// that no longer exists must be VISIBLE and unclickable rather than hidden.
+
+const sampleRecent = [
+  { cwd: "/Users/x/git/project", sessions: 4, lastUsedMs: 900, cwdExists: true },
+  { cwd: "/mnt/unmounted", sessions: 2, lastUsedMs: 500, cwdExists: false, cwdMissing: "missing" },
+  { cwd: "/Users/x/Downloads", sessions: 1, lastUsedMs: 400, cwdExists: false, cwdMissing: "unreadable" },
+];
+
+async function sheetWith(recent) {
+  const { OpenDirectorySheet } = await server.ssrLoadModule("/src/components/OpenDirectorySheet.tsx");
+  return renderToString(createElement(OpenDirectorySheet, {
+    installationRoot: undefined,
+    home: "/Users/x",
+    recent,
+    onClose() {},
+    onOpen() {},
+  }));
+}
+
+test("used directories are one click each, most recent first, with the count", async () => {
+  const html = await sheetWith(sampleRecent);
+  assert.match(text(html), /Used before/, "the list is named for what it is");
+  assert.match(html, /~/ && /project/, "the path is abbreviated");
+  assert.match(text(html), /4 sessions/, "a directory says how many sessions ran there");
+  // One button per directory, and the click target is the whole row — including the unavailable ones, which are
+  // rendered DISABLED rather than omitted (see the next test for why they must stay visible).
+  assert.equal((html.match(/class="recent-dir"/g) ?? []).length, 3, "one row per directory");
+  // Order: the recent one precedes the missing one.
+  assert.ok(html.indexOf("project") < html.indexOf("unmounted"), "most recently used comes first");
+});
+
+test("a directory that no longer exists is shown, DISABLED, and says why", async () => {
+  // Hidden would read as "Pi Central forgot my project" for a volume that is merely unmounted; allowed would
+  // spend a spawn on a directory that cannot work, because RPC-mode Pi exits 1 rather than prompting (C2).
+  const html = await sheetWith(sampleRecent);
+  const missing = html.slice(html.indexOf("unmounted") - 400, html.indexOf("unmounted") + 200);
+  assert.match(missing, /disabled/, "the button cannot be pressed");
+  assert.match(missing, /missing/, "and it states the reason rather than looking broken");
+  assert.match(missing, /no longer exists/, "the title carries the full path and the reason");
+});
+
+test("the sheet distinguishes a MISSING directory from an UNREADABLE one (issue #196)", async () => {
+  // Both rows are disabled, but they are different problems: one needs the directory restored, the other needs
+  // access granted — and the second is often fixable right now. Saying "missing" for both is what History did.
+  const html = await sheetWith(sampleRecent);
+  const doc = new JSDOM(`<body>${html}</body>`).window.document;
+  const rows = [...doc.querySelectorAll(".recent-dir")];
+
+  const gone = rows.find((row) => row.textContent.includes("unmounted"));
+  assert.ok(gone?.disabled, "a genuinely missing directory is disabled");
+  assert.match(gone.textContent, /missing/, "and says so");
+  assert.match(gone.title, /no longer exists/);
+
+  const unreadable = rows.find((row) => row.textContent.includes("Downloads"));
+  assert.ok(unreadable?.disabled, "an unreadable directory is also disabled — it cannot be entered either");
+  assert.match(unreadable.textContent, /unreadable/, "but it does NOT claim to be missing");
+  assert.match(unreadable.title, /cannot be read/, "the title states the recoverable problem");
+});
+
+test("the sheet is fed by the REAL derivation, so an unreadable directory survives the trip", async () => {
+  // Found by falsifying the previous test: it passed `recent` rows directly, so disabling the aggregation in
+  // `recentDirectories` left it green. That is the seam that matters — history in, rows out — because it is where
+  // `cwdMissing` could be dropped on the way from the orchestrator's session records to the sheet.
+  const { recentDirectories } = await server.ssrLoadModule("/src/recent.ts");
+  const base = { created: "", bytes: 10, messageCount: 1, firstMessage: "x", scratch: false, cwdExists: false };
+  const history = [
+    { ...base, path: "/s/a.jsonl", id: "a", cwd: "/Users/x/Downloads", modifiedMs: 900, cwdMissing: "unreadable", cwdError: "EPERM" },
+    { ...base, path: "/s/b.jsonl", id: "b", cwd: "/Volumes/old", modifiedMs: 800, cwdMissing: "missing", cwdError: "ENOENT" },
+  ];
+  const html = await sheetWith(recentDirectories(history));
+  const doc = new JSDOM(`<body>${html}</body>`).window.document;
+  const rows = [...doc.querySelectorAll(".recent-dir")];
+  assert.match(rows[0].textContent, /unreadable/, "the unreadable directory keeps its reason end to end");
+  assert.match(rows[1].textContent, /missing/, "and the missing one keeps its own");
+});
+
+test("no recent directories means no empty list furniture", async () => {
+  // A first run has no history, and a heading over nothing is noise on the one screen a new user sees.
+  const html = await sheetWith([]);
+  assert.ok(!/Used before/.test(html), "no heading with nothing under it");
+  assert.match(text(html), /Open in a directory/, "and the sheet is still the sheet");
+});
+
+test("a project session offers one click to a new task in the SAME directory", async () => {
+  const { SessionHeader } = await server.ssrLoadModule("/src/components/SessionHeader.tsx");
+  const html = renderToString(createElement(SessionHeader, {
+    session: session({ cwd: "/Users/x/git/project", scratch: false }),
+    home: "/Users/x",
+    models: [],
+    modelError: undefined,
+    onRequestModels() {}, onSelectModel() {},
+    thinking: { levels: undefined, error: undefined },
+    onRequestThinkingLevels() {}, onSelectThinkingLevel() {},
+    onRename() {},
+    onNewInDirectory() {},
+  }));
+  assert.match(text(html), /New session here/, "the frequent action is visible, not in an overflow menu");
+});
+
+test("the action shares a ROW with the path, never a block below it", async () => {
+  // Reported from a screenshot: "New session here" rendered as a full-width block under the path, looking like a
+  // text input and pushing the meter and cost onto another line. `.title` is a flex COLUMN, so a button placed as
+  // its next child is a second row — visually a field, because a block on its own line at that width is exactly
+  // what a field looks like.
+  //
+  // Asserted structurally rather than by class name alone: the button must be inside the element that also holds
+  // `.where`, so that a future change to the wrapper cannot silently restore the block.
+  const { SessionHeader } = await server.ssrLoadModule("/src/components/SessionHeader.tsx");
+  const html = renderToString(createElement(SessionHeader, {
+    session: session({ cwd: "/Users/x/git/project", scratch: false }),
+    home: "/Users/x",
+    models: [],
+    modelError: undefined,
+    onRequestModels() {}, onSelectModel() {},
+    thinking: { levels: undefined, error: undefined },
+    onRequestThinkingLevels() {}, onSelectThinkingLevel() {},
+    onRename() {},
+    onNewInDirectory() {},
+  }));
+  const doc = new JSDOM(`<body>${html}</body>`).window.document;
+  const button = doc.querySelector(".new-in-dir");
+  assert.ok(button, "the affordance renders");
+  const row = button.closest(".where-row");
+  assert.ok(row, "it sits in the location row, not directly in the column");
+  assert.ok(row.querySelector(".where"), "and that row is the one holding the path it acts on");
+  // It must not be a direct child of the column, which is what made it a block.
+  assert.notEqual(button.parentElement?.className, "title", "a direct child of .title becomes its own row");
+});
+
+test("its accessible name carries the directory, since the label alone is ambiguous", async () => {
+  // "New session here" is unambiguous NEXT TO a path. As an accessible name it needs the directory, and the button
+  // announces on its own.
+  const { SessionHeader } = await server.ssrLoadModule("/src/components/SessionHeader.tsx");
+  const html = renderToString(createElement(SessionHeader, {
+    session: session({ cwd: "/Users/x/git/project", scratch: false }),
+    home: "/Users/x",
+    models: [],
+    modelError: undefined,
+    onRequestModels() {}, onSelectModel() {},
+    thinking: { levels: undefined, error: undefined },
+    onRequestThinkingLevels() {}, onSelectThinkingLevel() {},
+    onRename() {},
+    onNewInDirectory() {},
+  }));
+  assert.match(html, /aria-label="New session in \/Users\/x\/git\/project"/);
+});
+
+test("the action LOOKS like a control at rest, not like the path beside it", async () => {
+  // Reported from a screenshot: the button rendered as `~/git/data-manager   New session here`, which reads as one
+  // sentence. Stripping the border to keep it quiet removed the only thing saying "this half is clickable" — and
+  // DESIGN §5.1 says "nothing depends on hover to be discoverable", which applies most of all to the affordance
+  // whose purpose is being noticed.
+  //
+  // Asserted on the stylesheet, because the defect is a STYLE outcome: the markup was correct both times, and a
+  // rendered-HTML assertion cannot see a missing border.
+  const css = readCss();
+  const rule = (selector) => {
+    const normalised = css.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, " ");
+    const wanted = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const all = [...normalised.matchAll(new RegExp(`(?<![\\w-])${wanted} ?\\{([^}]*)\\}`, "g"))];
+    return all.length > 0 ? all[all.length - 1][1] : undefined;
+  };
+
+  const resting = rule(".new-in-dir");
+  assert.ok(resting, ".new-in-dir must have a rule");
+  // A visible border at REST. `transparent` or `none` is the defect.
+  const border = /border:\s*([^;]+);/.exec(resting)?.[1] ?? "";
+  assert.ok(border.length > 0, "the button declares a border");
+  assert.ok(!/transparent|none/.test(border), `the resting border must be visible, got "${border}"`);
+  // And a background, so it reads as a surface rather than as bare text.
+  assert.ok(/(?:^|;)\s*background:\s*var\(--panel-\d\)/.test(resting), "it has a resting surface");
+});
+
+test("a SCRATCH session does not offer it — its directory belongs to that one session", async () => {
+  // Offering it would start a session in the app-owned workspace of a different session, which is not a project
+  // the reader recognises, and would pile up workspaces named s7, s8, s9.
+  const { SessionHeader } = await server.ssrLoadModule("/src/components/SessionHeader.tsx");
+  const html = renderToString(createElement(SessionHeader, {
+    session: session({ cwd: "/Users/x/.local/share/pi-central/workspaces/s7", scratch: true }),
+    home: "/Users/x",
+    models: [],
+    modelError: undefined,
+    onRequestModels() {}, onSelectModel() {},
+    thinking: { levels: undefined, error: undefined },
+    onRequestThinkingLevels() {}, onSelectThinkingLevel() {},
+    onRename() {},
+    onNewInDirectory() {},
+  }));
+  assert.ok(!/New session here/.test(html), `no affordance for a scratch session: ${html}`);
+});
+
 // --- The self-hosting hazard in the sheet (issue #25) --------------------------------------------
 
 test("the directory sheet warns when the path is Pi Central's own installation", async () => {

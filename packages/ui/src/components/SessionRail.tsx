@@ -42,6 +42,7 @@ export function SessionRail({
   onOpenDirectory,
   home,
   historyTotal,
+  firstPromptFor,
   openAsDrawer = false,
   onCloseDrawer,
 }: {
@@ -86,6 +87,13 @@ export function SessionRail({
   /** Total sessions on disk, which may exceed the number loaded. */
   historyTotal: number;
   /**
+   * The first thing the reader asked a session, for its label when nobody named it (`titleFromPrompt`).
+   *
+   * A RESOLVER rather than an array: the rail is given rows, and a row already identifies its session. Passing the
+   * history page would put a second, differently-shaped copy of the same data in this component's props.
+   */
+  firstPromptFor?: ((row: RosterRow) => string | undefined) | undefined;
+  /**
    * Whether the rail is showing as an overlay drawer.
    *
    * Below the drawer breakpoint the columns cannot all fit, so the rail leaves the grid. The state lives in `App`
@@ -102,7 +110,7 @@ export function SessionRail({
     const needle = filter.trim().toLowerCase();
     if (needle.length === 0) return rows;
     return rows.filter((row) => {
-      const name = rowName(row).toLowerCase();
+      const name = rowName(row, firstPromptFor?.(row)).toLowerCase();
       const cwd = (row.entry.cwd ?? "").toLowerCase();
       const id = row.session?.id.toLowerCase() ?? "";
       return name.includes(needle) || cwd.includes(needle) || id.includes(needle);
@@ -164,6 +172,7 @@ export function SessionRail({
                   onRetry={() => onRetryRow(row)}
                   retryAvailable={retryAvailable}
                   home={home}
+                  firstPromptFor={firstPromptFor}
                 />
               ))}
             </section>
@@ -206,9 +215,23 @@ function rowKey(row: RosterRow): string {
  *
  * A remembered entry with no id of its own uses the file name, which is stable and at least identifies the row.
  */
-function rowName(row: RosterRow): string {
-  if (row.session !== undefined) return displayName(row.session);
-  return nameLabel(row.entry.name, row.entry.scratch === true, filenameOf(row.entry.path));
+/**
+ * A row's label.
+ *
+ * `firstPrompt` is what makes an unnamed session recognisable instead of an opaque handle — see
+ * `titleFromPrompt`. The two sources are deliberately different:
+ *
+ *   - a LIVE session takes the prompt from its transcript, because a session started a moment ago has its question
+ *     in memory and no file worth re-reading yet;
+ *   - a row with no process takes it from the roster entry's stored `firstMessage`, which is already the first line
+ *     of the persisted conversation.
+ *
+ * A `firstMessage` recorded in the roster is preferred over one passed in, since the entry is what survives a
+ * restart and the two must not disagree about the same session.
+ */
+function rowName(row: RosterRow, firstPrompt?: string | undefined): string {
+  if (row.session !== undefined) return displayName(row.session, firstPrompt);
+  return nameLabel(row.entry.name, row.entry.scratch === true, filenameOf(row.entry.path), firstPrompt);
 }
 
 /** The first line of a message — the reason, as opposed to everything the process printed. */
@@ -223,6 +246,7 @@ function filenameOf(path: string): string {
 }
 
 function RailRow({
+  firstPromptFor,
   row,
   focused,
   onFocus,
@@ -238,6 +262,7 @@ function RailRow({
   onRetry: () => void;
   retryAvailable: boolean;
   home: string | undefined;
+  firstPromptFor?: ((row: RosterRow) => string | undefined) | undefined;
 }) {
   const session = row.session;
   /*
@@ -276,7 +301,7 @@ function RailRow({
         onClick={onFocus}
       >
       <span className="r1">
-        <span className="name">{rowName(row)}</span>
+        <span className="name">{rowName(row, firstPromptFor?.(row))}</span>
         {session?.scratch && <span className="chip chip-scratch">scratch</span>}
         <span className={`chip chip-${activity}`}>
           {session === undefined ? "stopped" : stateLabel(session)}
@@ -320,7 +345,7 @@ function RailRow({
               decides whether to compact. The formatter is the same one the header uses, so the word `full` and the
               amber fill turn at the same threshold.
             */}
-            <ContextBar percent={session.contextPercent} label={rowName(row)} />
+            <ContextBar percent={session.contextPercent} label={rowName(row, firstPromptFor?.(row))} />
             <span className={isNearFull(session.contextPercent) ? "warn" : ""}>
               {formatContext(session.contextPercent)}
             </span>

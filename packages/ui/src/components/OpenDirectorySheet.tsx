@@ -17,15 +17,27 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ownInstallationWarning } from "@pi-central/protocol";
+import { abbreviateCwd, baseName, type RecentDirectory } from "../recent.ts";
 
 export function OpenDirectorySheet({
   installationRoot,
+  home,
+  recent = [],
   initialPath = "",
   onClose,
   onOpen,
 }: {
   /** Where Pi Central is running from, or `undefined` if it could not be identified (issue #25). */
   installationRoot: string | undefined;
+  /** The orchestrator's `$HOME`, for abbreviating the recent list. */
+  home: string | undefined;
+  /**
+   * Directories used before, most recent first (issue #149).
+   *
+   * Derived from session history by `recentDirectories` — a projection of what is on disk, not a stored
+   * list — so this sheet has no path memory of its own to keep valid.
+   */
+  recent?: readonly RecentDirectory[];
   /** A prefilled path, which a test uses to reach a given state without simulating typing. */
   initialPath?: string;
   onClose: () => void;
@@ -76,6 +88,66 @@ export function OpenDirectorySheet({
         onClick={(event) => event.stopPropagation()}
       >
         <h3 id="open-dir-title">Open in a directory</h3>
+        {/*
+          Recent directories come FIRST, and they are the reason this sheet is usable at all (issue #149).
+
+          Before this the sheet was a bare text input: starting a second task in a project you were already
+          working in meant retyping an absolute path from memory. The list is derived from session headers
+          (`recentDirectories`), so it is a projection of what is on disk rather than a cache that could
+          disagree with it — and a directory that has since been deleted is still shown, marked, and
+          refused before anything is spawned (the #11 rule) rather than silently omitted.
+        */}
+        {recent.length > 0 && (
+          <div className="recent-dirs">
+            <p className="recent-dirs-label" id="recent-dirs-label">
+              Used before
+            </p>
+            <ul aria-labelledby="recent-dirs-label">
+              {recent.map((entry) => (
+                <li key={entry.cwd}>
+                  <button
+                    type="button"
+                    className="recent-dir"
+                    /*
+                      A directory that no longer exists is DISABLED rather than hidden or allowed.
+
+                      Hidden would make the list silently forget a project whose volume is unmounted — the
+                      reader would conclude Pi Central forgot it. Allowed would spend a spawn on a directory
+                      that cannot work: RPC-mode Pi exits 1 rather than prompting (C2), so the failure would
+                      arrive as an unexplained crash instead of a stated reason.
+                    */
+                    disabled={!entry.cwdExists}
+                    /*
+                      The reason, not just "no longer exists" (issue #196).
+
+                      `cwdExists: false` from an orchestrator that predates `cwdMissing` keeps the old wording — a
+                      missing cause must not be invented. When the reason IS known, it decides the sentence, because
+                      "unreadable" is often fixable now and "gone" is not.
+                    */
+                    title={
+                      entry.cwdExists
+                        ? entry.cwd
+                        : entry.cwdMissing === "unreadable"
+                          ? `${entry.cwd} — exists but cannot be read`
+                          : `${entry.cwd} — no longer exists`
+                    }
+                    onClick={() => onOpen(entry.cwd)}
+                  >
+                    <span className="recent-dir-name">{baseName(entry.cwd)}</span>
+                    <span className="recent-dir-path mono">{abbreviateCwd(entry.cwd, home)}</span>
+                    <span className="recent-dir-count">
+                      {entry.cwdExists
+                        ? `${entry.sessions} session${entry.sessions === 1 ? "" : "s"}`
+                        : entry.cwdMissing === "unreadable"
+                          ? "unreadable"
+                          : "missing"}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <p style={{ marginBottom: 12 }}>
           The session is sandboxed to this directory. Pi Central does not change a session's
           directory later, so start it where the work belongs.

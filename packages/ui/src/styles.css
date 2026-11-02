@@ -2630,6 +2630,90 @@ select.btn { font-family: var(--sans); }
 .context-bar.is-full .context-bar-fill { background: var(--warn); }
 
 /*
+ * Recent directories in the open sheet (issue #149).
+ *
+ * A list of BUTTONS rather than a `<select>`: each row carries three facts (name, path, how many sessions), and a
+ * native select cannot show three. A list also keeps the row whole as one click target, which matters because the
+ * whole point is that this is faster than typing a path.
+ */
+.recent-dirs { margin-bottom: var(--sp-3); }
+.recent-dirs-label {
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 var(--sp-2);
+}
+.recent-dirs ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.recent-dir {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 0 var(--sp-2);
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.recent-dir:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-tint); }
+.recent-dir:focus-visible { box-shadow: var(--focus); outline: none; }
+/* A directory that no longer exists stays VISIBLE and unclickable: hiding it would make the list look like Pi
+   Central forgot a project whose volume is merely unmounted. */
+.recent-dir:disabled { opacity: 0.55; cursor: not-allowed; }
+.recent-dir-name { font-weight: 600; font-size: var(--fs-sm); }
+.recent-dir-path { grid-column: 1; font-size: var(--fs-xs); color: var(--dim); }
+.recent-dir-count { grid-row: 1 / span 2; grid-column: 2; align-self: center; font-size: var(--fs-xs); color: var(--dim); }
+.recent-dir:disabled .recent-dir-count { color: var(--warn-text); }
+
+/*
+ * The location line and "New session here", in one row (issue #149).
+ *
+ * `.title` is a flex COLUMN, so the button used to be its next child and therefore a second full-width block under
+ * the path — reported from a screenshot as looking like a text input, and it pushed the meter and cost onto another
+ * line. This wrapper is the row they actually share. `min-width: 0` lets the path truncate instead of pushing the
+ * button out of the header, which is the same rule `.title` itself follows.
+ */
+.where-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.where-row .where { min-width: 0; }
+
+/*
+ * "New session here". Quiet, but VISIBLE — and that distinction was learned the hard way.
+ *
+ * The first version stripped the border and the background so it would not compete with the pickers. Rendered, it
+ * became indistinguishable from the path beside it: `~/git/data-manager   New session here` read as one sentence,
+ * with no sign that the second half was a control. That is DESIGN §5.1's rule — *"nothing depends on hover to be
+ * discoverable"* — and it applied to exactly the affordance whose whole purpose is being noticed.
+ *
+ * So it keeps a resting edge: the hairline `--line` at rest, `--line-strong` on hover, in the same shape family as
+ * the chips on the line above. `flex: none` so it keeps its label rather than being squeezed by a long directory
+ * name — a control clipped to `New sessi` reads as broken, and the path is the thing that can afford to truncate.
+ */
+.new-in-dir {
+  flex: none;
+  font-size: var(--fs-xs);
+  padding: 2px 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  color: var(--dim);
+  white-space: nowrap;
+}
+/* At rest the label is quiet; the EDGE is what makes it a control, so waking the text is the SECOND signal, not
+   the first. */
+.new-in-dir:hover { color: var(--text); background: var(--panel-3); border-color: var(--line-strong); }
+.new-in-dir:focus-visible { outline: none; box-shadow: var(--focus); }
+
+/*
  * The header's stats group: the meter and the cost, held together and against the right edge.
  *
  * `flex: none` so it never wraps away from the pickers, and `margin-left: auto` so it is pushed right even when the
@@ -3145,7 +3229,10 @@ select.btn { font-family: var(--sans); }
   }
   /* The identity keeps one line: the name truncates, the chips stay. */
   .transcript-header .session-header .title { flex: 1 1 12ch; min-width: 0; }
-  .transcript-header .session-header .where { display: none; }
+  /* At narrow widths the location line goes; the action that acts on it goes WITH it. Leaving "New session here"
+     visible with no path beside it would be an unlabelled button in a row of its own — it is only unambiguous
+     next to the directory it names. The sheet's "Used before" list is the same affordance one click away. */
+  .transcript-header .session-header .where-row { display: none; }
   /* Labels go, controls stay. `display: none` rather than `visibility`: a hidden label must not reserve a column. */
   .transcript-header .picker-label { display: none; }
   .transcript-header .picker-grid { flex-direction: row; align-items: center; gap: var(--sp-2); margin-left: auto; }

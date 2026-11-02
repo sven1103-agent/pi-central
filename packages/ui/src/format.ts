@@ -149,19 +149,88 @@ export function formatModel(model: string | undefined, max = 14): string {
  *
  * `id` is the last resort for a non-scratch session, because a handle at least identifies the row.
  */
-export function nameLabel(name: string | undefined, scratch: boolean, id: string): string {
+/** How much of the opening prompt a derived title shows. */
+export const TITLE_FROM_PROMPT_MAX = 48;
+
+/**
+ * A session's label when nobody has named it: the first thing the reader asked for.
+ *
+ * ## Why not the handle
+ *
+ * It was the handle (`s4`), and reported from use: *"when creating a new session it gets the handle name like s4,
+ * which means nothing to users."* Correct — and measured, not assumed: of **888 sessions in this machine's store,
+ * only 9 carry a name**, and all nine are deliberate human titles (*"Data Manager"*, *"Heavy Lifting"*). So an
+ * unnamed session is not an edge case, it is 99% of them, and `s4` is what the rail would show almost always.
+ *
+ * ## Why the prompt, specifically
+ *
+ * It is the option #77 named when it weighed generated names: *"a title derived from the first user message — Pi
+ * Central already holds the transcript, and that prompt is what the human would have named it."* It is also
+ * available for **every** session: measured on the same store, 885 of 888 have a `firstMessage`.
+ *
+ * A prompt-derived title is also *not* the thing #77 rejected. That objection was that *"a generated name looks
+ * chosen"*, which removes the nudge to name a session — and a truncated question does not look chosen: it reads as
+ * a preview, in quotes, cut mid-sentence. It gives the reader what they actually wanted, which is to recognise the
+ * task, not to admire a label.
+ *
+ * ## The rules
+ *
+ *   - Whitespace collapses, because a prompt is full of newlines and indentation and the rail is one line.
+ *   - It truncates at a WORD boundary where one is near the limit, so the title is not cut mid-word when it does
+ *     not have to be.
+ *   - Markdown noise is stripped from the start: `# `, `- `, `> ` and a `@path` mention would otherwise lead.
+ *   - It is wrapped in typographic quotes so the reader can see it is an excerpt, not a name somebody gave.
+ */
+export function titleFromPrompt(firstMessage: string | undefined): string | undefined {
+  const raw = firstMessage?.replace(/\s+/g, " ").trim();
+  if (raw === undefined || raw.length === 0) return undefined;
+
+  /*
+   * Leading structural noise: a heading marker, a list bullet, a quote marker.
+   *
+   * The `\s*` rather than `\s+` matters, and was found by a test: `"# "` collapses to `"#"` under the whitespace
+   * rule above (trailing space trimmed), so a pattern requiring a space after the marker missed it and produced a
+   * label of `"#"`. A marker with nothing after it is markup and nothing else, and must yield no title at all.
+   */
+  const cleaned = raw.replace(/^(?:#{1,6}\s*|[-*+]\s+|>\s+)/, "").trim();
+  if (cleaned.length === 0) return undefined;
+
+  if (cleaned.length <= TITLE_FROM_PROMPT_MAX) return `\u201c${cleaned}\u201d`;
+
+  // Prefer the last space before the limit, so the cut lands between words; fall back to a hard cut when the
+  // prompt is one long token (a URL or a path), where a word boundary does not exist.
+  const window = cleaned.slice(0, TITLE_FROM_PROMPT_MAX);
+  const lastSpace = window.lastIndexOf(" ");
+  const cut = lastSpace > TITLE_FROM_PROMPT_MAX * 0.6 ? window.slice(0, lastSpace) : window;
+  return `\u201c${cut.trimEnd()}\u2026\u201d`;
+}
+
+/**
+ * The label for a session, with the prompt as the fallback when it has no name.
+ *
+ * `firstMessage` is optional and the handle remains the last resort: a session with neither a name nor a prompt
+ * still has to be addressable, and an empty label would make the row unclickable in practice.
+ */
+export function nameLabel(
+  name: string | undefined,
+  scratch: boolean,
+  id: string,
+  firstMessage?: string | undefined,
+): string {
   const trimmed = name?.trim();
   // The literals matter: a stored `"undefined"` is a value that reached storage, not a missing key, and it must
   // not be rendered as though a person had typed it.
   const isPlaceholder =
     trimmed === undefined || trimmed.length === 0 || /^(undefined|null)$/i.test(trimmed) || /^s\d+$/.test(trimmed);
   if (scratch) return isPlaceholder ? "Scratch session" : trimmed;
-  return isPlaceholder ? id : trimmed;
+  if (!isPlaceholder) return trimmed;
+  // The reader's own words beat a handle — see `titleFromPrompt`.
+  return titleFromPrompt(firstMessage) ?? id;
 }
 
 /** A live session's display name. A thin adapter, so there is exactly one labelling rule. */
-export function displayName(session: LiveSession): string {
-  return nameLabel(session.name, session.scratch, session.id);
+export function displayName(session: LiveSession, firstMessage?: string | undefined): string {
+  return nameLabel(session.name, session.scratch, session.id, firstMessage);
 }
 
 /**

@@ -38,6 +38,7 @@ import {
   composerMode,
   fleetCounts,
   focusedSession,
+  firstPromptFor,
   hasUnisolatedSession,
   initialState,
   pendingDialogCount,
@@ -97,6 +98,7 @@ import {
 } from "./panel.ts";
 import { ModelPicker } from "./components/ModelPicker.tsx";
 import { OpenDirectorySheet } from "./components/OpenDirectorySheet.tsx";
+import { recentDirectories } from "./recent.ts";
 import { InlineRename } from "./components/InlineRename.tsx";
 import { ThinkingPicker } from "./components/ThinkingPicker.tsx";
 import { SessionHeader } from "./components/SessionHeader.tsx";
@@ -815,6 +817,31 @@ export function App() {
       document.removeEventListener("visibilitychange", tick);
     };
   }, [focusedId, listDirectoryFor]);
+  /**
+   * The first prompt behind a rail row, for its label when nobody named it.
+   *
+   * Two sources, deliberately, because they cover different rows:
+   *
+   *   - a LIVE session's prompt comes from its transcript — a session started seconds ago has its question in memory
+   *     and no file worth re-reading yet, and the rail must not show `s4` for a question the reader can already see;
+   *   - a row with no process falls back to the history page's `firstMessage`, which is the persisted first line.
+   *
+   * Identity-stable via `useCallback` on `state.transcripts` and `state.history` only, so it changes when either
+   * source does and not on every streaming delta.
+   */
+  const rowPrompt = useCallback(
+    (row: RosterRow): string | undefined => {
+      // A live session wins: its transcript is the current conversation, and its first message is what the reader
+      // wrote most recently.
+      if (row.session !== undefined) {
+        const live = firstPromptFor(state, row.session.id);
+        if (live !== undefined) return live;
+      }
+      return state.history.find((entry) => entry.path === row.entry.path)?.firstMessage || undefined;
+    },
+    [state],
+  );
+
   const transcript = transcriptFor(state, focused?.id);
   const fleet = fleetCounts(state);
   // HOME arrives with the first snapshot, so it is undefined until then. Paths render in full
@@ -1099,6 +1126,15 @@ export function App() {
            * the reader left it — that is the whole point of the issue.
            */
           rows={rosterRows(state.roster, state.live)}
+          /*
+            The prompt, for an unnamed session's label (issue #149 follow-up).
+
+            Two sources, because they cover different rows: a LIVE session's prompt is in its transcript (a session
+            started seconds ago has no file worth re-reading), and a row with no process falls back to the history
+            page's `firstMessage`, which is the persisted first line. Handles are the last resort — see
+            `titleFromPrompt` for why they are not the default.
+          */
+          firstPromptFor={rowPrompt}
           focusedId={state.focusedId}
           openAsDrawer={railOpen}
           onCloseDrawer={() => setRailOpen(false)}
@@ -1184,6 +1220,7 @@ export function App() {
               models={focused ? state.models[focused.id] : undefined}
               modelError={focused ? state.modelErrors[focused.id] : undefined}
               onRename={renameFocused}
+              onNewInDirectory={onOpenDirectory}
               onAnswer={onAnswer}
               onRequestModels={() => {
                 if (focused) send({ kind: "listModels", sessionId: focused.id });
@@ -1350,6 +1387,10 @@ export function App() {
       {sheetOpen && (
         <OpenDirectorySheet
           installationRoot={state.installationRoot}
+          home={state.home}
+          /* Derived from history, not stored (issue #149). `state.history` is the newest page, which is
+             exactly the right input: "recent" cannot be older than the page it is drawn from. */
+          recent={recentDirectories(state.history)}
           onClose={() => setSheetOpen(false)}
           onOpen={onOpenDirectory}
         />
@@ -1433,6 +1474,7 @@ function SessionView({
   modelError,
   onAnswer,
   onRename,
+  onNewInDirectory,
   onRequestModels,
   onSelectModel,
   thinking,
@@ -1478,6 +1520,8 @@ function SessionView({
   onAnswer: (dialogId: string, answer: DialogAnswer) => void;
   /** Rename this session (issues #78, #79). */
   onRename: (name: string) => void;
+  /** Start a NEW session in this session's directory (issue #149). */
+  onNewInDirectory?: ((cwd: string) => void) | undefined;
   onRequestModels: () => void;
   onSelectModel: (provider: string, modelId: string) => void;
   thinking: { levels: string[] | undefined; error: string | undefined };
@@ -1584,6 +1628,7 @@ function SessionView({
             onRequestThinkingLevels={onRequestThinkingLevels}
             onSelectThinkingLevel={onSelectThinkingLevel}
             onRename={onRename}
+            onNewInDirectory={onNewInDirectory}
             busy={busy}
             warnings={session.warnings}
           />
