@@ -163,38 +163,42 @@ test("Resume says what it does NOT do, since it spends a spawn", () => {
 
 // --- The highlighting ---------------------------------------------------------------------------
 
-test("an idle row's stripe is a neutral grey, not a bright text colour", () => {
-  // Five idle rows each showed a `--dim` bar — an AA-bright grey that reads as "disabled".
-  const idle = rule(".state-idle");
-  assert.ok(idle, ".state-idle must have a rule");
-  assert.match(idle, /border-left-color:\s*var\(--line-strong\)/, `got ${JSON.stringify(idle)}`);
-  assert.doesNotMatch(idle, /var\(--dim\)/, "a text colour is not a quiet stripe");
+test("each state keeps its own stripe colour, so the left edge means something", () => {
+  // The stripe is the row's state channel. `idle` is `--dim` — which was briefly changed to a neutral grey and then
+  // changed back, because the rail's appearance as a whole was preferred: "i liked the old design better".
+  const expected = {
+    ".state-idle": "--dim",
+    ".state-stopped": "--line-strong",
+    ".state-streaming": "--ok",
+    ".state-awaiting-approval": "--warn",
+    ".state-failed": "--danger",
+  };
+  for (const [selector, token] of Object.entries(expected)) {
+    assert.match(
+      rule(selector) ?? "",
+      new RegExp(`border-left-color:\\s*var\\(${token}\\)`),
+      `${selector} should be ${token}`,
+    );
+  }
 });
 
-test("rows are flush, and separation comes from the fills rather than a separator", () => {
-  // Three attempts, and this is the one chosen from looking at all of them:
-  //   - flush + a bright `--dim` stripe: a loud grey bar on every idle row ("they all show a gray bar on the left");
-  //   - flush + a neutral stripe: merged into one block ("hardly differentiate between the cards");
-  //   - 8px apart: separated but loose ("everything gets visually wider");
-  //   - 1px hairline: separated at no cost, still not preferred.
-  // The boundary the reader wanted was the hover and selection FILLS, so the rail stays compact and those two carry it.
+test("rows are flush, and SELECTION is the accent tint", () => {
+  // The rail's appearance is the original one: no gap, no hairline separator, hover is `--panel-3`, and the idle stripe
+  // is `--dim`. Three rounds of trying to separate rows another way (8px gap, 1px hairline, a quietened stripe) were
+  // all rejected from looking at them: "i liked the old design better".
+  //
+  // Exactly one thing survives from that round — SELECTION. It used to share `--panel-2` with hover, which is one step
+  // from the `--panel-3` wash, so a selected row and a hovered row looked nearly the same. The accent tint cannot be
+  // confused with either.
   assert.equal(rule(".rail-row + .rail-row"), undefined, "no gap and no separator between rows");
-
-  // What does the separating, asserted as present so a future "quiet tidy-up" cannot remove it:
-  assert.match(rule(".rail-row:hover") ?? "", /background:\s*var\(--panel-2\)/, "hover fills the row");
+  assert.match(rule(".rail-row:hover") ?? "", /background:\s*var\(--panel-3\)/, "hover is the original light wash");
   assert.match(
     rule('.rail-row[aria-current="true"]') ?? "",
     /background:\s*var\(--accent-tint\)/,
-    "selection fills the row",
-  );
-
-  // And the stripe is an edge, not the row's own gutter colour — otherwise a row has no left boundary at all.
-  assert.doesNotMatch(
-    rule(".state-idle") ?? "",
-    /border-left-color:\s*var\(--line\)/,
-    "a stripe the same as the gutter is not an edge",
+    "and selection is the accent tint",
   );
 });
+
 test("attention states keep their HUE, so the stripe still means something", () => {
   // Stepping the quiet ones back must not flatten the loud ones — that is the stripe's whole job.
   for (const [selector, expected] of [
@@ -206,21 +210,12 @@ test("attention states keep their HUE, so the stripe still means something", () 
   }
 });
 
-test("hover is a visible step, not six units of near-black", () => {
-  // `--panel` → `--panel-3` was present in the CSS and invisible in practice.
-  const hover = rule(".rail-row:hover");
-  assert.ok(hover, "the hover rule exists");
-  const background = /background:\s*var\((--[\w-]+)\)/.exec(hover)?.[1];
-  assert.equal(background, "--panel-2", `hover should be the lighter surface, got ${background}`);
-  assert.notEqual(background, "--panel-3", "the old, too-subtle step");
-  // And a second channel, so the row answers the pointer where the fill is hard to see.
-  assert.match(hover, /box-shadow/, "hover also changes the edge");
-});
-
-test("hover and SELECTION stay visually distinct", () => {
-  // They were once the same fill, which made the focused session indistinguishable from whatever the mouse was over.
-  const hover = /background:\s*var\((--[\w-]+)\)/.exec(rule(".rail-row:hover"))?.[1];
-  const focused = /background:\s*var\((--[\w-]+)\)/.exec(rule('.rail-row[aria-current="true"]'))?.[1];
-  assert.notEqual(hover, focused, `hover and selection must not share a fill, got ${hover} for both`);
-  assert.match(focused, /--accent-tint/, "selection is the accent wash");
+test("hover and SELECTION are distinguishable, which is the point of the tint", () => {
+  // They were once the same fill, so the focused session could not be told from whatever the mouse was over. Hover is
+  // the original light wash; selection is the accent tint. Asserted as a DIFFERENCE, so the specific tokens can change
+  // without the invariant silently disappearing.
+  const hover = /background:\s*var\((--[\w-]+)\)/.exec(rule(".rail-row:hover") ?? "")?.[1];
+  const selected = /background:\s*var\((--[\w-]+)\)/.exec(rule('.rail-row[aria-current="true"]') ?? "")?.[1];
+  assert.ok(hover && selected, `both fills must exist, got ${hover} / ${selected}`);
+  assert.notEqual(hover, selected, "hover and selection must not share a fill");
 });

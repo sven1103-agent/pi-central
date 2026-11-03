@@ -38,7 +38,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - A stopped session can be resumed, forgotten or deleted from its rail row, instead of the row losing every control
   ([#89]).
 - Hovering a rail row is visible, and idle rows no longer wear a bright grey stripe ([#89]).
-- Rail rows stay compact and flush; separation comes from the state stripe and the hover/selection fills ([#89]).
+- The selected rail row is filled with the accent tint, so it cannot be confused with a hovered one ([#89]).
 
 - Clicking a History session that is already running focuses it, instead of leaving the view on another session
   ([#150]).
