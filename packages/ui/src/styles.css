@@ -492,8 +492,7 @@ button { font: inherit; color: inherit; }
 }
 
 .rail-filter { padding: 0 var(--sp-3) var(--sp-2); }
-.rail-filter input,
-.history-search input {
+.rail-filter input {
   width: 100%;
   background: var(--bg);
   border: 1px solid var(--line);
@@ -502,8 +501,7 @@ button { font: inherit; color: inherit; }
   color: var(--text);
   font-size: var(--fs-sm);
 }
-.rail-filter input:focus,
-.history-search input:focus { border-color: var(--accent); }
+.rail-filter input:focus { border-color: var(--accent); }
 
 .rail-list { overflow-y: auto; flex: 1; padding-bottom: var(--sp-3); }
 
@@ -625,6 +623,39 @@ button { font: inherit; color: inherit; }
      reached by the keyboard that is the reason it is hidden. */
   opacity: 0;
 }
+/*
+ * The stopped row's two controls share ONE absolutely-positioned box (issue #150).
+ *
+ * `Forget` and `Delete` were each `position: absolute; right; bottom` — the same corner — so a second one would
+ * stack on top of the first. The wrapper takes the position and lays them out in a row, which keeps the row's height
+ * decided by its content (the reason `absolute` was chosen in the first place) and makes the pair's order explicit
+ * rather than accidental.
+ */
+.rail-row-stopped-actions {
+  position: absolute;
+  right: var(--sp-2);
+  bottom: var(--sp-2);
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-1);
+  /* Hidden until the row is engaged, exactly as the single control was. */
+  opacity: 0;
+}
+.rail-row:hover .rail-row-stopped-actions,
+.rail-row:focus-within .rail-row-stopped-actions { opacity: 1; }
+/* Inside the wrapper the buttons are ordinary flex children, so they must not re-position themselves. */
+.rail-row-stopped-actions .rail-row-forget {
+  position: static;
+  opacity: 1;
+}
+/* Deleting is the irreversible one, so it carries the danger colour on hover while `Forget` stays neutral: the
+   difference between them is the whole point of having both. */
+.rail-row-stopped-actions .rail-row-delete:hover {
+  color: var(--danger-text);
+  border-color: var(--danger);
+  background: var(--danger-tint);
+}
+
 .rail-row:hover .rail-row-forget, .rail-row:focus-within .rail-row-forget { opacity: 1; }
 .rail-row-forget:hover { color: var(--danger-text); border-color: var(--danger); }
 .rail-row-forget:focus-visible { outline: none; box-shadow: var(--focus); opacity: 1; }
@@ -654,6 +685,127 @@ button { font: inherit; color: inherit; }
  * action that helps behind a hover would mean the reader has to discover it. It is also never red — the
  * session is not being destroyed, it is being tried again.
  */
+/*
+ * A History row hosts two controls now, so it is a `<div>` wrapper (issue #150) — the same restructuring the rail
+ * needed in #89, because nested buttons are invalid HTML and browsers resolve them by breaking the inner one.
+ */
+/*
+ * History's toolbar, list and pagination (requested alongside #150).
+ *
+ * The report was "Nobody can scan 500 sessions", and the tab listed 200 rows in one column with no order and no pages.
+ * Three controls fix that: sort, page, select.
+ */
+/*
+ * ONE action bar above the list: search, sort, count, bulk delete (requested from use).
+ *
+ * They were three stacked rows — search, then a toolbar, then a select-all line — costing ~90px of vertical space
+ * before the first row and making the controls read as unrelated. They are the controls a reader uses together.
+ */
+.history-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-3);
+}
+.history-search-input {
+  flex: 1 1 260px;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  padding: 6px 9px;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+.history-search-input:focus-visible { outline: none; box-shadow: var(--focus); }
+/* The count yields first: it is the least actionable thing in the row. */
+/* The count yields first: it is the least actionable thing in the row. `margin-left: auto` puts it, and everything
+   after it, at the trailing edge — see the note by `.history-clear`. */
+.history-count { flex: 0 1 auto; min-width: 0; font-size: var(--fs-xs); margin-left: auto; }
+/* The selection count, heavier than the totals beside it — it is the fact the bulk action depends on. */
+.history-selected-count { color: var(--text); font-weight: 600; }
+/*
+ * The action bar's right-hand group: count, pager, clear, delete — in that order, pushed to the trailing edge.
+ *
+ * `margin-left: auto` on the COUNT rather than on the delete button, because the count is the first thing in the
+ * right-hand group and everything after it should follow without each item re-declaring the push. That was the bug the
+ * first version had: the delete button owned the `auto` margin, so anything inserted before it — the pager — landed
+ * to its LEFT, at the end of the search field's run.
+ */
+.history-clear { flex: none; }
+.history-bulk-delete { flex: none; }
+
+/* The pager in the action bar: the TOP one, and the reason it exists (see `HistoryPager`). */
+.history-actions .history-pages { margin-top: 0; flex: none; }
+.history-sort { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--dim); }
+/* The bulk action appears only with a selection, and takes the trailing edge so it does not push the count around. */
+
+/* A `<ul>` because each row is a list item with a checkbox — the semantic the old bare divs did not have. */
+.history-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+
+.history-selectbar {
+  display: flex;
+  align-items: center;
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  padding: 0 var(--sp-1);
+}
+.history-selectbar label { display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; }
+
+/* The row's own checkbox, outside the row's button: selecting and opening are different intents. */
+.history-check {
+  flex: none;
+  align-self: center;
+  margin: 0 var(--sp-2);
+  /* A generous target — this is a mouse product, but a 13px default checkbox is fiddly at this density. */
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
+/*
+ * Selection is painted on the ROW, not on the wrapper (fixed after a screenshot).
+ *
+ * The tint was on `.history-row-wrap`, but `.history-row` inside it has its own `background: var(--panel)` and
+ * `max-width: 900px` — so the wrapper's tint showed as a coloured strip to the RIGHT of the row, and the row itself
+ * stayed unhighlighted. The wrapper is not the visible box; the row is.
+ */
+.history-row-wrap.is-selected .history-row-main {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+}
+/* The checkbox column is part of the selected row visually, so it carries the same tint — otherwise selection reads as
+   two disconnected pieces. */
+.history-row-wrap.is-selected { border-radius: var(--r-2); background: var(--accent-tint); }
+
+/*
+ * A pager. Two instances share this rule: one at the top of the list (in the action bar) and one after the last row.
+ *
+ * Centred at the bottom, where a reader expects "end of list, continue here". The top one is positioned by the action
+ * bar's flex layout instead, so the `margin-top` is overridden there.
+ */
+.history-pages {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.history-row-wrap { display: flex; align-items: stretch; gap: 1px; }
+.history-row-wrap .history-row-main { flex: 1; min-width: 0; }
+.history-delete {
+  flex: none;
+  align-self: center;
+  font-size: var(--fs-xs);
+  padding: 4px 8px;
+  margin-right: var(--sp-2);
+  color: var(--dim);
+}
+.history-delete:hover { color: var(--danger-text); background: var(--danger-tint); }
+.history-delete:focus-visible { outline: none; box-shadow: var(--focus); }
+
 .rail-row-actions { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
 .rail-row-retry {
   background: none; border: 0; padding: 0 0 2px 2px;

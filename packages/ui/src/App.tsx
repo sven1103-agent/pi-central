@@ -9,8 +9,9 @@
  * rather than inferring "streaming" from having seen a delta (C8).
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { PROTOCOL_VERSION, supportsRetry, type Control, type HistoricalSession, type LiveSession, type ModelOption } from "@pi-central/protocol";
+import { PROTOCOL_VERSION, supportsDelete, supportsRetry, type Control, type HistoricalSession, type LiveSession, type ModelOption } from "@pi-central/protocol";
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
+import { ConfirmDelete } from "./components/ConfirmDelete.tsx";
 import {
   SKEW_PREFIX,
   assessProtocolSkew,
@@ -45,7 +46,7 @@ import {
   reduce,
   transcriptFor,
 } from "./store.ts";
-import { SessionRail } from "./components/SessionRail.tsx";
+import { SessionRail, rowLabel } from "./components/SessionRail.tsx";
 import { FollowToggle } from "./components/FollowToggle.tsx";
 import {
   parseTraceOrder,
@@ -63,6 +64,28 @@ import {
  * records for `FILES_SPLIT_MIN_WIDTH` in `panel.ts`.
  */
 export const RAIL_DRAWER_MAX_WIDTH = 1024;
+
+/**
+ * A session about to be deleted, from either surface (issue #150).
+ *
+ * The two surfaces identify a session differently — the rail has a `RosterRow` (which may not be live), History has a
+ * `HistoricalSession` — but deletion needs only the three facts the dialog displays and the one the request carries.
+ * Normalizing here is what lets ONE dialog serve both without either surface knowing about the other's shape.
+ */
+export interface PendingDelete {
+  /**
+   * The transcripts to remove. One entry for a row's Delete; several for a bulk selection.
+   *
+   * A LIST from the start, so the single and the bulk paths share one confirmation and one request shape. Two
+   * implementations would drift in wording on the one irreversible action — and the bulk case is the one where the
+   * wording matters most, because it deletes things the reader may only have glanced at.
+   */
+  paths: readonly string[];
+  /** What the dialog names. One label, or a count for a selection. */
+  label: string;
+  /** The directory for a single session; absent for a selection, which can span several. */
+  cwd?: string | undefined;
+}
 import { TranscriptView } from "./components/Transcript.tsx";
 import {
   ATTACHMENT_TYPES,
@@ -103,7 +126,7 @@ import { InlineRename } from "./components/InlineRename.tsx";
 import { ThinkingPicker } from "./components/ThinkingPicker.tsx";
 import { SessionHeader } from "./components/SessionHeader.tsx";
 import { HistoryView } from "./components/History.tsx";
-import { displayName, formatContext, formatCost, formatTokens, headerLocation } from "./format.ts";
+import { displayName, formatContext, formatCost, formatTokens, headerLocation, nameLabel } from "./format.ts";
 import { stateLabel, type UiState } from "./store.ts";
 import {
   ROSTER_PREFS_KEY,
@@ -124,6 +147,13 @@ export function App() {
   const [tab, setTab] = useState<Tab>("sessions");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [confirmStop, setConfirmStop] = useState<LiveSession | undefined>(undefined);
+  /**
+   * The session awaiting a delete confirmation (issue #150).
+   *
+   * One dialog for both surfaces: a rail row and a History row ask about the same thing, and two
+   * implementations would drift in wording or focus handling on the one irreversible action.
+   */
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | undefined>(undefined);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Focus RETURNS to the trigger on close. Without this, closing a surface opened from the keyboard
   // drops focus to the document body, and the next Tab starts from the top of the page — so a
@@ -1148,6 +1178,30 @@ export function App() {
             setRailOpen(false);
           }}
           onForgetRow={(row) => dispatch({ kind: "forget", path: row.entry.path })}
+          /*
+            Delete is offered only when the orchestrator understands it (issue #150): a UI built from files can be
+            talking to an older in-memory orchestrator, and an unknown control on the one irreversible action would
+            appear to work and do nothing.
+          */
+          /*
+            Stop from the row, so a delete refusal is actionable (issue #150 follow-up). The refusal tells the reader to
+            stop the session; without this they had to find it, focus it, and stop it from the Session panel.
+          */
+          onStopRow={(row) => {
+            if (row.session !== undefined) send({ kind: "stop", sessionId: row.session.id });
+          }}
+          onDeleteRow={
+            supportsDelete(state.install?.protocol)
+              ? (row) =>
+                  setPendingDelete({
+                    paths: [row.entry.path],
+                    // The same label the row showed — including its first prompt, which the row may be labelled by —
+                    // so the dialog cannot name a different session than the one clicked.
+                    label: rowLabel(row, rowPrompt(row)),
+                    cwd: row.entry.cwd ?? "",
+                  })
+              : undefined
+          }
           retryAvailable={supportsRetry(state.install?.protocol)}
           onRetryRow={(row) => {
             // Only a live session has a handle to retry with; a row that is not running has no process to
@@ -1167,6 +1221,20 @@ export function App() {
               history={state.history}
               historyTotal={state.historyTotal}
               home={home}
+              /*
+                Bulk delete, gated the same way. The confirmation names a COUNT rather than a label, because a selection
+                can span directories and sessions — and "delete 7 sessions?" is the honest question, where naming one of
+                them would imply the others are incidental.
+              */
+              onDeleteMany={
+                supportsDelete(state.install?.protocol)
+                  ? (sessions: HistoricalSession[]) =>
+                      setPendingDelete({
+                        paths: sessions.map((session) => session.path),
+                        label: `${sessions.length} selected sessions`,
+                      })
+                  : undefined
+              }
               onResume={(session: HistoricalSession) => {
                 // Same as starting: the reader asked for THIS session, so it must become the active one
                 // even when another is already focused (issue #144).
@@ -1393,6 +1461,25 @@ export function App() {
           recent={recentDirectories(state.history)}
           onClose={() => setSheetOpen(false)}
           onOpen={onOpenDirectory}
+        />
+      )}
+
+      {/*
+        ONE destructive dialog for both surfaces (issue #150). It is rendered at the shell rather than inside History
+        or the rail so the two cannot disagree about wording or focus on the only irreversible action.
+      */}
+      {pendingDelete !== undefined && (
+        <ConfirmDelete
+          label={pendingDelete.label}
+          {...(pendingDelete.cwd === undefined ? {} : { cwd: pendingDelete.cwd })}
+          count={pendingDelete.paths.length}
+          onCancel={() => setPendingDelete(undefined)}
+          onConfirm={() => {
+            // One control per path. The orchestrator deletes each and re-broadcasts once at the end, so the
+            // confirmation is a single act even though the wire carries N messages.
+            for (const path of pendingDelete.paths) send({ kind: "deleteSession", path });
+            setPendingDelete(undefined);
+          }}
         />
       )}
 

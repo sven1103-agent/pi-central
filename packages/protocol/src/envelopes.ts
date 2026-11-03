@@ -217,6 +217,15 @@ export type Control =
   | { kind: "abort"; sessionId: string }
   | { kind: "stop"; sessionId: string }
   | { kind: "rename"; sessionId: string; name: string }
+  /**
+   * Delete a session's transcript from disk (issue #150).
+   *
+   * The ONLY irreversible operation on the wire, so it is a distinct control rather than a flag on `stop`: stopping
+   * still leaves the file, and conflating them would let a mistake be unrecoverable. Identified by PATH, not by
+   * `sessionId`, because a session that is not running has no handle — and History lists sessions this process never
+   * spawned.
+   */
+  | { kind: "deleteSession"; path: string }
   /** Change the model. Carries provider AND id because `set_model` requires both (PROTOCOL.md). */
   | { kind: "setModel"; sessionId: string; provider: string; modelId: string }
   /** Ask for the session's available models. Answered with `models` or `modelsError`. */
@@ -594,8 +603,18 @@ export type FileErrorReason =
  *
  * A refused image is reported as an `error` event with a stated reason, never a dropped frame: the
  * transport's 8 MB limit would otherwise close the socket for a shape the client could have avoided.
+ *
+ * v6 (issue #150): the `deleteSession` control.
+ *
+ * A new KIND, so this one IS caught by `wire-surface.test.ts` — and it needs the bump regardless, because a v5
+ * orchestrator receiving it would answer `bad control: unknown kind 'deleteSession'`. For a control whose whole
+ * purpose is removing a file, "the button appeared to work and nothing happened" and "the button is not offered" are
+ * very different outcomes, and only the second is acceptable.
+ *
+ * Note what `DELETE_SINCE_PROTOCOL` is for on top of this: a 0.8.0 UI *built from files* can be talking to an older
+ * in-memory orchestrator in a dev checkout, where the version skew check is the only warning available.
  */
-export const PROTOCOL_VERSION = 5 as const;
+export const PROTOCOL_VERSION = 6 as const;
 
 /**
  * The first protocol version that understands the `retry` control (issue #11).
@@ -613,6 +632,22 @@ export const PROTOCOL_VERSION = 5 as const;
 export const RETRY_SINCE_PROTOCOL = 4;
 
 /** Whether a peer speaking `protocol` can be asked to retry a session. */
+/**
+ * The first protocol version that understands the `deleteSession` control (issue #150).
+ *
+ * The same reasoning as `RETRY_SINCE_PROTOCOL`, and it matters more here: a UI that offers Delete against an
+ * orchestrator that predates it would send an unknown kind and show `bad control: unknown kind 'deleteSession'` — for
+ * the one action that must never appear to half-work. The control is withheld instead, and the rail says nothing
+ * rather than promising something it cannot do.
+ */
+export const DELETE_SINCE_PROTOCOL = 6;
+
+/** Whether a peer speaking `protocol` can be asked to delete a session. */
+export function supportsDelete(protocol: number | undefined): boolean {
+  // `undefined` is "not reported yet", not "old" — the same convention `supportsRetry` documents.
+  return protocol === undefined ? true : protocol >= DELETE_SINCE_PROTOCOL;
+}
+
 export function supportsRetry(protocol: number | undefined): boolean {
   // `undefined` is "not reported yet", not "old": the snapshot carries this, so an unknown answer means the
   // handshake has not finished. Assuming otherwise would hide the control during every load.

@@ -36,6 +36,8 @@ export function SessionRail({
   focusedId,
   onFocusRow,
   onForgetRow,
+  onDeleteRow,
+  onStopRow,
   onRetryRow,
   retryAvailable,
   onStartSession,
@@ -64,6 +66,28 @@ export function SessionRail({
    * is a different action with its own confirmation.
    */
   onForgetRow: (row: RosterRow) => void;
+  /**
+   * Delete a STOPPED session's transcript from disk (issue #150).
+   *
+   * Distinct from `onForgetRow` next to it, and the two are deliberately side by side: `Forget` hides a row and
+   * deletes nothing, `Delete` removes bytes and cannot be undone. The rail's own comment on `onForgetRow` promised
+   * "deleting is #150 … a different action with its own confirmation", and this is that action.
+   *
+   * Absent means the affordance is not rendered — so a UI connected to an orchestrator that predates the control does
+   * not offer a button that would fail.
+   */
+  onDeleteRow?: ((row: RosterRow) => void) | undefined;
+  /**
+   * Stop a RUNNING session from its row (issue #150 follow-up).
+   *
+   * Added because a refusal sent the reader here and there was nothing to press. Deleting a transcript that a running
+   * session holds open is refused, and the refusal says "stop that session first" — but Stop existed only in the
+   * Session panel, for the FOCUSED session. So a reader with ten sessions had to find the right one, focus it, open the
+   * panel, and stop it from there, to clear a warning that named a handle they could not see.
+   *
+   * The rail is the list of sessions; stopping one belongs in it.
+   */
+  onStopRow?: ((row: RosterRow) => void) | undefined;
   /**
    * Retry a FAILED session (issue #11).
    *
@@ -169,6 +193,8 @@ export function SessionRail({
                   focused={rowKey(row) === focusedId}
                   onFocus={() => onFocusRow(row)}
                   onForget={() => onForgetRow(row)}
+                  onDelete={onDeleteRow === undefined ? undefined : () => onDeleteRow(row)}
+                  onStop={onStopRow === undefined ? undefined : () => onStopRow(row)}
                   onRetry={() => onRetryRow(row)}
                   retryAvailable={retryAvailable}
                   home={home}
@@ -190,6 +216,15 @@ export function SessionRail({
     </nav>
   );
 }
+
+/**
+ * The states in which a session can be STOPPED.
+ *
+ * An allow-list, because the negative form is wrong in a way that shipped for one commit: a row with no live session
+ * has no `state` at all, and `state !== "stopped" && state !== "failed"` is TRUE for `undefined` — so every stopped row
+ * grew a Stop button that could not act.
+ */
+const RAIL_STOPPABLE: ReadonlySet<string> = new Set(["starting", "idle", "streaming", "awaiting-approval"]);
 
 /** The section label for a group key. The words live here; the classification lives in `roster.ts`. */
 function labelOf(group: (typeof GROUPS)[number]["key"]): string {
@@ -234,6 +269,17 @@ function rowName(row: RosterRow, firstPrompt?: string | undefined): string {
   return nameLabel(row.entry.name, row.entry.scratch === true, filenameOf(row.entry.path), firstPrompt);
 }
 
+/**
+ * A row's label, exported so the DELETE dialog can name the same session the row named.
+ *
+ * One rule: a dialog asking "delete this session?" about a row that said something else is exactly the ambiguity a
+ * destructive confirmation cannot afford. `firstPrompt` is forwarded for the same reason — the row may be labelled
+ * by its prompt, and the dialog must say the same thing.
+ */
+export function rowLabel(row: RosterRow, firstPrompt?: string | undefined): string {
+  return rowName(row, firstPrompt);
+}
+
 /** The first line of a message — the reason, as opposed to everything the process printed. */
 function firstLine(text: string): string {
   return text.split("\n")[0] ?? text;
@@ -251,6 +297,8 @@ function RailRow({
   focused,
   onFocus,
   onForget,
+  onDelete,
+  onStop,
   onRetry,
   retryAvailable,
   home,
@@ -259,6 +307,10 @@ function RailRow({
   focused: boolean;
   onFocus: () => void;
   onForget: () => void;
+  /** Absent when the connected orchestrator cannot delete sessions (older protocol). */
+  onDelete?: (() => void) | undefined;
+  /** Stop this session. Offered for a RUNNING row, which is the only kind it can act on. */
+  onStop?: (() => void) | undefined;
   onRetry: () => void;
   retryAvailable: boolean;
   home: string | undefined;
@@ -368,6 +420,47 @@ function RailRow({
         (the composer becomes usable again), and erasing the evidence would leave a reader unable to compare
         attempts.
       */}
+      {/*
+        Stop, on any RUNNING row (issue #150 follow-up).
+
+        Before this the rail had no way to stop a session at all — it lived in the Session panel, for the focused
+        session only — so a reader told to "stop that session first" had to find the right row, focus it, and open a
+        panel. The rail is the list of sessions; stopping one belongs in it.
+
+        Not offered for `stopped` or `failed`: there is nothing to stop, and a control that cannot act is worse than
+        none. `onStop` absent means the affordance is not rendered at all, so a connected orchestrator that predates
+        the control does not offer a button that would fail.
+      */}
+      {/*
+        An ALLOW-LIST of stoppable states, not `state !== "stopped" && state !== "failed"`.
+
+        The difference is defence in depth rather than a live bug: `session !== undefined` above already excludes the
+        row with no state at all, so both forms behave identically for every row that reaches here. The allow-list is
+        still the right shape, because the negative form is only correct while that earlier guard exists — and the
+        earlier guard was added for a different reason, so a future change could drop it without noticing that a Stop
+        button now appears on every stopped row.
+
+        Stated plainly because I could not falsify the allow-list on its own: reverting it changes nothing, which is
+        what "defence in depth" means and also what a test that cannot fail looks like. The behaviour it guards is
+        asserted (`Stop is not offered where it cannot act`); the guard itself is belt and braces.
+      */}
+      {onStop !== undefined && session !== undefined && RAIL_STOPPABLE.has(session.state) && (
+        <span className="rail-row-actions rail-row-stop">
+          <button
+            type="button"
+            className="rail-row-forget"
+            onClick={onStop}
+            /*
+              The title states the CONSEQUENCE, not the mechanic: stopping ends the run, and the transcript stays. That
+              is the fact a reader needs before pressing it, and the opposite of Delete's warning — which is why the
+              two must not look alike.
+            */
+            title="Stop this session. Its transcript stays on disk."
+          >
+            Stop
+          </button>
+        </span>
+      )}
       {session?.state === "failed" && (
         <span className="rail-row-actions">
           {retryAvailable ? (
@@ -412,14 +505,31 @@ function RailRow({
         <span className="rail-row-earlier">last failure: {firstLine(session.previousError)}</span>
       )}
       {session === undefined && (
-        <button
-          type="button"
-          className="rail-row-forget"
-          onClick={onForget}
-          title="Remove from the rail. The session file is not deleted."
-        >
-          Forget
-        </button>
+        <span className="rail-row-actions rail-row-stopped-actions">
+          <button
+            type="button"
+            className="rail-row-forget"
+            onClick={onForget}
+            /*
+              The two controls are ADJACENT and their labels say the difference, because the difference is the whole
+              point: Forget hides a row and keeps the file; Delete removes the file and cannot be undone. A single
+              ambiguous "Remove" is how one of them gets used for the other.
+            */
+            title="Remove from the rail. The session file is not deleted."
+          >
+            Forget
+          </button>
+          {onDelete !== undefined && (
+            <button
+              type="button"
+              className="rail-row-forget rail-row-delete"
+              onClick={onDelete}
+              title="Delete this session's transcript from disk. This cannot be undone."
+            >
+              Delete
+            </button>
+          )}
+        </span>
       )}
     </div>
   );
