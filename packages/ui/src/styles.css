@@ -2784,13 +2784,13 @@ select.btn { font-family: var(--sans); }
   height: 4px;
   border-radius: var(--r-pill);
   /*
-   * The track is `--panel-3` — the original, preferred look.
+   * The track is `--panel-3`, with the `--line` hairline — the gauge as it has always been drawn.
    *
-   * It was briefly changed to `--bg` with a brighter ring, because the gauge disappeared on a TINTED row. That fixed
-   * the symptom at the cost of the appearance, and the appearance was the thing already liked: *"the rail for the
-   * progress bar looked better before."*
-   *
-   * So the track keeps its own colour and the FIX moved to where it is needed — see the filled-row override below.
+   * Two attempts to make it survive a filled row were rejected, both because they changed the rendering rather than
+   * the row: a global `--bg` track, then a per-state override that darkened it on hover and selection. Reported as
+   * *"make the bar rendering as we always had it."* And it holds up: selection is `--panel-2`, which is DARKER than
+   * `--panel-3`, so the track reads against it. The only row where the track matches its surface is hover — which is
+   * transient, and not a place to compromise the appearance of every row.
    */
   background: var(--panel-3);
   box-shadow: inset 0 0 0 1px var(--line);
@@ -2807,23 +2807,6 @@ select.btn { font-family: var(--sans); }
 }
 .context-bar.is-full .context-bar-fill { background: var(--warn); }
 
-/*
- * On a FILLED row the track steps back, so the gauge stays visible.
- *
- * `--panel-3` is one step from `--panel`, which is right while the row is `--panel`. Hover paints `--panel-3` and
- * selection paints `--panel-2`, so on either the track would sit within one step of the row and the gauge would
- * disappear — reported as: *"you cant see the progress bar anymore."*
- *
- * Scoped to the two filled states rather than changed globally, because the plain row's track is the one that was
- * already liked. `--bg` is darker than every row surface the rail paints, so the bar reads as a bar on exactly the rows
- * where it would otherwise vanish.
- */
-.rail-row:hover .context-bar,
-.rail-row.is-focused .context-bar,
-.rail-row[aria-current="true"] .context-bar {
-  background: var(--bg);
-  box-shadow: inset 0 0 0 1px var(--line-strong);
-}
 
 /*
  * Recent directories in the open sheet (issue #149).

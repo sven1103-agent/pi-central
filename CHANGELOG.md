@@ -38,8 +38,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - A stopped session can be resumed, forgotten or deleted from its rail row, instead of the row losing every control
   ([#89]).
 - Hovering a rail row is visible, and idle rows no longer wear a bright grey stripe ([#89]).
-- The selected rail row is marked by a bar on its right edge, leaving its contents at full contrast ([#89]).
-- A rail row's context gauge stays visible on a hovered or selected row ([#89]).
+- The selected rail row is marked by a bar on its right edge, so its contents keep full contrast ([#89]).
 
 - Clicking a History session that is already running focuses it, instead of leaving the view on another session
   ([#150]).

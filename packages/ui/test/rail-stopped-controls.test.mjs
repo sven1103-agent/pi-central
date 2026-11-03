@@ -219,23 +219,38 @@ test("selection is a RIGHT-edge bar, not a wash, so the row's contents keep thei
   assert.doesNotMatch(selected, /var\(--accent-tint\)/, "no wash");
 });
 
-test("the gauge keeps its own track colour, and steps back only on a FILLED row", () => {
-  // The track is `--panel-3` — one step from `--panel`, which is right on a plain row and was the look preferred:
-  // "the rail for the progress bar looked better before". It was briefly changed globally to `--bg`, which fixed the
-  // disappearing gauge by changing the appearance instead of the cause.
+test("the gauge renders as it always has: one track colour, no per-state override", () => {
+  // Two attempts to keep the gauge visible on a filled row were rejected, because both changed the rendering instead of
+  // the row: a global `--bg` track ("the rail for the progress bar looked better before"), then a per-state override
+  // ("now you are doing the bar rendering that i did not want in the selected session").
   //
-  // Hover paints `--panel-3` and selection paints `--panel-2`, so on either the track sits within one step of the row
-  // and the gauge vanishes — "you cant see the progress bar anymore". The fix is scoped to those two states.
+  // It holds up without either: selection is `--panel-2`, DARKER than the `--panel-3` track, so the track reads
+  // against it. The only surface the track matches is the `--panel-3` hover wash — transient, and not worth
+  // compromising every row for.
   const track = ruleExact(".context-bar") ?? "";
-  assert.match(track, /background:\s*var\(--panel-3\)/, `the plain row keeps its own track, got ${JSON.stringify(track)}`);
+  assert.match(track, /background:\s*var\(--panel-3\)/, `the original track, got ${JSON.stringify(track)}`);
+  assert.match(track, /box-shadow:\s*inset 0 0 0 1px var\(--line\)/, "and the original hairline");
 
-  const filled = rule(".rail-row:hover .context-bar, .rail-row.is-focused .context-bar, .rail-row[aria-current=\"true\"] .context-bar");
-  assert.ok(filled, "filled rows override the track");
-  assert.match(filled, /background:\s*var\(--bg\)/, "so it stays visible against a filled row");
+  // No override may reintroduce a different track on ANY row state.
+  //
+  // Scanned across every rule rather than by one known selector: the first version asserted a single combined selector
+  // string, so adding `.rail-row[aria-current="true"] .context-bar { background: ... }` — exactly the thing this
+  // guards — left it green. Found by falsifying it.
+  const overrides = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+    .filter(([, selector]) => selector.includes(".rail-row") && selector.includes(".context-bar"))
+    .filter(([, , body]) => /background\s*:/.test(body));
+  assert.deepEqual(
+    overrides.map(([, selector]) => selector.trim().slice(0, 60)),
+    [],
+    "the gauge must not be restyled per row state",
+  );
 
-  // Selection must still be a bar on the right, which is what made the wash unnecessary in the first place.
-  assert.match(rule('.rail-row[aria-current="true"]') ?? "", /inset -3px 0 0 var\(--accent\)/);
+  // Selection stays: a plain surface plus the bar on the right edge.
+  const selected = rule('.rail-row[aria-current="true"]') ?? "";
+  assert.match(selected, /background:\s*var\(--panel-2\)/, "the original background change is kept");
+  assert.match(selected, /box-shadow:\s*inset -3px 0 0 var\(--accent\)/, "and the selection bar on the right");
 });
+
 test("attention states keep their HUE, so the stripe still means something", () => {
   // Stepping the quiet ones back must not flatten the loud ones — that is the stripe's whole job.
   for (const [selector, expected] of [
