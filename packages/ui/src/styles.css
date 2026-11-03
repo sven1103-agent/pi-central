@@ -599,10 +599,10 @@ button { font: inherit; color: inherit; }
 .rail-row .ask { color: var(--warn-text); }
 
 /*
- * A rail row holds two controls (issue #89): the row itself, and — when the session is not running — Forget.
+ * A rail row holds two controls (issue #89): the row itself, and the `⋯` menu of actions.
  *
- * The row is a `<div>` now because nesting buttons is invalid HTML that browsers resolve by breaking the inner
- * one. `.rail-row-main` carries the old button's layout so the visual rhythm is unchanged.
+ * The row is a `<div>` because nesting buttons is invalid HTML that browsers resolve by breaking the inner one.
+ * `.rail-row-main` carries the button's layout so the visual rhythm is unchanged.
  */
 .rail-row { display: flex; flex-direction: column; position: relative; }
 .rail-row-main {
@@ -612,71 +612,79 @@ button { font: inherit; color: inherit; }
   width: 100%;
 }
 .rail-row-main:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--r-1); }
+
 /*
- * Forget is deliberately quiet: it is housekeeping, not a primary act. Never red — the session is not being
- * deleted, only taken off the rail, and a danger colour would promise a consequence that does not happen.
- */
-/*
- * `Forget`: a real control, and it does not change the row's height.
+ * The row's actions, behind ONE `⋯` button (DESIGN.md §712, built after a reported defect).
  *
- * Two defects from a screenshot review (`img_35.png`). It was plain text with no affordance on a line of its own, which
- * made a DESTRUCTIVE action look like leaked hover text — and because it was a third line in the row's column layout it
- * made the selected row taller than its neighbours, so the rail's rhythm broke exactly on the row that matters most.
+ * The actions used to be inline buttons pinned to the row's bottom-right corner. Three of them (Resume, Forget,
+ * Delete) do not fit a 288px column: the cluster overlapped the row's own text, spilled past its edge and could not
+ * be clicked. Reported as: *"noboday can hit the right controls in the stopped session card ;) why not a menu icon
+ * (vertical ellipsis) with a submenue for the actions?"*
  *
- * `position: absolute` takes it out of that flow: the row height is now decided by its content alone, and the control
- * floats at the row's trailing edge, appearing on hover and on keyboard focus. Still reachable by Tab, because it is a
- * real button and `:focus-within` reveals it.
+ * A menu has a fixed footprint, so it does not grow with each new action — which is what broke when Stop became the
+ * fourth one.
  */
-.rail-row-forget {
-  position: absolute;
-  right: var(--sp-2);
-  bottom: var(--sp-2);
+.rail-row-menu { position: absolute; right: var(--sp-1); bottom: var(--sp-1); }
+
+.rail-row-menu-trigger {
+  display: grid; place-items: center;
+  width: 22px; height: 22px;
   background: var(--panel-3);
   border: 1px solid var(--line);
   border-radius: var(--r-1);
-  padding: 1px 6px;
-  font: inherit; font-size: var(--fs-2xs);
-  color: var(--dim); cursor: pointer;
-  /* Hidden until the row is engaged, but never `display: none` — a control that vanishes from the tab order cannot be
-     reached by the keyboard that is the reason it is hidden. */
+  color: var(--dim);
+  font: inherit; font-size: var(--fs-sm); line-height: 1;
+  cursor: pointer;
+  /* Revealed on hover or focus, like the single control it replaces. Never `display: none`: a control that leaves the
+     tab order cannot be reached by the keyboard that needed the reveal. */
   opacity: 0;
 }
-/*
- * The stopped row's two controls share ONE absolutely-positioned box (issue #150).
- *
- * `Forget` and `Delete` were each `position: absolute; right; bottom` — the same corner — so a second one would
- * stack on top of the first. The wrapper takes the position and lays them out in a row, which keeps the row's height
- * decided by its content (the reason `absolute` was chosen in the first place) and makes the pair's order explicit
- * rather than accidental.
- */
-.rail-row-stopped-actions {
-  position: absolute;
-  right: var(--sp-2);
-  bottom: var(--sp-2);
-  flex-direction: row;
-  align-items: center;
-  gap: var(--sp-1);
-  /* Hidden until the row is engaged, exactly as the single control was. */
-  opacity: 0;
-}
-.rail-row:hover .rail-row-stopped-actions,
-.rail-row:focus-within .rail-row-stopped-actions { opacity: 1; }
-/* Inside the wrapper the buttons are ordinary flex children, so they must not re-position themselves. */
-.rail-row-stopped-actions .rail-row-forget {
-  position: static;
-  opacity: 1;
-}
-/* Deleting is the irreversible one, so it carries the danger colour on hover while `Forget` stays neutral: the
-   difference between them is the whole point of having both. */
-.rail-row-stopped-actions .rail-row-delete:hover {
-  color: var(--danger-text);
-  border-color: var(--danger);
-  background: var(--danger-tint);
-}
+/* An open menu keeps its trigger visible, or the reader loses the thing that is showing them the menu. */
+.rail-row:hover .rail-row-menu-trigger,
+.rail-row:focus-within .rail-row-menu-trigger,
+.rail-row-menu[data-open="true"] .rail-row-menu-trigger { opacity: 1; }
+.rail-row-menu-trigger:hover { color: var(--text); border-color: var(--line-strong); }
+.rail-row-menu-trigger:focus-visible { outline: none; box-shadow: var(--focus); opacity: 1; }
 
-.rail-row:hover .rail-row-forget, .rail-row:focus-within .rail-row-forget { opacity: 1; }
-.rail-row-forget:hover { color: var(--danger-text); border-color: var(--danger); }
-.rail-row-forget:focus-visible { outline: none; box-shadow: var(--focus); opacity: 1; }
+/*
+ * The menu itself: hidden with `display: none` rather than unmounted, so its items are not in the tab order while it
+ * is closed and the rendered state still says what a row OFFERS.
+ *
+ * `bottom: 100%` opens it UPWARD, because a rail row sits near the bottom of a scrolling list as often as not.
+ */
+.rail-row-menu-list {
+  display: none;
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 4px);
+  z-index: 20;
+  min-width: 148px;
+  padding: 4px;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--panel-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  box-shadow: var(--sh-2);
+}
+.rail-row-menu[data-open="true"] .rail-row-menu-list { display: flex; }
+
+.rail-row-menu-item {
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 5px 8px;
+  border-radius: var(--r-1);
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  cursor: pointer;
+}
+.rail-row-menu-item:hover { background: var(--panel-2); }
+.rail-row-menu-item:focus-visible { outline: none; box-shadow: var(--focus); }
+/* Deleting is the irreversible one, so it carries the danger colour while Forget stays neutral: the difference between
+   them is the whole point of having both. */
+.rail-row-menu-item.rail-row-delete:hover { color: var(--danger-text); background: var(--danger-tint); }
 
 /*
  * The inline rename field (issues #78, #79).
@@ -824,14 +832,6 @@ button { font: inherit; color: inherit; }
 .history-delete:hover { color: var(--danger-text); background: var(--danger-tint); }
 .history-delete:focus-visible { outline: none; box-shadow: var(--focus); }
 
-.rail-row-actions { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
-.rail-row-retry {
-  background: none; border: 0; padding: 0 0 2px 2px;
-  font: inherit; font-size: var(--fs-2xs); font-weight: 600;
-  color: var(--accent-text); cursor: pointer;
-}
-.rail-row-retry:hover { text-decoration: underline; }
-.rail-row-retry:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--r-1); }
 /*
  * The earlier failure, kept after a retry. One dim line, truncated: it is evidence to compare against the next
  * attempt, not something to read in full on a rail row — the full text is on the row's `title`.
@@ -843,9 +843,9 @@ button { font: inherit; color: inherit; }
   font-size: var(--fs-2xs); color: var(--dim);
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-@media (prefers-reduced-motion: no-preference) { .rail-row-forget { transition: opacity 120ms ease; } }
-/* Touch and keyboard users get it without hovering, since there is no hover to give. */
-@media (hover: none) { .rail-row-forget { opacity: 1; } }
+@media (prefers-reduced-motion: no-preference) { .rail-row-menu-trigger { transition: opacity 120ms ease; } }
+/* Touch and keyboard users get the trigger without hovering, since there is no hover to give. */
+@media (hover: none) { .rail-row-menu-trigger { opacity: 1; } }
 
 .state-idle { border-left-color: var(--dim); }
 .state-starting { border-left-color: var(--accent); }

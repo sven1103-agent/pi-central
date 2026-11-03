@@ -2619,8 +2619,18 @@ test("Retry is NOT offered when the orchestrator speaks an older protocol", () =
     focusedId: undefined, onFocusRow() {}, onForgetRow() {}, onRetryRow() {}, retryAvailable: false,
     onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
   }));
-  assert.ok(!/rail-row-retry/.test(html), `no button that cannot work: ${html}`);
-  assert.match(html, /restart the orchestrator/, "and the row says what to do instead");
+  // No Retry CONTROL may be offered. The reason moved into the row's `⋯` menu as a DISABLED item, so the explanation
+  // sits where the reader looks for the action instead of adding a line to every failed row.
+  //
+  // Compared by CLASS TOKEN, not substring: `rail-row-retry` is a prefix of `rail-row-retry-unavailable`, so a
+  // substring test reported the disabled explanation as if it were the button.
+  const doc = new JSDOM(`<body>${html}</body>`).window.document;
+  const classes = [...doc.querySelectorAll(".rail-row-menu-item")].map((item) => item.className.split(" "));
+  assert.ok(!classes.some((tokens) => tokens.includes("rail-row-retry")), `no button that cannot work: ${html}`);
+  const unavailable = doc.querySelector(".rail-row-retry-unavailable");
+  assert.ok(unavailable, "a disabled item states that Retry is missing");
+  assert.equal(unavailable.disabled, true, "and it cannot be pressed");
+  assert.match(unavailable.title, /restart the orchestrator/i, "saying what to do instead");
 });
 
 test("the error strip shows the reason, not a screenful of stderr", () => {

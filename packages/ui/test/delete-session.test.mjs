@@ -264,7 +264,7 @@ test("a stopped rail row offers Forget AND Delete, and they are distinguishable"
     }),
   );
   const doc = new JSDOM(`<body>${html}</body>`).window.document;
-  const forget = doc.querySelector(".rail-row-forget:not(.rail-row-delete)");
+  const forget = doc.querySelector(".rail-row-menu-item.rail-row-forget");
   const del = doc.querySelector(".rail-row-delete");
   assert.ok(forget, "Forget is present");
   assert.ok(del, "Delete is present beside it");
@@ -308,7 +308,7 @@ test("a RUNNING rail row offers Stop, so a delete refusal can be acted on", () =
     }),
   );
   const doc = new JSDOM(`<body>${html}</body>`).window.document;
-  const stop = doc.querySelector(".rail-row-stop button");
+  const stop = doc.querySelector(".rail-row-menu-item.rail-row-stop");
   assert.ok(stop, "a Stop control is rendered on the live row");
   assert.match(stop.textContent, /Stop/);
   // The consequence, not the mechanic — and the opposite of Delete's warning, so the two cannot be confused.

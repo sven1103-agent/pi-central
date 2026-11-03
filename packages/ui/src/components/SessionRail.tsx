@@ -13,6 +13,7 @@ import { displayName, formatContext, isNearFull, nameLabel, shortenPath, whereLi
 import { stateLabel } from "../store.ts";
 import { groupRows, isRunning, rosterLabel, rowActivity, type RosterRow } from "../roster.ts";
 import { ContextBar } from "./ContextMeter.tsx";
+import { RowActionsMenu, type RowActionItem } from "./RowActionsMenu.tsx";
 
 /**
  * Section headings, in attention order.
@@ -288,6 +289,97 @@ function rowName(row: RosterRow, firstPrompt?: string | undefined): string {
 }
 
 /**
+ * What a row offers, as a list rather than as markup.
+ *
+ * Pure and exported, because *which* actions a row has is the part with rules: a running session offers Stop and
+ * nothing destructive; a stopped one offers Resume, Forget and Delete; a failed one offers Retry plus the
+ * housekeeping. Asserting that on a list is clearer than five string matches against rendered HTML, and it is where
+ * the `isRunning` distinction lives.
+ *
+ * ORDER: the action that continues work first, the irreversible one last. A destructive item should never be the
+ * first thing under the pointer when a menu opens.
+ */
+export function rowActionsFor(
+  row: RosterRow,
+  caps: {
+    onResume?: (() => void) | undefined;
+    onForget: () => void;
+    onDelete?: (() => void) | undefined;
+    onStop?: (() => void) | undefined;
+    onRetry: () => void;
+    retryAvailable: boolean;
+  },
+): RowActionItem[] {
+  const session = row.session;
+  const items: RowActionItem[] = [];
+
+  if (session?.state === "failed") {
+    if (caps.retryAvailable) {
+      items.push({
+        key: "retry",
+        label: "Retry",
+        title: "Try this session again in the same directory",
+        onSelect: caps.onRetry,
+        className: "rail-row-retry",
+      });
+    } else {
+      /*
+       * The control is withheld rather than shown-and-broken, and the REASON is stated in the place the reader is
+       * looking for it. A disabled button alone would still be a promise.
+       */
+      items.push({
+        key: "retry-unavailable",
+        label: "Retry unavailable",
+        title: "Restart the orchestrator to retry: it speaks an older protocol",
+        onSelect: () => {},
+        disabled: true,
+        className: "rail-row-retry-unavailable",
+      });
+    }
+    // A failed session is not running, so it can also be dismissed or deleted.
+    items.push({ key: "forget", label: "Forget", title: FORGET_TITLE, onSelect: caps.onForget, className: "rail-row-forget" });
+    if (caps.onDelete !== undefined) {
+      items.push({ key: "delete", label: "Delete", title: DELETE_TITLE, onSelect: caps.onDelete, className: "rail-row-delete" });
+    }
+    return items;
+  }
+
+  if (isRunning(session)) {
+    // Nothing destructive while a process holds the transcript open; and resuming a running session is not a thing.
+    if (caps.onStop !== undefined && session !== undefined && RAIL_STOPPABLE.has(session.state)) {
+      items.push({
+        key: "stop",
+        label: "Stop",
+        title: "Stop this session. Its transcript stays on disk.",
+        onSelect: caps.onStop,
+        className: "rail-row-stop",
+      });
+    }
+    return items;
+  }
+
+  // Not running: the whole housekeeping set, Resume first.
+  if (caps.onResume !== undefined) {
+    items.push({
+      key: "resume",
+      label: "Resume",
+      title: "Start this session again in the same directory. Its transcript continues.",
+      onSelect: caps.onResume,
+      className: "rail-row-resume",
+    });
+  }
+  items.push({ key: "forget", label: "Forget", title: FORGET_TITLE, onSelect: caps.onForget, className: "rail-row-forget" });
+  if (caps.onDelete !== undefined) {
+    items.push({ key: "delete", label: "Delete", title: DELETE_TITLE, onSelect: caps.onDelete, className: "rail-row-delete" });
+  }
+  return items;
+}
+
+/** The two housekeeping titles, in one place: their difference IS the point, so they are read side by side. */
+const FORGET_TITLE = "Remove from the rail. The session file is not deleted.";
+const DELETE_TITLE = "Delete this session's transcript from disk. This cannot be undone.";
+
+/**
  * A row's label, exported so the DELETE dialog can name the same session the row named.
  *
  * One rule: a dialog asking "delete this session?" about a row that said something else is exactly the ambiguity a
@@ -333,6 +425,18 @@ function RailRow({
   firstPromptFor?: ((row: RosterRow) => string | undefined) | undefined;
 }) {
   const session = row.session;
+  /*
+   * What this row offers, in one place. Pure and exported, so the rules about WHICH actions exist are asserted on a
+   * list rather than on five string matches against rendered HTML.
+   */
+  const rowActions = rowActionsFor(row, {
+    ...(onResume === undefined ? {} : { onResume }),
+    onForget,
+    ...(onDelete === undefined ? {} : { onDelete }),
+    ...(onStop === undefined ? {} : { onStop }),
+    onRetry,
+    retryAvailable,
+  });
   /*
    * NO RENAME HERE, deliberately.
    *
@@ -460,51 +564,18 @@ function RailRow({
         what "defence in depth" means and also what a test that cannot fail looks like. The behaviour it guards is
         asserted (`Stop is not offered where it cannot act`); the guard itself is belt and braces.
       */}
-      {onStop !== undefined && session !== undefined && RAIL_STOPPABLE.has(session.state) && (
-        <span className="rail-row-actions rail-row-stop">
-          <button
-            type="button"
-            className="rail-row-forget"
-            onClick={onStop}
-            /*
-              The title states the CONSEQUENCE, not the mechanic: stopping ends the run, and the transcript stays. That
-              is the fact a reader needs before pressing it, and the opposite of Delete's warning — which is why the
-              two must not look alike.
-            */
-            title="Stop this session. Its transcript stays on disk."
-          >
-            Stop
-          </button>
-        </span>
-      )}
-      {session?.state === "failed" && (
-        <span className="rail-row-actions">
-          {retryAvailable ? (
-            <button
-              type="button"
-              className="rail-row-retry"
-              onClick={onRetry}
-              /*
-                A STATIC sentence. It used to be `session.error`, which put the whole multi-line stderr into a
-                native tooltip — the same mistake as the thinking block's `title` (issue #143): a wall of text
-                appearing on a stray hover, with no way to keep it open or dismiss it. Hovering a control should
-                say what the control DOES; the reason lives in one place, the Session panel.
-              */
-              title="Try this session again in the same directory"
-            >
-              Retry
-            </button>
-          ) : (
-            /*
-              The control is withheld rather than shown-and-broken, and the reason is stated. A disabled button
-              would still be a promise; a sentence that says what to do is the honest version.
-            */
-            <span className="rail-row-earlier">
-              restart the orchestrator to retry (it speaks an older protocol)
-            </span>
-          )}
-        </span>
-      )}
+      {/*
+        EVERY action for this row, behind one `⋯` button.
+
+        They were three separate strips: Stop pinned to the corner, Retry under a failed row, and Resume/Forget/Delete
+        in an absolutely-positioned cluster. In a 288px column the cluster overlapped the row's own text and spilled
+        past its edge, so the controls could not be clicked at all — reported as *"noboday can hit the right controls in
+        the stopped session card ;) why not a menu icon (vertical ellipsis) with a submenue for the actions?"*
+
+        A menu also stops the row growing with each new action, which is what happened when Stop became the fourth.
+        `DESIGN.md` §712 had already specified this button.
+      */}
+      <RowActionsMenu label={rowName(row, firstPromptFor?.(row))} items={rowActions} />
       {/*
         The earlier failure, whenever there IS one — NOT only while the session is failed.
 
@@ -519,55 +590,6 @@ function RailRow({
           `firstLine` is the same rule the error strip follows, so the two agree about what "the reason" is.
         */
         <span className="rail-row-earlier">last failure: {firstLine(session.previousError)}</span>
-      )}
-      {/*
-        The controls for a row that is NOT running — gated on `isRunning`, not on `session === undefined`.
-
-        That distinction is the reported bug: stopping a session leaves it in the live list (`stopped` is a state, C3),
-        so `session !== undefined` was still true and this whole block disappeared. The rail could stop a session and
-        then offered no way to resume, forget or delete it.
-      */}
-      {!isRunning(session) && (
-        <span className="rail-row-actions rail-row-stopped-actions">
-          {onResume !== undefined && (
-            <button
-              type="button"
-              className="rail-row-forget rail-row-resume"
-              onClick={onResume}
-              /*
-                First of the three, because it is the one that continues the work. Its title says what resuming does
-                NOT do — it starts a process, it does not undo anything — which is the fact a reader needs before
-                spending a spawn.
-              */
-              title="Start this session again in the same directory. Its transcript continues."
-            >
-              Resume
-            </button>
-          )}
-          <button
-            type="button"
-            className="rail-row-forget"
-            onClick={onForget}
-            /*
-              The two controls are ADJACENT and their labels say the difference, because the difference is the whole
-              point: Forget hides a row and keeps the file; Delete removes the file and cannot be undone. A single
-              ambiguous "Remove" is how one of them gets used for the other.
-            */
-            title="Remove from the rail. The session file is not deleted."
-          >
-            Forget
-          </button>
-          {onDelete !== undefined && (
-            <button
-              type="button"
-              className="rail-row-forget rail-row-delete"
-              onClick={onDelete}
-              title="Delete this session's transcript from disk. This cannot be undone."
-            >
-              Delete
-            </button>
-          )}
-        </span>
       )}
     </div>
   );

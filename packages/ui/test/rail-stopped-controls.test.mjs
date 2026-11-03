@@ -129,9 +129,9 @@ const railWith = (state, handlers = {}) =>
 /** The control labels rendered in the row's action strip. */
 function controls(html) {
   const doc = new JSDOM(`<body>${html}</body>`).window.document;
-  // `.rail-row-actions` covers every action strip: the failed row's Retry, the running row's Stop (which also carries
-  // `rail-row-stop`), and the not-running row's Resume/Forget/Delete (which also carries `rail-row-stopped-actions`).
-  return [...doc.querySelectorAll(".rail-row-actions button")].map((b) => (b.textContent ?? "").trim());
+  // Every action lives in the row's `⋯` menu now; the items are rendered always and hidden with `display: none`, so
+  // the rendered output still states what a row OFFERS.
+  return [...doc.querySelectorAll(".rail-row-menu-item")].map((b) => (b.textContent ?? "").trim());
 }
 
 test("a STOPPED session offers Resume, Forget and Delete — not an empty row", () => {
@@ -169,7 +169,7 @@ test("a failed session keeps Retry rather than gaining Resume", () => {
 test("Resume says what it does NOT do, since it spends a spawn", () => {
   const html = railWith("stopped", { onResumeRow() {} });
   const doc = new JSDOM(`<body>${html}</body>`).window.document;
-  const resume = [...doc.querySelectorAll(".rail-row-stopped-actions button")].find((b) => /Resume/.test(b.textContent));
+  const resume = [...doc.querySelectorAll(".rail-row-menu-item")].find((b) => /Resume/.test(b.textContent));
   assert.match(resume.title, /same directory/, "the directory is preserved");
   assert.match(resume.title, /transcript continues/, "and the conversation is continued, not restarted");
 });
@@ -270,4 +270,60 @@ test("hover and SELECTION are distinguishable, which is the point of the tint", 
   const selected = /background:\s*var\((--[\w-]+)\)/.exec(rule('.rail-row[aria-current="true"]') ?? "")?.[1];
   assert.ok(hover && selected, `both fills must exist, got ${hover} / ${selected}`);
   assert.notEqual(hover, selected, "hover and selection must not share a fill");
+});
+
+// --- The actions menu (asked for from use) ------------------------------------------------------
+
+test("a stopped row offers its actions behind ONE ⋯ button, not three inline buttons", () => {
+  // Reported: "noboday can hit the right controls in the stopped session card ;) why not a menu icon (vertical
+  // ellipsis) with a submenue for the actions?" Three buttons pinned to the corner of a 288px row overlapped its text,
+  // spilled past its edge, and could not be clicked.
+  const html = railWith("stopped", { onResumeRow() {}, onDeleteRow() {}, onStopRow() {} });
+  const doc = new JSDOM(`<body>${html}</body>`).window.document;
+
+  const trigger = doc.querySelector(".rail-row-menu-trigger");
+  assert.ok(trigger, "there is a menu trigger");
+  assert.match(trigger.textContent, /⋯/, "a vertical ellipsis");
+  // Named for the session, so ten rows do not all announce "Actions".
+  assert.match(trigger.getAttribute("aria-label"), /^Actions for /);
+  // Its state is announced rather than implied by the glyph.
+  assert.equal(trigger.getAttribute("aria-haspopup"), "menu");
+  assert.equal(trigger.getAttribute("aria-expanded"), "false", "closed at rest");
+});
+
+test("the menu holds the row's actions, and is hidden with display:none when closed", () => {
+  // `display: none` rather than unmounting: the items leave the tab order while closed, and the rendered output still
+  // says what a row OFFERS — which is what these tests assert.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(
+    ruleExact(".rail-row-menu-list") ?? "",
+    /display:\s*none/,
+    "closed means display:none, not mounted-on-open",
+  );
+  assert.match(
+    css,
+    /\.rail-row-menu\[data-open="true"\] \.rail-row-menu-list\s*\{[^}]*display:\s*flex/,
+    "and opening reveals it",
+  );
+
+  const html = railWith("stopped", { onResumeRow() {} });
+  const doc = new JSDOM(`<body>${html}</body>`).window.document;
+  const items = [...doc.querySelectorAll(".rail-row-menu-item")];
+  assert.ok(items.length > 0, "the actions are in the menu");
+  assert.ok(items.every((item) => item.getAttribute("role") === "menuitem"), "and each is a menu item");
+});
+
+test("the menu opens UPWARD, because a rail row sits low in a scrolling list", () => {
+  const list = ruleExact(".rail-row-menu-list") ?? "";
+  assert.match(list, /bottom:\s*calc\(100% \+ 4px\)/, `opens above the trigger, got ${JSON.stringify(list)}`);
+});
+
+test("a row that cannot retry says so as a DISABLED item, in the menu", () => {
+  // The explanation used to be a sentence under the row. Here it sits where the reader looks for the action, and says
+  // both that there is no Retry and why.
+  const html = railWith("failed", { onRetryRow() {}, retryAvailable: false });
+  const doc = new JSDOM(`<body>${html}</body>`).window.document;
+  const unavailable = doc.querySelector(".rail-row-retry-unavailable");
+  assert.ok(unavailable, "a disabled item states the absence");
+  assert.equal(unavailable.disabled, true);
 });
