@@ -171,25 +171,30 @@ test("an idle row's stripe is a neutral grey, not a bright text colour", () => {
   assert.doesNotMatch(idle, /var\(--dim\)/, "a text colour is not a quiet stripe");
 });
 
-test("adjacent rows are separated by a HAIRLINE, not a gap", () => {
-  // Rows were flush, so the state stripe was the only boundary — stepping it back to a neutral grey merged five idle
-  // rows into one block ("now i can hardly differentiate between the cards").
-  //
-  // The first fix used the 8px the design document specifies, which separated them and made the rail feel loose:
-  // 40px of added height across five rows, every row further from the one above. Reported as "now everything gets
-  // visually wider. Maybe a very tiny separator? not a lot." So: a 1px edge, the app's own gutter idiom.
-  const separator = rule(".rail-row + .rail-row");
-  assert.ok(separator, "adjacent rows are separated by their own rule");
-  assert.match(separator, /border-top:\s*1px solid var\(--line\)/, `a 1px hairline, got ${JSON.stringify(separator)}`);
+test("rows are flush, and separation comes from the fills rather than a separator", () => {
+  // Three attempts, and this is the one chosen from looking at all of them:
+  //   - flush + a bright `--dim` stripe: a loud grey bar on every idle row ("they all show a gray bar on the left");
+  //   - flush + a neutral stripe: merged into one block ("hardly differentiate between the cards");
+  //   - 8px apart: separated but loose ("everything gets visually wider");
+  //   - 1px hairline: separated at no cost, still not preferred.
+  // The boundary the reader wanted was the hover and selection FILLS, so the rail stays compact and those two carry it.
+  assert.equal(rule(".rail-row + .rail-row"), undefined, "no gap and no separator between rows");
 
-  // A gap is the thing that was rejected: it must not come back as a margin.
-  assert.doesNotMatch(separator, /margin-top/, "spacing was too much — the separator is one pixel");
+  // What does the separating, asserted as present so a future "quiet tidy-up" cannot remove it:
+  assert.match(rule(".rail-row:hover") ?? "", /background:\s*var\(--panel-2\)/, "hover fills the row");
+  assert.match(
+    rule('.rail-row[aria-current="true"]') ?? "",
+    /background:\s*var\(--accent-tint\)/,
+    "selection fills the row",
+  );
 
-  // And the stripe must not be the row's own gutter colour, which would be invisible again.
-  const idle = rule(".state-idle");
-  assert.doesNotMatch(idle, /border-left-color:\s*var\(--line\)/, "a stripe the same as the gutter is not an edge");
+  // And the stripe is an edge, not the row's own gutter colour — otherwise a row has no left boundary at all.
+  assert.doesNotMatch(
+    rule(".state-idle") ?? "",
+    /border-left-color:\s*var\(--line\)/,
+    "a stripe the same as the gutter is not an edge",
+  );
 });
-
 test("attention states keep their HUE, so the stripe still means something", () => {
   // Stepping the quiet ones back must not flatten the loud ones — that is the stripe's whole job.
   for (const [selector, expected] of [

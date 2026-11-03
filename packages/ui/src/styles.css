@@ -550,17 +550,17 @@ button { font: inherit; color: inherit; }
   color: var(--dim);
 }
 /*
- * A hairline between rows — not a gap.
+ * Rows are FLUSH — no gap, no separator.
  *
- * The first attempt used the 8px the design document specifies ("rows 8px apart"), which separated them but made the
- * rail feel loose: five extra 8px gaps is 40px of added height in a 288px column, and every row sat further from the
- * one above it. Reported as *"now everything gets visually wider. Maybe a very tiny separator? not a lot."*
+ * Three attempts, and this is the one chosen from looking at all of them. Rows flush with a bright `--dim` stripe
+ * (the original) read fine but put a loud grey bar on every idle row. Flush with a neutral stripe merged into one
+ * block. 8px apart separated them but made the rail feel loose — 40px of extra height in a 288px column. A 1px
+ * hairline separated them at no cost, and was still not preferred: the boundary the reader actually wanted came from
+ * the hover and selection FILLS, not from a line between rows.
  *
- * A 1px `--line` edge is the app's own idiom ("separated by 1px `--line` gutters rather than borders or cards") and
- * costs one pixel per row. It gives the boundary that the state stripe was accidentally providing, while leaving the
- * 68px row rhythm the design specifies intact.
+ * So separation is carried by the state stripe on the left and by the two fills below, and the rail keeps its compact
+ * 68px rhythm. Recorded because the next person will otherwise try the same three in the same order.
  */
-.rail-row + .rail-row { border-top: 1px solid var(--line); }
 
 /* Hover and SELECTION are different states and must look different.
  *
