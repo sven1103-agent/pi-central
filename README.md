@@ -44,7 +44,7 @@ Check these first — Pi Central will not run without them, and it is better to 
 |---|---|---|
 | **macOS** | Safehouse (the sandbox) has no Linux backend yet. | `uname` |
 | **[Pi](https://pi.dev)** | Pi Central supervises `pi --mode rpc`; it is not a fork of it. | `pi --version` |
-| **[Safehouse](https://github.com/earendil-works/safehouse)** | Composes the per-session sandbox profile. | `safehouse --help` |
+| **[Safehouse](https://agent-safehouse.dev)** | Composes the per-session sandbox profile. | `safehouse --help` |
 | **Node ≥ 22** | The orchestrator runs TypeScript directly. | `node --version` |
 
 ## Quick start
