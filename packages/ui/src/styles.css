@@ -542,19 +542,29 @@ button { font: inherit; color: inherit; }
  *
  * They were the same `--panel-2` fill, so the selected session was only distinguishable from whatever the mouse
  * happened to be over — and a review could not tell which session the workspace was showing by looking at the
- * rail. Selection is now a persistent fill AND the state-coloured left edge, which is the shape the eye already
- * reads as "this one"; hover stays a light wash with no edge.
+ * rail.
  *
- * The words stay full-strength either way: selection is not the only signal, `aria-current` carries it to
- * assistive tech, and the left border does not depend on colour vision alone because it is a shape change. */
-.rail-row:hover { background: var(--panel-3); }
+ * Reported again from use: *"on hover they dont do anything noticeable."* `--panel` → `--panel-3` is a 6-unit step on
+ * a dark screen, which is not a change you notice while moving a pointer down a list. So hover is now the lighter
+ * `--panel-2` PLUS a brighter name, and selection moved to the accent tint with a thickened state edge — three
+ * channels, in the order a reader notices them: fill, text, shape.
+ *
+ * The words stay full-strength on selection either way: `aria-current` carries it to assistive tech, and the edge
+ * width is a shape change, so nothing depends on colour vision alone. */
+/* Fill, text and a hairline edge together: the fill alone was too small a step to notice while moving a pointer. */
+.rail-row:hover {
+  background: var(--panel-2);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.rail-row:hover .name { color: var(--text); }
 .rail-row.is-focused,
 .rail-row[aria-current="true"] {
-  background: var(--panel-2);
+  background: var(--accent-tint);
   color: var(--text);
   /* The rail row's left border is the STATE stripe; selection thickens it rather than recolouring it, so the two
      facts stay on separate channels. */
   border-left-width: 4px;
+  box-shadow: none;
 }
 .rail-row.is-focused .name { color: var(--text); }
 .rail-row.is-focused .r2,
@@ -829,12 +839,20 @@ button { font: inherit; color: inherit; }
 /* Touch and keyboard users get it without hovering, since there is no hover to give. */
 @media (hover: none) { .rail-row-forget { opacity: 1; } }
 
-.state-idle { border-left-color: var(--dim); }
+/*
+ * The state stripe. Two of these were doing harm.
+ *
+ * `idle` used `--dim` — a text grey, deliberately AA-bright — so a list of five idle sessions showed five prominent
+ * grey bars that read as "disabled" rather than "quiet". `stopped` used `--line-strong`, nearly the same. Reported as:
+ * *"in idle, they all show a gray bar on the left."* The stripe's job is to make the states that need ATTENTION stand
+ * out, so the quiet ones step back to the row's own line colour and the loud ones keep their hue.
+ */
+.state-idle { border-left-color: var(--line); }
+.state-stopped { border-left-color: var(--line); }
 .state-starting { border-left-color: var(--accent); }
 .state-streaming { border-left-color: var(--ok); }
 .state-awaiting-approval { border-left-color: var(--warn); }
 .state-failed { border-left-color: var(--danger); }
-.state-stopped { border-left-color: var(--line-strong); }
 
 .rail-empty { padding: var(--sp-4) var(--sp-3); color: var(--dim); font-size: var(--fs-sm); }
 

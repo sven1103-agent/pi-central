@@ -35,6 +35,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- A stopped session can be resumed, forgotten or deleted from its rail row, instead of the row losing every control
+  ([#89]).
+- Hovering a rail row is visible, and idle rows no longer wear a bright grey stripe ([#89]).
+
 - Clicking a History session that is already running focuses it, instead of leaving the view on another session
   ([#150]).
 - A resumed session is focused when it arrives, and an unrelated new session can no longer claim that focus ([#150]).

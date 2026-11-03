@@ -23,7 +23,7 @@ import type {
   PiRecord,
 } from "@pi-central/protocol";
 import { applyRecord, emptyTranscript, seedTranscript, type Transcript } from "./transcript.ts";
-import { addToRoster, moveToFront, removeFromRoster, type RosterEntry, type RosterRow } from "./roster.ts";
+import { addToRoster, moveToFront, removeFromRoster, rosterEntryFor, type RosterEntry, type RosterRow } from "./roster.ts";
 // A type-only import from a component, which is the odd part of this file: `QueueBehavior` is the composer's
 // vocabulary for how a prompt joins a run, and `pendingPrompt` has to speak it so a parked prompt is sent with
 // the same behaviour the reader chose. Imported as a TYPE so no component code is pulled into the reducer.
@@ -629,22 +629,34 @@ export function focusedStoppedRow(state: UiState): RosterRow | undefined {
   const id = state.focusedId;
   if (id === undefined) return undefined;
   /*
-   * A live handle wins, so one session never gets two views.
+   * A live handle wins — UNLESS the session is stopped.
    *
-   * Defence in depth rather than a live fix: a live handle (`s1`) can never equal a roster path (an absolute `.jsonl`
-   * path), so the `find` below would return nothing anyway. It is kept because the two branches render DIFFERENT
-   * components for the same row — `SessionView` or `StoppedSession` — and a future change that made a handle and a path
-   * collide would silently render both.
-   *
-   * Stated plainly because I could not falsify it on its own: removing it changes no test, which is what "cannot fail"
-   * looks like from the outside.
+   * `stopped` is a state, not an absence (C3): the supervisor keeps the session object, so a stopped row still has a
+   * handle. Gating on "a live session exists" therefore sent a stopped session to `SessionView`, which renders a
+   * running session's furniture for a process that is not there — and, before `isRunning` existed, left the row with no
+   * Resume at all. A stopped session is a stopped session whether or not its object lingers.
    */
-  if (state.live.some((session) => session.id === id)) return undefined;
+  const live = state.live.find((session) => session.id === id);
+  if (live !== undefined && live.state !== "stopped") return undefined;
+  if (live !== undefined) {
+    /*
+     * Build the row from the live session, because a stopped session may never have been in the roster under this
+     * handle's path — and `StoppedSession` needs an entry with a path to resume from.
+     */
+    const entry = state.roster.find((candidate) => candidate.path === live.sessionFile) ?? rosterEntryFor(live);
+    if (entry === undefined) return undefined;
+    return { entry, session: live };
+  }
   const entry = state.roster.find((candidate) => candidate.path === id);
   if (entry === undefined) return undefined;
-  // A session that came back is live again; the live branch above already returned in that case, but a snapshot can
-  // race a focus, so the join is done here rather than trusted.
-  const session = state.live.find((candidate) => candidate.sessionFile === entry.path);
+  /*
+   * Join the session only when it is STOPPED.
+   *
+   * A path focus can race a resume: `focusRow` resolves a file to a handle when a live session holds it, but a snapshot
+   * could land between the two. Returning the running session here would render the stopped-session view for a live
+   * process, so the running case is deliberately excluded rather than trusted to the ordering above.
+   */
+  const session = state.live.find((candidate) => candidate.sessionFile === entry.path && candidate.state === "stopped");
   return { entry, session };
 }
 

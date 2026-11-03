@@ -11,7 +11,7 @@ import { useMemo, useState } from "react";
 import type { LiveSession } from "@pi-central/protocol";
 import { displayName, formatContext, isNearFull, nameLabel, shortenPath, whereLine } from "../format.ts";
 import { stateLabel } from "../store.ts";
-import { groupRows, rosterLabel, rowActivity, type RosterRow } from "../roster.ts";
+import { groupRows, isRunning, rosterLabel, rowActivity, type RosterRow } from "../roster.ts";
 import { ContextBar } from "./ContextMeter.tsx";
 
 /**
@@ -38,6 +38,7 @@ export function SessionRail({
   onForgetRow,
   onDeleteRow,
   onStopRow,
+  onResumeRow,
   onRetryRow,
   retryAvailable,
   onStartSession,
@@ -88,6 +89,14 @@ export function SessionRail({
    * The rail is the list of sessions; stopping one belongs in it.
    */
   onStopRow?: ((row: RosterRow) => void) | undefined;
+  /**
+   * Start a STOPPED session again from its row (reported from use).
+   *
+   * Stopping was a one-way door: the row kept its session object (`stopped` is a state, not an absence), so the
+   * controls that were gated on `session === undefined` disappeared — no Resume, no Forget, no Delete. The rail could
+   * stop a session and then had no way to bring it back.
+   */
+  onResumeRow?: ((row: RosterRow) => void) | undefined;
   /**
    * Retry a FAILED session (issue #11).
    *
@@ -195,6 +204,7 @@ export function SessionRail({
                   onForget={() => onForgetRow(row)}
                   onDelete={onDeleteRow === undefined ? undefined : () => onDeleteRow(row)}
                   onStop={onStopRow === undefined ? undefined : () => onStopRow(row)}
+                  onResume={onResumeRow === undefined ? undefined : () => onResumeRow(row)}
                   onRetry={() => onRetryRow(row)}
                   retryAvailable={retryAvailable}
                   home={home}
@@ -302,6 +312,7 @@ function RailRow({
   onForget,
   onDelete,
   onStop,
+  onResume,
   onRetry,
   retryAvailable,
   home,
@@ -314,6 +325,8 @@ function RailRow({
   onDelete?: (() => void) | undefined;
   /** Stop this session. Offered for a RUNNING row, which is the only kind it can act on. */
   onStop?: (() => void) | undefined;
+  /** Start this session again. Offered for a row that is NOT running. */
+  onResume?: (() => void) | undefined;
   onRetry: () => void;
   retryAvailable: boolean;
   home: string | undefined;
@@ -507,8 +520,30 @@ function RailRow({
         */
         <span className="rail-row-earlier">last failure: {firstLine(session.previousError)}</span>
       )}
-      {session === undefined && (
+      {/*
+        The controls for a row that is NOT running — gated on `isRunning`, not on `session === undefined`.
+
+        That distinction is the reported bug: stopping a session leaves it in the live list (`stopped` is a state, C3),
+        so `session !== undefined` was still true and this whole block disappeared. The rail could stop a session and
+        then offered no way to resume, forget or delete it.
+      */}
+      {!isRunning(session) && (
         <span className="rail-row-actions rail-row-stopped-actions">
+          {onResume !== undefined && (
+            <button
+              type="button"
+              className="rail-row-forget rail-row-resume"
+              onClick={onResume}
+              /*
+                First of the three, because it is the one that continues the work. Its title says what resuming does
+                NOT do — it starts a process, it does not undo anything — which is the fact a reader needs before
+                spending a spawn.
+              */
+              title="Start this session again in the same directory. Its transcript continues."
+            >
+              Resume
+            </button>
+          )}
           <button
             type="button"
             className="rail-row-forget"

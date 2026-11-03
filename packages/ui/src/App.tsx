@@ -1204,6 +1204,16 @@ export function App() {
           onStopRow={(row) => {
             if (row.session !== undefined) send({ kind: "stop", sessionId: row.session.id });
           }}
+          /*
+            Resume from the row — the other half of Stop. Stopping was a one-way door: the row kept its session
+            object, so the not-running controls never appeared and the session could be stopped but never restarted.
+            Sent by PATH, because a stopped session's handle is per-process and says nothing durable (ADR-0004).
+          */
+          onResumeRow={(row) => {
+            dispatch({ kind: "focusRow", key: row.entry.path });
+            dispatch({ kind: "expectNewSession", file: row.entry.path });
+            send({ kind: "resume", path: row.entry.path });
+          }}
           onDeleteRow={
             supportsDelete(state.install?.protocol)
               ? (row) =>
