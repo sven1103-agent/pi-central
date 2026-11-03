@@ -614,86 +614,13 @@ button { font: inherit; color: inherit; }
 .rail-row-main:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--r-1); }
 
 /*
- * The row's actions, behind ONE `⋯` button (DESIGN.md §712, built after a reported defect).
+ * The rail row carries NO actions of its own.
  *
- * The actions used to be inline buttons pinned to the row's bottom-right corner. Three of them (Resume, Forget,
- * Delete) do not fit a 288px column: the cluster overlapped the row's own text, spilled past its edge and could not
- * be clicked. Reported as: *"noboday can hit the right controls in the stopped session card ;) why not a menu icon
- * (vertical ellipsis) with a submenue for the actions?"*
- *
- * A menu has a fixed footprint, so it does not grow with each new action — which is what broke when Stop became the
- * fourth one.
+ * They were inline buttons pinned to the row's corner, then a `⋯` menu in the same corner. Both are cramped in a 288px
+ * column: the buttons overlapped the row's text and could not be clicked, and the menu was reported as "very tiny".
+ * The controls now live in the session companion panel beside the transcript, which has the width for them — see
+ * `sessionControlsFor` in `Inspector.tsx`.
  */
-/*
- * Room for the trigger, on rows that have one.
- *
- * The trigger floats at the row's trailing edge. Without this reservation its 22px landed ON the third line — over the
- * ctx gauge and the cost — which a screenshot showed as the button covering the numbers beside it. Reserving the space
- * in the row itself is what keeps a hover-revealed control from colliding with content it does not replace.
- */
-.rail-row.has-actions { padding-right: calc(var(--sp-3) + 24px); }
-
-.rail-row-menu { position: absolute; right: var(--sp-1); bottom: var(--sp-1); }
-
-.rail-row-menu-trigger {
-  display: grid; place-items: center;
-  width: 22px; height: 22px;
-  background: var(--panel-3);
-  border: 1px solid var(--line);
-  border-radius: var(--r-1);
-  color: var(--dim);
-  font: inherit; font-size: var(--fs-sm); line-height: 1;
-  cursor: pointer;
-  /* Revealed on hover or focus, like the single control it replaces. Never `display: none`: a control that leaves the
-     tab order cannot be reached by the keyboard that needed the reveal. */
-  opacity: 0;
-}
-/* An open menu keeps its trigger visible, or the reader loses the thing that is showing them the menu. */
-.rail-row:hover .rail-row-menu-trigger,
-.rail-row:focus-within .rail-row-menu-trigger,
-.rail-row-menu[data-open="true"] .rail-row-menu-trigger { opacity: 1; }
-.rail-row-menu-trigger:hover { color: var(--text); border-color: var(--line-strong); }
-.rail-row-menu-trigger:focus-visible { outline: none; box-shadow: var(--focus); opacity: 1; }
-
-/*
- * The menu itself: hidden with `display: none` rather than unmounted, so its items are not in the tab order while it
- * is closed and the rendered state still says what a row OFFERS.
- *
- * `bottom: 100%` opens it UPWARD, because a rail row sits near the bottom of a scrolling list as often as not.
- */
-.rail-row-menu-list {
-  display: none;
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 4px);
-  z-index: 20;
-  min-width: 148px;
-  padding: 4px;
-  flex-direction: column;
-  gap: 1px;
-  background: var(--panel-3);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-2);
-  box-shadow: var(--sh-2);
-}
-.rail-row-menu[data-open="true"] .rail-row-menu-list { display: flex; }
-
-.rail-row-menu-item {
-  text-align: left;
-  background: none;
-  border: 0;
-  padding: 5px 8px;
-  border-radius: var(--r-1);
-  font: inherit;
-  font-size: var(--fs-sm);
-  color: var(--text);
-  cursor: pointer;
-}
-.rail-row-menu-item:hover { background: var(--panel-2); }
-.rail-row-menu-item:focus-visible { outline: none; box-shadow: var(--focus); }
-/* Deleting is the irreversible one, so it carries the danger colour while Forget stays neutral: the difference between
-   them is the whole point of having both. */
-.rail-row-menu-item.rail-row-delete:hover { color: var(--danger-text); background: var(--danger-tint); }
 
 /*
  * The inline rename field (issues #78, #79).
@@ -852,9 +779,6 @@ button { font: inherit; color: inherit; }
   font-size: var(--fs-2xs); color: var(--dim);
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-@media (prefers-reduced-motion: no-preference) { .rail-row-menu-trigger { transition: opacity 120ms ease; } }
-/* Touch and keyboard users get the trigger without hovering, since there is no hover to give. */
-@media (hover: none) { .rail-row-menu-trigger { opacity: 1; } }
 
 .state-idle { border-left-color: var(--dim); }
 .state-starting { border-left-color: var(--accent); }

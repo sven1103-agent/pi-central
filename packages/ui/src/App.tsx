@@ -1192,40 +1192,6 @@ export function App() {
             setRailOpen(false);
           }}
           onForgetRow={(row) => dispatch({ kind: "forget", path: row.entry.path })}
-          /*
-            Delete is offered only when the orchestrator understands it (issue #150): a UI built from files can be
-            talking to an older in-memory orchestrator, and an unknown control on the one irreversible action would
-            appear to work and do nothing.
-          */
-          /*
-            Stop from the row, so a delete refusal is actionable (issue #150 follow-up). The refusal tells the reader to
-            stop the session; without this they had to find it, focus it, and stop it from the Session panel.
-          */
-          onStopRow={(row) => {
-            if (row.session !== undefined) send({ kind: "stop", sessionId: row.session.id });
-          }}
-          /*
-            Resume from the row — the other half of Stop. Stopping was a one-way door: the row kept its session
-            object, so the not-running controls never appeared and the session could be stopped but never restarted.
-            Sent by PATH, because a stopped session's handle is per-process and says nothing durable (ADR-0004).
-          */
-          onResumeRow={(row) => {
-            dispatch({ kind: "focusRow", key: row.entry.path });
-            dispatch({ kind: "expectNewSession", file: row.entry.path });
-            send({ kind: "resume", path: row.entry.path });
-          }}
-          onDeleteRow={
-            supportsDelete(state.install?.protocol)
-              ? (row) =>
-                  setPendingDelete({
-                    paths: [row.entry.path],
-                    // The same label the row showed — including its first prompt, which the row may be labelled by —
-                    // so the dialog cannot name a different session than the one clicked.
-                    label: rowLabel(row, rowPrompt(row)),
-                    cwd: row.entry.cwd ?? "",
-                  })
-              : undefined
-          }
           retryAvailable={supportsRetry(state.install?.protocol)}
           onRetryRow={(row) => {
             // Only a live session has a handle to retry with; a row that is not running has no process to
@@ -1486,6 +1452,37 @@ export function App() {
               home={home}
               onStop={() => focused && setConfirmStop(focused)}
               onRename={renameFocused}
+              /*
+                The session's controls live HERE, not on the rail row (asked for from use: "maybe we introduce these as
+                session control actions in the session companion next to the transcript?"). The row gave them 288px and
+                a tiny `⋯`; this panel has room for labels that say what they do.
+
+                Each one acts on the FOCUSED session, by its file where a path is needed — a stopped session has no
+                process, so its handle addresses nothing durable (ADR-0004).
+              */
+              onResume={() => {
+                if (!focused?.sessionFile) return;
+                dispatch({ kind: "focusRow", key: focused.sessionFile });
+                dispatch({ kind: "expectNewSession", file: focused.sessionFile });
+                send({ kind: "resume", path: focused.sessionFile });
+              }}
+              onRetry={() => focused && send({ kind: "retry", sessionId: focused.id })}
+              retryAvailable={supportsRetry(state.install?.protocol)}
+              onForget={() => {
+                if (focused?.sessionFile) dispatch({ kind: "forget", path: focused.sessionFile });
+              }}
+              {...(supportsDelete(state.install?.protocol)
+                ? {
+                    onDelete: () => {
+                      if (!focused?.sessionFile) return;
+                      setPendingDelete({
+                        paths: [focused.sessionFile],
+                        label: displayName(focused),
+                        cwd: focused.cwd,
+                      });
+                    },
+                  }
+                : {})}
             />
           ) : focused ? (
             <FilesPanel

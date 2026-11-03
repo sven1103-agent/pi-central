@@ -8,18 +8,134 @@
  */
 import type { LiveSession } from "@pi-central/protocol";
 import { formatCost, formatTokens, shortenPath } from "../format.ts";
+import { isRunning } from "../roster.ts";
 import { CopyButton } from "./CopyButton.tsx";
+
+/** One control in the Actions section. */
+export interface SessionControl {
+  key: string;
+  label: string;
+  /** What it does — or, when destructive, what it does not undo. */
+  title: string;
+  onSelect: () => void;
+  /** Present but not selectable, used to state WHY an action is missing. */
+  disabled?: boolean;
+  /** Rendered in the danger colour. Only ever Delete. */
+  danger?: boolean;
+}
+
+/**
+ * Which controls this session offers, as a list.
+ *
+ * ## Why they live here rather than on the rail row
+ *
+ * They were row-level buttons, then a row-level `⋯` menu. Both are cramped in a 288px column: the buttons overlapped
+ * the row's text and could not be hit, and the menu was reported as *"very tiny"*. Asked for from use: *"maybe we
+ * introduce these as session control actions in the session companion next to the transcript?"* — this panel, which
+ * already held Rename and Stop and has the width for full-size controls.
+ *
+ * ## The rules, and why each is a case
+ *
+ *   - **running** → Stop, and nothing destructive: a process holds the transcript open, so deleting it would leave a
+ *     file being written to after it was unlinked.
+ *   - **failed** → Retry, plus the housekeeping. A retry the connected orchestrator cannot perform is a DISABLED item
+ *     stating the reason, never a button that fails when pressed.
+ *   - **stopped** → Resume, plus the housekeeping. Resume spends a spawn, so it comes first and says what it does not
+ *     undo.
+ *
+ * Order throughout: the action that continues work first, the irreversible one last.
+ */
+export function sessionControlsFor(
+  session: LiveSession,
+  caps: {
+    onStop?: (() => void) | undefined;
+    onResume?: (() => void) | undefined;
+    onRetry?: (() => void) | undefined;
+    retryAvailable: boolean;
+    onForget?: (() => void) | undefined;
+    onDelete?: (() => void) | undefined;
+  },
+): SessionControl[] {
+  const controls: SessionControl[] = [];
+  const housekeeping = () => {
+    if (caps.onForget !== undefined) {
+      controls.push({
+        key: "forget",
+        label: "Forget",
+        // The two titles are read side by side, and their difference IS the point.
+        title: "Remove from the rail. The session file is not deleted.",
+        onSelect: caps.onForget,
+      });
+    }
+    if (caps.onDelete !== undefined) {
+      controls.push({
+        key: "delete",
+        label: "Delete transcript",
+        title: "Delete this session's transcript from disk. This cannot be undone.",
+        onSelect: caps.onDelete,
+        danger: true,
+      });
+    }
+  };
+
+  if (session.state === "failed") {
+    if (caps.retryAvailable && caps.onRetry !== undefined) {
+      controls.push({ key: "retry", label: "Retry", title: "Try this session again in the same directory", onSelect: caps.onRetry });
+    } else if (!caps.retryAvailable) {
+      controls.push({
+        key: "retry-unavailable",
+        label: "Retry unavailable",
+        title: "Restart the orchestrator to retry: it speaks an older protocol",
+        onSelect: () => {},
+        disabled: true,
+      });
+    }
+    housekeeping();
+    return controls;
+  }
+
+  if (isRunning(session)) {
+    if (caps.onStop !== undefined) {
+      controls.push({ key: "stop", label: "Stop session", title: "Stop this session. Its transcript stays on disk.", onSelect: caps.onStop });
+    }
+    return controls;
+  }
+
+  // Not running (stopped): the whole housekeeping set, Resume first.
+  if (caps.onResume !== undefined) {
+    controls.push({
+      key: "resume",
+      label: "Resume session",
+      title: "Start this session again in the same directory. Its transcript continues.",
+      onSelect: caps.onResume,
+    });
+  }
+  housekeeping();
+  return controls;
+}
 
 export function Inspector({
   session,
   home,
   onStop,
   onRename,
+  onResume,
+  onRetry,
+  retryAvailable = true,
+  onForget,
+  onDelete,
 }: {
   session: LiveSession | undefined;
   home: string | undefined;
   onStop: () => void;
   onRename: (name: string) => void;
+  /** Start a stopped session again. Absent when the caller cannot. */
+  onResume?: (() => void) | undefined;
+  onRetry?: (() => void) | undefined;
+  /** False when the connected orchestrator speaks an older protocol (issue #11). */
+  retryAvailable?: boolean;
+  onForget?: (() => void) | undefined;
+  onDelete?: (() => void) | undefined;
 }) {
   if (!session) {
     return (
@@ -147,13 +263,40 @@ export function Inspector({
         </section>
       )}
 
+      {/*
+        The session's controls, full size, in the companion panel.
+
+        They were row-level buttons and then a `⋯` menu on the rail row, both cramped in a 288px column — the buttons
+        overlapped the text and could not be hit, and the menu was "very tiny". This panel already held Rename and Stop,
+        and has the width for labels that say what they do.
+
+        Rebuilt from `sessionControlsFor` on every render rather than held in state: the list depends only on the
+        session's state and which callbacks the shell can offer, so deriving it means a stale action cannot survive a
+        state change (a Stop button left over on a stopped session is the bug this panel already had once).
+      */}
       <section>
         <h3>Actions</h3>
         <div className="actions">
           <RenameField current={session.name} onRename={onRename} />
-          <button type="button" className="btn" onClick={onStop}>
-            Stop session
-          </button>
+          {sessionControlsFor(session, {
+            onStop,
+            ...(onResume === undefined ? {} : { onResume }),
+            ...(onRetry === undefined ? {} : { onRetry }),
+            retryAvailable,
+            ...(onForget === undefined ? {} : { onForget }),
+            ...(onDelete === undefined ? {} : { onDelete }),
+          }).map((control) => (
+            <button
+              key={control.key}
+              type="button"
+              className={`btn${control.danger === true ? " btn-danger" : ""}`}
+              title={control.title}
+              disabled={control.disabled === true}
+              onClick={control.onSelect}
+            >
+              {control.label}
+            </button>
+          ))}
         </div>
       </section>
     </div>

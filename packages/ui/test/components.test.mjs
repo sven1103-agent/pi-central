@@ -2517,22 +2517,23 @@ test("forgetting a stopped row removes it, and the removal survives serializatio
     "and a reload reads it back forgotten");
 });
 
-test("Forget is offered only on a row that is not running", () => {
+test("Forget is offered for a session that is not running, in the companion panel", async () => {
   // A running session must not be dismissable: hiding a live process from the rail while it keeps working and
   // spending would make the roster lie about what is happening.
-  const stopped = renderToString(createElement(SessionRail, {
-    rows: [{ entry: { path: "/s/a/one.jsonl", name: "old" }, session: undefined }],
-    focusedId: undefined, onFocusRow() {}, onForgetRow() {}, onRetryRow() {}, retryAvailable: true, onStartSession() {}, onOpenDirectory() {},
-    home: undefined, historyTotal: 0,
-  }));
-  assert.match(stopped, /rail-row-forget/, "a stopped row can be dismissed");
+  //
+  // The control lives in the session panel now (asked for from use), so this asserts the panel's list rather than the
+  // row's markup — the ROW no longer carries actions at all.
+  const { sessionControlsFor } = await server.ssrLoadModule("/src/components/Inspector.tsx");
+  const caps = { onForget() {}, retryAvailable: true };
 
-  const running = renderToString(createElement(SessionRail, {
-    rows: rowsOf([session({ id: "s1", state: "streaming" })]),
-    focusedId: undefined, onFocusRow() {}, onForgetRow() {}, onRetryRow() {}, retryAvailable: true, onStartSession() {}, onOpenDirectory() {},
-    home: undefined, historyTotal: 0,
-  }));
-  assert.ok(!/rail-row-forget/.test(running), `a running row must not offer Forget: ${running}`);
+  const stopped = sessionControlsFor(session({ state: "stopped" }), caps).map((c) => c.label);
+  assert.ok(stopped.includes("Forget"), `a stopped session can be dismissed, got ${JSON.stringify(stopped)}`);
+
+  const running = sessionControlsFor(session({ state: "streaming" }), caps).map((c) => c.label);
+  // The RULE: nothing destructive on a live session. (Which other controls appear depends on the callbacks the shell
+  // can offer, so the absence of Forget is the assertion, not the exact list.)
+  assert.ok(!running.includes("Forget"), `a running session must not be dismissable, got ${JSON.stringify(running)}`);
+  assert.ok(!running.includes("Delete transcript"), "and its transcript cannot be deleted while it is open");
 });
 
 test("a scratch session that is not running shows 'Scratch session', not its handle", () => {
@@ -2575,24 +2576,19 @@ test("Settings says how to verify the install, and why it cannot do it itself", 
 
 // --- Retrying a failed session (#11) --------------------------------------------------------------
 
-test("a FAILED row offers Retry, and no other row does", () => {
+test("a FAILED session offers Retry, and no other state does", async () => {
   // DESIGN.md promised this and it did not exist: the composer says "Retry it from the rail", and the rail had
   // no control. Retry is explicit — nothing restarts on its own, because a silent restart hides a crash loop.
-  const failed = renderToString(createElement(SessionRail, {
-    rows: rowsOf([session({ id: "s1", state: "failed" })]),
-    focusedId: undefined, onFocusRow() {}, onForgetRow() {}, onRetryRow() {}, retryAvailable: true, onStartSession() {},
-    onOpenDirectory() {}, home: undefined, historyTotal: 0,
-  }));
-  assert.match(failed, /rail-row-retry/, "a failed session can be retried");
-  assert.match(failed, />Retry</);
+  //
+  // The control moved to the companion panel with the rest; the RULE is what this pins.
+  const { sessionControlsFor } = await server.ssrLoadModule("/src/components/Inspector.tsx");
+  const caps = { onRetry() {}, retryAvailable: true };
+  const failed = sessionControlsFor(session({ state: "failed" }), caps).map((c) => c.label);
+  assert.ok(failed.includes("Retry"), `a failed session can be retried, got ${JSON.stringify(failed)}`);
 
   for (const state of ["idle", "streaming", "starting", "awaiting-approval", "stopped"]) {
-    const html = renderToString(createElement(SessionRail, {
-      rows: rowsOf([session({ id: "s1", state })]),
-      focusedId: undefined, onFocusRow() {}, onForgetRow() {}, onRetryRow() {}, retryAvailable: true, onStartSession() {},
-      onOpenDirectory() {}, home: undefined, historyTotal: 0,
-    }));
-    assert.ok(!/rail-row-retry/.test(html), `${state} must not offer Retry`);
+    const labels = sessionControlsFor(session({ state }), caps).map((c) => c.label);
+    assert.ok(!labels.includes("Retry"), `${state} must not offer Retry, got ${JSON.stringify(labels)}`);
   }
 });
 
@@ -2609,30 +2605,22 @@ test("the PREVIOUS failure stays visible after a retry", () => {
   assert.ok(!/rail-row-retry/.test(html), "a retrying session is not itself retryable");
 });
 
-test("Retry is NOT offered when the orchestrator speaks an older protocol", () => {
+test("Retry is NOT offered when the orchestrator speaks an older protocol", async () => {
   // Observed from a window: a red banner reading `bad control: unknown kind 'retry'`. The UI offered an action
   // the connected orchestrator could not perform — reachable without any mistake in a checkout, because the UI
   // is served as FILES (a `ui:build` reaches a running orchestrator at once) while the orchestrator's own module
   // stays in memory from when it started.
-  const html = renderToString(createElement(SessionRail, {
-    rows: rowsOf([session({ id: "s1", state: "failed" })]),
-    focusedId: undefined, onFocusRow() {}, onForgetRow() {}, onRetryRow() {}, retryAvailable: false,
-    onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
-  }));
-  // No Retry CONTROL may be offered. The reason moved into the row's `⋯` menu as a DISABLED item, so the explanation
-  // sits where the reader looks for the action instead of adding a line to every failed row.
-  //
-  // Compared by CLASS TOKEN, not substring: `rail-row-retry` is a prefix of `rail-row-retry-unavailable`, so a
-  // substring test reported the disabled explanation as if it were the button.
-  const doc = new JSDOM(`<body>${html}</body>`).window.document;
-  const classes = [...doc.querySelectorAll(".rail-row-menu-item")].map((item) => item.className.split(" "));
-  assert.ok(!classes.some((tokens) => tokens.includes("rail-row-retry")), `no button that cannot work: ${html}`);
-  const unavailable = doc.querySelector(".rail-row-retry-unavailable");
+  const { sessionControlsFor } = await server.ssrLoadModule("/src/components/Inspector.tsx");
+  const controls = sessionControlsFor(session({ state: "failed" }), { onRetry() {}, retryAvailable: false });
+
+  // No Retry CONTROL may be offered, and the reason is stated where the reader looks for it — a DISABLED item, never a
+  // button that fails when pressed.
+  assert.ok(!controls.some((c) => c.label === "Retry" && c.disabled !== true), "no button that cannot work");
+  const unavailable = controls.find((c) => c.key === "retry-unavailable");
   assert.ok(unavailable, "a disabled item states that Retry is missing");
-  assert.equal(unavailable.disabled, true, "and it cannot be pressed");
+  assert.equal(unavailable.disabled, true);
   assert.match(unavailable.title, /restart the orchestrator/i, "saying what to do instead");
 });
-
 test("the error strip shows the reason, not a screenful of stderr", () => {
   // Reported from a window: the first line was the reason, the next eight were pi's startup chatter — LiteLLM
   // model notices and an nvim-tmux hint. `role="alert"` read all nine lines aloud.
@@ -2655,27 +2643,34 @@ test("a single-line error gets no 'more lines' note", () => {
   assert.ok(!/more line/.test(html), `nothing was withheld, so nothing may be claimed: ${html}`);
 });
 
-test("nothing on the rail puts the error in a hover tooltip", () => {
-  // Reported: "when users hover over retry, they also see the error. That does not make sense." Same mistake as
-  // the thinking block's `title` (issue #143): a native tooltip holding a wall of multi-line stderr, appearing
-  // on a stray hover with no way to keep it open or dismiss it. A control's tooltip says what the control does.
+test("no control puts the session's stderr in a hover tooltip", async () => {
+  // Reported: "when users hover over retry, they also see the error. That does not make sense." Same mistake as the
+  // thinking block's `title` (issue #143): a native tooltip holding a wall of multi-line stderr, appearing on a stray
+  // hover with no way to keep it open or dismiss it. A control's tooltip says what the control DOES.
+  //
+  // The controls are the panel's now, so the invariant is asserted on the LIST rather than on rail markup: every title
+  // is a static sentence, and none of them can carry the stored error.
+  const { sessionControlsFor } = await server.ssrLoadModule("/src/components/Inspector.tsx");
+  const error = "pi exited (code=137)\n[LiteLLM] noise\n[nvim-tmux] noise";
+  const controls = sessionControlsFor(
+    session({ state: "failed", error, previousError: error }),
+    { onRetry() {}, retryAvailable: true, onForget() {}, onDelete() {} },
+  );
+  assert.ok(controls.length > 0, "there are controls to check");
+  for (const control of controls) {
+    assert.ok(!/LiteLLM|nvim-tmux|code=137/.test(control.title), `static tooltip expected, got ${JSON.stringify(control.title)}`);
+  }
+
+  // The rail still shows the earlier failure as ONE line, without the stored wall — that part did not move.
   const html = renderToString(createElement(SessionRail, {
-    rows: rowsOf([session({
-      id: "s1", state: "failed", error: "pi exited (code=137)\n[LiteLLM] noise\n[nvim-tmux] noise",
-      previousError: "earlier failure\n[LiteLLM] more noise",
-    })]),
+    rows: rowsOf([session({ id: "s1", state: "failed", error, previousError: error })]),
     focusedId: undefined, onFocusRow() {}, onForgetRow() {}, onRetryRow() {}, retryAvailable: true,
     onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
   }));
-  assert.match(html, /rail-row-retry/, "the button is there");
-  assert.ok(!/title="[^"]*LiteLLM/.test(html), `no stderr in any tooltip: ${html}`);
-  assert.match(html, /title="Try this session again in the same directory"/, "a static tooltip instead");
-  // The earlier failure is one line on the row, not the stored wall.
   assert.ok(!/nvim-tmux|LiteLLM/.test(html), `no stderr text on the row at all: ${html}`);
   // React separates the label from the value with `<!-- -->`; asserting the sentence means normalising first.
-  assert.match(html.replace(/<!-- -->/g, ""), /last failure: earlier failure/, "and its first line is still shown");
+  assert.match(html.replace(/<!-- -->/g, ""), /last failure: pi exited \(code=137\)/, "and its first line is still shown");
 });
-
 test("Provider and Model share ONE label column, and Thinking is on the model's row", async () => {
   // From a screenshot: the provider sat above and to the right of the model, `Thinking` was on the PROVIDER's
   // line, and `Model` hung below on its own — three left edges in a 120px block. Each picker was a sibling with

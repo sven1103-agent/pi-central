@@ -1,26 +1,22 @@
 /**
- * A stopped session's row must stay usable (reported from use).
+ * A session's controls, in the companion panel beside the transcript.
  *
- * ## The report
+ * ## The report, and the two designs it killed
  *
- * *"the session roster can stop sessions, but then you cant resume them or remove them from the roster. Also the
- * highlighting of session elements in the roster is weird: in idle, they all show a gray bar on the left and on hover
- * they dont do anything noticeable."*
+ * *"noboday can hit the right controls in the stopped session card"* — Resume, Forget and Delete were three inline
+ * buttons pinned to a row's corner in a 288px column; they overlapped the row's text, spilled past its edge and could
+ * not be clicked.
  *
- * ## Why stopping was a one-way door
+ * Then a `⋯` menu in the same corner: *"i dont like the approach, the menu is very tiny. Maybe we introduce these as
+ * session control actions in the session companion next to the transcript?"*
  *
- * The controls were gated on `session === undefined` — "this row has no live session object". But `stopped` is a
- * STATE, not an absence (C3): the supervisor keeps the session, so after Stop the row still had a session, the
- * not-running block never rendered, and the Stop control itself no longer applied either (`stopped` is not stoppable).
- * The row ended up with no controls at all.
+ * So the controls live in the panel — full-size buttons with labels, in the place that already held Rename and Stop.
+ * The rail row carries none. This file pins the RULES, which are the part that can be got wrong:
  *
- * ## The visual half
- *
- * `idle` painted `--dim` — an AA-bright text grey — as the state stripe, so five idle rows showed five loud grey bars
- * that read as "disabled" rather than "quiet". And hover stepped `--panel` → `--panel-3`, six units on a dark screen:
- * present in the CSS, invisible to a reader moving a pointer down a list.
- *
- * Both are asserted against the STYLESHEET, because they are pure style outcomes — the markup was right in both cases.
+ *   - a running session offers Stop and nothing destructive;
+ *   - a stopped one offers Resume plus the housekeeping;
+ *   - a failed one offers Retry, and states why when it cannot;
+ *   - the irreversible action is last and carries the danger colour.
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -37,20 +33,12 @@ Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, co
 
 const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 
-/** The LAST rule for a selector: source order decides equal specificity, so the first match can be stale. */
-function rule(selector) {
-  const normalised = css.replace(/\s+/g, " ");
-  const wanted = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const all = [...normalised.matchAll(new RegExp(`(?<![\\w-])${wanted} ?\\{([^}]*)\\}`, "g"))];
-  return all.length > 0 ? all[all.length - 1][1] : undefined;
-}
-
 /**
  * The rule whose SELECTOR IS EXACTLY `selector`, anchored at the start of a line.
  *
- * `rule()` above matches anywhere, which is wrong when a compound selector *ends* in the one being looked for:
- * `.rail-row:hover .context-bar { ... }` also matches `/\.context-bar ?\{/`, so a "what is the base track colour"
- * question answered itself with the override. Found by this test failing for that reason.
+ * Anchored because a loose pattern matches a compound selector that ENDS in the same class — `.rail-row:hover
+ * .context-bar { }` satisfied `/\.context-bar ?\{/` — so a question about a base rule answered itself with an override.
+ * Found when an override was added; the selector is the subject, so it is matched as one.
  */
 function ruleExact(selector) {
   const wanted = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -58,12 +46,7 @@ function ruleExact(selector) {
   return all.length > 0 ? all[all.length - 1][1] : undefined;
 }
 
-/** A custom property's value, so a test can compare tokens rather than literals. */
-function token(name) {
-  return new RegExp(`${name}:\\s*([^;]+);`).exec(css)?.[1]?.trim();
-}
-
-let server, SessionRail;
+let server, sessionControlsFor, Inspector, SessionRail;
 before(async () => {
   server = await createServer({
     root: new URL("..", import.meta.url).pathname,
@@ -72,6 +55,7 @@ before(async () => {
     logLevel: "error",
     optimizeDeps: { noDiscovery: true, include: [] },
   });
+  ({ sessionControlsFor, Inspector } = await server.ssrLoadModule("/src/components/Inspector.tsx"));
   ({ SessionRail } = await server.ssrLoadModule("/src/components/SessionRail.tsx"));
 });
 after(async () => {
@@ -80,12 +64,12 @@ after(async () => {
 
 const FILE = "/sessions/p/a.jsonl";
 
-function session(state) {
+function session(over = {}) {
   return {
     id: "s3",
     name: "data manager work",
     cwd: "/Users/x/git/data-manager",
-    state,
+    state: "stopped",
     mode: "sandboxed",
     isolation: "",
     command: "",
@@ -99,244 +83,124 @@ function session(state) {
     warnings: [],
     startedAt: 0,
     sessionFile: FILE,
+    ...over,
   };
 }
 
-const railProps = {
-  focusedId: undefined,
-  onFocusRow() {},
-  onForgetRow() {},
-  onRetryRow() {},
+/** Every callback, so a test's assertion is about the RULE rather than about which hooks the caller passed. */
+const allCaps = {
+  onStop() {},
+  onResume() {},
+  onRetry() {},
   retryAvailable: true,
-  onStartSession() {},
-  onOpenDirectory() {},
-  home: "/Users/x",
-  historyTotal: 0,
-  openAsDrawer: false,
-  onCloseDrawer() {},
+  onForget() {},
+  onDelete() {},
 };
 
-/** The rail with ONE row in the given state. */
-const railWith = (state, handlers = {}) =>
-  renderToString(
-    createElement(SessionRail, {
-      ...railProps,
-      ...handlers,
-      rows: [{ entry: { path: FILE, cwd: "/Users/x/git/data-manager", name: "data manager work" }, session: session(state) }],
+const labels = (state, caps = allCaps) => sessionControlsFor(session({ state }), caps).map((c) => c.label);
+
+test("a STOPPED session offers Resume, Forget and Delete", () => {
+  // The reported dead end: after Stop there was no way to resume, forget or delete. Resume comes first because it is
+  // the one that continues the work.
+  assert.deepEqual(labels("stopped"), ["Resume session", "Forget", "Delete transcript"]);
+});
+
+test("a RUNNING session offers Stop, and nothing destructive", () => {
+  // A process holds the transcript open: deleting it would leave a file being written to after it was unlinked.
+  for (const state of ["idle", "streaming", "starting", "awaiting-approval"]) {
+    assert.deepEqual(labels(state), ["Stop session"], `${state} offers only Stop`);
+  }
+});
+
+test("a FAILED session offers Retry plus the housekeeping", () => {
+  assert.deepEqual(labels("failed"), ["Retry", "Forget", "Delete transcript"]);
+});
+
+test("Retry is stated as unavailable, not offered, against an older orchestrator", () => {
+  // A button that fails when pressed is worse than an explanation where the button would be.
+  const controls = sessionControlsFor(session({ state: "failed" }), { ...allCaps, retryAvailable: false });
+  const retry = controls.find((c) => c.key === "retry");
+  assert.equal(retry, undefined, "no Retry control");
+  const unavailable = controls.find((c) => c.key === "retry-unavailable");
+  assert.ok(unavailable, "the absence is stated");
+  assert.equal(unavailable.disabled, true);
+  assert.match(unavailable.title, /restart the orchestrator/i);
+});
+
+test("the irreversible action is LAST and carries the danger colour", () => {
+  // A destructive control should never be the first thing under the pointer.
+  for (const state of ["stopped", "failed"]) {
+    const controls = sessionControlsFor(session({ state }), allCaps);
+    assert.equal(controls.at(-1).key, "delete", `${state}: Delete is last`);
+    assert.equal(controls.at(-1).danger, true, `${state}: and only Delete is a danger action`);
+    assert.ok(!controls.slice(0, -1).some((c) => c.danger === true), `${state}: nothing else is destructive`);
+  }
+});
+
+test("Forget and Delete cannot be mistaken for each other", () => {
+  const controls = sessionControlsFor(session({ state: "stopped" }), allCaps);
+  assert.match(controls.find((c) => c.key === "forget").title, /not deleted/);
+  assert.match(controls.find((c) => c.key === "delete").title, /cannot be undone/);
+});
+
+test("Resume says what it does NOT do, because it spends a spawn", () => {
+  const resume = sessionControlsFor(session({ state: "stopped" }), allCaps).find((c) => c.key === "resume");
+  assert.match(resume.title, /same directory/, "the directory is preserved");
+  assert.match(resume.title, /transcript continues/, "and the conversation is continued");
+});
+
+test("a control is only offered when the shell can carry it out", () => {
+  // The list is derived from what the caller passes, so an action the shell cannot perform never appears.
+  assert.deepEqual(labels("stopped", { retryAvailable: true }), [], "no callbacks, no controls");
+});
+
+// --- Rendered: the panel and the rail -----------------------------------------------------------
+
+test("the panel renders the controls as full-size buttons", () => {
+  // The whole point of moving them: room for labels instead of a 22px glyph in a 288px column.
+  const html = renderToString(
+    createElement(Inspector, {
+      session: session({ state: "stopped" }),
+      home: "/Users/x",
+      onStop() {},
+      onRename() {},
+      onResume() {},
+      onForget() {},
+      onDelete() {},
+      retryAvailable: true,
     }),
   );
-
-/** The control labels rendered in the row's action strip. */
-function controls(html) {
   const doc = new JSDOM(`<body>${html}</body>`).window.document;
-  // Every action lives in the row's `⋯` menu now; the items are rendered always and hidden with `display: none`, so
-  // the rendered output still states what a row OFFERS.
-  return [...doc.querySelectorAll(".rail-row-menu-item")].map((b) => (b.textContent ?? "").trim());
-}
-
-test("a STOPPED session offers Resume, Forget and Delete — not an empty row", () => {
-  // The reported bug: after Stop the row had a session object, so `session === undefined` was false and this whole
-  // block disappeared. The session could be stopped and then never restarted or removed.
-  const html = railWith("stopped", { onResumeRow() {}, onDeleteRow() {}, onStopRow() {} });
-  const labels = controls(html);
-  assert.ok(labels.includes("Resume"), `Resume must be offered, got ${JSON.stringify(labels)}`);
-  assert.ok(labels.includes("Forget"), "and Forget");
-  assert.ok(labels.includes("Delete"), "and Delete");
-  assert.ok(!labels.includes("Stop"), "Stop is not offered for something already stopped");
-});
-
-test("a RUNNING session offers Stop, and no Resume — it is already going", () => {
-  const labels = controls(railWith("streaming", { onResumeRow() {}, onDeleteRow() {}, onStopRow() {} }));
-  assert.ok(labels.includes("Stop"), `Stop must be offered, got ${JSON.stringify(labels)}`);
-  assert.ok(!labels.includes("Resume"), "resuming a running session is not a thing");
-  assert.ok(!labels.includes("Delete"), "and its transcript is open, so it cannot be deleted");
-});
-
-test("an IDLE session is running: Stop, not Resume", () => {
-  // `idle` means idle-and-alive. Treating it as "not running" would offer Resume beside a live process.
-  const labels = controls(railWith("idle", { onResumeRow() {}, onDeleteRow() {}, onStopRow() {} }));
-  assert.ok(labels.includes("Stop"), `got ${JSON.stringify(labels)}`);
-  assert.ok(!labels.includes("Resume"), "a live idle session is not resumed, it is prompted");
-});
-
-test("a failed session keeps Retry rather than gaining Resume", () => {
-  // `failed` is deliberately not "not running": it has its own control, and folding it in would lose that.
-  const labels = controls(railWith("failed", { onResumeRow() {}, onDeleteRow() {}, onStopRow() {} }));
-  assert.ok(labels.includes("Retry"), `got ${JSON.stringify(labels)}`);
-  assert.ok(!labels.includes("Resume"), "Retry is the right control for a failure");
-});
-
-test("Resume says what it does NOT do, since it spends a spawn", () => {
-  const html = railWith("stopped", { onResumeRow() {} });
-  const doc = new JSDOM(`<body>${html}</body>`).window.document;
-  const resume = [...doc.querySelectorAll(".rail-row-menu-item")].find((b) => /Resume/.test(b.textContent));
-  assert.match(resume.title, /same directory/, "the directory is preserved");
-  assert.match(resume.title, /transcript continues/, "and the conversation is continued, not restarted");
-});
-
-// --- The highlighting ---------------------------------------------------------------------------
-
-test("each state keeps its own stripe colour, so the left edge means something", () => {
-  // The stripe is the row's state channel. `idle` is `--dim` — which was briefly changed to a neutral grey and then
-  // changed back, because the rail's appearance as a whole was preferred: "i liked the old design better".
-  const expected = {
-    ".state-idle": "--dim",
-    ".state-stopped": "--line-strong",
-    ".state-streaming": "--ok",
-    ".state-awaiting-approval": "--warn",
-    ".state-failed": "--danger",
-  };
-  for (const [selector, token] of Object.entries(expected)) {
-    assert.match(
-      rule(selector) ?? "",
-      new RegExp(`border-left-color:\\s*var\\(${token}\\)`),
-      `${selector} should be ${token}`,
-    );
+  const section = [...doc.querySelectorAll("section")].find((s) => /Actions/.test(s.textContent ?? ""));
+  assert.ok(section, "there is an Actions section");
+  const buttons = [...section.querySelectorAll("button")].map((b) => (b.textContent ?? "").trim());
+  for (const label of ["Resume session", "Forget", "Delete transcript"]) {
+    assert.ok(buttons.includes(label), `${label} is a button, got ${JSON.stringify(buttons)}`);
   }
+  // Delete is the only one in the danger style.
+  const danger = [...section.querySelectorAll(".btn-danger")].map((b) => (b.textContent ?? "").trim());
+  assert.deepEqual(danger, ["Delete transcript"]);
 });
 
-test("rows are flush, and SELECTION is the accent tint", () => {
-  // The rail's appearance is the original one: no gap, no hairline separator, hover is `--panel-3`, and the idle stripe
-  // is `--dim`. Three rounds of trying to separate rows another way (8px gap, 1px hairline, a quietened stripe) were
-  // all rejected from looking at them: "i liked the old design better".
-  //
-  // Exactly one thing survives from that round — SELECTION. It used to share `--panel-2` with hover, which is one step
-  // from the `--panel-3` wash, so a selected row and a hovered row looked nearly the same. The accent tint cannot be
-  // confused with either.
-  assert.equal(rule(".rail-row + .rail-row"), undefined, "no gap and no separator between rows");
-  assert.match(rule(".rail-row:hover") ?? "", /background:\s*var\(--panel-3\)/, "hover is the original light wash");
-});
-
-test("selection is a RIGHT-edge bar, not a wash, so the row's contents keep their contrast", () => {
-  // The tint was applied to the whole row, including the context gauge — which then sat on a blue-grey that its own
-  // fill could barely differ from. Reported as: "you cant see the progress bar anymore."
-  //
-  // The rail uses two channels by convention, and this finishes it: the LEFT edge is STATE, the RIGHT edge is SELECTION.
-  const selected = rule('.rail-row[aria-current="true"]') ?? "";
-  assert.match(selected, /box-shadow:\s*inset -3px 0 0 var\(--accent\)/, "a bar on the right, in the accent");
-  // And the surface is a plain panel colour, not a tint — a tint is what washed the contents out.
-  assert.match(selected, /background:\s*var\(--panel-2\)/, `a solid surface, got ${JSON.stringify(selected)}`);
-  assert.doesNotMatch(selected, /var\(--accent-tint\)/, "no wash");
-});
-
-test("the gauge renders as it always has: one track colour, no per-state override", () => {
-  // Two attempts to keep the gauge visible on a filled row were rejected, because both changed the rendering instead of
-  // the row: a global `--bg` track ("the rail for the progress bar looked better before"), then a per-state override
-  // ("now you are doing the bar rendering that i did not want in the selected session").
-  //
-  // It holds up without either: selection is `--panel-2`, DARKER than the `--panel-3` track, so the track reads
-  // against it. The only surface the track matches is the `--panel-3` hover wash — transient, and not worth
-  // compromising every row for.
-  const track = ruleExact(".context-bar") ?? "";
-  assert.match(track, /background:\s*var\(--panel-3\)/, `the original track, got ${JSON.stringify(track)}`);
-  assert.match(track, /box-shadow:\s*inset 0 0 0 1px var\(--line\)/, "and the original hairline");
-
-  // No override may reintroduce a different track on ANY row state.
-  //
-  // Scanned across every rule rather than by one known selector: the first version asserted a single combined selector
-  // string, so adding `.rail-row[aria-current="true"] .context-bar { background: ... }` — exactly the thing this
-  // guards — left it green. Found by falsifying it.
-  const overrides = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
-    .filter(([, selector]) => selector.includes(".rail-row") && selector.includes(".context-bar"))
-    .filter(([, , body]) => /background\s*:/.test(body));
-  assert.deepEqual(
-    overrides.map(([, selector]) => selector.trim().slice(0, 60)),
-    [],
-    "the gauge must not be restyled per row state",
+test("the RAIL ROW carries no actions at all", () => {
+  // Two cramped attempts live in this file's header; the row is a view of the session, not a control surface.
+  const html = renderToString(
+    createElement(SessionRail, {
+      rows: [{ entry: { path: FILE, cwd: "/Users/x/git/data-manager", name: "data manager work" }, session: session({ state: "stopped" }) }],
+      focusedId: undefined,
+      onFocusRow() {},
+      onForgetRow() {},
+      onRetryRow() {},
+      retryAvailable: true,
+      onStartSession() {},
+      onOpenDirectory() {},
+      home: "/Users/x",
+      historyTotal: 0,
+      openAsDrawer: false,
+      onCloseDrawer() {},
+    }),
   );
-
-  // Selection stays: a plain surface plus the bar on the right edge.
-  const selected = rule('.rail-row[aria-current="true"]') ?? "";
-  assert.match(selected, /background:\s*var\(--panel-2\)/, "the original background change is kept");
-  assert.match(selected, /box-shadow:\s*inset -3px 0 0 var\(--accent\)/, "and the selection bar on the right");
-});
-
-test("attention states keep their HUE, so the stripe still means something", () => {
-  // Stepping the quiet ones back must not flatten the loud ones — that is the stripe's whole job.
-  for (const [selector, expected] of [
-    [".state-streaming", "--ok"],
-    [".state-awaiting-approval", "--warn"],
-    [".state-failed", "--danger"],
-  ]) {
-    assert.match(rule(selector) ?? "", new RegExp(`border-left-color:\\s*var\\(${expected}\\)`), selector);
+  for (const gone of ["rail-row-menu", "rail-row-forget", "rail-row-retry", "rail-row-stop", "rail-row-delete"]) {
+    assert.ok(!html.includes(gone), `the row must not carry ${gone}`);
   }
-});
-
-test("hover and SELECTION are distinguishable, which is the point of the tint", () => {
-  // They were once the same fill, so the focused session could not be told from whatever the mouse was over. Hover is
-  // the original light wash; selection is the accent tint. Asserted as a DIFFERENCE, so the specific tokens can change
-  // without the invariant silently disappearing.
-  const hover = /background:\s*var\((--[\w-]+)\)/.exec(rule(".rail-row:hover") ?? "")?.[1];
-  const selected = /background:\s*var\((--[\w-]+)\)/.exec(rule('.rail-row[aria-current="true"]') ?? "")?.[1];
-  assert.ok(hover && selected, `both fills must exist, got ${hover} / ${selected}`);
-  assert.notEqual(hover, selected, "hover and selection must not share a fill");
-});
-
-// --- The actions menu (asked for from use) ------------------------------------------------------
-
-test("a stopped row offers its actions behind ONE ⋯ button, not three inline buttons", () => {
-  // Reported: "noboday can hit the right controls in the stopped session card ;) why not a menu icon (vertical
-  // ellipsis) with a submenue for the actions?" Three buttons pinned to the corner of a 288px row overlapped its text,
-  // spilled past its edge, and could not be clicked.
-  const html = railWith("stopped", { onResumeRow() {}, onDeleteRow() {}, onStopRow() {} });
-  const doc = new JSDOM(`<body>${html}</body>`).window.document;
-
-  const trigger = doc.querySelector(".rail-row-menu-trigger");
-  assert.ok(trigger, "there is a menu trigger");
-  assert.match(trigger.textContent, /⋯/, "a vertical ellipsis");
-  // Named for the session, so ten rows do not all announce "Actions".
-  assert.match(trigger.getAttribute("aria-label"), /^Actions for /);
-  // Its state is announced rather than implied by the glyph.
-  assert.equal(trigger.getAttribute("aria-haspopup"), "menu");
-  assert.equal(trigger.getAttribute("aria-expanded"), "false", "closed at rest");
-});
-
-test("the menu holds the row's actions, and is hidden with display:none when closed", () => {
-  // `display: none` rather than unmounting: the items leave the tab order while closed, and the rendered output still
-  // says what a row OFFERS — which is what these tests assert.
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-  assert.match(
-    ruleExact(".rail-row-menu-list") ?? "",
-    /display:\s*none/,
-    "closed means display:none, not mounted-on-open",
-  );
-  assert.match(
-    css,
-    /\.rail-row-menu\[data-open="true"\] \.rail-row-menu-list\s*\{[^}]*display:\s*flex/,
-    "and opening reveals it",
-  );
-
-  const html = railWith("stopped", { onResumeRow() {} });
-  const doc = new JSDOM(`<body>${html}</body>`).window.document;
-  const items = [...doc.querySelectorAll(".rail-row-menu-item")];
-  assert.ok(items.length > 0, "the actions are in the menu");
-  assert.ok(items.every((item) => item.getAttribute("role") === "menuitem"), "and each is a menu item");
-});
-
-test("the menu opens UPWARD, because a rail row sits low in a scrolling list", () => {
-  const list = ruleExact(".rail-row-menu-list") ?? "";
-  assert.match(list, /bottom:\s*calc\(100% \+ 4px\)/, `opens above the trigger, got ${JSON.stringify(list)}`);
-});
-
-test("a row that cannot retry says so as a DISABLED item, in the menu", () => {
-  // The explanation used to be a sentence under the row. Here it sits where the reader looks for the action, and says
-  // both that there is no Retry and why.
-  const html = railWith("failed", { onRetryRow() {}, retryAvailable: false });
-  const doc = new JSDOM(`<body>${html}</body>`).window.document;
-  const unavailable = doc.querySelector(".rail-row-retry-unavailable");
-  assert.ok(unavailable, "a disabled item states the absence");
-  assert.equal(unavailable.disabled, true);
-});
-
-test("a row reserves room for the trigger, so it never covers the row's own numbers", () => {
-  // From a screenshot: the `⋯` sat on top of the ctx gauge and cost — the button covered the values beside it. A
-  // hover-revealed control still occupies space; reserving it in the row is the only way it cannot collide.
-  const reserved = ruleExact(".rail-row.has-actions") ?? "";
-  assert.match(
-    reserved,
-    /padding-right:\s*calc\(var\(--sp-3\) \+ 24px\)/,
-    `the row reserves the trigger's width, got ${JSON.stringify(reserved)}`,
-  );
-  // And the trigger is 22px wide, so 24px is enough — asserted rather than assumed, because a wider glyph would clip.
-  assert.match(ruleExact(".rail-row-menu-trigger") ?? "", /width:\s*22px/);
 });
