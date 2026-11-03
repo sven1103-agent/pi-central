@@ -19,7 +19,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The sheet's recent list says "unreadable" rather than "missing" when a directory exists but cannot be read ([#196]).
 - An unnamed session is labelled by its first prompt, so the rail shows the task instead of a handle ([#149]).
 - A stopped session can be deleted from the rail and from History, behind a confirmation that names its directory ([#150]).
-- History sorts by newest, oldest, size or name, pages 25 rows at a time, and deletes a selection in one act ([#150]).
+- History puts search, sort and a bulk delete in one action bar; the delete is disabled until rows are selected ([#150]).
+- History pages 25 rows at a time and sorts by newest, oldest, size or name ([#150]).
 - Deleting removes the session's transcript and its subagent sidecar; a sidecar that cannot be removed is reported ([#150]).
 
 ### Changed

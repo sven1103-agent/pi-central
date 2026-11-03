@@ -31,7 +31,6 @@ export function HistoryView({
   history,
   historyTotal,
   onResume,
-  onDelete,
   onDeleteMany,
   home,
 }: {
@@ -40,17 +39,10 @@ export function HistoryView({
   historyTotal: number;
   onResume: (session: HistoricalSession) => void;
   /**
-   * Delete a session's transcript (issue #150).
-   *
-   * A callback rather than the request itself, so the confirmation dialog — which lives here, next to the row that was
-   * clicked — is the only path to it. Nothing deletes without passing through a dialog the reader has read.
-   */
-  onDelete?: ((session: HistoricalSession) => void) | undefined;
-  /**
    * Delete MANY at once (requested alongside #150).
    *
-   * Separate from `onDelete` so the confirmation can say "3 sessions" and the request can carry a list — one dialog for
-   * one, and one dialog for a selection, rather than N dialogs in sequence.
+   * The ONLY way to delete from this tab: a row has no control of its own, so every path goes through a selection and
+   * one confirmation. That is also what lets the dialog state a count rather than name one row out of several.
    */
   onDeleteMany?: ((sessions: HistoricalSession[]) => void) | undefined;
   home: string | undefined;
@@ -89,17 +81,79 @@ export function HistoryView({
 
   return (
     <div className="history">
-      <div className="history-search">
+      {/*
+        ONE action bar: search, sort, count, and the bulk action (requested from use).
+
+        They were three separate rows — a search field, then a toolbar, then a select-all line — which pushed the list
+        down by ~90px and made the controls read as unrelated. They are the controls a reader uses together, so they
+        share a row, and the select-all checkbox is in the list's own header where it belongs.
+      */}
+      <div className="history-actions">
         <input
           type="search"
+          className="history-search-input"
           value={query}
           placeholder="Search sessions by content, project, or name"
           aria-label="Search sessions"
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            // Back to page 1: a filter that leaves 3 rows must not strand the reader on page 7 of the old list.
+            setPage(1);
+          }}
         />
         {query.length > 0 && (
-          <button type="button" className="btn" onClick={() => setQuery("")}>
-            Clear search
+          <button type="button" className="btn btn-quiet" onClick={() => setQuery("")}>
+            Clear
+          </button>
+        )}
+
+        <label className="history-sort">
+          <span>Sort</span>
+          <select
+            className="btn"
+            value={sort}
+            onChange={(event) => {
+              setSort(event.target.value as HistorySort);
+              // Back to page 1: staying on page 7 of a re-ordered list shows rows from the middle of a different
+              // order, which reads as the sort having done nothing.
+              setPage(1);
+            }}
+          >
+            {(Object.keys(HISTORY_SORT_LABELS) as HistorySort[]).map((key) => (
+              <option key={key} value={key}>
+                {HISTORY_SORT_LABELS[key]}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <span className="hint history-count" aria-live="polite">
+          {results.length} of {history.length}
+          {/* Say when the loaded set is a page. Presenting 500 of 1115 as a total would be a
+              half-truth, and the honest version is one short clause. */}
+          {historyTotal > history.length && <> · {historyTotal} on disk</>}
+        </span>
+
+        {onDeleteMany !== undefined && (
+          /*
+            ALWAYS present, DISABLED until something is selected (requested from use).
+
+            It used to appear only once a selection existed, which made a primary action materialise out of nowhere
+            and left the reader with no way to see that bulk delete exists before selecting. A disabled control states
+            the capability and the condition — and the count in its label says what it will act on.
+          */
+          <button
+            type="button"
+            className="btn btn-danger history-bulk-delete"
+            disabled={selectedSessions.length === 0}
+            title={
+              selectedSessions.length === 0
+                ? "Select sessions with the checkboxes first"
+                : `Delete ${selectedSessions.length} selected transcript${selectedSessions.length === 1 ? "" : "s"}`
+            }
+            onClick={() => onDeleteMany(selectedSessions)}
+          >
+            Delete{selectedSessions.length > 0 ? ` ${selectedSessions.length}` : ""}
           </button>
         )}
       </div>
@@ -125,57 +179,6 @@ export function HistoryView({
             The toolbar: order, count, and the bulk action. One row, because these are the controls a reader uses
             together — "show me the biggest ones, and delete the ones I have selected".
           */}
-          <div className="history-toolbar">
-            <label className="history-sort">
-              <span>Sort</span>
-              <select
-                className="btn"
-                value={sort}
-                onChange={(event) => {
-                  setSort(event.target.value as HistorySort);
-                  // Back to page 1: staying on page 7 of a re-ordered list shows rows from the middle of a different
-                  // order, which reads as the sort having done nothing.
-                  setPage(1);
-                }}
-              >
-                {(Object.keys(HISTORY_SORT_LABELS) as HistorySort[]).map((key) => (
-                  <option key={key} value={key}>
-                    {HISTORY_SORT_LABELS[key]}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <span className="hint" aria-live="polite">
-              {results.length} of {history.length} session{history.length === 1 ? "" : "s"}
-              {/* Say when the loaded set is a page. Presenting 500 of 1115 as a total would be a
-                  half-truth, and the honest version is one short clause. */}
-              {historyTotal > history.length && (
-                <> · searching the {history.length} most recent of {historyTotal}</>
-              )}
-            </span>
-
-            {selectedSessions.length > 0 && (
-              <span className="history-bulk">
-                <span className="history-bulk-count">
-                  {selectedSessions.length} selected
-                </span>
-                {onDeleteMany !== undefined && (
-                  <button
-                    type="button"
-                    className="btn btn-danger"
-                    onClick={() => onDeleteMany(selectedSessions)}
-                  >
-                    Delete selected
-                  </button>
-                )}
-                <button type="button" className="btn btn-quiet" onClick={() => setSelected(new Set())}>
-                  Clear
-                </button>
-              </span>
-            )}
-          </div>
-
           <ul className="history-list">
             <li className="history-selectbar">
               <label>
@@ -212,7 +215,6 @@ export function HistoryView({
                     }
                     onResume(session);
                   }}
-                  onDelete={onDelete === undefined ? undefined : () => onDelete(session)}
                 />
               </li>
             ))}
@@ -258,7 +260,6 @@ function HistoryRow({
   session,
   home,
   onSelect,
-  onDelete,
   selected,
   onToggleSelected,
 }: {
@@ -266,7 +267,6 @@ function HistoryRow({
   home: string | undefined;
   onSelect: () => void;
   /** Present only when deletion is available; absent means the affordance is not rendered at all. */
-  onDelete?: (() => void) | undefined;
   /** Whether this row is part of the bulk selection. */
   selected: boolean;
   /**
@@ -277,13 +277,16 @@ function HistoryRow({
 }) {
   return (
     /*
-      A `<div>` hosting two controls, not one `<button>` — the same restructuring the rail needed in #89.
+      A `<div>` hosting the checkbox and the row's button — the same restructuring the rail needed in #89.
 
-      Nested buttons are invalid HTML and browsers resolve them by breaking the inner one, so a Delete control inside a
-      button row would silently not work. `.history-row-main` carries the row's layout so the visual rhythm is
-      unchanged.
+      Nested buttons are invalid HTML and browsers resolve them by breaking the inner one. `.history-row-main` carries
+      the row's layout so the visual rhythm is unchanged.
+
+      The row has NO delete control of its own: deletion is a bulk action in the toolbar, disabled until something is
+      selected. Per-row buttons on every row made the list read as a grid of destructive affordances, and with a
+      selection model they were a second, redundant way to do the same thing.
     */
-    <div className={`history-row-wrap${onDelete === undefined ? "" : " has-delete"}${selected ? " is-selected" : ""}`}>
+    <div className={`history-row-wrap${selected ? " is-selected" : ""}`}>
       {onToggleSelected !== undefined && (
         /*
          * A real checkbox, not a click on the row: selecting and opening are different intents, and a row that
@@ -343,21 +346,6 @@ function HistoryRow({
           <span>{formatBytes(session.bytes)}</span>
         </span>
       </button>
-      {onDelete !== undefined && (
-        <button
-          type="button"
-          className="btn btn-quiet history-delete"
-          /*
-            Labeled for the session, not just "Delete". A list of ten rows each announcing "Delete" is unusable to a
-            screen-reader user, and this is the one control whose target matters more than most.
-          */
-          aria-label={`Delete the session ${nameLabel(session.name, session.scratch, session.id)}`}
-          title="Delete this session's transcript from disk"
-          onClick={onDelete}
-        >
-          Delete
-        </button>
-      )}
     </div>
   );
 }

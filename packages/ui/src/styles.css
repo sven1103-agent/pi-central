@@ -492,8 +492,7 @@ button { font: inherit; color: inherit; }
 }
 
 .rail-filter { padding: 0 var(--sp-3) var(--sp-2); }
-.rail-filter input,
-.history-search input {
+.rail-filter input {
   width: 100%;
   background: var(--bg);
   border: 1px solid var(--line);
@@ -502,8 +501,7 @@ button { font: inherit; color: inherit; }
   color: var(--text);
   font-size: var(--fs-sm);
 }
-.rail-filter input:focus,
-.history-search input:focus { border-color: var(--accent); }
+.rail-filter input:focus { border-color: var(--accent); }
 
 .rail-list { overflow-y: auto; flex: 1; padding-bottom: var(--sp-3); }
 
@@ -697,17 +695,38 @@ button { font: inherit; color: inherit; }
  * The report was "Nobody can scan 500 sessions", and the tab listed 200 rows in one column with no order and no pages.
  * Three controls fix that: sort, page, select.
  */
-.history-toolbar {
+/*
+ * ONE action bar above the list: search, sort, count, bulk delete (requested from use).
+ *
+ * They were three stacked rows — search, then a toolbar, then a select-all line — costing ~90px of vertical space
+ * before the first row and making the controls read as unrelated. They are the controls a reader uses together.
+ */
+.history-actions {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
   flex-wrap: wrap;
-  margin-bottom: var(--sp-2);
+  margin-bottom: var(--sp-3);
 }
+.history-search-input {
+  flex: 1 1 260px;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  padding: 6px 9px;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+.history-search-input:focus-visible { outline: none; box-shadow: var(--focus); }
+/* The count yields first: it is the least actionable thing in the row. */
+.history-count { flex: 0 1 auto; min-width: 0; font-size: var(--fs-xs); }
+/* Pushed to the trailing edge, so the bulk action sits where a primary action belongs and does not move when the
+   count changes width. */
+.history-bulk-delete { flex: none; margin-left: auto; }
 .history-sort { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--dim); }
 /* The bulk action appears only with a selection, and takes the trailing edge so it does not push the count around. */
-.history-bulk { display: inline-flex; align-items: center; gap: var(--sp-2); margin-left: auto; }
-.history-bulk-count { font-size: var(--fs-xs); color: var(--text); font-weight: 600; }
 
 /* A `<ul>` because each row is a list item with a checkbox — the semantic the old bare divs did not have. */
 .history-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }

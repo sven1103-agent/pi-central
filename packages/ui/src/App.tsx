@@ -1215,20 +1215,6 @@ export function App() {
               historyTotal={state.historyTotal}
               home={home}
               /*
-                Delete from History as well as the rail (requested alongside #150). Same gate, same dialog, same
-                control: an older orchestrator means no affordance rather than one that fails.
-              */
-              onDelete={
-                supportsDelete(state.install?.protocol)
-                  ? (session: HistoricalSession) =>
-                      setPendingDelete({
-                        paths: [session.path],
-                        label: nameLabel(session.name, session.scratch, session.id),
-                        cwd: session.cwd,
-                      })
-                  : undefined
-              }
-              /*
                 Bulk delete, gated the same way. The confirmation names a COUNT rather than a label, because a selection
                 can span directories and sessions — and "delete 7 sessions?" is the honest question, where naming one of
                 them would imply the others are incidental.

@@ -113,21 +113,60 @@ const historical = (over = {}) => ({
   ...over,
 });
 
-test("History offers Delete per row when the orchestrator understands it", () => {
+test("History has NO per-row Delete — deletion is a bulk action in the toolbar", () => {
+  // Requested from use: "The delete button next to the session can go now." Per-row buttons made the list read as a
+  // grid of destructive affordances, and with a selection model they were a redundant second way to do the same thing.
   const html = renderToString(
     createElement(HistoryView, {
       history: [historical()],
       historyTotal: 1,
       home: "/Users/x",
       onResume() {},
-      onDelete() {},
+      onDeleteMany() {},
     }),
   );
-  assert.match(html, /history-delete/, "the control is rendered");
-  // Named for its session, so ten rows do not all announce "Delete".
+  assert.ok(!/history-delete/.test(html), "no per-row delete control");
+  assert.match(html, /history-bulk-delete/, "the bulk control is what exists");
+});
+
+test("the bulk control is ALWAYS present and DISABLED until something is selected", () => {
+  // Requested from use: "Dont let the delete button appear magically, it can be in a deactivated state and once at
+  // least one session is selected, it can be deleted." A control that materialises leaves the reader unable to see the
+  // capability before selecting — and a disabled one states both the capability and its condition.
+  const html = renderToString(
+    createElement(HistoryView, {
+      history: [historical()],
+      historyTotal: 1,
+      home: "/Users/x",
+      onResume() {},
+      onDeleteMany() {},
+    }),
+  );
   const doc = new JSDOM(`<body>${html}</body>`).window.document;
-  const button = doc.querySelector(".history-delete");
-  assert.match(button.getAttribute("aria-label"), /Delete the session/);
+  const button = doc.querySelector(".history-bulk-delete");
+  assert.ok(button, "it is rendered with nothing selected");
+  assert.equal(button.disabled, true, "and disabled");
+  assert.match(button.title, /Select sessions/, "with the condition stated rather than the button just being dead");
+});
+
+test("search, sort and the bulk control share ONE action bar", () => {
+  // They were three stacked rows, costing ~90px before the first session and reading as unrelated controls.
+  const html = renderToString(
+    createElement(HistoryView, {
+      history: [historical()],
+      historyTotal: 1,
+      home: "/Users/x",
+      onResume() {},
+      onDeleteMany() {},
+    }),
+  );
+  const doc = new JSDOM(`<body>${html}</body>`).window.document;
+  const bar = doc.querySelector(".history-actions");
+  assert.ok(bar, "one bar");
+  assert.ok(bar.querySelector(".history-search-input"), "search is in it");
+  assert.ok(bar.querySelector(".history-sort"), "sort is in it");
+  assert.ok(bar.querySelector(".history-bulk-delete"), "and so is the bulk action");
+  assert.ok(!doc.querySelector(".history-toolbar"), "the separate toolbar row is gone");
 });
 
 test("History owns NO dialog of its own — the shell renders exactly one (issue #150)", () => {
@@ -140,8 +179,8 @@ test("History owns NO dialog of its own — the shell renders exactly one (issue
   const source = readFileSync(new URL("../src/components/History.tsx", import.meta.url), "utf8");
   assert.ok(!/ConfirmDelete/.test(source), "History must not render its own delete confirmation");
   assert.ok(!/deleting/.test(source), "nor hold state for one");
-  // And it must still hand the request upward, so the shell's dialog is reachable.
-  assert.match(source, /onDelete\?\.|onDelete\(session\)|onDelete\(/, "the row still asks the shell to confirm");
+  // And it must still hand the BULK request upward, so the shell's single dialog is reachable.
+  assert.match(source, /onDeleteMany\(selectedSessions\)/, "the bulk action asks the shell to confirm");
 });
 
 test("the shell renders the ONE dialog", () => {
