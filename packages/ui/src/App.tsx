@@ -1183,6 +1183,13 @@ export function App() {
             talking to an older in-memory orchestrator, and an unknown control on the one irreversible action would
             appear to work and do nothing.
           */
+          /*
+            Stop from the row, so a delete refusal is actionable (issue #150 follow-up). The refusal tells the reader to
+            stop the session; without this they had to find it, focus it, and stop it from the Session panel.
+          */
+          onStopRow={(row) => {
+            if (row.session !== undefined) send({ kind: "stop", sessionId: row.session.id });
+          }}
           onDeleteRow={
             supportsDelete(state.install?.protocol)
               ? (row) =>

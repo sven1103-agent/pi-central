@@ -21,6 +21,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 - A stopped session can be deleted from the rail and from History, behind a confirmation that names its directory ([#150]).
 - History puts search, sort and a bulk delete in one action bar; the delete is disabled until rows are selected ([#150]).
 - A selection can be cleared in one step, and its count is shown in the action bar ([#150]).
+- A running session can be stopped from its rail row, so a refused deletion names a session you can reach ([#150]).
+- The deletion refusal names the session, its directory and its state instead of only a handle ([#150]).
 - History pages 25 rows at a time and sorts by newest, oldest, size or name ([#150]).
 - Deleting removes the session's transcript and its subagent sidecar; a sidecar that cannot be removed is reported ([#150]).
 

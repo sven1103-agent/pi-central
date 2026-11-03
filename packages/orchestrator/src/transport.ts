@@ -469,11 +469,24 @@ export class Transport {
          */
         const live = this.#supervisor.listedByFile(control.path);
         if (live !== undefined) {
+          /*
+           * The refusal must be ACTIONABLE, which the first version was not.
+           *
+           * Reported from use: "I get a warning, that I shall stop this session first. I dont see a session open with
+           * that id though." The message named a handle (`s4`) and a condition, but not how to find the row — and the
+           * session is easy to lose: it may be one of many in a collapsed group, or a session restored at startup that
+           * the reader never opened.
+           *
+           * So the refusal names the session, its DIRECTORY (the thing that identifies the row in a list of ten), and
+           * its state — because "still running" is wrong for an idle one, and the two need different actions.
+           */
+          const where = live.cwd === undefined ? "" : ` in ${live.cwd}`;
           this.#broadcast({
             kind: "error",
             message:
-              `Stop this session before deleting it — ${live.name} is still running and its transcript is open. ` +
-              `Deleting it now would remove a file the process is still writing to.`,
+              `Cannot delete this transcript: it is open in the running session "${live.name}"${where} ` +
+              `(${live.state}). Stop that session from the Sessions tab, then delete it — deleting it now would ` +
+              `remove a file the process is still writing to.`,
             sessionId: live.id,
           });
           return;

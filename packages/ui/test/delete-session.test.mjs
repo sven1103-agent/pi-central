@@ -288,3 +288,58 @@ test("a LIVE rail row offers neither, because a running transcript cannot be del
   );
   assert.ok(!/rail-row-delete/.test(html), `no delete on a live row: ${html}`);
 });
+
+// --- The refusal must be actionable (reported from use) ----------------------------------------
+
+test("a RUNNING rail row offers Stop, so a delete refusal can be acted on", () => {
+  // Reported: "I get a warning, that I shall stop this session first. I dont see a session open with that id though."
+  // The rail had no Stop at all — it lived in the Session panel for the focused session only — so the instruction
+  // pointed at a control the reader could not reach from the list they were looking at.
+  const live = {
+    id: "s4", name: "data manager work", cwd: "/Users/x/git/data-manager", state: "idle", mode: "sandboxed",
+    isolation: "", command: "", scratch: false, messageCount: 3, pending: 0, contextPercent: null,
+    tokensTotal: null, cost: null, dialogs: [], warnings: [], startedAt: 0,
+  };
+  const html = renderToString(
+    createElement(SessionRail, {
+      ...railProps,
+      rows: [{ entry: { path: "/sessions/p/a.jsonl", cwd: live.cwd, name: live.name }, session: live }],
+      onStopRow() {},
+    }),
+  );
+  const doc = new JSDOM(`<body>${html}</body>`).window.document;
+  const stop = doc.querySelector(".rail-row-stop button");
+  assert.ok(stop, "a Stop control is rendered on the live row");
+  assert.match(stop.textContent, /Stop/);
+  // The consequence, not the mechanic — and the opposite of Delete's warning, so the two cannot be confused.
+  assert.match(stop.title, /transcript stays/);
+});
+
+test("Stop is not offered where it cannot act", () => {
+  // `stopped` and `failed` have nothing to stop; a control that cannot act is worse than none.
+  const stopped = renderToString(
+    createElement(SessionRail, {
+      ...railProps,
+      rows: [{ entry: { path: "/sessions/p/a.jsonl", cwd: "/Users/x/git/p" } }],
+      onStopRow() {},
+    }),
+  );
+  // Matched with a boundary: `rail-row-stop` is a PREFIX of `rail-row-stopped-actions`, so a bare substring test
+  // matched the stopped-row wrapper and reported a Stop button that was not there.
+  assert.ok(!/rail-row-stop[\s"]/.test(stopped), "no Stop on a stopped row");
+});
+
+test("an orchestrator without the Stop control is not offered it", () => {
+  const live = {
+    id: "s1", name: "x", cwd: "/Users/x/git/p", state: "idle", mode: "sandboxed", isolation: "", command: "",
+    scratch: false, messageCount: 0, pending: 0, contextPercent: null, tokensTotal: null, cost: null,
+    dialogs: [], warnings: [], startedAt: 0,
+  };
+  const html = renderToString(
+    createElement(SessionRail, {
+      ...railProps,
+      rows: [{ entry: { path: "/sessions/p/a.jsonl", cwd: live.cwd, name: live.name }, session: live }],
+    }),
+  );
+  assert.ok(!/rail-row-stop[\s"]/.test(html), "withheld rather than shown-and-broken");
+});
