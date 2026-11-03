@@ -23,7 +23,7 @@ import type {
   PiRecord,
 } from "@pi-central/protocol";
 import { applyRecord, emptyTranscript, seedTranscript, type Transcript } from "./transcript.ts";
-import { addToRoster, removeFromRoster, type RosterEntry, type RosterRow } from "./roster.ts";
+import { addToRoster, moveToFront, removeFromRoster, type RosterEntry, type RosterRow } from "./roster.ts";
 // A type-only import from a component, which is the odd part of this file: `QueueBehavior` is the composer's
 // vocabulary for how a prompt joins a run, and `pendingPrompt` has to speak it so a parked prompt is sent with
 // the same behaviour the reader chose. Imported as a TYPE so no component code is pulled into the reducer.
@@ -362,6 +362,14 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
 
     case "session": {
       const index = state.live.findIndex((s) => s.id === event.session.id);
+      /*
+       * The transition, captured BEFORE `live` is replaced — this is what decides whether the row moves.
+       *
+       * Ordering within a group is recency of ACTIVITY (see `moveToFront`), and a state change is the only event that
+       * should move a row. `session` is broadcast on every patch, so a streaming session arrives here several times a
+       * second; moving on those would reorder the rail continuously and make rows impossible to click.
+       */
+      const previousState = state.live[index]?.state;
       const live = index === -1
         ? [...state.live, event.session]
         : state.live.map((s) => (s.id === event.session.id ? event.session : s));
@@ -418,10 +426,22 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
         entry.path === file ? { ...entry, ...(event.session.name ? { name: event.session.name } : {}) } : entry,
       );
 
+      /*
+       * A STATE change moves the row to the front; anything else leaves it where it is.
+       *
+       * Applied to the roster rather than to the rendered rows, because the roster is what persists: the order survives
+       * a reload, which is what makes "recently active first" true after a restart too.
+       */
+      const roster =
+        previousState !== undefined && previousState !== event.session.state && event.session.sessionFile !== undefined
+          ? moveToFront(state.roster, event.session.sessionFile)
+          : state.roster;
+
       return {
         ...state,
         live,
         history,
+        roster,
         focusedId,
         // Cleared when the intent is SPENT, not merely when something new appeared: a `session` event for an unrelated
         // session must not consume "focus the one I asked for".

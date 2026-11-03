@@ -29,6 +29,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Changed
 
+- Each rail section is ordered by most recent activity, so the row that just changed is at the top ([#68]).
+
 - Every rail row draws the context-usage bar, so pressure is compared across sessions by eye ([#13]).
 
 ### Fixed
@@ -47,6 +49,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - Both context gauges are sized from one token, so widening one widens the other ([#13]).
 
 [#13]: https://github.com/sven1103-agent/pi-central/issues/13
+[#68]: https://github.com/sven1103-agent/pi-central/issues/68
 [#89]: https://github.com/sven1103-agent/pi-central/issues/89
 [#149]: https://github.com/sven1103-agent/pi-central/issues/149
 [#150]: https://github.com/sven1103-agent/pi-central/issues/150
