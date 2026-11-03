@@ -128,11 +128,41 @@ export function HistoryView({
         </label>
 
         <span className="hint history-count" aria-live="polite">
+          {/*
+            The selection count is stated here rather than only on the button, so the reader can see what is selected
+            without inferring it from a label — and `aria-live` announces it once when it changes, which is what makes
+            the bulk action feel like it has a state.
+          */}
+          {selectedSessions.length > 0 && (
+            <strong className="history-selected-count">{selectedSessions.length} selected · </strong>
+          )}
           {results.length} of {history.length}
           {/* Say when the loaded set is a page. Presenting 500 of 1115 as a total would be a
               half-truth, and the honest version is one short clause. */}
           {historyTotal > history.length && <> · {historyTotal} on disk</>}
         </span>
+
+        {/*
+          Clear, whenever anything is selected — and it is not decoration.
+
+          Removing the old bulk toolbar silently removed the only way to drop a selection in one step: a reader who had
+          ticked twenty rows had to untick them one at a time. With "select this page" that is the difference between
+          a usable bulk action and a trap.
+
+          It sits BEFORE the delete button so the safe escape is not the last thing in the row, and it appears on the
+          same condition — which is fine here, unlike the delete button, because hiding it when nothing is selected
+          removes nothing: there is no state to escape from.
+        */}
+        {selectedSessions.length > 0 && (
+          <button
+            type="button"
+            className="btn btn-quiet history-clear"
+            title={`Clear ${selectedSessions.length} selected session${selectedSessions.length === 1 ? "" : "s"}`}
+            onClick={() => setSelected(new Set())}
+          >
+            Clear
+          </button>
+        )}
 
         {onDeleteMany !== undefined && (
           /*

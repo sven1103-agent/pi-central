@@ -722,8 +722,12 @@ button { font: inherit; color: inherit; }
 .history-search-input:focus-visible { outline: none; box-shadow: var(--focus); }
 /* The count yields first: it is the least actionable thing in the row. */
 .history-count { flex: 0 1 auto; min-width: 0; font-size: var(--fs-xs); }
+/* The selection count, heavier than the totals beside it — it is the fact the bulk action depends on. */
+.history-selected-count { color: var(--text); font-weight: 600; }
 /* Pushed to the trailing edge, so the bulk action sits where a primary action belongs and does not move when the
-   count changes width. */
+   count changes width. Clear sits immediately before it, so the safe escape is not stranded at the far end. */
+.history-clear { flex: none; margin-left: auto; }
+.history-clear + .history-bulk-delete { margin-left: 0; }
 .history-bulk-delete { flex: none; margin-left: auto; }
 .history-sort { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--dim); }
 /* The bulk action appears only with a selection, and takes the trailing edge so it does not push the count around. */
@@ -750,7 +754,20 @@ button { font: inherit; color: inherit; }
   height: 15px;
   accent-color: var(--accent);
 }
-.history-row-wrap.is-selected { background: var(--accent-tint); border-radius: var(--r-3); }
+/*
+ * Selection is painted on the ROW, not on the wrapper (fixed after a screenshot).
+ *
+ * The tint was on `.history-row-wrap`, but `.history-row` inside it has its own `background: var(--panel)` and
+ * `max-width: 900px` — so the wrapper's tint showed as a coloured strip to the RIGHT of the row, and the row itself
+ * stayed unhighlighted. The wrapper is not the visible box; the row is.
+ */
+.history-row-wrap.is-selected .history-row-main {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+}
+/* The checkbox column is part of the selected row visually, so it carries the same tint — otherwise selection reads as
+   two disconnected pieces. */
+.history-row-wrap.is-selected { border-radius: var(--r-2); background: var(--accent-tint); }
 
 .history-pages {
   display: flex;

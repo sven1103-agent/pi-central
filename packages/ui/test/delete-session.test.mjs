@@ -149,6 +149,48 @@ test("the bulk control is ALWAYS present and DISABLED until something is selecte
   assert.match(button.title, /Select sessions/, "with the condition stated rather than the button just being dead");
 });
 
+test("a selection can be cleared in ONE step (severe bug, reported from use)", () => {
+  // *"users cant clear the selection anymore in one step, which is a severe bug."* Removing the old bulk toolbar
+  // silently took the only Clear with it: a reader who had ticked twenty rows — or pressed "select this page" over 25 —
+  // had to untick them one at a time. Reported as severe, and it is: it turns a bulk action into a trap.
+  const source = readFileSync(new URL("../src/components/History.tsx", import.meta.url), "utf8");
+  // The control exists and resets the whole selection, rather than removing one path.
+  assert.match(source, /className="btn btn-quiet history-clear"/, "a Clear control is rendered");
+  assert.match(source, /setSelected\(new Set\(\)\)/, "and it resets the selection in one step");
+  // It must not be gated on the delete capability: clearing is a view action, and a reader with an old orchestrator
+  // still needs to be able to untick things.
+  const clearBlock = source.slice(source.indexOf("history-clear") - 400, source.indexOf("history-clear"));
+  assert.ok(!/onDeleteMany !== undefined &&/.test(clearBlock), "clearing is not conditioned on being able to delete");
+});
+
+test("the selected COUNT is visible, not only implied by the button's label", () => {
+  // "Delete 3" says what will go; the reader also needs to see that three are selected while deciding.
+  const source = readFileSync(new URL("../src/components/History.tsx", import.meta.url), "utf8");
+  assert.match(source, /history-selected-count/, "the count is shown in the action bar");
+  assert.match(source, /selected ·/, "worded, so it is not a bare number beside other numbers");
+});
+
+test("selection is painted on the ROW, not on the wrapper around it", () => {
+  // From a screenshot: the tint appeared as a strip to the RIGHT of each selected row. `.history-row-wrap` got the
+  // background, but `.history-row` inside it has its own `background: var(--panel)` and `max-width: 900px`, so it
+  // painted over the tint and left the wrapper's colour showing only where the row did not reach.
+  //
+  // Asserted on the stylesheet because this is a pure style outcome: the markup was right, and a rendered-HTML test
+  // cannot see which element won the background.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rule = (selector) => {
+    const normalised = css.replace(/\s+/g, " ");
+    const wanted = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const all = [...normalised.matchAll(new RegExp(`(?<![\\w-])${wanted} ?\\{([^}]*)\\}`, "g"))];
+    return all.length > 0 ? all[all.length - 1][1] : undefined;
+  };
+
+  const rowSelected = rule(".history-row-wrap.is-selected .history-row-main");
+  assert.ok(rowSelected, "the selected ROW has a rule");
+  assert.match(rowSelected, /background:\s*var\(--accent-tint\)/, "the row itself carries the tint");
+  assert.match(rowSelected, /border-color:\s*var\(--accent\)/, "and an accent edge, so selection is not colour alone");
+});
+
 test("search, sort and the bulk control share ONE action bar", () => {
   // They were three stacked rows, costing ~90px before the first session and reading as unrelated controls.
   const html = renderToString(
