@@ -188,7 +188,6 @@ export function SessionHeader({
         <span className="header-cost mono" title="Total cost reported for this session">
           {formatCost(session.cost)}
         </span>
-        <SessionControlBar session={session} {...controls} />
       </div>
 
       {/*
@@ -203,7 +202,17 @@ export function SessionHeader({
         </div>
       )}
 
-      <div className="picker picker-grid">
+      {/*
+        The pickers and the control bar travel together as ONE column.
+
+        The header is a single flex line (`flex-wrap: nowrap`) — deliberately, because letting it wrap freely is what
+        produced the four-row header of `img_23.png`. So a second row is not achieved by wrapping: it is achieved by
+        putting both bands in one child, which is one flex item to the header and a column inside.
+
+        Asked for from use: *"just put it below the model selection."*
+      */}
+      <div className="header-lower">
+        <div className="picker picker-grid">
         <ModelPicker
           session={session}
           models={models}
@@ -222,6 +231,20 @@ export function SessionHeader({
             />
           }
         />
+      </div>
+
+        {/*
+          THE CONTROL BAR, on its own line below the model and thinking pickers.
+
+        Asked for: *"just put it below the model selection."* On the stats row it was clipped — `Delete tran…` ran off
+        the edge — because that row is sized by the meter, the cost and the pickers, not by a variable number of
+        buttons. Its own row is sized by the actions themselves, so the bar can hold however many a state offers.
+
+        Below the pickers rather than above them because the pickers are a standing choice about the session, while
+        these act on it once; a control that ends or resumes the session should not sit between the reader and the
+        thing they adjust most.
+      */}
+        <SessionControlBar session={session} {...controls} />
       </div>
     </header>
   );

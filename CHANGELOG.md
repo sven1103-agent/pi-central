@@ -35,7 +35,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
-- A session's Stop, Resume, Retry, Forget and Delete controls are a bar on the session header, above the transcript ([#89]).
+- A session's Stop, Resume, Retry, Forget and Delete controls are a bar below the model pickers, in the session header ([#89]).
 - Hovering a rail row is visible, and idle rows no longer wear a bright grey stripe ([#89]).
 - The selected rail row is marked by a bar on its right edge, so its contents keep full contrast ([#89]).
 

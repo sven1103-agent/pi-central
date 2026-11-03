@@ -258,8 +258,11 @@ test("only Delete carries the danger style, and the bar is a hairline apart from
   const danger = [...doc.querySelectorAll(".session-controls .session-control-danger")].map((b) => b.textContent);
   assert.deepEqual(danger, ["Delete transcript"], "a permanent red button in a header reads as a warning about the session");
 
+  // The bar is its OWN BAND below the pickers (asked for from use: "just put it below the model selection"), so the
+  // separator is above it rather than beside it.
   const bar = ruleExact(".session-controls") ?? "";
-  assert.match(bar, /border-left:\s*1px solid var\(--line\)/, "a separator, so the actions read as a group");
+  assert.match(bar, /border-top:\s*1px solid var\(--line\)/, "a separator above, so the band reads as its own");
+  assert.doesNotMatch(bar, /border-left/, "and not the old left edge from when it shared the stats row");
 });
 
 test("the bar renders NOTHING when the shell offers nothing", () => {

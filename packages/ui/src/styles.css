@@ -623,14 +623,40 @@ button { font: inherit; color: inherit; }
  * The header row is horizontal and already carries the name, the directory, the meter and the cost, so a bar fits
  * here without a menu. Buttons are quiet until hovered: the header's one loud control is the composer below it.
  */
+/*
+ * The lower band of the header: the pickers, and the control bar beneath them.
+ *
+ * One flex ITEM to the header, so the header keeps its single nowrap line (the guard that stops the four-row defect of
+ * `img_23.png`), and a column inside to stack the two bands.
+ */
+.header-lower {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  /* Sized to its content, so it does not push the identity block out; the pickers keep their own widths. */
+  flex: none;
+  min-width: 0;
+}
+
 .session-controls {
   display: flex;
   align-items: center;
   gap: var(--sp-1);
-  flex: none;
-  /* A hairline separator, so the actions read as a group apart from the meter and the cost. */
-  padding-left: var(--sp-2);
-  border-left: 1px solid var(--line);
+  /*
+   * A row of buttons that wraps rather than overflowing.
+   *
+   * It sits inside `.header-lower`, so it is already BELOW the pickers — no basis trickery needed, and the header's own
+   * `nowrap` is untouched. `flex-wrap` here means a narrow window puts a long action on a second line instead of
+   * clipping it, which is what happened when this bar shared the stats row (`Delete tran…`).
+   */
+  flex-wrap: wrap;
+  /*
+   * A hairline ABOVE, because this is a band of its own rather than a continuation of the row above — the same idiom
+   * the picker block uses to separate itself from the identity line.
+   */
+  padding-top: var(--sp-2);
+  margin-top: var(--sp-1);
+  border-top: 1px solid var(--line);
 }
 .session-control {
   font-size: var(--fs-xs);
