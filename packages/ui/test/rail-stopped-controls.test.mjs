@@ -327,3 +327,16 @@ test("a row that cannot retry says so as a DISABLED item, in the menu", () => {
   assert.ok(unavailable, "a disabled item states the absence");
   assert.equal(unavailable.disabled, true);
 });
+
+test("a row reserves room for the trigger, so it never covers the row's own numbers", () => {
+  // From a screenshot: the `⋯` sat on top of the ctx gauge and cost — the button covered the values beside it. A
+  // hover-revealed control still occupies space; reserving it in the row is the only way it cannot collide.
+  const reserved = ruleExact(".rail-row.has-actions") ?? "";
+  assert.match(
+    reserved,
+    /padding-right:\s*calc\(var\(--sp-3\) \+ 24px\)/,
+    `the row reserves the trigger's width, got ${JSON.stringify(reserved)}`,
+  );
+  // And the trigger is 22px wide, so 24px is enough — asserted rather than assumed, because a wider glyph would clip.
+  assert.match(ruleExact(".rail-row-menu-trigger") ?? "", /width:\s*22px/);
+});

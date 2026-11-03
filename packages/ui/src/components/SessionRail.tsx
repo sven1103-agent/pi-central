@@ -465,7 +465,14 @@ function RailRow({
       would hide a live session from the rail while it kept working and spending — the roster is a view, but it
       must not be able to lie about what is happening.
     */
-    <div className={`rail-row state-${activity}${focused ? " is-focused" : ""}`}>
+    /*
+      `has-actions` reserves room for the `⋯` trigger, so it never sits on top of the row's own text.
+      The trigger floats at the row's trailing edge; without the reservation its 22px landed over the ctx gauge and the
+      cost on the third line — visible in a screenshot as the button covering the numbers it was next to.
+    */
+    <div
+      className={`rail-row state-${activity}${focused ? " is-focused" : ""}${rowActions.length > 0 ? " has-actions" : ""}`}
+    >
       <button
         type="button"
         className="rail-row-main"

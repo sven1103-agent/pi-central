@@ -35,7 +35,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
-- A rail row's actions live behind one `⋯` button, so they are reachable in a narrow rail ([#89]).
+- A rail row's actions live behind one `⋯` button, with room reserved so it never covers the row's numbers ([#89]).
 - Hovering a rail row is visible, and idle rows no longer wear a bright grey stripe ([#89]).
 - The selected rail row is marked by a bar on its right edge, so its contents keep full contrast ([#89]).
 

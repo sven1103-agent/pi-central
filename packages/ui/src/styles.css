@@ -624,6 +624,15 @@ button { font: inherit; color: inherit; }
  * A menu has a fixed footprint, so it does not grow with each new action — which is what broke when Stop became the
  * fourth one.
  */
+/*
+ * Room for the trigger, on rows that have one.
+ *
+ * The trigger floats at the row's trailing edge. Without this reservation its 22px landed ON the third line — over the
+ * ctx gauge and the cost — which a screenshot showed as the button covering the numbers beside it. Reserving the space
+ * in the row itself is what keeps a hover-revealed control from colliding with content it does not replace.
+ */
+.rail-row.has-actions { padding-right: calc(var(--sp-3) + 24px); }
+
 .rail-row-menu { position: absolute; right: var(--sp-1); bottom: var(--sp-1); }
 
 .rail-row-menu-trigger {
