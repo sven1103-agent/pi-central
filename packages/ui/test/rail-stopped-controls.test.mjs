@@ -192,11 +192,26 @@ test("rows are flush, and SELECTION is the accent tint", () => {
   // confused with either.
   assert.equal(rule(".rail-row + .rail-row"), undefined, "no gap and no separator between rows");
   assert.match(rule(".rail-row:hover") ?? "", /background:\s*var\(--panel-3\)/, "hover is the original light wash");
-  assert.match(
-    rule('.rail-row[aria-current="true"]') ?? "",
-    /background:\s*var\(--accent-tint\)/,
-    "and selection is the accent tint",
-  );
+});
+
+test("selection is a RIGHT-edge bar, not a wash, so the row's contents keep their contrast", () => {
+  // The tint was applied to the whole row, including the context gauge — which then sat on a blue-grey that its own
+  // fill could barely differ from. Reported as: "you cant see the progress bar anymore."
+  //
+  // The rail uses two channels by convention, and this finishes it: the LEFT edge is STATE, the RIGHT edge is SELECTION.
+  const selected = rule('.rail-row[aria-current="true"]') ?? "";
+  assert.match(selected, /box-shadow:\s*inset -3px 0 0 var\(--accent\)/, "a bar on the right, in the accent");
+  // And the surface is a plain panel colour, not a tint — a tint is what washed the contents out.
+  assert.match(selected, /background:\s*var\(--panel-2\)/, `a solid surface, got ${JSON.stringify(selected)}`);
+  assert.doesNotMatch(selected, /var\(--accent-tint\)/, "no wash");
+});
+
+test("the context gauge's track is visible on EVERY row surface", () => {
+  // The track was `--panel-3`, one step from `--panel`: fine while every row was `--panel`, invisible the moment a row
+  // was filled. `--bg` is darker than any surface the rail paints, so the bar reads as a bar wherever the row sits.
+  const track = rule(".context-bar") ?? "";
+  assert.match(track, /background:\s*var\(--bg\)/, `the darkest surface, got ${JSON.stringify(track)}`);
+  assert.doesNotMatch(track, /background:\s*var\(--panel-3\)/, "the value that disappeared on a filled row");
 });
 
 test("attention states keep their HUE, so the stripe still means something", () => {

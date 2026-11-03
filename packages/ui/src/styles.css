@@ -555,11 +555,24 @@ button { font: inherit; color: inherit; }
 .rail-row:hover { background: var(--panel-3); }
 .rail-row.is-focused,
 .rail-row[aria-current="true"] {
-  background: var(--accent-tint);
+  /*
+   * Selection is a solid fill plus a bar on the RIGHT edge — not a colour wash.
+   *
+   * The wash (`--accent-tint`) tinted everything inside the row, including the context gauge, which then had almost no
+   * contrast against its own track: the progress bar became invisible on exactly the row the reader was looking at.
+   * Asked for from use: *"what about changing the background of the selected card, we introduce a vertical bar on the
+   * right side of the card?"* — yes, and it uses the rail's own two-channel convention:
+   *
+   *   - the LEFT edge is STATE (colour by state, thickened on selection);
+   *   - the RIGHT edge is SELECTION (always the accent, so it cannot be read as a state).
+   *
+   * A shape on each edge, and a plain `--panel-2` surface in between that leaves every value inside the row at full
+   * contrast.
+   */
+  background: var(--panel-2);
   color: var(--text);
-  /* The rail row's left border is the STATE stripe; selection thickens it rather than recolouring it, so the two
-     facts stay on separate channels. */
   border-left-width: 4px;
+  box-shadow: inset -3px 0 0 var(--accent);
 }
 .rail-row.is-focused .name { color: var(--text); }
 .rail-row.is-focused .r2,
@@ -2770,9 +2783,16 @@ select.btn { font-family: var(--sans); }
   max-width: var(--gauge-width);
   height: 4px;
   border-radius: var(--r-pill);
-  background: var(--panel-3);
-  /* A hairline edge so the track is visible at 0, where "empty" and "not rendered" would otherwise look alike. */
-  box-shadow: inset 0 0 0 1px var(--line);
+  /*
+   * The track is the DARKEST surface, not `--panel-3`.
+   *
+   * `--panel-3` is one step from `--panel`, which was fine while every row was `--panel`. The moment a row is filled —
+   * hover, or the selection tint — the track and the fill converge and the gauge disappears. Reported as: *"you cant
+   * see the progress bar anymore."* `--bg` is darker than every row surface the rail can paint, so the track reads as a
+   * track wherever the row sits, and the ring keeps it legible at 0%.
+   */
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
   overflow: hidden;
   /* Centred against the mono label's cap height rather than its baseline box. */
   align-self: center;
