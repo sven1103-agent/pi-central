@@ -33,12 +33,21 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- Clicking a History session that is already running focuses it, instead of leaving the view on another session
+  ([#150]).
+- A resumed session is focused when it arrives, and an unrelated new session can no longer claim that focus ([#150]).
+
+- Selecting a stopped session shows it, with a Resume control, instead of a dead end ([#89]).
+- Rows that were named after their directory — several sessions all reading `data-manager` — now show the prompt or a
+  unique short id ([#89]).
+
 - History says a directory is unreadable when it exists but cannot be read, instead of calling it gone ([#196]).
 - Discovery and resume share one directory classification, so the History chip and the refusal dialog agree ([#196]).
 - The context-pressure threshold is one shared constant instead of three separate `80`s ([#13]).
 - Both context gauges are sized from one token, so widening one widens the other ([#13]).
 
 [#13]: https://github.com/sven1103-agent/pi-central/issues/13
+[#89]: https://github.com/sven1103-agent/pi-central/issues/89
 [#149]: https://github.com/sven1103-agent/pi-central/issues/149
 [#150]: https://github.com/sven1103-agent/pi-central/issues/150
 [#196]: https://github.com/sven1103-agent/pi-central/issues/196
