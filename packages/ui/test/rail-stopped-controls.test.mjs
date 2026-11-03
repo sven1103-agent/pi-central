@@ -45,6 +45,19 @@ function rule(selector) {
   return all.length > 0 ? all[all.length - 1][1] : undefined;
 }
 
+/**
+ * The rule whose SELECTOR IS EXACTLY `selector`, anchored at the start of a line.
+ *
+ * `rule()` above matches anywhere, which is wrong when a compound selector *ends* in the one being looked for:
+ * `.rail-row:hover .context-bar { ... }` also matches `/\.context-bar ?\{/`, so a "what is the base track colour"
+ * question answered itself with the override. Found by this test failing for that reason.
+ */
+function ruleExact(selector) {
+  const wanted = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const all = [...css.matchAll(new RegExp(`^${wanted} ?\\{([^}]*)\\}`, "gm"))];
+  return all.length > 0 ? all[all.length - 1][1] : undefined;
+}
+
 /** A custom property's value, so a test can compare tokens rather than literals. */
 function token(name) {
   return new RegExp(`${name}:\\s*([^;]+);`).exec(css)?.[1]?.trim();
@@ -206,14 +219,23 @@ test("selection is a RIGHT-edge bar, not a wash, so the row's contents keep thei
   assert.doesNotMatch(selected, /var\(--accent-tint\)/, "no wash");
 });
 
-test("the context gauge's track is visible on EVERY row surface", () => {
-  // The track was `--panel-3`, one step from `--panel`: fine while every row was `--panel`, invisible the moment a row
-  // was filled. `--bg` is darker than any surface the rail paints, so the bar reads as a bar wherever the row sits.
-  const track = rule(".context-bar") ?? "";
-  assert.match(track, /background:\s*var\(--bg\)/, `the darkest surface, got ${JSON.stringify(track)}`);
-  assert.doesNotMatch(track, /background:\s*var\(--panel-3\)/, "the value that disappeared on a filled row");
-});
+test("the gauge keeps its own track colour, and steps back only on a FILLED row", () => {
+  // The track is `--panel-3` — one step from `--panel`, which is right on a plain row and was the look preferred:
+  // "the rail for the progress bar looked better before". It was briefly changed globally to `--bg`, which fixed the
+  // disappearing gauge by changing the appearance instead of the cause.
+  //
+  // Hover paints `--panel-3` and selection paints `--panel-2`, so on either the track sits within one step of the row
+  // and the gauge vanishes — "you cant see the progress bar anymore". The fix is scoped to those two states.
+  const track = ruleExact(".context-bar") ?? "";
+  assert.match(track, /background:\s*var\(--panel-3\)/, `the plain row keeps its own track, got ${JSON.stringify(track)}`);
 
+  const filled = rule(".rail-row:hover .context-bar, .rail-row.is-focused .context-bar, .rail-row[aria-current=\"true\"] .context-bar");
+  assert.ok(filled, "filled rows override the track");
+  assert.match(filled, /background:\s*var\(--bg\)/, "so it stays visible against a filled row");
+
+  // Selection must still be a bar on the right, which is what made the wash unnecessary in the first place.
+  assert.match(rule('.rail-row[aria-current="true"]') ?? "", /inset -3px 0 0 var\(--accent\)/);
+});
 test("attention states keep their HUE, so the stripe still means something", () => {
   // Stepping the quiet ones back must not flatten the loud ones — that is the stripe's whole job.
   for (const [selector, expected] of [
