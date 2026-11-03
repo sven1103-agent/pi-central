@@ -163,9 +163,9 @@ export function serializeRoster(entries: readonly RosterEntry[]): string {
 /**
  * Add a session, or refresh the hints of one already present.
  *
- * **Order is preserved for an existing entry.** A session that starts running must not jump to the top of a
- * list the reader arranged — that is #68's "positions that hold still" complaint in miniature, and the roster
- * is the one place the order is entirely the reader's.
+ * **A refresh keeps the entry where it is.** Moving on every refresh would reorder the rail dozens of times a second
+ * while a session streams — `remember` is dispatched for every live session on every broadcast — so position changes
+ * are driven by `moveToFront`, which the reducer calls only when a session's STATE changes.
  *
  * Hints are MERGED rather than replaced: a live session may not know the `name` a previous run recorded, and
  * overwriting with `undefined` would rename a row the reader recognises.
@@ -179,6 +179,38 @@ export function addToRoster(entries: readonly RosterEntry[], entry: RosterEntry)
     return next;
   }
   return [entry, ...entries].slice(0, ROSTER_MAX);
+}
+
+/**
+ * Move one entry to the front of the roster.
+ *
+ * ## Why the array is the clock
+ *
+ * The rail's sections are rendered by filtering this array in order, so an entry's INDEX is its position within its
+ * section. Moving it to the front is therefore all "most recently active first" needs: no timestamp to store and
+ * nothing to migrate. `addToRoster` already prepends a new entry, so the two together mean the array is ordered by the
+ * last time anything happened to a row.
+ *
+ * ## The decision this narrows, and why
+ *
+ * #68 settled that positions must **hold still**, and `addToRoster` preserved order for that reason — a row that jumps
+ * while you aim at it is the original complaint. That holds for a row you are *reading*. It does not hold for a section
+ * whose whole question is recency: "which of these went quiet last?" was answered by insertion order, which for an old
+ * roster is close to arbitrary.
+ *
+ * So the rule is narrowed rather than dropped. A row moves only when its **state changes** — start, settle, block,
+ * fail, stop — an event the reader caused or needs to know about. It never moves while streaming, and never on a mere
+ * refresh (see `addToRoster`). The groups keep #68's stable attention order; only the order *within* a group is now
+ * recency.
+ *
+ * Returns the same array when the entry is already first or absent, so a caller cannot trigger a re-render for nothing.
+ */
+export function moveToFront(entries: readonly RosterEntry[], path: string): RosterEntry[] {
+  const at = entries.findIndex((candidate) => candidate.path === path);
+  if (at <= 0) return entries as RosterEntry[];
+  const next = [...entries];
+  const [moved] = next.splice(at, 1);
+  return [moved!, ...next];
 }
 
 /**
