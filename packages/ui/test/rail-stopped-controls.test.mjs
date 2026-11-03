@@ -171,15 +171,21 @@ test("an idle row's stripe is a neutral grey, not a bright text colour", () => {
   assert.doesNotMatch(idle, /var\(--dim\)/, "a text colour is not a quiet stripe");
 });
 
-test("rows are SPACED, so they read as separate blocks", () => {
-  // The stripe was doing structural work it was never meant to do. `.rail-list` has no `gap` and the row has no
-  // margin, so rows were flush against each other and the only separation was the state colour — which is why
-  // stepping the idle stripe back merged five rows into one block ("now i can hardly differentiate between the
-  // cards"). DESIGN.md already said "rows 8px apart"; it was never implemented.
-  const spacer = rule(".rail-row + .rail-row");
-  assert.ok(spacer, "adjacent rows are separated by their own rule");
-  assert.match(spacer, /margin-top:\s*var\(--sp-2\)/, `8px is the documented rhythm, got ${JSON.stringify(spacer)}`);
-  // And the stripe must not be the row's own separator colour, which would be invisible again.
+test("adjacent rows are separated by a HAIRLINE, not a gap", () => {
+  // Rows were flush, so the state stripe was the only boundary — stepping it back to a neutral grey merged five idle
+  // rows into one block ("now i can hardly differentiate between the cards").
+  //
+  // The first fix used the 8px the design document specifies, which separated them and made the rail feel loose:
+  // 40px of added height across five rows, every row further from the one above. Reported as "now everything gets
+  // visually wider. Maybe a very tiny separator? not a lot." So: a 1px edge, the app's own gutter idiom.
+  const separator = rule(".rail-row + .rail-row");
+  assert.ok(separator, "adjacent rows are separated by their own rule");
+  assert.match(separator, /border-top:\s*1px solid var\(--line\)/, `a 1px hairline, got ${JSON.stringify(separator)}`);
+
+  // A gap is the thing that was rejected: it must not come back as a margin.
+  assert.doesNotMatch(separator, /margin-top/, "spacing was too much — the separator is one pixel");
+
+  // And the stripe must not be the row's own gutter colour, which would be invisible again.
   const idle = rule(".state-idle");
   assert.doesNotMatch(idle, /border-left-color:\s*var\(--line\)/, "a stripe the same as the gutter is not an edge");
 });

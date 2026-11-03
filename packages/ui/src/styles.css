@@ -549,8 +549,18 @@ button { font: inherit; color: inherit; }
   cursor: pointer;
   color: var(--dim);
 }
-/* 8px between rows is the documented rhythm, and it is what makes them read as separate blocks. */
-.rail-row + .rail-row { margin-top: var(--sp-2); }
+/*
+ * A hairline between rows — not a gap.
+ *
+ * The first attempt used the 8px the design document specifies ("rows 8px apart"), which separated them but made the
+ * rail feel loose: five extra 8px gaps is 40px of added height in a 288px column, and every row sat further from the
+ * one above it. Reported as *"now everything gets visually wider. Maybe a very tiny separator? not a lot."*
+ *
+ * A 1px `--line` edge is the app's own idiom ("separated by 1px `--line` gutters rather than borders or cards") and
+ * costs one pixel per row. It gives the boundary that the state stripe was accidentally providing, while leaving the
+ * 68px row rhythm the design specifies intact.
+ */
+.rail-row + .rail-row { border-top: 1px solid var(--line); }
 
 /* Hover and SELECTION are different states and must look different.
  *
