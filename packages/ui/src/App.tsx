@@ -1250,9 +1250,22 @@ export function App() {
                   : undefined
               }
               onResume={(session: HistoricalSession) => {
-                // Same as starting: the reader asked for THIS session, so it must become the active one
-                // even when another is already focused (issue #144).
-                dispatch({ kind: "expectNewSession" });
+                /*
+                 * Same as starting: the reader asked for THIS session, so it must become the active one even when
+                 * another is already focused (issue #144) — and even when THIS one is already running.
+                 *
+                 * Two dispatches, because two cases:
+                 *
+                 *   - `focusRow` by FILE focuses it immediately when a live session already holds that conversation.
+                 *     That is the reported bug: resuming an already-live session re-broadcasts it, `arrived` is false,
+                 *     so the boolean intent was never spent and the tab switched to Sessions showing whatever had been
+                 *     focused before. The reader could not tell they were somewhere else.
+                 *   - `expectNewSession` with the SAME file covers the spawn still being in flight: the intent is now
+                 *     matched by file rather than by "did something new appear", so the arriving session is the one
+                 *     that gets focus.
+                 */
+                dispatch({ kind: "focusRow", key: session.path });
+                dispatch({ kind: "expectNewSession", file: session.path });
                 send({ kind: "resume", path: session.path });
                 setTab("sessions");
               }}

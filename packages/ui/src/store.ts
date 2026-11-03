@@ -84,6 +84,23 @@ export interface UiState {
    */
   focusNextNewSession: boolean;
   /**
+   * The session FILE the reader asked for, when they asked for one that may already be running.
+   *
+   * ## The defect this fixes
+   *
+   * Clicking a History row for a session that is ALREADY live did nothing to the selection. `focusNextNewSession` is
+   * consumed only by a session that is NEW to the list (`arrived`), and resuming an already-live session re-broadcasts
+   * that same session — so `arrived` is false, the intent is never spent, and the tab switches to Sessions showing
+   * **whatever was focused before**. Reported as: *"when you click a session in the history, and it is already active in
+   * the roster, it opens this session, but the selection is not updated. Users dont realise that they are in the new
+   * session. This is a huge identity issue."*
+   *
+   * A boolean cannot express "the one in this file", so the file is recorded. Matching on `sessionFile` is the same
+   * identity the roster uses (ADR-0004) — a resumed session has a NEW handle for the SAME conversation, so the handle
+   * is exactly the wrong thing to wait for.
+   */
+  focusNextSessionFile: string | undefined;
+  /**
    * The sessions the reader is working with (issue #89).
    *
    * **This list is the rail.** Nothing retires entries from it and nothing derives it from `live`: activity is
@@ -157,6 +174,7 @@ export function initialState(): UiState {
     restoredQueue: {},
     focusedId: undefined,
     focusNextNewSession: false,
+    focusNextSessionFile: undefined,
     roster: [],
     pendingPrompt: undefined,
     connection: "connecting",
@@ -229,7 +247,13 @@ export type LocalAction =
    * Dispatched BEFORE the `start`/`resume` control is sent, because the orchestrator broadcasts the new
    * session synchronously in reply — so the intent has to already be in the store when that event lands.
    */
-  | { kind: "expectNewSession" };
+  /**
+   * "The reader asked for this one."
+   *
+   * `file` names WHICH, when it may already be running — the History case, where the click targets a conversation that
+   * a live session may already be holding. Without it the intent could only be spent by a session new to the list.
+   */
+  | { kind: "expectNewSession"; file?: string | undefined };
 
 export function reduce(
   state: UiState,
@@ -242,8 +266,19 @@ export function reduce(
     return { ...state, restoredQueue };
   }
   if (event.kind === "expectNewSession") {
-    // A flag, not an id: the id does not exist yet. Consumed by the next new `session` event.
-    return state.focusNextNewSession ? state : { ...state, focusNextNewSession: true };
+    /*
+     * A flag, not an id: the id does not exist yet. Consumed by the next new `session` event.
+     *
+     * `file` is how a session that is ALREADY running is reached. Without it the intent is spent only by a session new
+     * to the list, so a resume of a live one focuses nothing and the reader is left looking at a different session.
+     */
+    const file = event.file;
+    if (state.focusNextNewSession && state.focusNextSessionFile === file) return state;
+    return {
+      ...state,
+      focusNextNewSession: true,
+      focusNextSessionFile: file,
+    };
   }
   if (event.kind === "dismissError") {
     // The strip shows `errors[0]`, so dismissing removes exactly that one and reveals the next — which is the
@@ -275,19 +310,29 @@ export function reduce(
   }
   if (event.kind === "focusRow") {
     /*
-     * A row key is EITHER a live session's handle OR a roster entry's file path (issue #89).
+     * A key is a live session's handle, a roster entry's file path, OR (since the identity fix) a session file — the
+     * History case, where the reader names a conversation rather than a row.
      *
-     * Ignored when it is neither: focus and presence are different facts, and focusing something unknown would
-     * blank the main column — a worse outcome than ignoring the click.
+     * Three resolutions, and the third is the one that was missing:
      *
-     * Returning the SAME object when nothing changes keeps React from re-rendering the whole app for a click on
-     * the already-focused row.
+     *   - a handle → that session;
+     *   - a file a LIVE session holds → that session's handle. This matters more than it looks: the same conversation
+     *     can be running under a handle the reader never saw (`s12`), and focusing the path instead would render the
+     *     stopped-session view beside a running process;
+     *   - a file no live session holds → the roster row, which `focusedStoppedRow` then renders.
+     *
+     * Ignored when it is none of those: focus and presence are different facts, and focusing something unknown would
+     * blank the main column — a worse outcome than ignoring the click. Returning the SAME object when nothing changes
+     * keeps React from re-rendering the whole app for a click on the already-focused row.
      */
-    const isLive = state.live.some((session) => session.id === event.key);
+    const byHandle = state.live.find((session) => session.id === event.key);
+    const byFile = byHandle === undefined ? state.live.find((session) => session.sessionFile === event.key) : undefined;
+    const live = byHandle ?? byFile;
     const isRoster = state.roster.some((entry) => entry.path === event.key);
-    if (!isLive && !isRoster) return state;
-    if (state.focusedId === event.key) return state;
-    return { ...state, focusedId: event.key };
+    if (live === undefined && !isRoster) return state;
+    const key = live?.id ?? event.key;
+    if (state.focusedId === key) return state;
+    return { ...state, focusedId: key };
   }
   return applyEvent(state, event);
 }
@@ -334,9 +379,28 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
        * NEXT unrelated session.
        */
       const arrived = index === -1;
-      const focusedId = state.focusNextNewSession && arrived
-        ? event.session.id
-        : (state.focusedId ?? event.session.id);
+      /*
+       * The intent is spent by EITHER a new session OR the session the reader named by file.
+       *
+       * The `file` half is the identity fix: resuming a session that is already live re-broadcasts the SAME session, so
+       * `arrived` is false and a boolean-only intent was never spent — the tab switched to Sessions showing whatever
+       * had been focused before, and the reader had no way to tell they were somewhere else.
+       *
+       * A new session still wins on arrival (`arrived`), because that is the `start` case where no file was named and
+       * none exists yet.
+       */
+      const named = state.focusNextSessionFile !== undefined && event.session.sessionFile === state.focusNextSessionFile;
+      /*
+       * When a FILE was named, only that file can spend the intent.
+       *
+       * `focusNextNewSession && arrived` alone is the #144 rule for `start`, where no file can be named because none
+       * exists yet — but applied to a named resume it means the FIRST new session to arrive wins, whichever it is. That
+       * is not hypothetical: a resume is a spawn, and any other session starting in the same second would take the
+       * reader's view. Caught by a test that lets an unrelated session arrive first.
+       */
+      const claimed =
+        named || (state.focusNextNewSession && arrived && state.focusNextSessionFile === undefined);
+      const focusedId = claimed ? event.session.id : (state.focusedId ?? event.session.id);
       /*
        * Keep the HISTORY entry in step when this is the same session (issue #164).
        *
@@ -359,7 +423,9 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
         live,
         history,
         focusedId,
-        focusNextNewSession: arrived ? false : state.focusNextNewSession,
+        // Cleared when the intent is SPENT, not merely when something new appeared: a `session` event for an unrelated
+        // session must not consume "focus the one I asked for".
+        ...(claimed ? { focusNextNewSession: false, focusNextSessionFile: undefined } : {}),
       };
     }
 
@@ -463,6 +529,8 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
       return {
         ...state,
         focusNextNewSession: false,
+        // The FILE goes with it: an error disarms the whole intent, or a later unrelated session could be matched.
+        focusNextSessionFile: undefined,
         errors: [event.message, ...state.errors].slice(0, MAX_ERRORS),
       };
   }

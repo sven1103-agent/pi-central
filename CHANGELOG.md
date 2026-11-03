@@ -33,6 +33,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- Clicking a History session that is already running focuses it, instead of leaving the view on another session
+  ([#150]).
+- A resumed session is focused when it arrives, and an unrelated new session can no longer claim that focus ([#150]).
+
 - Selecting a stopped session shows it, with a Resume control, instead of a dead end ([#89]).
 - Rows that were named after their directory — several sessions all reading `data-manager` — now show the prompt or a
   unique short id ([#89]).
