@@ -691,6 +691,56 @@ button { font: inherit; color: inherit; }
  * A History row hosts two controls now, so it is a `<div>` wrapper (issue #150) — the same restructuring the rail
  * needed in #89, because nested buttons are invalid HTML and browsers resolve them by breaking the inner one.
  */
+/*
+ * History's toolbar, list and pagination (requested alongside #150).
+ *
+ * The report was "Nobody can scan 500 sessions", and the tab listed 200 rows in one column with no order and no pages.
+ * Three controls fix that: sort, page, select.
+ */
+.history-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-2);
+}
+.history-sort { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--dim); }
+/* The bulk action appears only with a selection, and takes the trailing edge so it does not push the count around. */
+.history-bulk { display: inline-flex; align-items: center; gap: var(--sp-2); margin-left: auto; }
+.history-bulk-count { font-size: var(--fs-xs); color: var(--text); font-weight: 600; }
+
+/* A `<ul>` because each row is a list item with a checkbox — the semantic the old bare divs did not have. */
+.history-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+
+.history-selectbar {
+  display: flex;
+  align-items: center;
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  padding: 0 var(--sp-1);
+}
+.history-selectbar label { display: inline-flex; align-items: center; gap: var(--sp-2); cursor: pointer; }
+
+/* The row's own checkbox, outside the row's button: selecting and opening are different intents. */
+.history-check {
+  flex: none;
+  align-self: center;
+  margin: 0 var(--sp-2);
+  /* A generous target — this is a mouse product, but a 13px default checkbox is fiddly at this density. */
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
+.history-row-wrap.is-selected { background: var(--accent-tint); border-radius: var(--r-3); }
+
+.history-pages {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+
 .history-row-wrap { display: flex; align-items: stretch; gap: 1px; }
 .history-row-wrap .history-row-main { flex: 1; min-width: 0; }
 .history-delete {

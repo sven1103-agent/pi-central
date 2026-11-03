@@ -13,6 +13,7 @@
  *   - Forget and Delete are distinguishable, because one is reversible and one is not.
  */
 import { test, before, after } from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { createServer } from "vite";
@@ -127,6 +128,27 @@ test("History offers Delete per row when the orchestrator understands it", () =>
   const doc = new JSDOM(`<body>${html}</body>`).window.document;
   const button = doc.querySelector(".history-delete");
   assert.match(button.getAttribute("aria-label"), /Delete the session/);
+});
+
+test("History owns NO dialog of its own — the shell renders exactly one (issue #150)", () => {
+  // Reported from use: *"in the deletion prompt dialog, i need to click and confirm delete twice, until it actually
+  // gets deleted."* The cause was two dialogs: History opened its own, whose confirm only called back, and the shell
+  // then opened a second. So the second click was the one that mattered, and the first looked like it had failed.
+  //
+  // A rendered-HTML test cannot see this — History's dialog only appeared on click. So the assertion is structural: the
+  // component must not contain a confirmation at all, which is what makes a second dialog impossible to reintroduce.
+  const source = readFileSync(new URL("../src/components/History.tsx", import.meta.url), "utf8");
+  assert.ok(!/ConfirmDelete/.test(source), "History must not render its own delete confirmation");
+  assert.ok(!/deleting/.test(source), "nor hold state for one");
+  // And it must still hand the request upward, so the shell's dialog is reachable.
+  assert.match(source, /onDelete\?\.|onDelete\(session\)|onDelete\(/, "the row still asks the shell to confirm");
+});
+
+test("the shell renders the ONE dialog", () => {
+  // The counterpart: App owns it, so the two surfaces share wording, focus handling and the single request.
+  const source = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(source, /<ConfirmDelete/, "App renders the confirmation");
+  assert.match(source, /kind: "deleteSession"/, "and the confirm is what sends the request");
 });
 
 test("History offers NO Delete when the orchestrator cannot delete", () => {

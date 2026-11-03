@@ -73,12 +73,18 @@ export const RAIL_DRAWER_MAX_WIDTH = 1024;
  * Normalizing here is what lets ONE dialog serve both without either surface knowing about the other's shape.
  */
 export interface PendingDelete {
-  /** The absolute path of the transcript to remove. The only thing the control needs. */
-  path: string;
-  /** The label the dialog shows — the same one the row showed, so they cannot look like different sessions. */
+  /**
+   * The transcripts to remove. One entry for a row's Delete; several for a bulk selection.
+   *
+   * A LIST from the start, so the single and the bulk paths share one confirmation and one request shape. Two
+   * implementations would drift in wording on the one irreversible action — and the bulk case is the one where the
+   * wording matters most, because it deletes things the reader may only have glanced at.
+   */
+  paths: readonly string[];
+  /** What the dialog names. One label, or a count for a selection. */
   label: string;
-  /** The directory, because two tasks in one project is the normal case. */
-  cwd: string;
+  /** The directory for a single session; absent for a selection, which can span several. */
+  cwd?: string | undefined;
 }
 import { TranscriptView } from "./components/Transcript.tsx";
 import {
@@ -1181,7 +1187,7 @@ export function App() {
             supportsDelete(state.install?.protocol)
               ? (row) =>
                   setPendingDelete({
-                    path: row.entry.path,
+                    paths: [row.entry.path],
                     // The same label the row showed — including its first prompt, which the row may be labelled by —
                     // so the dialog cannot name a different session than the one clicked.
                     label: rowLabel(row, rowPrompt(row)),
@@ -1216,9 +1222,23 @@ export function App() {
                 supportsDelete(state.install?.protocol)
                   ? (session: HistoricalSession) =>
                       setPendingDelete({
-                        path: session.path,
+                        paths: [session.path],
                         label: nameLabel(session.name, session.scratch, session.id),
                         cwd: session.cwd,
+                      })
+                  : undefined
+              }
+              /*
+                Bulk delete, gated the same way. The confirmation names a COUNT rather than a label, because a selection
+                can span directories and sessions — and "delete 7 sessions?" is the honest question, where naming one of
+                them would imply the others are incidental.
+              */
+              onDeleteMany={
+                supportsDelete(state.install?.protocol)
+                  ? (sessions: HistoricalSession[]) =>
+                      setPendingDelete({
+                        paths: sessions.map((session) => session.path),
+                        label: `${sessions.length} selected sessions`,
                       })
                   : undefined
               }
@@ -1458,10 +1478,13 @@ export function App() {
       {pendingDelete !== undefined && (
         <ConfirmDelete
           label={pendingDelete.label}
-          cwd={pendingDelete.cwd}
+          {...(pendingDelete.cwd === undefined ? {} : { cwd: pendingDelete.cwd })}
+          count={pendingDelete.paths.length}
           onCancel={() => setPendingDelete(undefined)}
           onConfirm={() => {
-            send({ kind: "deleteSession", path: pendingDelete.path });
+            // One control per path. The orchestrator deletes each and re-broadcasts once at the end, so the
+            // confirmation is a single act even though the wire carries N messages.
+            for (const path of pendingDelete.paths) send({ kind: "deleteSession", path });
             setPendingDelete(undefined);
           }}
         />

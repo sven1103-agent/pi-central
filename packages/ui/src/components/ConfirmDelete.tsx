@@ -29,15 +29,18 @@ import { useEffect, useRef } from "react";
 export function ConfirmDelete({
   /** The session's display label, from `nameLabel`/`displayName` — never a handle if a prompt explains it. */
   label,
-  /** The absolute directory the session worked in. */
+  /** The absolute directory the session worked in. Absent for a selection, which can span several. */
   cwd,
+  /** How many transcripts this confirmation will remove. Present for a bulk selection. */
+  count,
   /** Set when a sidecar directory will also be removed, so the reader knows the count of what goes. */
   hasSidecar,
   onCancel,
   onConfirm,
 }: {
   label: string;
-  cwd: string;
+  cwd?: string | undefined;
+  count?: number | undefined;
   hasSidecar?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -61,16 +64,22 @@ export function ConfirmDelete({
         aria-labelledby="delete-title"
         onClick={(event) => event.stopPropagation()}
       >
-        <h3 id="delete-title">Delete this session?</h3>
+        <h3 id="delete-title">
+          {/* Plural when it is a selection, because "delete this session?" over seven rows is the wrong question. */}
+          {count !== undefined && count > 1 ? `Delete ${count} sessions?` : "Delete this session?"}
+        </h3>
         <p style={{ marginBottom: 8 }}>
           <strong>{label}</strong>
           {/* The directory, because two tasks in one project is the normal case — the label alone is ambiguous. */}
-          <span className="mono" style={{ display: "block", fontSize: "var(--fs-xs)", color: "var(--dim)" }}>
-            {cwd}
-          </span>
+          {cwd !== undefined && (
+            <span className="mono" style={{ display: "block", fontSize: "var(--fs-xs)", color: "var(--dim)" }}>
+              {cwd}
+            </span>
+          )}
         </p>
         <p style={{ marginBottom: hasSidecar === true ? 8 : 16 }}>
-          Its transcript file will be <strong>removed from disk</strong>. This cannot be undone — Pi Central keeps no
+          {count !== undefined && count > 1 ? "Their transcript files will be" : "Its transcript file will be"}{" "}
+          <strong>removed from disk</strong>. This cannot be undone — Pi Central keeps no
           copy, and the session will not appear in History again.
         </p>
         {hasSidecar === true && (
@@ -80,7 +89,7 @@ export function ConfirmDelete({
         )}
         <div className="dialog-actions">
           <button type="button" className="btn btn-danger" onClick={onConfirm}>
-            Delete transcript
+            {count !== undefined && count > 1 ? `Delete ${count} transcripts` : "Delete transcript"}
           </button>
           <button type="button" className="btn" ref={cancelRef} onClick={onCancel}>
             Keep it

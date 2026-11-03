@@ -13,7 +13,17 @@
 import { useState } from "react";
 import type { HistoricalSession } from "@pi-central/protocol";
 import { formatAge, nameLabel } from "../format.ts";
-import { ConfirmDelete } from "./ConfirmDelete.tsx";
+import {
+  allOnPageSelected,
+  HISTORY_PAGE_SIZE,
+  HISTORY_SORT_LABELS,
+  pageOf,
+  pruneSelection,
+  sortHistory,
+  togglePageSelected,
+  toggleSelected,
+  type HistorySort,
+} from "../history-view.ts";
 import { searchHistory } from "../store.ts";
 import { CopyButton } from "./CopyButton.tsx";
 
@@ -22,6 +32,7 @@ export function HistoryView({
   historyTotal,
   onResume,
   onDelete,
+  onDeleteMany,
   home,
 }: {
   history: HistoricalSession[];
@@ -35,18 +46,46 @@ export function HistoryView({
    * clicked — is the only path to it. Nothing deletes without passing through a dialog the reader has read.
    */
   onDelete?: ((session: HistoricalSession) => void) | undefined;
+  /**
+   * Delete MANY at once (requested alongside #150).
+   *
+   * Separate from `onDelete` so the confirmation can say "3 sessions" and the request can carry a list — one dialog for
+   * one, and one dialog for a selection, rather than N dialogs in sequence.
+   */
+  onDeleteMany?: ((sessions: HistoricalSession[]) => void) | undefined;
   home: string | undefined;
 }) {
   const [query, setQuery] = useState("");
   const [refused, setRefused] = useState<HistoricalSession | undefined>(undefined);
+  /** How the list is ordered. `newest` because that is what the page already arrives as. */
+  const [sort, setSort] = useState<HistorySort>("newest");
+  const [page, setPage] = useState(1);
   /**
-   * The session awaiting a delete confirmation (issue #150).
+   * Selected paths, not sessions (see `history-view.ts`).
    *
-   * Held here rather than in the row, because the dialog outlives the row: after a delete the list re-renders without
-   * that session, and a dialog owned by the row would unmount mid-interaction.
+   * `useState` holding a Set: every mutation goes through the helpers, which return a new Set, so a checkbox cannot
+   * appear unresponsive because the object identity never changed.
    */
-  const [deleting, setDeleting] = useState<HistoricalSession | undefined>(undefined);
-  const results = searchHistory(history, query);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+
+  /*
+   * Search, then sort, then page.
+   *
+   * That order matters: paging BEFORE sorting would page the unsorted list and then sort each page, so page 1 would
+   * hold the newest 25 of an arbitrary 25. And selecting from `results` before paging would let "select all" reach rows
+   * the reader has never seen — see `togglePageSelected`.
+   */
+  /*
+   * `searchHistory` returns at most its own cap; the loaded page is at most that anyway, so no extra limit is applied
+   * here — the reader sees every row they have, ordered and paged, rather than a second invisible cap.
+   */
+  const results = sortHistory(searchHistory(history, query, history.length), sort);
+  const view = pageOf(results, page);
+
+  // A selection cannot outlive the rows it names. Computed rather than stored, so it is correct on the same render the
+  // list changes — the alternative is an effect that runs one frame late, showing a stale count.
+  const liveSelection = pruneSelection(selected, results);
+  const selectedSessions = results.filter((session) => liveSelection.has(session.path));
 
   return (
     <div className="history">
@@ -82,46 +121,135 @@ export function HistoryView({
         </div>
       ) : (
         <>
-          <p className="hint" style={{ marginBottom: 12 }} aria-live="polite">
-            {results.length} of {history.length} session{history.length === 1 ? "" : "s"}
-            {/* Say when the loaded set is a page. Presenting 500 of 1115 as a total would be a
-                half-truth, and the honest version is one short clause. */}
-            {historyTotal > history.length && (
-              <> · searching the {history.length} most recent of {historyTotal}</>
+          {/*
+            The toolbar: order, count, and the bulk action. One row, because these are the controls a reader uses
+            together — "show me the biggest ones, and delete the ones I have selected".
+          */}
+          <div className="history-toolbar">
+            <label className="history-sort">
+              <span>Sort</span>
+              <select
+                className="btn"
+                value={sort}
+                onChange={(event) => {
+                  setSort(event.target.value as HistorySort);
+                  // Back to page 1: staying on page 7 of a re-ordered list shows rows from the middle of a different
+                  // order, which reads as the sort having done nothing.
+                  setPage(1);
+                }}
+              >
+                {(Object.keys(HISTORY_SORT_LABELS) as HistorySort[]).map((key) => (
+                  <option key={key} value={key}>
+                    {HISTORY_SORT_LABELS[key]}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <span className="hint" aria-live="polite">
+              {results.length} of {history.length} session{history.length === 1 ? "" : "s"}
+              {/* Say when the loaded set is a page. Presenting 500 of 1115 as a total would be a
+                  half-truth, and the honest version is one short clause. */}
+              {historyTotal > history.length && (
+                <> · searching the {history.length} most recent of {historyTotal}</>
+              )}
+            </span>
+
+            {selectedSessions.length > 0 && (
+              <span className="history-bulk">
+                <span className="history-bulk-count">
+                  {selectedSessions.length} selected
+                </span>
+                {onDeleteMany !== undefined && (
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    onClick={() => onDeleteMany(selectedSessions)}
+                  >
+                    Delete selected
+                  </button>
+                )}
+                <button type="button" className="btn btn-quiet" onClick={() => setSelected(new Set())}>
+                  Clear
+                </button>
+              </span>
             )}
-          </p>
-          {results.map((session) => (
-            <HistoryRow
-              key={session.path}
-              session={session}
-              home={home}
-              onSelect={() => {
-                if (!session.cwdExists) {
-                  // Refused before spawning: Pi exits 1 on a missing directory in RPC mode.
-                  setRefused(session);
-                  return;
-                }
-                onResume(session);
-              }}
-              onDelete={onDelete === undefined ? undefined : () => setDeleting(session)}
-            />
-          ))}
+          </div>
+
+          <ul className="history-list">
+            <li className="history-selectbar">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={allOnPageSelected(liveSelection, view.rows)}
+                  /*
+                   * `aria-label` because the visible text is a column heading rather than a phrase: a bare checkbox
+                   * announces as "checkbox". The label says the SCOPE, since "select all" over a paged list means this
+                   * page and saying so prevents a nasty surprise.
+                   */
+                  aria-label={`Select all ${view.rows.length} sessions on this page`}
+                  onChange={() => setSelected(togglePageSelected(liveSelection, view.rows))}
+                />
+                <span>Select this page</span>
+              </label>
+            </li>
+            {view.rows.map((session) => (
+              <li key={session.path}>
+                <HistoryRow
+                  session={session}
+                  home={home}
+                  selected={liveSelection.has(session.path)}
+                  onToggleSelected={
+                    onDeleteMany === undefined
+                      ? undefined
+                      : () => setSelected(toggleSelected(liveSelection, session.path))
+                  }
+                  onSelect={() => {
+                    if (!session.cwdExists) {
+                      // Refused before spawning: Pi exits 1 on a missing directory in RPC mode.
+                      setRefused(session);
+                      return;
+                    }
+                    onResume(session);
+                  }}
+                  onDelete={onDelete === undefined ? undefined : () => onDelete(session)}
+                />
+              </li>
+            ))}
+          </ul>
+
+          {/*
+            Pagination. Present whenever there is more than one page, and it states the RANGE rather than only the page
+            number — "26–50 of 200" answers "how far in am I", which a bare "page 2" does not.
+          */}
+          {view.pages > 1 && (
+            <nav className="history-pages" aria-label="History pages">
+              <button
+                type="button"
+                className="btn"
+                disabled={view.page <= 1}
+                onClick={() => setPage(view.page - 1)}
+              >
+                ‹ Previous
+              </button>
+              <span className="hint">
+                {(view.page - 1) * HISTORY_PAGE_SIZE + 1}–
+                {Math.min(view.page * HISTORY_PAGE_SIZE, view.total)} of {view.total}
+              </span>
+              <button
+                type="button"
+                className="btn"
+                disabled={view.page >= view.pages}
+                onClick={() => setPage(view.page + 1)}
+              >
+                Next ›
+              </button>
+            </nav>
+          )}
         </>
       )}
 
       {refused && <ResumeRefusal session={refused} onDismiss={() => setRefused(undefined)} />}
-
-      {deleting !== undefined && onDelete !== undefined && (
-        <ConfirmDelete
-          label={nameLabel(deleting.name, deleting.scratch, deleting.id)}
-          cwd={deleting.cwd}
-          onCancel={() => setDeleting(undefined)}
-          onConfirm={() => {
-            onDelete(deleting);
-            setDeleting(undefined);
-          }}
-        />
-      )}
     </div>
   );
 }
@@ -131,12 +259,21 @@ function HistoryRow({
   home,
   onSelect,
   onDelete,
+  selected,
+  onToggleSelected,
 }: {
   session: HistoricalSession;
   home: string | undefined;
   onSelect: () => void;
   /** Present only when deletion is available; absent means the affordance is not rendered at all. */
   onDelete?: (() => void) | undefined;
+  /** Whether this row is part of the bulk selection. */
+  selected: boolean;
+  /**
+   * Toggle this row's selection. Absent when bulk deletion is not available, in which case no checkbox is rendered —
+   * a checkbox that cannot lead to an action is a control that does nothing.
+   */
+  onToggleSelected?: (() => void) | undefined;
 }) {
   return (
     /*
@@ -146,7 +283,20 @@ function HistoryRow({
       button row would silently not work. `.history-row-main` carries the row's layout so the visual rhythm is
       unchanged.
     */
-    <div className={`history-row-wrap${onDelete === undefined ? "" : " has-delete"}`}>
+    <div className={`history-row-wrap${onDelete === undefined ? "" : " has-delete"}${selected ? " is-selected" : ""}`}>
+      {onToggleSelected !== undefined && (
+        /*
+         * A real checkbox, not a click on the row: selecting and opening are different intents, and a row that
+         * selected when clicked would make "resume this session" impossible to do without also selecting it.
+         */
+        <input
+          type="checkbox"
+          className="history-check"
+          checked={selected}
+          aria-label={`Select ${nameLabel(session.name, session.scratch, session.id, session.firstMessage)}`}
+          onChange={onToggleSelected}
+        />
+      )}
       <button type="button" className="history-row history-row-main" onClick={onSelect}>
         <span className="h1">
         {/*
