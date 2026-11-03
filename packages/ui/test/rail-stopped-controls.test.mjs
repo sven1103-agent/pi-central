@@ -163,12 +163,25 @@ test("Resume says what it does NOT do, since it spends a spawn", () => {
 
 // --- The highlighting ---------------------------------------------------------------------------
 
-test("an idle row's stripe is the quiet line colour, not a bright text grey", () => {
+test("an idle row's stripe is a neutral grey, not a bright text colour", () => {
   // Five idle rows each showed a `--dim` bar — an AA-bright grey that reads as "disabled".
   const idle = rule(".state-idle");
   assert.ok(idle, ".state-idle must have a rule");
-  assert.match(idle, /border-left-color:\s*var\(--line\)/, `got ${JSON.stringify(idle)}`);
+  assert.match(idle, /border-left-color:\s*var\(--line-strong\)/, `got ${JSON.stringify(idle)}`);
   assert.doesNotMatch(idle, /var\(--dim\)/, "a text colour is not a quiet stripe");
+});
+
+test("rows are SPACED, so they read as separate blocks", () => {
+  // The stripe was doing structural work it was never meant to do. `.rail-list` has no `gap` and the row has no
+  // margin, so rows were flush against each other and the only separation was the state colour — which is why
+  // stepping the idle stripe back merged five rows into one block ("now i can hardly differentiate between the
+  // cards"). DESIGN.md already said "rows 8px apart"; it was never implemented.
+  const spacer = rule(".rail-row + .rail-row");
+  assert.ok(spacer, "adjacent rows are separated by their own rule");
+  assert.match(spacer, /margin-top:\s*var\(--sp-2\)/, `8px is the documented rhythm, got ${JSON.stringify(spacer)}`);
+  // And the stripe must not be the row's own separator colour, which would be invisible again.
+  const idle = rule(".state-idle");
+  assert.doesNotMatch(idle, /border-left-color:\s*var\(--line\)/, "a stripe the same as the gutter is not an edge");
 });
 
 test("attention states keep their HUE, so the stripe still means something", () => {

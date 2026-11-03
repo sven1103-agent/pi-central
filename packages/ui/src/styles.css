@@ -526,7 +526,18 @@ button { font: inherit; color: inherit; }
 }
 .group-header .count { font-family: var(--mono); }
 
-/* Row: 3 lines, state on the left border, no card. */
+/*
+ * Row: 3 lines, state on the left border, no card.
+ *
+ * Rows were flush against each other — `.rail-list` has no `gap` and the row no margin — so the ONLY thing separating
+ * them was the state stripe. That went unnoticed while every idle row carried a bright `--dim` bar; the moment those
+ * were stepped back to the row's own line colour, five idle rows merged into one block. Reported as: *"now i can
+ * hardly differentiate between the cards."*
+ *
+ * `DESIGN.md` already specified the missing piece — *"rows 8px apart"* — and it was never implemented. The app's
+ * idiom is gutters rather than cards (`--line` separators, no borders), so the separation is space, and the stripe's
+ * job goes back to being STATE rather than structure.
+ */
 .rail-row {
   display: block;
   width: 100%;
@@ -538,6 +549,9 @@ button { font: inherit; color: inherit; }
   cursor: pointer;
   color: var(--dim);
 }
+/* 8px between rows is the documented rhythm, and it is what makes them read as separate blocks. */
+.rail-row + .rail-row { margin-top: var(--sp-2); }
+
 /* Hover and SELECTION are different states and must look different.
  *
  * They were the same `--panel-2` fill, so the selected session was only distinguishable from whatever the mouse
@@ -847,8 +861,8 @@ button { font: inherit; color: inherit; }
  * *"in idle, they all show a gray bar on the left."* The stripe's job is to make the states that need ATTENTION stand
  * out, so the quiet ones step back to the row's own line colour and the loud ones keep their hue.
  */
-.state-idle { border-left-color: var(--line); }
-.state-stopped { border-left-color: var(--line); }
+.state-idle { border-left-color: var(--line-strong); }
+.state-stopped { border-left-color: var(--line-strong); }
 .state-starting { border-left-color: var(--accent); }
 .state-streaming { border-left-color: var(--ok); }
 .state-awaiting-approval { border-left-color: var(--warn); }
