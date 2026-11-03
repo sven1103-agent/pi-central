@@ -23,7 +23,7 @@ import type {
   PiRecord,
 } from "@pi-central/protocol";
 import { applyRecord, emptyTranscript, seedTranscript, type Transcript } from "./transcript.ts";
-import { addToRoster, removeFromRoster, type RosterEntry } from "./roster.ts";
+import { addToRoster, removeFromRoster, type RosterEntry, type RosterRow } from "./roster.ts";
 // A type-only import from a component, which is the odd part of this file: `QueueBehavior` is the composer's
 // vocabulary for how a prompt joins a run, and `pendingPrompt` has to speak it so a parked prompt is sent with
 // the same behaviour the reader chose. Imported as a TYPE so no component code is pulled into the reducer.
@@ -520,6 +520,44 @@ export function historyIsPartial(state: UiState): boolean {
 
 export function focusedSession(state: UiState): LiveSession | undefined {
   return state.live.find((s) => s.id === state.focusedId);
+}
+
+/**
+ * The focused row when it is a STOPPED session, i.e. a roster entry rather than a live handle.
+ *
+ * ## Why this has to exist
+ *
+ * `focusedId` holds EITHER a live session's handle or a roster entry's file path (issue #89). `focusedSession` only
+ * searches `state.live`, so clicking a stopped row set a `focusedId` that resolved to nothing — and the main column
+ * rendered "No session selected". There was then no control anywhere to start that session again: the
+ * "resume-on-send" the issue describes was never wired (`queuePrompt` is dispatched by nothing).
+ *
+ * A dead end, reported as: *"i could not recover a session … That leaves user in a deadlock to select the right
+ * session."* Selecting was the second problem; this is the first — the click led nowhere at all.
+ *
+ * Returns `undefined` when the focus is a live session (use `focusedSession`) or names nothing known.
+ */
+export function focusedStoppedRow(state: UiState): RosterRow | undefined {
+  const id = state.focusedId;
+  if (id === undefined) return undefined;
+  /*
+   * A live handle wins, so one session never gets two views.
+   *
+   * Defence in depth rather than a live fix: a live handle (`s1`) can never equal a roster path (an absolute `.jsonl`
+   * path), so the `find` below would return nothing anyway. It is kept because the two branches render DIFFERENT
+   * components for the same row — `SessionView` or `StoppedSession` — and a future change that made a handle and a path
+   * collide would silently render both.
+   *
+   * Stated plainly because I could not falsify it on its own: removing it changes no test, which is what "cannot fail"
+   * looks like from the outside.
+   */
+  if (state.live.some((session) => session.id === id)) return undefined;
+  const entry = state.roster.find((candidate) => candidate.path === id);
+  if (entry === undefined) return undefined;
+  // A session that came back is live again; the live branch above already returned in that case, but a snapshot can
+  // race a focus, so the join is done here rather than trusted.
+  const session = state.live.find((candidate) => candidate.sessionFile === entry.path);
+  return { entry, session };
 }
 
 export function transcriptFor(state: UiState, sessionId: string | undefined): Transcript {
