@@ -42,6 +42,7 @@
  * Nothing about a session's contents is stored. This is a list of identifiers.
  */
 import type { LiveSession } from "@pi-central/protocol";
+import { nameLabel } from "./format.ts";
 
 /** One entry in the roster. `path` is the only required field: it is the durable identity. */
 export interface RosterEntry {
@@ -322,4 +323,58 @@ export function sessionForPendingPrompt(
 ): LiveSession | undefined {
   if (pending === undefined) return undefined;
   return live.find((session) => session.sessionFile === pending.path);
+}
+
+/**
+ * A label for a row that is NOT running, which is where two sessions can look identical.
+ *
+ * ## The defect this fixes
+ *
+ * `rosterEntryFor` persisted `entry.name = session.name`, and until #195 an unnamed project session was named after
+ * its **directory**. So a browser's roster holds many entries whose `name` is `data-manager`, all with the same `cwd`
+ * line — several distinct sessions rendered as indistinguishable rows. Reported as: *"We have several sessions named
+ * data-manager, but they are distinct sessions. That leaves user in a deadlock to select the right session."*
+ *
+ * ## The rule
+ *
+ * A stored name is used only when it says something the row does not already say. A name equal to the directory's
+ * basename is exactly what the old default produced, and it is the cwd line repeated — so it is treated as a
+ * placeholder. What remains is either the reader's own first prompt (the same rule `nameLabel` uses) or a short form
+ * of the session's own filename, which is unique by construction.
+ *
+ * The filename fallback matters on its own: History may not have loaded the session yet, and two rows must still be
+ * distinguishable *before* their prompts are known.
+ */
+export function rosterLabel(entry: RosterEntry, firstPrompt?: string | undefined): string {
+  const trimmed = entry.name?.trim();
+  // `data-manager` for a session working in `~/git/data-manager` is the directory naming itself, not a title.
+  const directoryDerived =
+    trimmed !== undefined &&
+    trimmed.length > 0 &&
+    entry.cwd !== undefined &&
+    trimmed.toLowerCase() === baseNameOf(entry.cwd).toLowerCase();
+
+  const usable = directoryDerived ? undefined : trimmed;
+  return nameLabel(usable, entry.scratch === true, shortSessionId(entry.path), firstPrompt);
+}
+
+/** The last path segment, for the directory-naming comparison. */
+function baseNameOf(cwd: string): string {
+  return cwd.split("/").filter((part) => part.length > 0).pop() ?? cwd;
+}
+
+/**
+ * A short, unique, readable stand-in for a session file name.
+ *
+ * `2026-06-29T11-55-55-038Z_019f133c-6d1e-736f-83e4-b63ddf8ba396.jsonl` becomes `2026-06-29 · 019f133c`: the date says
+ * *when*, and the first segment of Pi's uuid is what makes two sessions from the same day tell apart. Truncating the
+ * uuid rather than the date is deliberate — a list sorted by recency is already ordered by time, so the date is the
+ * redundant half.
+ */
+export function shortSessionId(path: string): string {
+  const file = path.split("/").filter((part) => part.length > 0).pop() ?? path;
+  const stem = file.replace(/\.jsonl$/, "");
+  const match = /^(\d{4}-\d{2}-\d{2})T[^_]*_(.+)$/.exec(stem);
+  if (match === null) return stem;
+  return `${match[1]} · ${match[2]!.split("-")[0]!.slice(0, 8)}`;
 }

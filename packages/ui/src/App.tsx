@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { PROTOCOL_VERSION, supportsDelete, supportsRetry, type Control, type HistoricalSession, type LiveSession, type ModelOption } from "@pi-central/protocol";
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
 import { ConfirmDelete } from "./components/ConfirmDelete.tsx";
+import { StoppedSession } from "./components/StoppedSession.tsx";
 import {
   SKEW_PREFIX,
   assessProtocolSkew,
@@ -39,6 +40,7 @@ import {
   composerMode,
   fleetCounts,
   focusedSession,
+  focusedStoppedRow,
   firstPromptFor,
   hasUnisolatedSession,
   initialState,
@@ -47,6 +49,7 @@ import {
   transcriptFor,
 } from "./store.ts";
 import { SessionRail, rowLabel } from "./components/SessionRail.tsx";
+import { rosterLabel } from "./roster.ts";
 import { FollowToggle } from "./components/FollowToggle.tsx";
 import {
   parseTraceOrder,
@@ -517,6 +520,17 @@ export function App() {
   }, []);
 
   const focused = focusedSession(state);
+  /*
+    A focused row that is NOT live (issue #89 deadlock).
+
+    `focusedId` holds either a live handle or a roster path, and `focusedSession` searches only `live` — so clicking a
+    stopped row used to resolve to nothing and the middle column fell through to "No session selected", with no control
+    anywhere to start it again.
+  */
+  const stoppedRow = focusedStoppedRow(state);
+  const stoppedHistory = stoppedRow === undefined
+    ? undefined
+    : state.history.find((entry) => entry.path === stoppedRow.entry.path);
 
   /**
    * Remember that a group was opened or closed, for the focused session.
@@ -1246,6 +1260,36 @@ export function App() {
           </main>
         ) : (
           <main className="column">
+            {/*
+              The dead end, closed (issue #89 deadlock).
+
+              `SessionView` renders "No session selected" for an undefined session, which is right for a fresh window
+              and wrong for a row the reader just clicked. A focused STOPPED row gets a view of its own, with the one
+              control that recovers it.
+            */}
+            {focused === undefined && stoppedRow !== undefined ? (
+              <StoppedSession
+                row={stoppedRow}
+                history={stoppedHistory}
+                home={home}
+                onResume={() => {
+                  dispatch({ kind: "expectNewSession" });
+                  // By PATH: a stopped session has no handle, and the path is its durable identity (ADR-0004).
+                  send({ kind: "resume", path: stoppedRow.entry.path });
+                }}
+                onForget={() => dispatch({ kind: "forget", path: stoppedRow.entry.path })}
+                {...(supportsDelete(state.install?.protocol)
+                  ? {
+                      onDelete: () =>
+                        setPendingDelete({
+                          paths: [stoppedRow.entry.path],
+                          label: rosterLabel(stoppedRow.entry, stoppedHistory?.firstMessage),
+                          ...(stoppedRow.entry.cwd === undefined ? {} : { cwd: stoppedRow.entry.cwd }),
+                        }),
+                    }
+                  : {})}
+              />
+            ) : (
             <SessionView
               key={focused?.id}
               session={focused}
@@ -1368,6 +1412,7 @@ export function App() {
                 if (focused) setDrafts((previous) => ({ ...previous, [focused.id]: draft }));
               }}
             />
+            )}
           </main>
         )}
 

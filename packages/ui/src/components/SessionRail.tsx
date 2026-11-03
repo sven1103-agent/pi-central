@@ -11,7 +11,7 @@ import { useMemo, useState } from "react";
 import type { LiveSession } from "@pi-central/protocol";
 import { displayName, formatContext, isNearFull, nameLabel, shortenPath, whereLine } from "../format.ts";
 import { stateLabel } from "../store.ts";
-import { groupRows, rowActivity, type RosterRow } from "../roster.ts";
+import { groupRows, rosterLabel, rowActivity, type RosterRow } from "../roster.ts";
 import { ContextBar } from "./ContextMeter.tsx";
 
 /**
@@ -266,7 +266,15 @@ function rowKey(row: RosterRow): string {
  */
 function rowName(row: RosterRow, firstPrompt?: string | undefined): string {
   if (row.session !== undefined) return displayName(row.session, firstPrompt);
-  return nameLabel(row.entry.name, row.entry.scratch === true, filenameOf(row.entry.path), firstPrompt);
+  /*
+   * A row with no process goes through `rosterLabel`, NOT `nameLabel`.
+   *
+   * The difference is the whole of the reported deadlock: `rosterEntryFor` persisted the old directory-derived name,
+   * so several distinct sessions in one project rendered as several rows called `data-manager`, each with the same
+   * cwd line. `rosterLabel` treats a name equal to the directory's basename as the placeholder it is, and falls back
+   * to the first prompt — or, before History has loaded it, to a short form of the session's own file name.
+   */
+  return rosterLabel(row.entry, firstPrompt);
 }
 
 /**
@@ -285,11 +293,6 @@ function firstLine(text: string): string {
   return text.split("\n")[0] ?? text;
 }
 
-/** The file's name without its extension, as a last-resort label. */
-function filenameOf(path: string): string {
-  const segment = path.split("/").filter((part) => part.length > 0).pop() ?? path;
-  return segment.replace(/\.jsonl$/, "");
-}
 
 function RailRow({
   firstPromptFor,
