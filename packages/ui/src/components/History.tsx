@@ -127,19 +127,28 @@ export function HistoryView({
           </select>
         </label>
 
-        <span className="hint history-count" aria-live="polite">
-          {/*
-            The selection count is stated here rather than only on the button, so the reader can see what is selected
-            without inferring it from a label — and `aria-live` announces it once when it changes, which is what makes
-            the bulk action feel like it has a state.
-          */}
+        {/*
+          The pager, TOP-RIGHT of the list — the fix for "users need to scroll a lot to see it".
+
+          It shares its page state with the bottom pager, so there is one answer to "which page am I on".
+        */}
+        <HistoryPager view={view} onPage={setPage} position="top" />
+
+        {/*
+          How many sessions there are, as its own fact.
+
+          It said `500 of 500 · 885 on disk` — two ratios pushed together, which is exactly the kind of arithmetic a
+          reader has to do to extract "there are 885 sessions". The COUNT is the important information, so it is stated
+          as a number with a noun: `885 sessions`. The filtered case says so separately, and only when it applies.
+        */}
+        <span className="history-count" aria-live="polite">
           {selectedSessions.length > 0 && (
             <strong className="history-selected-count">{selectedSessions.length} selected · </strong>
           )}
-          {results.length} of {history.length}
-          {/* Say when the loaded set is a page. Presenting 500 of 1115 as a total would be a
-              half-truth, and the honest version is one short clause. */}
-          {historyTotal > history.length && <> · {historyTotal} on disk</>}
+          <strong>{historyTotal}</strong> session{historyTotal === 1 ? "" : "s"}
+          {results.length !== history.length && (
+            <span className="hint"> · {results.length} match{results.length === 1 ? "" : "es"}</span>
+          )}
         </span>
 
         {/*
@@ -254,35 +263,77 @@ export function HistoryView({
             Pagination. Present whenever there is more than one page, and it states the RANGE rather than only the page
             number — "26–50 of 200" answers "how far in am I", which a bare "page 2" does not.
           */}
-          {view.pages > 1 && (
-            <nav className="history-pages" aria-label="History pages">
-              <button
-                type="button"
-                className="btn"
-                disabled={view.page <= 1}
-                onClick={() => setPage(view.page - 1)}
-              >
-                ‹ Previous
-              </button>
-              <span className="hint">
-                {(view.page - 1) * HISTORY_PAGE_SIZE + 1}–
-                {Math.min(view.page * HISTORY_PAGE_SIZE, view.total)} of {view.total}
-              </span>
-              <button
-                type="button"
-                className="btn"
-                disabled={view.page >= view.pages}
-                onClick={() => setPage(view.page + 1)}
-              >
-                Next ›
-              </button>
-            </nav>
-          )}
+          {/* The end-of-list pager. The same control sits at the TOP as well — see `HistoryPager`. */}
+          <HistoryPager view={view} onPage={setPage} position="bottom" />
         </>
       )}
 
       {refused && <ResumeRefusal session={refused} onDismiss={() => setRefused(undefined)} />}
     </div>
+  );
+}
+
+/**
+ * The pager, rendered at BOTH ends of the list.
+ *
+ * ## Why both, and why the top one is the one that fixes this
+ *
+ * Pagination conventionally sits at the bottom right, because it is read after the rows. That convention assumes
+ * rows you can take in at once. A History row is a ~120px card, so 25 of them is roughly 3,000px of scrolling — the
+ * reader has to travel the whole list to reach the only control that leaves it. That is not a convention problem, it
+ * is a distance problem.
+ *
+ * So there are two, sharing one page state: the top one is reachable without scrolling, and the bottom one is where
+ * a reader who has actually read the page expects it. Neither is a second source of truth — both call the same
+ * `setPage`.
+ *
+ * ## What it states
+ *
+ * The RANGE and the TOTAL (`26–50 of 500`), not the page number. "Page 2 of 20" says how many pages there are;
+ * "26–50 of 500" says where you are in the corpus, which is the question a reader has. The total is also the only
+ * place the size of the collection is visible without reading the toolbar, so it is repeated here rather than
+ * assumed.
+ */
+function HistoryPager({
+  view,
+  onPage,
+  position,
+}: {
+  view: { page: number; pages: number; total: number };
+  onPage: (page: number) => void;
+  /** Distinguishes the two instances for assistive tech, which would otherwise see two identically-named navs. */
+  position: "top" | "bottom";
+}) {
+  // One page needs no pager: there is nowhere to go, and the total is already in the toolbar.
+  if (view.pages <= 1) return null;
+  const first = (view.page - 1) * HISTORY_PAGE_SIZE + 1;
+  const last = Math.min(view.page * HISTORY_PAGE_SIZE, view.total);
+
+  return (
+    <nav className="history-pages" aria-label={`History pages (${position})`}>
+      <button
+        type="button"
+        className="btn"
+        disabled={view.page <= 1}
+        onClick={() => onPage(view.page - 1)}
+        // Named so a screen-reader user knows which pager they are on; "Previous" twice in one page is ambiguous.
+        aria-label={`Previous page (${position} pager)`}
+      >
+        ‹ Previous
+      </button>
+      <span className="hint">
+        {first}–{last} of {view.total}
+      </span>
+      <button
+        type="button"
+        className="btn"
+        disabled={view.page >= view.pages}
+        onClick={() => onPage(view.page + 1)}
+        aria-label={`Next page (${position} pager)`}
+      >
+        Next ›
+      </button>
+    </nav>
   );
 }
 

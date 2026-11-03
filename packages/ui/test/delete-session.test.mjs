@@ -343,3 +343,94 @@ test("an orchestrator without the Stop control is not offered it", () => {
   );
   assert.ok(!/rail-row-stop[\s"]/.test(html), "withheld rather than shown-and-broken");
 });
+
+// --- Pagination placement and the session count -----------------------------------------------
+
+/** Many sessions, so the list pages. */
+const manySessions = (n = 300) =>
+  Array.from({ length: n }, (_, i) => ({
+    path: `/sessions/p/${i}.jsonl`,
+    id: `id${i}`,
+    cwd: "/Users/x/git/data-manager",
+    created: "",
+    modifiedMs: 10_000 - i,
+    bytes: 1_000 + i,
+    messageCount: 3,
+    firstMessage: `question ${i}`,
+    cwdExists: true,
+    scratch: false,
+  }));
+
+const historyPage = (over = {}) =>
+  renderToString(
+    createElement(HistoryView, {
+      history: manySessions(),
+      historyTotal: 885,
+      home: "/Users/x",
+      onResume() {},
+      onDeleteMany() {},
+      ...over,
+    }),
+  );
+
+test("a pager sits at the TOP as well as the bottom", () => {
+  // Reported from use: "The pagination element is a little lost there on the bottom, especially users need to scroll a
+  // lot to see it." Convention puts it at the bottom, which assumes rows you can take in at once — a History row is a
+  // ~120px card, so 25 of them is ~3,000px of travel to reach the only control that leaves the list.
+  const doc = new JSDOM(`<body>${historyPage()}</body>`).window.document;
+  const pagers = [...doc.querySelectorAll(".history-pages")];
+  assert.equal(pagers.length, 2, "one at each end");
+
+  // The TOP one is inside the action bar, which is above the first row — reachable without scrolling.
+  const inBar = doc.querySelector(".history-actions .history-pages");
+  assert.ok(inBar, "the top pager is in the action bar");
+  // The other is after the list.
+  const afterList = doc.querySelector(".history-list ~ .history-pages");
+  assert.ok(afterList, "and one after the rows");
+});
+
+test("two pagers are distinguishable, so a screen reader is not given two identical navs", () => {
+  const doc = new JSDOM(`<body>${historyPage()}</body>`).window.document;
+  const labels = [...doc.querySelectorAll(".history-pages")].map((p) => p.getAttribute("aria-label"));
+  assert.equal(new Set(labels).size, 2, `each pager needs its own name, got ${JSON.stringify(labels)}`);
+  // And the buttons too: "Previous" twice in one document is ambiguous out of context.
+  const prevLabels = [...doc.querySelectorAll(".history-pages button[aria-label^='Previous']")].map((b) =>
+    b.getAttribute("aria-label"),
+  );
+  assert.equal(new Set(prevLabels).size, 2, "each Previous button says which pager it belongs to");
+});
+
+test("both pagers state the RANGE and the total, not the page number", () => {
+  // "Page 2 of 12" says how many pages there are; "26–50 of 300" says where you are in the corpus, which is what a
+  // reader is asking.
+  const doc = new JSDOM(`<body>${historyPage()}</body>`).window.document;
+  for (const pager of doc.querySelectorAll(".history-pages")) {
+    assert.match(pager.textContent, /1–25 of 300/, "the range and the total");
+    assert.ok(!/page 1 of/i.test(pager.textContent), "not a page number");
+  }
+});
+
+test("one page needs no pager at all", () => {
+  // Nowhere to go, and the total is already in the action bar.
+  const html = historyPage({ history: manySessions(3), historyTotal: 3 });
+  assert.ok(!/history-pages/.test(html), `no pager for a single page: ${html}`);
+});
+
+test("the SESSION COUNT is stated as a number, not as a ratio to decode", () => {
+  // Reported: "It also shows the number of available sessions, which is an important information." It read
+  // `500 of 500 · 885 on disk` — two ratios pushed together, so the reader had to do arithmetic to extract 885.
+  const doc = new JSDOM(`<body>${historyPage()}</body>`).window.document;
+  const count = doc.querySelector(".history-count");
+  assert.ok(count, "the count is present");
+  assert.match(count.textContent, /885 sessions/, "the total, as a number with a noun");
+  assert.ok(!/of 500/.test(count.textContent), "and not a ratio to decode");
+});
+
+test("a filter says how many MATCH, separately from the total", () => {
+  const doc = new JSDOM(`<body>${historyPage({ history: manySessions(20), historyTotal: 885 })}</body>`).window.document;
+  const count = doc.querySelector(".history-count").textContent;
+  assert.match(count, /885 sessions/, "the total is still the total");
+  // 20 rows loaded, unfiltered, so nothing "matches" a query — but the total is still stated. The match clause appears
+  // only when the visible count differs from the loaded one, which a query produces.
+  assert.ok(!/match/.test(count), "no match clause without a filter");
+});

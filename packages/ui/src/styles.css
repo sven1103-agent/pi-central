@@ -721,14 +721,24 @@ button { font: inherit; color: inherit; }
 }
 .history-search-input:focus-visible { outline: none; box-shadow: var(--focus); }
 /* The count yields first: it is the least actionable thing in the row. */
-.history-count { flex: 0 1 auto; min-width: 0; font-size: var(--fs-xs); }
+/* The count yields first: it is the least actionable thing in the row. `margin-left: auto` puts it, and everything
+   after it, at the trailing edge — see the note by `.history-clear`. */
+.history-count { flex: 0 1 auto; min-width: 0; font-size: var(--fs-xs); margin-left: auto; }
 /* The selection count, heavier than the totals beside it — it is the fact the bulk action depends on. */
 .history-selected-count { color: var(--text); font-weight: 600; }
-/* Pushed to the trailing edge, so the bulk action sits where a primary action belongs and does not move when the
-   count changes width. Clear sits immediately before it, so the safe escape is not stranded at the far end. */
-.history-clear { flex: none; margin-left: auto; }
-.history-clear + .history-bulk-delete { margin-left: 0; }
-.history-bulk-delete { flex: none; margin-left: auto; }
+/*
+ * The action bar's right-hand group: count, pager, clear, delete — in that order, pushed to the trailing edge.
+ *
+ * `margin-left: auto` on the COUNT rather than on the delete button, because the count is the first thing in the
+ * right-hand group and everything after it should follow without each item re-declaring the push. That was the bug the
+ * first version had: the delete button owned the `auto` margin, so anything inserted before it — the pager — landed
+ * to its LEFT, at the end of the search field's run.
+ */
+.history-clear { flex: none; }
+.history-bulk-delete { flex: none; }
+
+/* The pager in the action bar: the TOP one, and the reason it exists (see `HistoryPager`). */
+.history-actions .history-pages { margin-top: 0; flex: none; }
 .history-sort { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--dim); }
 /* The bulk action appears only with a selection, and takes the trailing edge so it does not push the count around. */
 
@@ -769,11 +779,17 @@ button { font: inherit; color: inherit; }
    two disconnected pieces. */
 .history-row-wrap.is-selected { border-radius: var(--r-2); background: var(--accent-tint); }
 
+/*
+ * A pager. Two instances share this rule: one at the top of the list (in the action bar) and one after the last row.
+ *
+ * Centred at the bottom, where a reader expects "end of list, continue here". The top one is positioned by the action
+ * bar's flex layout instead, so the `margin-top` is overridden there.
+ */
 .history-pages {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
   margin-top: var(--sp-3);
 }
 
