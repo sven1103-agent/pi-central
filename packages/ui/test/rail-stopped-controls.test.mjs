@@ -46,7 +46,7 @@ function ruleExact(selector) {
   return all.length > 0 ? all[all.length - 1][1] : undefined;
 }
 
-let server, sessionControlsFor, Inspector, SessionRail;
+let server, sessionControlsFor, Inspector, SessionHeader, SessionRail;
 before(async () => {
   server = await createServer({
     root: new URL("..", import.meta.url).pathname,
@@ -57,6 +57,7 @@ before(async () => {
   });
   ({ sessionControlsFor, Inspector } = await server.ssrLoadModule("/src/components/Inspector.tsx"));
   ({ SessionRail } = await server.ssrLoadModule("/src/components/SessionRail.tsx"));
+  ({ SessionHeader } = await server.ssrLoadModule("/src/components/SessionHeader.tsx"));
 });
 after(async () => {
   await server?.close();
@@ -203,4 +204,79 @@ test("the RAIL ROW carries no actions at all", () => {
   for (const gone of ["rail-row-menu", "rail-row-forget", "rail-row-retry", "rail-row-stop", "rail-row-delete"]) {
     assert.ok(!html.includes(gone), `the row must not carry ${gone}`);
   }
+});
+
+// --- The control bar on the session header ------------------------------------------------------
+
+/** The header for one session in one state, with every callback available. */
+function headerFor(state) {
+  return renderToString(
+    createElement(SessionHeader, {
+      session: session({ state }),
+      home: "/Users/x",
+      models: [],
+      modelError: undefined,
+      onRequestModels() {},
+      onSelectModel() {},
+      thinking: { levels: undefined, error: undefined },
+      onRequestThinkingLevels() {},
+      onSelectThinkingLevel() {},
+      onRename() {},
+      controls: allCaps,
+    }),
+  );
+}
+
+test("the control bar sits on the session header, which is always visible", () => {
+  // Where they finally live. The three rejected placements each named the next: rail-row buttons (unclickable in
+  // 288px), a rail `⋯` menu ("very tiny"), and the side panel ("i dont see actions in the panel" — it is collapsed by
+  // default, so the controls were behind a toggle).
+  const doc = new JSDOM(`<body>${headerFor("stopped")}</body>`).window.document;
+  const bar = doc.querySelector(".session-header .session-controls");
+  assert.ok(bar, "the bar is inside the session header");
+  assert.equal(bar.getAttribute("role"), "group");
+  assert.match(bar.getAttribute("aria-label"), /Session actions/);
+  // Full-size labelled buttons, not a glyph: that was the complaint about the menu.
+  assert.deepEqual(
+    [...bar.querySelectorAll("button")].map((b) => b.textContent),
+    ["Resume session", "Forget", "Delete transcript"],
+  );
+});
+
+test("the bar follows the same per-state rules as the list behind it", () => {
+  const labelsIn = (state) =>
+    [...new JSDOM(`<body>${headerFor(state)}</body>`).window.document.querySelectorAll(".session-controls button")].map(
+      (b) => b.textContent,
+    );
+  assert.deepEqual(labelsIn("idle"), ["Stop session"], "a live session offers Stop only");
+  assert.deepEqual(labelsIn("stopped"), ["Resume session", "Forget", "Delete transcript"]);
+  assert.deepEqual(labelsIn("failed"), ["Retry", "Forget", "Delete transcript"]);
+});
+
+test("only Delete carries the danger style, and the bar is a hairline apart from the telemetry", () => {
+  const doc = new JSDOM(`<body>${headerFor("stopped")}</body>`).window.document;
+  const danger = [...doc.querySelectorAll(".session-controls .session-control-danger")].map((b) => b.textContent);
+  assert.deepEqual(danger, ["Delete transcript"], "a permanent red button in a header reads as a warning about the session");
+
+  const bar = ruleExact(".session-controls") ?? "";
+  assert.match(bar, /border-left:\s*1px solid var\(--line\)/, "a separator, so the actions read as a group");
+});
+
+test("the bar renders NOTHING when the shell offers nothing", () => {
+  // An empty bar would be a group with no controls — and a `<div>` with a border and no content is a visible artefact.
+  const html = renderToString(
+    createElement(SessionHeader, {
+      session: session({ state: "stopped" }),
+      home: "/Users/x",
+      models: [],
+      modelError: undefined,
+      onRequestModels() {},
+      onSelectModel() {},
+      thinking: { levels: undefined, error: undefined },
+      onRequestThinkingLevels() {},
+      onSelectThinkingLevel() {},
+      onRename() {},
+    }),
+  );
+  assert.ok(!/session-controls/.test(html), "no bar without actions");
 });

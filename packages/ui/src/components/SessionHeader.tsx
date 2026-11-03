@@ -40,6 +40,7 @@ import { InlineRename } from "./InlineRename.tsx";
 import { ModelPicker } from "./ModelPicker.tsx";
 import { ThinkingPicker } from "./ThinkingPicker.tsx";
 import { ContextMeter } from "./ContextMeter.tsx";
+import { SessionControlBar, type SessionControlCaps } from "./SessionControlBar.tsx";
 
 export function SessionHeader({
   session,
@@ -52,6 +53,7 @@ export function SessionHeader({
   onRequestThinkingLevels,
   onSelectThinkingLevel,
   onRename,
+  controls = {},
   onNewInDirectory,
   busy = false,
   warnings = [],
@@ -66,6 +68,13 @@ export function SessionHeader({
   onRequestThinkingLevels: () => void;
   onSelectThinkingLevel: (level: string) => void;
   onRename: (name: string) => void;
+  /**
+   * The controls for THIS session, rendered as one bar on the header row.
+   *
+   * Passed through rather than derived here: which actions exist depends on the session's state AND on what the
+   * connected orchestrator can do, and that decision already lives in one place (`sessionControlsFor`).
+   */
+  controls?: SessionControlCaps | undefined;
   /**
    * Start a NEW session in this session's directory (issue #149).
    *
@@ -179,6 +188,7 @@ export function SessionHeader({
         <span className="header-cost mono" title="Total cost reported for this session">
           {formatCost(session.cost)}
         </span>
+        <SessionControlBar session={session} {...controls} />
       </div>
 
       {/*

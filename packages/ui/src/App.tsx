@@ -13,6 +13,7 @@ import { PROTOCOL_VERSION, supportsDelete, supportsRetry, type Control, type His
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
 import { ConfirmDelete } from "./components/ConfirmDelete.tsx";
 import { StoppedSession } from "./components/StoppedSession.tsx";
+import type { SessionControlCaps } from "./components/SessionControlBar.tsx";
 import {
   SKEW_PREFIX,
   assessProtocolSkew,
@@ -1322,6 +1323,47 @@ export function App() {
               modelError={focused ? state.modelErrors[focused.id] : undefined}
               onRename={renameFocused}
               onNewInDirectory={onOpenDirectory}
+              /*
+                The control bar for the focused session, on its header row.
+
+                Stop, Resume, Retry, Forget and Delete, on the row above the transcript — where the session's name and
+                directory already are, and where it is always visible. Not the side panel (collapsed by default, so
+                unreachable) and not the rail row (two cramped attempts). Each action addresses the session by its FILE
+                where a path is needed: a stopped session has no process, so its handle means nothing durable.
+              */
+              controls={{
+                onStop: () => setConfirmStop(focusedSession(state) ?? undefined),
+                onResume: () => {
+                  const target = focusedSession(state);
+                  if (target?.sessionFile === undefined) return;
+                  dispatch({ kind: "focusRow", key: target.sessionFile });
+                  dispatch({ kind: "expectNewSession", file: target.sessionFile });
+                  send({ kind: "resume", path: target.sessionFile });
+                },
+                onRetry: () => {
+                  const target = focusedSession(state);
+                  if (target === undefined) return;
+                  send({ kind: "retry", sessionId: target.id });
+                },
+                retryAvailable: supportsRetry(state.install?.protocol),
+                onForget: () => {
+                  const target = focusedSession(state);
+                  if (target?.sessionFile !== undefined) dispatch({ kind: "forget", path: target.sessionFile });
+                },
+                ...(supportsDelete(state.install?.protocol)
+                  ? {
+                      onDelete: () => {
+                        const target = focusedSession(state);
+                        if (target?.sessionFile === undefined) return;
+                        setPendingDelete({
+                          paths: [target.sessionFile],
+                          label: displayName(target),
+                          cwd: target.cwd,
+                        });
+                      },
+                    }
+                  : {}),
+              }}
               onAnswer={onAnswer}
               onRequestModels={() => {
                 if (focused) send({ kind: "listModels", sessionId: focused.id });
@@ -1627,6 +1669,7 @@ function SessionView({
   onAnswer,
   onRename,
   onNewInDirectory,
+  controls,
   onRequestModels,
   onSelectModel,
   thinking,
@@ -1674,6 +1717,8 @@ function SessionView({
   onRename: (name: string) => void;
   /** Start a NEW session in this session's directory (issue #149). */
   onNewInDirectory?: ((cwd: string) => void) | undefined;
+  /** The session's control bar — Stop, Resume, Retry, Forget, Delete. Built by the shell. */
+  controls?: SessionControlCaps | undefined;
   onRequestModels: () => void;
   onSelectModel: (provider: string, modelId: string) => void;
   thinking: { levels: string[] | undefined; error: string | undefined };
@@ -1781,6 +1826,7 @@ function SessionView({
             onSelectThinkingLevel={onSelectThinkingLevel}
             onRename={onRename}
             onNewInDirectory={onNewInDirectory}
+            controls={controls}
             busy={busy}
             warnings={session.warnings}
           />

@@ -614,6 +614,36 @@ button { font: inherit; color: inherit; }
 .rail-row-main:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--r-1); }
 
 /*
+ * The session's control bar, on the header row above the transcript.
+ *
+ * Where the actions finally live, after three rejected placements: inline buttons on the rail row (they overlapped the
+ * text and could not be clicked), a `⋯` menu in the same corner ("very tiny"), and the side panel ("i dont see actions
+ * in the panel" — it is collapsed by default, so they were behind a toggle).
+ *
+ * The header row is horizontal and already carries the name, the directory, the meter and the cost, so a bar fits
+ * here without a menu. Buttons are quiet until hovered: the header's one loud control is the composer below it.
+ */
+.session-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: none;
+  /* A hairline separator, so the actions read as a group apart from the meter and the cost. */
+  padding-left: var(--sp-2);
+  border-left: 1px solid var(--line);
+}
+.session-control {
+  font-size: var(--fs-xs);
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+/* Only Delete is destructive, and it says so on hover rather than shouting at rest: a header with a permanent red
+   button reads as a warning about the session itself. */
+.session-control-danger:hover { color: var(--danger-text); background: var(--danger-tint); }
+/* A control the connected orchestrator cannot perform: stated, not hidden, and visibly not pressable. */
+.session-control:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/*
  * The rail row carries NO actions of its own.
  *
  * They were inline buttons pinned to the row's corner, then a `⋯` menu in the same corner. Both are cramped in a 288px
