@@ -54,8 +54,8 @@ export interface SessionControlCaps {
 function ControlIcon({ control }: { control: string }) {
   const common = {
     viewBox: "0 0 16 16",
-    width: 14,
-    height: 14,
+    width: 16,
+    height: 16,
     // Decoration: the button carries the label, so an announced path would add "graphic" before every action.
     "aria-hidden": true,
     focusable: "false" as const,
@@ -100,11 +100,21 @@ function ControlIcon({ control }: { control: string }) {
         </svg>
       );
     case "forget":
-      // An eye with a slash: "stop showing me this". Distinct in shape from the bin, which is the point.
+      /*
+       * A list with a minus, NOT an eye with a slash.
+       *
+       * The eye-slash means "visibility off" in essentially every icon system — password reveal, layer visibility,
+       * tracking prevention — so a reader guessed "hide" by luck and could guess something else entirely. What Forget
+       * actually does is "take this session off the rail and keep the file", and a list with a line removed says that
+       * and nothing else.
+       *
+       * Three rules and a minus, so it stays legible at 16px: at this size a 16px glyph is about 40 device pixels on a
+       * retina display but only 16 logical ones, and detail finer than that turns to mush.
+       */
       return (
         <svg {...common}>
-          <path d="M2 8s2.2-3.5 6-3.5S14 8 14 8s-2.2 3.5-6 3.5S2 8 2 8Z" />
-          <path d="M2.5 13 13.5 3" />
+          <path d="M2.5 4h11M2.5 8h6M2.5 12h11" />
+          <path d="M11 8h3.5" strokeWidth="2" />
         </svg>
       );
     default:

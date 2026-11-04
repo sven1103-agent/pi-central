@@ -679,8 +679,15 @@ button { font: inherit; color: inherit; }
 .session-control {
   display: inline-grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  /* `relative` for the hairline that `.session-control-delete::before` draws beside it. */
+  position: relative;
+  /*
+   * 32x32, which is the app's OWN stated minimum for row actions (DESIGN.md §713: "row actions 32×32 minimum even
+   * though this is a mouse product"). It was 28 — a documented standard the code did not meet, and these are the only
+   * icon-only controls in the app, so there was no consistency argument for the exception.
+   */
+  width: 32px;
+  height: 32px;
   padding: 0;
   background: none;
   border: 1px solid transparent;
@@ -704,13 +711,35 @@ button { font: inherit; color: inherit; }
 .session-control-stop { color: var(--warn-text); }
 .session-control-stop:hover { color: var(--warn-text); background: var(--warn-tint); border-color: var(--warn); }
 /* Delete removes a file and cannot be undone — the only destructive control, in the app's danger colour. */
-.session-control-danger,
-.session-control-delete { color: var(--danger-text); }
+.session-control-danger { color: var(--danger-text); }
 .session-control-danger:hover,
 .session-control-delete:hover { color: var(--danger-text); background: var(--danger-tint); border-color: var(--danger); }
 /* Forget hides a row and keeps the file, so it stays neutral — the difference from Delete is exactly this. */
 .session-control-forget { color: var(--dim); }
 .session-control-forget:hover { color: var(--text); }
+
+/*
+ * A hairline before Delete.
+ *
+ * `Resume · Forget · Delete` at a uniform 4px gap presented three peers, with the one irreversible action separated from
+ * a safe one by nothing. Colour helped but said nothing about GROUPING — and Forget is the control a reader is most
+ * likely to have guessed wrong about, which makes its proximity to Delete the wrong thing to leave implicit.
+ *
+ * A margin rather than a border: this reads as a gap between groups, not as a decoration on a button.
+ */
+.session-control-delete {
+  color: var(--danger-text);
+  margin-left: var(--sp-2);
+}
+.session-control-delete::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--sp-2) - 1px);
+  top: 20%;
+  height: 60%;
+  width: 1px;
+  background: var(--line-strong);
+}
 
 @media (prefers-reduced-motion: reduce) {
   .session-control { transition: none; }

@@ -35,7 +35,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
-- A session's controls are icon-only, below the model pickers: green Resume, amber Stop, red Delete ([#89]).
+- A session's controls are 32px icon buttons below the model pickers, with a gap before Delete ([#89]).
+- The Forget control draws a list with a minus, not an eye with a slash, so "take it off the rail" reads as itself ([#89]).
 - Hovering a rail row is visible, and idle rows no longer wear a bright grey stripe ([#89]).
 - The selected rail row is marked by a bar on its right edge, so its contents keep full contrast ([#89]).
 

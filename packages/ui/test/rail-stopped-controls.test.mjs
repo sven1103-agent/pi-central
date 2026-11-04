@@ -304,3 +304,52 @@ test("the bar renders NOTHING when the shell offers nothing", () => {
   );
   assert.ok(!/session-controls/.test(html), "no bar without actions");
 });
+
+test("the targets meet the app's own minimum for row actions", () => {
+  // DESIGN.md §713: "row actions 32x32 minimum even though this is a mouse product". These were 28 — a documented
+  // standard the code did not meet, and they are the only icon-only controls in the app, so there was no consistency
+  // argument for the exception.
+  const control = ruleExact(".session-control") ?? "";
+  assert.match(control, /width:\s*32px/, `32px wide, got ${JSON.stringify(control)}`);
+  assert.match(control, /height:\s*32px/, "and 32px tall");
+});
+
+test("the icons are 16px, which is what keeps them off the 'afterthought' line", () => {
+  // At 14px in a 28px target in a band with 4px gaps, they were the smallest marks in a dense header while being the
+  // most consequential controls on it.
+  const doc = new JSDOM(`<body>${headerFor("stopped")}</body>`).window.document;
+  for (const svg of doc.querySelectorAll(".session-control svg")) {
+    assert.equal(svg.getAttribute("width"), "16");
+    assert.equal(svg.getAttribute("height"), "16");
+  }
+});
+
+test("FORGET is a list with a minus, not an eye with a slash", () => {
+  // The eye-slash means "visibility off" in essentially every icon system (password reveal, layer visibility,
+  // tracking prevention). Forget means "take this off the rail and keep the file". A reader guessed "hide" by luck and
+  // could guess something else entirely — and it sits beside the irreversible action.
+  //
+  // Asserted on the SHAPE: a list-with-minus draws horizontal rules and no closed eye outline.
+  const doc = new JSDOM(`<body>${headerFor("stopped")}</body>`).window.document;
+  const forget = [...doc.querySelectorAll(".session-control")].find((b) => b.getAttribute("aria-label") === "Forget");
+  const paths = [...forget.querySelectorAll("path")].map((path) => path.getAttribute("d"));
+  assert.ok(
+    paths.some((d) => /^M2\.5 4h11/.test(d ?? "")),
+    `the top rule of a list, got ${JSON.stringify(paths)}`,
+  );
+  assert.ok(!paths.some((d) => /s2\.2-3\.5/.test(d ?? "")), "and NOT the eye outline");
+});
+
+test("the destructive control is set apart from the safe ones", () => {
+  // Uniform 4px gaps made three peers of Resume, Forget and Delete, with nothing saying the last one is different in
+  // kind. Colour helped but said nothing about grouping.
+  const del = ruleExact(".session-control-delete") ?? "";
+  assert.match(del, /margin-left:\s*var\(--sp-2\)/, `a gap before Delete, got ${JSON.stringify(del)}`);
+  // A drawn hairline, so the boundary survives `forced-colors` where the colour difference may not.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(
+    css,
+    /\.session-control-delete::before\s*\{[^}]*background:\s*var\(--line-strong\)/,
+    "and a hairline beside it",
+  );
+});
