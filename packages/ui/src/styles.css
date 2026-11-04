@@ -658,16 +658,46 @@ button { font: inherit; color: inherit; }
   margin-top: var(--sp-1);
   border-top: 1px solid var(--line);
 }
+/*
+ * A control: a small glyph and its word, with NO button chrome at rest.
+ *
+ * Reported from use: three bordered buttons were *"less pressing on the visual load"* than they should be — the bar is
+ * an occasional action set, not a toolbar, and three full-width borders read as the loudest thing in the header.
+ *
+ * So the chrome is gone and the words stay. `DESIGN.md` §681 is the reason the words are not negotiable: a labelled
+ * control, not a glyph, because *"an icon makes it undiscoverable to anyone who reads words"* — and these are
+ * destructive actions, where the glyph for Forget and the glyph for Delete cannot be told apart by consequence.
+ */
 .session-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: var(--fs-xs);
-  padding: 2px 8px;
+  padding: 2px 6px;
+  border-color: transparent;
+  background: none;
+  color: var(--dim);
   white-space: nowrap;
 }
+/* The glyph is decoration for a reader who can see it; the word carries the meaning, so it stays at full strength
+   relative to the glyph rather than competing with it. */
+.session-control-glyph {
+  font-size: var(--fs-sm);
+  line-height: 1;
+  opacity: 0.85;
+}
+/* Hover firms the whole control up — text, glyph and a hairline edge — so a quiet bar still answers the pointer. */
+.session-control:hover {
+  color: var(--text);
+  background: var(--panel-3);
+  border-color: var(--line);
+}
 /* Only Delete is destructive, and it says so on hover rather than shouting at rest: a header with a permanent red
-   button reads as a warning about the session itself. */
-.session-control-danger:hover { color: var(--danger-text); background: var(--danger-tint); }
+   control reads as a warning about the session itself. */
+.session-control-danger:hover { color: var(--danger-text); background: var(--danger-tint); border-color: var(--danger); }
 /* A control the connected orchestrator cannot perform: stated, not hidden, and visibly not pressable. */
 .session-control:disabled { opacity: 0.5; cursor: not-allowed; }
+.session-control:focus-visible { outline: none; box-shadow: var(--focus); }
 
 /*
  * The rail row carries NO actions of its own.

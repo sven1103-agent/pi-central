@@ -36,6 +36,47 @@ export interface SessionControlCaps {
   onDelete?: (() => void) | undefined;
 }
 
+/**
+ * The glyph for each control, chosen to match what the app already uses.
+ *
+ * ## Why these, and not an icon set
+ *
+ * `RunNotices` already draws `↻` for a retry and `✕` for a terminal failure, so those two are not invented here —
+ * a second glyph for the same idea a few inches away would be the drift this repository keeps finding. The rest follow
+ * the same restrained convention: a typographic character, not a pictogram, so the bar reads as text with marks rather
+ * than as a toolbar of illustrations.
+ *
+ * ## Why the word stays beside it
+ *
+ * Asked for from use: *"if icons would be better since they are less pressing on the visual load. But that means users
+ * need to see symbols that are really intuitive."* That last clause is the whole problem — and `DESIGN.md` §681 settles
+ * the principle: a labelled control, not a glyph, because *"an icon makes it undiscoverable to anyone who reads words."*
+ *
+ * So the glyph reduces the visual weight and the WORD carries the meaning:
+ *
+ *   - **Forget vs Delete cannot be told apart as glyphs.** They differ only in consequence — one hides a row and keeps
+ *     the file, the other unlinks it — and any two symbols close enough to be guessable are close enough to be confused.
+ *     Confusing them is the irreversible case.
+ *   - **Resume vs Retry are both "run it again"**, differing in whether the transcript continues.
+ *   - **These are not frequent.** A session is resumed or stopped a handful of times a day, so recognition by
+ *     repetition never accumulates and the glyph stays a guess.
+ *
+ * A frequent, safe action can earn a bare glyph later; an irreversible one does not.
+ */
+const GLYPHS: Readonly<Record<string, string>> = {
+  resume: "▶",
+  retry: "↻",
+  stop: "◼",
+  forget: "✕",
+  delete: "⌫",
+  "retry-unavailable": "↻",
+};
+
+/** The glyph for a control key, or `undefined` for one that has none — a missing glyph must not render as nothing. */
+export function glyphFor(key: string): string | undefined {
+  return GLYPHS[key];
+}
+
 export function SessionControlBar({
   session,
   onStop,
@@ -71,6 +112,15 @@ export function SessionControlBar({
           disabled={control.disabled === true}
           onClick={control.onSelect}
         >
+          {glyphFor(control.key) !== undefined && (
+            /*
+             * `aria-hidden`, because the label is right beside it: an unlabelled glyph read aloud adds a symbol name
+             * before every action, and "black right-pointing triangle Resumé session" is noise.
+             */
+            <span className="session-control-glyph" aria-hidden="true">
+              {glyphFor(control.key)}
+            </span>
+          )}
           {control.label}
         </button>
       ))}

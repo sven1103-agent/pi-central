@@ -236,17 +236,25 @@ test("the control bar sits on the session header, which is always visible", () =
   assert.ok(bar, "the bar is inside the session header");
   assert.equal(bar.getAttribute("role"), "group");
   assert.match(bar.getAttribute("aria-label"), /Session actions/);
-  // Full-size labelled buttons, not a glyph: that was the complaint about the menu.
+  // A glyph AND its word. The word is the part that carries the meaning (DESIGN §681); the glyph only lowers the
+  // visual weight, which is what was asked for.
+  const buttons = [...bar.querySelectorAll("button")];
   assert.deepEqual(
-    [...bar.querySelectorAll("button")].map((b) => b.textContent),
-    ["Resume session", "Forget", "Delete transcript"],
+    buttons.map((b) => b.querySelector(".session-control-glyph").textContent + b.lastChild.textContent),
+    ["▶Resume session", "✕Forget", "⌫Delete transcript"],
+  );
+  // The glyph is decoration: its symbol name must not be read out before every action.
+  assert.ok(
+    buttons.every((b) => b.querySelector(".session-control-glyph").getAttribute("aria-hidden") === "true"),
+    "glyphs are aria-hidden, so the label is what a screen reader announces",
   );
 });
 
 test("the bar follows the same per-state rules as the list behind it", () => {
+  /** The WORD of each control, with the decorative glyph stripped — the label is what must follow the rules. */
   const labelsIn = (state) =>
     [...new JSDOM(`<body>${headerFor(state)}</body>`).window.document.querySelectorAll(".session-controls button")].map(
-      (b) => b.textContent,
+      (b) => b.lastChild.textContent,
     );
   assert.deepEqual(labelsIn("idle"), ["Stop session"], "a live session offers Stop only");
   assert.deepEqual(labelsIn("stopped"), ["Resume session", "Forget", "Delete transcript"]);
@@ -255,8 +263,8 @@ test("the bar follows the same per-state rules as the list behind it", () => {
 
 test("only Delete carries the danger style, and the bar is a hairline apart from the telemetry", () => {
   const doc = new JSDOM(`<body>${headerFor("stopped")}</body>`).window.document;
-  const danger = [...doc.querySelectorAll(".session-controls .session-control-danger")].map((b) => b.textContent);
-  assert.deepEqual(danger, ["Delete transcript"], "a permanent red button in a header reads as a warning about the session");
+  const danger = [...doc.querySelectorAll(".session-controls .session-control-danger")].map((b) => b.lastChild.textContent);
+  assert.deepEqual(danger, ["Delete transcript"], "a permanent red control in a header reads as a warning about the session");
 
   // The bar is its OWN BAND below the pickers (asked for from use: "just put it below the model selection"), so the
   // separator is above it rather than beside it.
