@@ -241,8 +241,21 @@ test("the control bar sits on the session header, which is always visible", () =
   const buttons = [...bar.querySelectorAll("button")];
   assert.deepEqual(
     buttons.map((b) => b.querySelector(".session-control-glyph").textContent + b.lastChild.textContent),
-    ["▶Resume session", "✕Forget", "⌫Delete transcript"],
+    ["▶Resume session", "✕Forget", "−Delete transcript"],
   );
+  /*
+   * No glyph from the TECHNICAL block (U+2300–U+23FF).
+   *
+   * `⌫` (U+232B) rendered as an empty box on macOS — found from a screenshot — and that block is where the marks that
+   * look right in a font specimen but are missing from the platform fallback live. The shapes the bar uses are
+   * geometric and basic-latin marks, which every fallback has.
+   */
+  for (const glyph of [...bar.querySelectorAll(".session-control-glyph")].map((g) => g.textContent)) {
+    for (const character of glyph) {
+      const code = character.codePointAt(0) ?? 0;
+      assert.ok(code < 0x2300 || code > 0x23ff, `"${glyph}" is from the technical block and may draw as a box`);
+    }
+  }
   // The glyph is decoration: its symbol name must not be read out before every action.
   assert.ok(
     buttons.every((b) => b.querySelector(".session-control-glyph").getAttribute("aria-hidden") === "true"),

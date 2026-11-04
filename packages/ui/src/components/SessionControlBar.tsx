@@ -66,9 +66,11 @@ export interface SessionControlCaps {
 const GLYPHS: Readonly<Record<string, string>> = {
   resume: "▶",
   retry: "↻",
-  stop: "◼",
+  stop: "■",
   forget: "✕",
-  delete: "⌫",
+  // NOT `⌫`: U+232B has no glyph in the fonts this app can rely on and renders as a box on macOS. `␡` and `⌦` are
+  // worse. A minus is the one "remove" mark that is universally present, and the word beside it does the real work.
+  delete: "−",
   "retry-unavailable": "↻",
 };
 

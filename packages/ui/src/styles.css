@@ -632,6 +632,10 @@ button { font: inherit; color: inherit; }
 .header-lower {
   display: flex;
   flex-direction: column;
+  /* Stretch, so the control bar gets the full width of this band and does not inherit the PICKERS' narrower
+     content width. With `flex: none` the column was as wide as the pickers, and three controls wrapped onto a second
+     line inside a header that had room to spare — reported from a screenshot as "not sure if it is an improvement". */
+  align-items: stretch;
   gap: var(--sp-2);
   /* Sized to its content, so it does not push the identity block out; the pickers keep their own widths. */
   flex: none;
@@ -643,11 +647,12 @@ button { font: inherit; color: inherit; }
   align-items: center;
   gap: var(--sp-1);
   /*
-   * A row of buttons that wraps rather than overflowing.
+   * One row, wrapping only when it genuinely cannot fit.
    *
-   * It sits inside `.header-lower`, so it is already BELOW the pickers — no basis trickery needed, and the header's own
-   * `nowrap` is untouched. `flex-wrap` here means a narrow window puts a long action on a second line instead of
-   * clipping it, which is what happened when this bar shared the stats row (`Delete tran…`).
+   * It sits inside `.header-lower`, so it is already BELOW the pickers and the header's own `nowrap` is untouched.
+   * `flex-wrap` stays so a very narrow window pushes a long action to a second line rather than clipping it — but with
+   * the column stretched it only does so when there is really no room, which is the difference between "wrapped by
+   * design" and "wrapped for no reason".
    */
   flex-wrap: wrap;
   /*

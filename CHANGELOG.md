@@ -35,7 +35,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
-- A session's controls are a quiet glyph-and-word bar below the model pickers, in the session header ([#89]).
+- A session's controls are a quiet glyph-and-word bar below the model pickers, and fit one line ([#89]).
+- Rail and control glyphs avoid the technical Unicode block, whose marks render as empty boxes on macOS ([#89]).
 - Hovering a rail row is visible, and idle rows no longer wear a bright grey stripe ([#89]).
 - The selected rail row is marked by a bar on its right edge, so its contents keep full contrast ([#89]).
 
