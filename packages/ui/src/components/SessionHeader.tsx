@@ -188,6 +188,20 @@ export function SessionHeader({
         <span className="header-cost mono" title="Total cost reported for this session">
           {formatCost(session.cost)}
         </span>
+
+        {/*
+          THE SESSION'S CONTROLS, at the TOP RIGHT of the companion.
+
+          They were the bottom-left of a column — the last thing before the transcript — where an unoutlined icon adrift
+          on its own read as a status marker rather than as something pressable. Reported as: *"users dont interprete the
+          icon as a control, especially on the bottom. Why dont we have them on the top right of the panel, because they
+          are primary session control."*
+
+          On this row rather than the title row because the title has a long, truncating name and two chips to fit in
+          340px; the stats row is short, so `margin-left: auto` here gives a clean right edge without squeezing the
+          identity. It also groups the controls with the session's health — which is the question they answer.
+        */}
+        <SessionControlBar session={session} {...controls} />
       </div>
 
       {/*
@@ -244,7 +258,6 @@ export function SessionHeader({
         these act on it once; a control that ends or resumes the session should not sit between the reader and the
         thing they adjust most.
       */}
-        <SessionControlBar session={session} {...controls} />
       </div>
     </header>
   );

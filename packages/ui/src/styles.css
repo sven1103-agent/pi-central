@@ -647,6 +647,14 @@ button { font: inherit; color: inherit; }
   align-items: center;
   gap: var(--sp-1);
   /*
+   * Pushed to the trailing edge of the stats row — the top-right of the companion.
+   *
+   * The controls are primary session actions and were the bottom-left of a column, where they read as a status marker.
+   * `margin-left: auto` puts them against the right edge, above the pickers rather than below them, which is where a
+   * reader looks for the actions on a panel.
+   */
+  margin-left: auto;
+  /*
    * One row, wrapping only when it genuinely cannot fit.
    *
    * It sits inside `.header-lower`, so it is already BELOW the pickers and the header's own `nowrap` is untouched.
@@ -655,13 +663,6 @@ button { font: inherit; color: inherit; }
    * design" and "wrapped for no reason".
    */
   flex-wrap: wrap;
-  /*
-   * A hairline ABOVE, because this is a band of its own rather than a continuation of the row above — the same idiom
-   * the picker block uses to separate itself from the identity line.
-   */
-  padding-top: var(--sp-2);
-  margin-top: var(--sp-1);
-  border-top: 1px solid var(--line);
 }
 /*
  * An ICON-ONLY control, and no shared `btn` class.
@@ -689,17 +690,25 @@ button { font: inherit; color: inherit; }
   width: 32px;
   height: 32px;
   padding: 0;
-  background: none;
-  border: 1px solid transparent;
+  /*
+   * A RESTING outline, not `transparent`.
+   *
+   * With no edge at rest the icons read as glyphs adrift in the panel — one reader described the lone stop square as
+   * looking like a status marker. A hairline says "button" before anything is hovered, which is the whole point of an
+   * icon-only control; `--line` rather than `--line-strong` keeps it quiet against the panel, and `--panel-3` gives it a
+   * surface so the shape is legible in `forced-colors` too.
+   */
+  background: var(--panel-3);
+  border: 1px solid var(--line);
   border-radius: var(--r-2);
   color: var(--dim);
   cursor: pointer;
   /* The hover wash has to be visible against `--panel-2`, which is what the header is drawn on. */
   transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
 }
-.session-control:hover { background: var(--panel-3); border-color: var(--line); }
+.session-control:hover { border-color: var(--line-strong); }
 .session-control:focus-visible { outline: none; box-shadow: var(--focus); }
-.session-control:disabled { opacity: 0.45; cursor: not-allowed; background: none; border-color: transparent; }
+.session-control:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* Resume continues the work, so it carries the "go" colour the app already uses for a healthy run. */
 .session-control-resume { color: var(--ok); }

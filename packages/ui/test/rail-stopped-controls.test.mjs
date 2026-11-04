@@ -353,3 +353,37 @@ test("the destructive control is set apart from the safe ones", () => {
     "and a hairline beside it",
   );
 });
+
+// --- Position and affordance, from a screenshot review ------------------------------------------
+
+test("the controls sit at the TOP RIGHT of the companion, with the stats", () => {
+  // Reported from use: "users dont interprete the icon as a control, especially on the bottom. Why dont we have them on
+  // the top right of the panel, because they are primary session control."
+  //
+  // At the bottom of a column they were the last thing before the transcript, alone on a line — which reads as a status
+  // marker rather than as something pressable. In the stats row they are above the pickers, against the right edge.
+  const doc = new JSDOM(`<body>${headerFor("stopped")}</body>`).window.document;
+  const stats = doc.querySelector(".session-header .header-stats");
+  assert.ok(stats, "the stats row exists");
+  assert.ok(stats.querySelector(".session-controls"), "the controls are IN the stats row");
+  // And NOT in the lower band, where they sat after the pickers.
+  assert.equal(
+    doc.querySelector(".header-lower .session-controls"),
+    null,
+    "and no longer in the band below the pickers",
+  );
+  // Pushed to the trailing edge of that row.
+  assert.match(ruleExact(".session-controls") ?? "", /margin-left:\s*auto/, "against the right edge");
+});
+
+test("an icon has a resting outline, so it reads as a button before hover", () => {
+  // With `border-color: transparent` and no background the icons read as glyphs adrift in the panel; one reader
+  // described the lone stop square as looking like a status marker. A hairline and a surface say "button" at rest, which
+  // is the whole point of an icon-only control.
+  const control = ruleExact(".session-control") ?? "";
+  assert.match(control, /border:\s*1px solid var\(--line\)/, `a resting hairline, got ${JSON.stringify(control)}`);
+  assert.match(control, /background:\s*var\(--panel-3\)/, "and a surface, so the shape survives forced-colors");
+  assert.doesNotMatch(control, /border-color:\s*transparent/, "not the invisible-edge version");
+  // Hover now LIFTS the edge rather than introducing it.
+  assert.match(ruleExact(".session-control:hover") ?? "", /border-color:\s*var\(--line-strong\)/);
+});
