@@ -227,63 +227,63 @@ function headerFor(state) {
   );
 }
 
-test("the control bar sits on the session header, which is always visible", () => {
-  // Where they finally live. The three rejected placements each named the next: rail-row buttons (unclickable in
-  // 288px), a rail `⋯` menu ("very tiny"), and the side panel ("i dont see actions in the panel" — it is collapsed by
-  // default, so the controls were behind a toggle).
+test("the control bar is icon-only, and each icon carries its label for assistive tech", () => {
+  // Asked for: "maybe the words are too long. Can we try icons only? For delete we can use a trash bin (and maybe in
+  // red). resume in green."
+  //
+  // Icon-only is safe HERE because two things carry the words: `aria-label` (what a screen reader announces) and `title`
+  // (what a hovering reader reads). Without either, DESIGN §681's objection stands — an icon is undiscoverable to
+  // someone who reads words.
   const doc = new JSDOM(`<body>${headerFor("stopped")}</body>`).window.document;
   const bar = doc.querySelector(".session-header .session-controls");
   assert.ok(bar, "the bar is inside the session header");
   assert.equal(bar.getAttribute("role"), "group");
-  assert.match(bar.getAttribute("aria-label"), /Session actions/);
-  // A glyph AND its word. The word is the part that carries the meaning (DESIGN §681); the glyph only lowers the
-  // visual weight, which is what was asked for.
-  const buttons = [...bar.querySelectorAll("button")];
-  assert.deepEqual(
-    buttons.map((b) => b.querySelector(".session-control-glyph").textContent + b.lastChild.textContent),
-    ["▶Resume session", "✕Forget", "−Delete transcript"],
-  );
-  /*
-   * No glyph from the TECHNICAL block (U+2300–U+23FF).
-   *
-   * `⌫` (U+232B) rendered as an empty box on macOS — found from a screenshot — and that block is where the marks that
-   * look right in a font specimen but are missing from the platform fallback live. The shapes the bar uses are
-   * geometric and basic-latin marks, which every fallback has.
-   */
-  for (const glyph of [...bar.querySelectorAll(".session-control-glyph")].map((g) => g.textContent)) {
-    for (const character of glyph) {
-      const code = character.codePointAt(0) ?? 0;
-      assert.ok(code < 0x2300 || code > 0x23ff, `"${glyph}" is from the technical block and may draw as a box`);
-    }
-  }
-  // The glyph is decoration: its symbol name must not be read out before every action.
-  assert.ok(
-    buttons.every((b) => b.querySelector(".session-control-glyph").getAttribute("aria-hidden") === "true"),
-    "glyphs are aria-hidden, so the label is what a screen reader announces",
-  );
+
+  const buttons = [...bar.querySelectorAll(".session-control")];
+  assert.deepEqual(buttons.map((b) => b.getAttribute("aria-label")), ["Resume session", "Forget", "Delete transcript"]);
+
+  // No visible text: the label lives in the attributes, which is what "icon-only" means.
+  assert.ok(buttons.every((b) => (b.textContent ?? "").trim() === ""), "no visible words");
+  // A real drawn icon, not a character: a character can be missing from the platform's fonts (that is how the previous
+  // unicode mark became an empty box), an inline path cannot.
+  assert.ok(buttons.every((b) => b.querySelector("svg path, svg rect") !== null), "each button draws an SVG shape");
+  // The destructive one says what it does in its tooltip, which is where a hovering reader checks.
+  assert.match(buttons.at(-1).title, /cannot be undone/);
 });
 
-test("the bar follows the same per-state rules as the list behind it", () => {
-  /** The WORD of each control, with the decorative glyph stripped — the label is what must follow the rules. */
-  const labelsIn = (state) =>
-    [...new JSDOM(`<body>${headerFor(state)}</body>`).window.document.querySelectorAll(".session-controls button")].map(
-      (b) => b.lastChild.textContent,
-    );
-  assert.deepEqual(labelsIn("idle"), ["Stop session"], "a live session offers Stop only");
-  assert.deepEqual(labelsIn("stopped"), ["Resume session", "Forget", "Delete transcript"]);
-  assert.deepEqual(labelsIn("failed"), ["Retry", "Forget", "Delete transcript"]);
-});
-
-test("only Delete carries the danger style, and the bar is a hairline apart from the telemetry", () => {
+test("the icons use the theme's own tokens, and differ in SHAPE as well as colour", () => {
+  // Colour is reinforcement. Each mark is also a distinct silhouette — a play triangle, a bin, an eye with a slash — so
+  // nothing is lost to a reader who cannot tell green from red.
   const doc = new JSDOM(`<body>${headerFor("stopped")}</body>`).window.document;
-  const danger = [...doc.querySelectorAll(".session-controls .session-control-danger")].map((b) => b.lastChild.textContent);
-  assert.deepEqual(danger, ["Delete transcript"], "a permanent red control in a header reads as a warning about the session");
+  const buttons = [...doc.querySelectorAll(".session-control")];
+  const resumes = buttons.find((b) => b.getAttribute("aria-label") === "Resume session");
+  const deletes = buttons.find((b) => b.getAttribute("aria-label") === "Delete transcript");
+  assert.match(resumes.className, /session-control-resume/, "Resume is coloured by its own class");
+  assert.match(deletes.className, /session-control-delete/, "and Delete by its own");
 
-  // The bar is its OWN BAND below the pickers (asked for from use: "just put it below the model selection"), so the
-  // separator is above it rather than beside it.
-  const bar = ruleExact(".session-controls") ?? "";
-  assert.match(bar, /border-top:\s*1px solid var\(--line\)/, "a separator above, so the band reads as its own");
-  assert.doesNotMatch(bar, /border-left/, "and not the old left edge from when it shared the stats row");
+  // The tokens are the app's existing ones, not a new palette.
+  assert.match(ruleExact(".session-control-resume") ?? "", /color:\s*var\(--ok\)/);
+  assert.match(ruleExact(".session-control-delete") ?? "", /color:\s*var\(--danger-text\)/);
+  // And the shapes differ: Resume is a filled triangle, Delete is a stroked bin.
+  assert.ok(resumes.querySelector("svg[fill='currentColor']"), "Resume draws a filled shape");
+  assert.ok(deletes.querySelector("svg path"), "Delete draws a bin path");
+});
+
+test("the bar fits ONE line", () => {
+  // It wrapped onto a second line inside a header with room to spare, because `.header-lower` was sized to the narrower
+  // picker column. Reported from a screenshot: "not sure if it is an improvement".
+  const lower = ruleExact(".header-lower") ?? "";
+  assert.match(lower, /align-items:\s*stretch/, "the column stretches, so the bar gets the full width");
+});
+
+test("the controls do not borrow the shared `btn` class", () => {
+  // `.btn` is defined LATER in the stylesheet with a background, a border and a radius at the same specificity, so it
+  // silently won the cascade and the "no chrome" bar still drew as three bordered buttons — found from a screenshot
+  // after I had claimed the chrome was gone.
+  const doc = new JSDOM(`<body>${headerFor("stopped")}</body>`).window.document;
+  for (const button of doc.querySelectorAll(".session-control")) {
+    assert.ok(!/\bbtn\b/.test(button.className), `must not carry .btn, got "${button.className}"`);
+  }
 });
 
 test("the bar renders NOTHING when the shell offers nothing", () => {

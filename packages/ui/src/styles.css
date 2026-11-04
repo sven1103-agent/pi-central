@@ -664,45 +664,57 @@ button { font: inherit; color: inherit; }
   border-top: 1px solid var(--line);
 }
 /*
- * A control: a small glyph and its word, with NO button chrome at rest.
+ * An ICON-ONLY control, and no shared `btn` class.
  *
- * Reported from use: three bordered buttons were *"less pressing on the visual load"* than they should be — the bar is
- * an occasional action set, not a toolbar, and three full-width borders read as the loudest thing in the header.
+ * The previous version carried `btn btn-quiet session-control`. `.btn` is defined LATER in this file and sets a
+ * background, a border and a radius at the same specificity — so it won the cascade and the "no chrome" bar still drew
+ * as three bordered buttons with long labels, which is what the screenshot showed after I claimed the chrome was gone.
+ * These are the only icon-only buttons in the app, so they own their styling outright.
  *
- * So the chrome is gone and the words stay. `DESIGN.md` §681 is the reason the words are not negotiable: a labelled
- * control, not a glyph, because *"an icon makes it undiscoverable to anyone who reads words"* — and these are
- * destructive actions, where the glyph for Forget and the glyph for Delete cannot be told apart by consequence.
+ * Colour is reinforcement, never the carrier. `--ok` on Resume says "this continues the work"; `--danger-text` on
+ * Delete says "this removes a file". Both are the app's existing tokens, so the bar belongs to the theme rather than
+ * importing a new palette — and both marks differ in SHAPE too (a play triangle, a bin), so nothing depends on colour
+ * vision. The words live in `aria-label` and `title`; see the component's header for why that is enough here.
  */
 .session-control {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: var(--fs-xs);
-  padding: 2px 6px;
-  border-color: transparent;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-2);
   color: var(--dim);
-  white-space: nowrap;
+  cursor: pointer;
+  /* The hover wash has to be visible against `--panel-2`, which is what the header is drawn on. */
+  transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
 }
-/* The glyph is decoration for a reader who can see it; the word carries the meaning, so it stays at full strength
-   relative to the glyph rather than competing with it. */
-.session-control-glyph {
-  font-size: var(--fs-sm);
-  line-height: 1;
-  opacity: 0.85;
-}
-/* Hover firms the whole control up — text, glyph and a hairline edge — so a quiet bar still answers the pointer. */
-.session-control:hover {
-  color: var(--text);
-  background: var(--panel-3);
-  border-color: var(--line);
-}
-/* Only Delete is destructive, and it says so on hover rather than shouting at rest: a header with a permanent red
-   control reads as a warning about the session itself. */
-.session-control-danger:hover { color: var(--danger-text); background: var(--danger-tint); border-color: var(--danger); }
-/* A control the connected orchestrator cannot perform: stated, not hidden, and visibly not pressable. */
-.session-control:disabled { opacity: 0.5; cursor: not-allowed; }
+.session-control:hover { background: var(--panel-3); border-color: var(--line); }
 .session-control:focus-visible { outline: none; box-shadow: var(--focus); }
+.session-control:disabled { opacity: 0.45; cursor: not-allowed; background: none; border-color: transparent; }
+
+/* Resume continues the work, so it carries the "go" colour the app already uses for a healthy run. */
+.session-control-resume { color: var(--ok); }
+.session-control-resume:hover { color: var(--ok); background: var(--ok-tint); border-color: var(--ok); }
+/* Retry is the same idea for a failed run: it starts something again. */
+.session-control-retry { color: var(--ok); }
+.session-control-retry:hover { color: var(--ok); background: var(--ok-tint); border-color: var(--ok); }
+/* Stop ends a run. Amber rather than red: the transcript survives, so this is not destruction. */
+.session-control-stop { color: var(--warn-text); }
+.session-control-stop:hover { color: var(--warn-text); background: var(--warn-tint); border-color: var(--warn); }
+/* Delete removes a file and cannot be undone — the only destructive control, in the app's danger colour. */
+.session-control-danger,
+.session-control-delete { color: var(--danger-text); }
+.session-control-danger:hover,
+.session-control-delete:hover { color: var(--danger-text); background: var(--danger-tint); border-color: var(--danger); }
+/* Forget hides a row and keeps the file, so it stays neutral — the difference from Delete is exactly this. */
+.session-control-forget { color: var(--dim); }
+.session-control-forget:hover { color: var(--text); }
+
+@media (prefers-reduced-motion: reduce) {
+  .session-control { transition: none; }
+}
 
 /*
  * The rail row carries NO actions of its own.

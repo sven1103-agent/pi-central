@@ -1,27 +1,36 @@
 /**
- * The session's control bar, on the header row above the transcript.
+ * The session control bar: icon buttons, with the word available on hover and to assistive tech.
  *
- * ## Where this belongs, and the two places it does not
+ * ## The history, because it explains the shape
  *
- * Three attempts, and each failure named the next location:
+ *   1. inline buttons on the rail row — unclickable in a 288px column;
+ *   2. a `⋯` menu in the same corner — *"very tiny"*;
+ *   3. the side panel — invisible, because that panel is collapsed by default;
+ *   4. a labelled button bar under the model pickers — worked, but *"the words are too long"*;
+ *   5. glyph + word — *"not sure if it is an improvement"*, and mine also wrapped and drew `⌫` as a tofu box.
  *
- *   1. **Inline buttons on the rail row** — Resume/Forget/Delete pinned to a 288px row's corner. They overlapped the
- *      row's own text, spilled past its edge, and could not be clicked: *"noboday can hit the right controls in the
- *      stopped session card."*
- *   2. **A `⋯` menu in that corner** — *"i dont like the approach, the menu is very tiny."*
- *   3. **The side panel** — *"i dont see actions in the panel."* They were there, but that panel is **collapsed by
- *      default** (`DESIGN.md` §78) and behind a *Show panel* toggle, which is exactly the defect #79 records for
- *      Rename: a control nobody can find.
+ * Asked for: *"maybe the words are too long. Can we try icons only? For delete we can use a trash bin (and maybe in
+ * red). resume in green."*
  *
- * Asked for from use: *"a i wanted to introduce a control bar here"*, pointing at the session header — the row that
- * already carries the name, the directory and a row of chrome. It has the width for labelled buttons, it is always
- * visible, and it sits beside the session the actions belong to.
+ * ## Why INLINE SVG and not a character
  *
- * ## Why a bar and not a menu
+ * The previous attempt used Unicode marks, and `⌫` (U+232B) rendered as an empty box on macOS because the platform
+ * fallback does not carry the Technical block. An inline path cannot fail that way: there is no font to miss it. It is
+ * also the pattern already in the codebase (`TraceOrderMenu`), so this is not a new technique.
  *
- * The header row is horizontal and already holds several controls (pickers, the meter, the cost). A bar of buttons
- * reads at a glance and states what each one does; a menu in a header with this much room would be hiding something the
- * reader came to the header for.
+ * ## What keeps icon-only safe here
+ *
+ * The objection in `DESIGN.md` §681 — *"an icon makes it undiscoverable to anyone who reads words"* — is real, and two
+ * things answer it:
+ *
+ *   - **`aria-label` carries the full label**, so a screen reader announces "Resume session", never "play".
+ *   - **`title` gives the same words on hover**, so a reader who does not recognise a shape waits half a second rather
+ *     than acting on a guess. The destructive one also states its consequence there.
+ *
+ * Colour is used as reinforcement, not as the carrier: green for the action that continues work, red for the one that
+ * removes a file. Both are the app's existing tokens (`--ok`, `--danger-text`) rather than new hues, so the bar belongs
+ * to the theme — and both marks are also distinct in SHAPE (a play triangle, a bin), so nothing depends on colour
+ * vision.
  */
 import type { LiveSession } from "@pi-central/protocol";
 import { sessionControlsFor } from "./Inspector.tsx";
@@ -37,46 +46,74 @@ export interface SessionControlCaps {
 }
 
 /**
- * The glyph for each control, chosen to match what the app already uses.
+ * The icon for a control, as an inline path.
  *
- * ## Why these, and not an icon set
- *
- * `RunNotices` already draws `↻` for a retry and `✕` for a terminal failure, so those two are not invented here —
- * a second glyph for the same idea a few inches away would be the drift this repository keeps finding. The rest follow
- * the same restrained convention: a typographic character, not a pictogram, so the bar reads as text with marks rather
- * than as a toolbar of illustrations.
- *
- * ## Why the word stays beside it
- *
- * Asked for from use: *"if icons would be better since they are less pressing on the visual load. But that means users
- * need to see symbols that are really intuitive."* That last clause is the whole problem — and `DESIGN.md` §681 settles
- * the principle: a labelled control, not a glyph, because *"an icon makes it undiscoverable to anyone who reads words."*
- *
- * So the glyph reduces the visual weight and the WORD carries the meaning:
- *
- *   - **Forget vs Delete cannot be told apart as glyphs.** They differ only in consequence — one hides a row and keeps
- *     the file, the other unlinks it — and any two symbols close enough to be guessable are close enough to be confused.
- *     Confusing them is the irreversible case.
- *   - **Resume vs Retry are both "run it again"**, differing in whether the transcript continues.
- *   - **These are not frequent.** A session is resumed or stopped a handful of times a day, so recognition by
- *     repetition never accumulates and the glyph stays a guess.
- *
- * A frequent, safe action can earn a bare glyph later; an irreversible one does not.
+ * 16×16, stroked with `currentColor` so the theme drives it and `forced-colors` still draws the shape. Each is a
+ * recognisable silhouette rather than a symbol: a play triangle, a bin, a square, a circular arrow.
  */
-const GLYPHS: Readonly<Record<string, string>> = {
-  resume: "▶",
-  retry: "↻",
-  stop: "■",
-  forget: "✕",
-  // NOT `⌫`: U+232B has no glyph in the fonts this app can rely on and renders as a box on macOS. `␡` and `⌦` are
-  // worse. A minus is the one "remove" mark that is universally present, and the word beside it does the real work.
-  delete: "−",
-  "retry-unavailable": "↻",
-};
+function ControlIcon({ control }: { control: string }) {
+  const common = {
+    viewBox: "0 0 16 16",
+    width: 14,
+    height: 14,
+    // Decoration: the button carries the label, so an announced path would add "graphic" before every action.
+    "aria-hidden": true,
+    focusable: "false" as const,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.5,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
 
-/** The glyph for a control key, or `undefined` for one that has none — a missing glyph must not render as nothing. */
-export function glyphFor(key: string): string | undefined {
-  return GLYPHS[key];
+  switch (control) {
+    case "resume":
+      // A filled play triangle: the one shape that means "continue" without a legend.
+      return (
+        <svg {...common} fill="currentColor" stroke="none">
+          <path d="M5 3.5v9l7-4.5z" />
+        </svg>
+      );
+    case "retry":
+      // A circular arrow, the same idea the retry notice already uses.
+      return (
+        <svg {...common}>
+          <path d="M3 8a5 5 0 1 1 1.6 3.7" />
+          <path d="M3 4.5V8h3.5" />
+        </svg>
+      );
+    case "stop":
+      // A filled square: the transport-control convention for "stop".
+      return (
+        <svg {...common} fill="currentColor" stroke="none">
+          <rect x="4" y="4" width="8" height="8" rx="1" />
+        </svg>
+      );
+    case "delete":
+      // A trash bin: lid, body, and two slats. Asked for by name.
+      return (
+        <svg {...common}>
+          <path d="M3 4.5h10" />
+          <path d="M6.5 4.5V3h3v1.5" />
+          <path d="M4.5 4.5 5 13h6l.5-8.5" />
+          <path d="M7 7v3.5M9 7v3.5" />
+        </svg>
+      );
+    case "forget":
+      // An eye with a slash: "stop showing me this". Distinct in shape from the bin, which is the point.
+      return (
+        <svg {...common}>
+          <path d="M2 8s2.2-3.5 6-3.5S14 8 14 8s-2.2 3.5-6 3.5S2 8 2 8Z" />
+          <path d="M2.5 13 13.5 3" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...common}>
+          <circle cx="8" cy="8" r="5" />
+        </svg>
+      );
+  }
 }
 
 export function SessionControlBar({
@@ -90,7 +127,7 @@ export function SessionControlBar({
 }: { session: LiveSession } & SessionControlCaps) {
   /*
    * Built from `sessionControlsFor`, so WHICH actions exist is decided in one place and stays a tested pure function.
-   * This component only renders the list.
+   * This component only draws them.
    */
   const controls = sessionControlsFor(session, {
     ...(onStop === undefined ? {} : { onStop }),
@@ -109,21 +146,25 @@ export function SessionControlBar({
         <button
           key={control.key}
           type="button"
-          className={`btn btn-quiet session-control${control.danger === true ? " session-control-danger" : ""}`}
-          title={control.title}
+          /*
+           * NO `btn` class. `.btn` is defined after these rules in the stylesheet and sets a border, a background and a
+           * radius — so it silently won the cascade and the "no chrome" version still drew as bordered buttons. Reported
+           * from a screenshot. These are the only buttons in the app that are icon-only, so they get their own class and
+           * no shared one.
+           */
+          className={`session-control session-control-${control.key}${
+            control.danger === true ? " session-control-danger" : ""
+          }`}
+          /*
+           * The full label as the accessible name — the icon is decoration. `title` gives the same words on hover, and
+           * for the destructive one it also states the consequence, which is the fact a reader needs before pressing.
+           */
+          aria-label={control.label}
+          title={`${control.label} — ${control.title}`}
           disabled={control.disabled === true}
           onClick={control.onSelect}
         >
-          {glyphFor(control.key) !== undefined && (
-            /*
-             * `aria-hidden`, because the label is right beside it: an unlabelled glyph read aloud adds a symbol name
-             * before every action, and "black right-pointing triangle Resumé session" is noise.
-             */
-            <span className="session-control-glyph" aria-hidden="true">
-              {glyphFor(control.key)}
-            </span>
-          )}
-          {control.label}
+          <ControlIcon control={control.key} />
         </button>
       ))}
     </div>
