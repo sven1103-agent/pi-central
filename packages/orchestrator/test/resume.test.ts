@@ -151,3 +151,61 @@ test("resuming an entry whose transcript was never written starts fresh instead 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+/**
+ * The lookup that decides "no such session" must not be the one that decides "is a process holding this file".
+ *
+ * Reported twice, because the first fix was dead code: `listedByFile` excludes `stopped` and `failed` — rightly, since
+ * it answers "is this transcript open in a process" for the delete guard — so using it to ask "do I know this session"
+ * returned `undefined` for a session the reader had just stopped, and the refusal stood. A stopped session is by
+ * definition not running.
+ */
+test("a STOPPED session is found by file, so resuming it is not refused as unknown", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-central-entry-by-file-"));
+  try {
+    const cwd = join(root, "work");
+    mkdirSync(cwd, { recursive: true });
+    mkdirSync(join(root, "sessions"), { recursive: true });
+    const supervisor = new Supervisor({
+      workspaceRoot: join(root, "w"),
+      stateRoot: join(root, "s"),
+      sessionsRoot: join(root, "sessions"),
+      safehouse: "safehouse-not-present",
+      pi: "pi-not-present",
+      agentRoot: join(root, "agent"),
+      fragmentDir: join(root, "s", "policy"),
+      agentRootManaged: true,
+      providerAgentDir: join(root, "provider"),
+      home: root,
+      installationRoot: undefined,
+    });
+    supervisor.on("error", () => {});
+
+    const started = supervisor.start({ cwd });
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+    const file = join(root, "sessions", "--work--", "x.jsonl");
+    started.session.sessionFile = file;
+    await supervisor.stop(started.session.id);
+
+    // The session is stopped, and its transcript was never written.
+    const entry = supervisor.entryByFile(file);
+    assert.ok(entry, "a stopped session is still KNOWN by its file");
+    assert.equal(entry.state === "stopped" || entry.state === "failed", true, `state is ${entry.state}`);
+
+    /*
+     * And the two questions are different: `listedByFile` must still say "not running", because the delete guard
+     * depends on it. Asserting both is what stops the next fix from collapsing them back into one method.
+     */
+    assert.equal(supervisor.listedByFile(file), undefined, "no process is holding it");
+
+    /*
+     * The transport-level test is the one that catches the collapse of these two questions into one method; this one
+     * pins the contract at the seam. Both are needed: `entryByFile` excluding `stopped` fails only when a real
+     * transport asks it, which the assertion above cannot reach.
+     */
+    await supervisor.stopAll({ forget: false });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

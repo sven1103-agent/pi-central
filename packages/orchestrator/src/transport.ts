@@ -392,7 +392,8 @@ export class Transport {
            * transcript and starts fresh in the recorded directory — so this only has to stop refusing before that.
            * The entry is reconstructed from the live session, which is where the cwd and mode still are.
            */
-          const owner = this.#supervisor.listedByFile(control.path);
+          // `entryByFile`, NOT `listedByFile`: the latter excludes `stopped`, which is exactly the state being resumed.
+          const owner = this.#supervisor.entryByFile(control.path);
           if (owner === undefined) {
             this.#broadcast({
               kind: "error",

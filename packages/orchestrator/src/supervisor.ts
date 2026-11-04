@@ -307,6 +307,25 @@ export class Supervisor extends EventEmitter {
     return this.#findLiveByPath(sessionPath);
   }
 
+  /**
+   * The session entry for one file, in ANY state — including `stopped` and `failed`.
+   *
+   * ## Why this is separate from `listedByFile`
+   *
+   * `listedByFile` answers "is a PROCESS holding this transcript open", because that is what refusing a delete needs,
+   * and it therefore excludes `stopped` and `failed`. Reusing it to answer "do I know this session" was wrong in a way
+   * that made a fix dead code: resuming a session the reader had just stopped asked `listedByFile`, got `undefined`,
+   * and refused with `no such session` — the exact report — because a stopped session is by definition not running.
+   *
+   * The two questions are different and now have different names.
+   */
+  entryByFile(sessionPath: string): LiveSession | undefined {
+    for (const session of this.#sessions.values()) {
+      if (session.sessionFile === sessionPath) return session;
+    }
+    return undefined;
+  }
+
   #findLiveByPath(sessionPath: string): LiveSession | undefined {
     for (const session of this.#sessions.values()) {
       if (session.sessionFile === sessionPath && session.state !== "stopped" && session.state !== "failed") {

@@ -54,8 +54,21 @@ class FakeSupervisor extends EventEmitter {
    * The transport asks this to distinguish "no such session" from "a session whose transcript was never written" — the
    * second is resumable as a fresh start. A fake that could not answer made the refusal path throw instead of refusing.
    */
-  listedByFile(path: string) {
+  /** The session holding this file, in ANY state — the lookup `resume` uses to decide "known but unwritten". */
+  entryByFile(path: string) {
     return this.sessions.find((session) => session.sessionFile === path);
+  }
+
+  /**
+   * The live session holding this file, i.e. one with a PROCESS.
+   *
+   * Kept separate on purpose: it excludes `stopped`, which is what the delete guard needs and what made a resume fix
+   * dead code when the two questions shared one method.
+   */
+  listedByFile(path: string) {
+    return this.sessions.find(
+      (session) => session.sessionFile === path && session.state !== "stopped" && session.state !== "failed",
+    );
   }
 
   resume(session: { path: string; cwd: string }, options: { mode?: string }) {
@@ -505,6 +518,44 @@ test("a resume for an unknown path reports an error rather than spawning", async
     assert.equal(event.kind, "error");
     assert.ok(event.message.includes("no such session"), event.message);
     assert.equal(supervisor.calls.length, 0, "nothing should reach the supervisor");
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("a resume for a STOPPED session with no transcript is not refused as unknown", async () => {
+  /*
+   * The report, twice: "when i want to resume a session i have just stoppend, i get an error."
+   *
+   * Pi reports `sessionFile` from `get_state` — the path it WILL write — and creates the file lazily, on the first
+   * message. A session stopped before it was prompted therefore has a file path and nothing on disk, and `sessionAt`
+   * correctly returns undefined for it.
+   *
+   * The first fix asked `listedByFile` whether the entry was ours — but that method excludes `stopped` and `failed`,
+   * because it answers "is a PROCESS holding this file" for the delete guard. So it answered "not mine" for the exact
+   * state being resumed, and the refusal stood. This test drives the TRANSPORT, which is where that mistake lived; the
+   * supervisor-level assertion could not see it.
+   */
+  const supervisor = new FakeSupervisor();
+  const stopped = makeSession("s1", "/tmp/work");
+  stopped.sessionFile = "/sessions/--work--/never-written.jsonl";
+  stopped.state = "stopped";
+  supervisor.sessions.push(stopped);
+
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "resume", path: stopped.sessionFile });
+    // It must reach the SUPERVISOR, not be refused first. Here the fake's `resume` succeeds.
+    const event = await client.next("session");
+    assert.equal(event.kind, "session");
+    assert.ok(
+      supervisor.calls.some((call) => call.method === "resume"),
+      `resume must be attempted, not refused: ${JSON.stringify(supervisor.calls.map((c) => c.method))}`,
+    );
     client.close();
   } finally {
     await transport.close();
