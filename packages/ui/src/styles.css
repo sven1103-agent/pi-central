@@ -647,22 +647,25 @@ button { font: inherit; color: inherit; }
   align-items: center;
   gap: var(--sp-1);
   /*
-   * Pushed to the trailing edge of the stats row — the top-right of the companion.
+   * The trailing group of the stats row — the top-right of the companion, above the pickers.
    *
-   * The controls are primary session actions and were the bottom-left of a column, where they read as a status marker.
-   * `margin-left: auto` puts them against the right edge, above the pickers rather than below them, which is where a
-   * reader looks for the actions on a panel.
+   * Positioned by the ROW's `justify-content: space-between` rather than by an `auto` margin here: one mechanism for one
+   * job, and it cannot depend on space the row does not have.
    */
-  margin-left: auto;
   /*
-   * One row, wrapping only when it genuinely cannot fit.
+   * ONE line, and it may not shrink.
    *
-   * It sits inside `.header-lower`, so it is already BELOW the pickers and the header's own `nowrap` is untouched.
-   * `flex-wrap` stays so a very narrow window pushes a long action to a second line rather than clipping it — but with
-   * the column stretched it only does so when there is really no room, which is the difference between "wrapped by
-   * design" and "wrapped for no reason".
+   * `flex: none` is the fix for the screenshot that showed a 2x2 block of buttons with the stats line pushed down.
+   * Inside `.header-stats` (which is `flex: none`, sized to the meter and the cost) these three buttons had no room, so
+   * `flex-wrap: wrap` did what it says: two on the first line, one on the second, and the taller row shoved `ctx`/`$`
+   * off its baseline.
+   *
+   * Three 32px buttons and two 4px gaps is 104px — it fits the 340px companion easily. The wrapping was never needed;
+   * it was a symptom of the bar being allowed to shrink. `nowrap` plus `flex: none` states the intent, and the stats row
+   * gets `justify-content: space-between` so the group still sits against the right edge.
    */
-  flex-wrap: wrap;
+  flex: none;
+  flex-wrap: nowrap;
 }
 /*
  * An ICON-ONLY control, and no shared `btn` class.
@@ -3298,7 +3301,18 @@ select.btn { font-family: var(--sans); }
 .transcript-header .session-header .title { min-width: 0; }
 /* The stats sit under the name, not pushed to a far edge: the `auto` margin belongs to a ROW layout, and inside a
    column it became the gap that a screenshot showed between `idle` and `ctx 2%` (`img_27.png`). */
-.transcript-header .header-stats { margin-left: 0; }
+.transcript-header .header-stats {
+  margin-left: 0;
+  /*
+   * Full width, with the telemetry left and the controls right.
+   *
+   * It used to be `flex: none` — sized to the meter and the cost — which left the control bar nothing to sit in, so it
+   * wrapped into a 2x2 block. `space-between` keeps the trailing edge without depending on the bar's own
+   * `margin-left: auto` finding space that does not exist.
+   */
+  width: 100%;
+  justify-content: space-between;
+}
 /* Same for the picker block: anchored left, under the stats, with its own label column intact. */
 /*
  * The pickers STACK in the companion box: label above control, one control per row.

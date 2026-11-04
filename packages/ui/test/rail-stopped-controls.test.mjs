@@ -372,8 +372,16 @@ test("the controls sit at the TOP RIGHT of the companion, with the stats", () =>
     null,
     "and no longer in the band below the pickers",
   );
-  // Pushed to the trailing edge of that row.
-  assert.match(ruleExact(".session-controls") ?? "", /margin-left:\s*auto/, "against the right edge");
+  // Against the trailing edge — by the ROW's `space-between`, not by an `auto` margin on the bar. One mechanism for one
+  // job: with the bar owning the margin it needed space the row did not have, and it wrapped into a 2x2 block.
+  const statsRow = ruleExact(".transcript-header .header-stats") ?? "";
+  assert.match(statsRow, /justify-content:\s*space-between/, "telemetry left, controls right");
+  assert.match(statsRow, /width:\s*100%/, "on a full-width row, so there is a trailing edge to push to");
+
+  // And the bar cannot shrink or wrap: three 32px buttons and two gaps is 104px, which fits the 340px companion.
+  const bar = ruleExact(".session-controls") ?? "";
+  assert.match(bar, /flex-wrap:\s*nowrap/, "one line");
+  assert.match(bar, /flex:\s*none/, "and it may not be squeezed into wrapping");
 });
 
 test("an icon has a resting outline, so it reads as a button before hover", () => {
