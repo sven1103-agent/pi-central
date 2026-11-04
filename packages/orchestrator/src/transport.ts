@@ -379,10 +379,52 @@ export class Transport {
          */
         const target = await sessionAt(this.#config, control.path);
         if (!target) {
-          this.#broadcast({
-            kind: "error",
-            message: `no such session: ${control.path}`,
-          });
+          /*
+           * An unresolvable path is REFUSED only when no live session holds it.
+           *
+           * Pi reports `sessionFile` from `get_state` — the path it will write — and creates the file lazily, on the
+           * first message. A session stopped before it was ever prompted therefore has a rail entry whose file does not
+           * exist, and `sessionAt` correctly returns nothing for it. `no such session` reads as data loss for a session
+           * the reader had just deliberately stopped: *"when i want to resume a session i have just stoppend, i get an
+           * error"*.
+           *
+           * The supervisor's `resume` already draws the distinction — it withholds `--session` when there is no
+           * transcript and starts fresh in the recorded directory — so this only has to stop refusing before that.
+           * The entry is reconstructed from the live session, which is where the cwd and mode still are.
+           */
+          const owner = this.#supervisor.listedByFile(control.path);
+          if (owner === undefined) {
+            this.#broadcast({
+              kind: "error",
+              message: `no such session: ${control.path}. Its transcript is not on disk, and no running session holds it.`,
+            });
+            return;
+          }
+          /*
+           * A minimal `HistoricalSession`: `resume` reads `path` and `cwd`, and the rest describe the transcript that
+           * does not exist. Filling them with zeros would be inventing facts, so they are stated as what they are —
+           * nothing yet — and the supervisor's own `checkResumable` decides the directory's fate.
+           */
+          const resumed = this.#supervisor.resume(
+            {
+              path: control.path,
+              cwd: owner.cwd,
+              id: owner.sessionId ?? owner.id,
+              created: "",
+              modifiedMs: 0,
+              bytes: 0,
+              messageCount: 0,
+              firstMessage: "",
+              cwdExists: true,
+              scratch: owner.scratch,
+            },
+            control.mode ? { mode: control.mode } : {},
+          );
+          if (!resumed.ok) {
+            this.#broadcast({ kind: "error", message: resumed.message });
+            return;
+          }
+          this.#broadcast({ kind: "session", session: resumed.session });
           return;
         }
         const result = this.#supervisor.resume(target, control.mode ? { mode: control.mode } : {});

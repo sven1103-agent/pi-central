@@ -48,6 +48,16 @@ class FakeSupervisor extends EventEmitter {
     return { ok: true as const, session };
   }
 
+  /**
+   * The live session holding one file, or `undefined`.
+   *
+   * The transport asks this to distinguish "no such session" from "a session whose transcript was never written" — the
+   * second is resumable as a fresh start. A fake that could not answer made the refusal path throw instead of refusing.
+   */
+  listedByFile(path: string) {
+    return this.sessions.find((session) => session.sessionFile === path);
+  }
+
   resume(session: { path: string; cwd: string }, options: { mode?: string }) {
     this.calls.push({ method: "resume", args: [session, options] });
     const live = makeSession(`s${++this.#next}`, session.cwd);

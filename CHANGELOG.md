@@ -35,6 +35,9 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- Resuming a session that was stopped before its first message starts it fresh, instead of reporting no such session
+  ([#89]).
+
 - A session's controls are 32px outlined icon buttons at the top right of the session header ([#89]).
 - The Forget control draws a list with a minus, not an eye with a slash, so "take it off the rail" reads as itself ([#89]).
 - Hovering a rail row is visible, and idle rows no longer wear a bright grey stripe ([#89]).
