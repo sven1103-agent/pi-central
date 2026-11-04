@@ -293,7 +293,35 @@ export function reduce(
     return { ...state, roster: addToRoster(state.roster, event.entry) };
   }
   if (event.kind === "forget") {
-    return { ...state, roster: removeFromRoster(state.roster, event.path) };
+    /*
+     * Forgetting the FOCUSED session moves the view off it.
+     *
+     * Removing the roster entry used to leave `focusedId` pointing at it, so the session stayed open in the middle
+     * column after the reader had removed it from the rail — reported as: *"When a user removes a session from the
+     * roster, it is still open in the active session pannel."* The rail and the workspace then disagreed about whether
+     * the session was still part of the reader's work.
+     *
+     * The key is either a live session's handle or a roster entry's path (issue #89), so both spellings are compared.
+     * When nothing matches, focus is untouched: forgetting a row nobody is looking at must not move the reader.
+     */
+    const roster = removeFromRoster(state.roster, event.path);
+    const key = state.focusedId;
+    if (key === undefined) return { ...state, roster };
+
+    // The handle for this file, if a live session holds it — `key` may be either form.
+    const owner = state.live.find((session) => session.sessionFile === event.path);
+    const forgettingFocused = key === event.path || (owner !== undefined && key === owner.id);
+    if (!forgettingFocused) return { ...state, roster };
+
+    /*
+     * Fall back to another live session, or to nothing.
+     *
+     * A live session is still running, so leaving the reader on one is not the same as hiding work. When the rail is
+     * empty, focus clears — and the placeholder ("open a new session or resume one") is the honest state after the
+     * reader has removed the last thing they were looking at.
+     */
+    const next = state.live.find((session) => session.id !== owner?.id);
+    return { ...state, roster, focusedId: next?.id };
   }
   if (event.kind === "queuePrompt") {
     return {

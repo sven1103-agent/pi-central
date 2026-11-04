@@ -35,6 +35,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- Forgetting the session you are looking at returns to the placeholder instead of leaving it open ([#89]).
+
 - Resuming a session that was stopped before its first message starts it fresh, instead of reporting no such session
   ([#89]).
 
