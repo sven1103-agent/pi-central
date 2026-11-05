@@ -547,7 +547,18 @@ export class Transport {
         if (result.sidecarFailure !== undefined) {
           this.#broadcast({ kind: "error", message: result.sidecarFailure });
         }
-        // Re-discover and re-broadcast, so both the rail and History drop the row from one authoritative answer
+        /*
+         * TELL the clients what was deleted, before the store is re-described.
+         *
+         * `history` and `snapshot` say what exists now; neither can say what was removed, because a session that
+         * scrolled out of the discovered page looks the same as a deleted one. The roster is `localStorage` and keeps
+         * its own list, so it has to be told — otherwise the rail keeps a row whose transcript is gone, the reader
+         * presses Delete again, and the second attempt fails on a file that no longer exists. Reported as: *"when
+         * deleting a transcript, it is not removed from the rail"*.
+         */
+        this.#broadcast({ kind: "deleted", path: control.path });
+
+        // Then re-describe the store, so both the rail and History drop the row from one authoritative answer
         // rather than each removing it locally and possibly disagreeing.
         const after = await discover(this.#config);
         this.#broadcast({ kind: "history", history: after.sessions, total: after.total });

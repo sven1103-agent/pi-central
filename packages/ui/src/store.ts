@@ -368,13 +368,29 @@ export function reduce(
 function applyEvent(state: UiState, event: import("@pi-central/protocol").Event): UiState {
   switch (event.kind) {
     case "snapshot": {
-      // Authoritative replacement, both halves. `focusedId` is preserved when that session is
-      // still present, so a reconnect does not move the user's view.
-      const stillPresent = state.focusedId && event.live.some((s) => s.id === state.focusedId);
-      const focusedId = stillPresent
+      /*
+       * Authoritative replacement, both halves. Focus is preserved when it still resolves, and NOT chosen otherwise.
+       *
+       * It used to fall back to `event.live[0]`, on the theory that "a user arriving expects a session". But a snapshot
+       * also arrives after a DELETE, and the reader had just deliberately removed the session they were looking at — so
+       * the fallback put a different conversation on screen in place of the placeholder. Reported as: *"when deleting a
+       * transcript, it is not removed from the rail and not the default entry app layout shown."*
+       *
+       * The rule is the same one `forget` follows: **a choice the reader did not make must not put a session in front of
+       * them.** Landing on an arbitrary conversation invites typing into the wrong one, and the reader cannot tell
+       * whether it was selected or fell there.
+       *
+       * A genuinely FIRST snapshot is different — `ready` is false and there is nothing to preserve — and there the
+       * first live session is the useful default, because the reader has expressed no intent at all.
+       */
+      const stillPresent =
+        state.focusedId !== undefined && event.live.some((s) => s.id === state.focusedId);
+      const focusStillResolvable =
+        stillPresent || state.roster.some((entry) => entry.path === state.focusedId);
+      const focusedId = focusStillResolvable
         ? state.focusedId
-        : // Otherwise focus the first session, which is what a user arriving expects.
-          event.live[0]?.id;
+        : // Only on the first snapshot, before the reader has had a chance to focus anything.
+          (state.ready ? undefined : event.live[0]?.id);
       return {
         ...state,
         live: event.live,
@@ -553,6 +569,31 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
         queues: { ...state.queues, [event.sessionId]: { steering: [], followUp: [] } },
         restoredQueue: { ...state.restoredQueue, [event.sessionId]: restored },
       };
+    }
+
+    case "deleted": {
+      /*
+       * A transcript was removed from disk: drop the row, and move the view off it if it was focused.
+       *
+       * Distinct from `forget`, which removes a row and KEEPS the file. Deleting is irreversible, so the row must not
+       * survive as a tombstone: the reader would press Delete again and the second attempt would fail on a file that no
+       * longer exists — reported as: *"it is not removed from the rail and not the default entry app layout shown. This
+       * leads to users trying to trigger delete again and then this step fails, because the session file was indeed
+       * deleted."*
+       *
+       * `history` and the `snapshot` that follow cannot express this: they say what exists now, and a session that
+       * scrolled out of the discovered page looks identical to one that was deleted. The roster is `localStorage`, so it
+       * has to be told.
+       */
+      const roster = removeFromRoster(state.roster, event.path);
+      const owner = state.live.find((session) => session.sessionFile === event.path);
+      const key = state.focusedId;
+      const wasFocused = key !== undefined && (key === event.path || (owner !== undefined && key === owner.id));
+      /*
+       * `live` is left alone: the orchestrator refuses to delete a live session's transcript, so this cannot arrive for
+       * one, and the snapshot that follows is authoritative about what is running.
+       */
+      return wasFocused ? { ...state, roster, focusedId: undefined } : { ...state, roster };
     }
 
     case "history":
