@@ -143,6 +143,7 @@ import { displayName, formatContext, formatCost, formatTokens, headerLocation, n
 import { stateLabel, type UiState } from "./store.ts";
 import {
   ROSTER_PREFS_KEY,
+  isRunning,
   parseRoster,
   rosterEntryFor,
   rosterRows,
@@ -1021,7 +1022,8 @@ export function App() {
    * whatever else runs on this origin.
    */
   useEffect(() => {
-    dispatch({ kind: "loadRoster", entries: parseRoster(localStorage.getItem(ROSTER_PREFS_KEY)) });
+    const restored = parseRoster(localStorage.getItem(ROSTER_PREFS_KEY));
+    dispatch({ kind: "loadRoster", entries: restored.entries, forgotten: restored.forgotten });
   }, []);
 
   /*
@@ -1036,14 +1038,23 @@ export function App() {
   useEffect(() => {
     for (const session of state.live) {
       const entry = rosterEntryFor(session);
-      if (entry !== undefined) dispatch({ kind: "remember", entry });
+      if (entry !== undefined) {
+        /*
+         * `running` is what spends a removal (issue #204). Without it a stopped session — which is still in `live`,
+         * because `stopped` is a state and not an absence (C3) — was re-added here immediately after the reader
+         * removed it, and the row came back on every broadcast. With it, a session that has a PROCESS is put back
+         * (it must never be hidden: *"a hidden live session would be a session you cannot stop"*), and a dead row
+         * the reader dismissed stays dismissed.
+         */
+        dispatch({ kind: "remember", entry, running: isRunning(session) });
+      }
     }
   }, [state.live]);
 
   // Persist whatever the rail is showing. One writer, so storage cannot drift from what is rendered.
   useEffect(() => {
     try {
-      localStorage.setItem(ROSTER_PREFS_KEY, serializeRoster(state.roster));
+      localStorage.setItem(ROSTER_PREFS_KEY, serializeRoster(state.roster, state.forgotten));
     } catch {
       // A full or disabled `localStorage` must not break the rail: the roster is a convenience, and an
       // unwritable store degrades to "not remembered", which is the behaviour before this feature existed.

@@ -2518,9 +2518,8 @@ test("focusing something that is neither live nor in the roster is ignored", asy
 
 test("forgetting a stopped row removes it, and the removal survives serialization", async () => {
   // The reachable case: Forget is offered only on a row that is not running (a running one must not be
-  // dismissable — see the rail test below). Asserting what actually happens, rather than the stronger claim
-  // that a forgotten session can never return: a session that starts running IS re-added by App's effect,
-  // because a live session belongs in the roster.
+  // dismissable — see the rail test below). A session that starts running IS re-added by App's effect, because a
+  // live session belongs in the roster; a stopped one that was removed is not (issue #204).
   const { reduce, initialState: blank } = await server.ssrLoadModule("/src/store.ts");
   const { serializeRoster, parseRoster } = await server.ssrLoadModule("/src/roster.ts");
 
@@ -2530,8 +2529,11 @@ test("forgetting a stopped row removes it, and the removal survives serializatio
   state = reduce(state, { kind: "forget", path: "/s/a/one.jsonl" });
 
   assert.deepEqual(state.roster.map((e) => e.path), ["/s/b/two.jsonl"]);
-  assert.deepEqual(parseRoster(serializeRoster(state.roster)).map((e) => e.path), ["/s/b/two.jsonl"],
-    "and a reload reads it back forgotten");
+  // Serialized WITH the removal list, which is what the app's single writer does — the whole point of #204 is that
+  // dropping the entry is not enough for the reload to know.
+  const restored = parseRoster(serializeRoster(state.roster, state.forgotten));
+  assert.deepEqual(restored.entries.map((e) => e.path), ["/s/b/two.jsonl"]);
+  assert.deepEqual(restored.forgotten, ["/s/a/one.jsonl"], "and a reload reads it back forgotten");
 });
 
 test("Forget is offered for a session that is not running, in the companion panel", async () => {

@@ -23,7 +23,15 @@ import type {
   PiRecord,
 } from "@pi-central/protocol";
 import { applyRecord, emptyTranscript, seedTranscript, type Transcript } from "./transcript.ts";
-import { addToRoster, moveToFront, removeFromRoster, rosterEntryFor, type RosterEntry, type RosterRow } from "./roster.ts";
+import {
+  addToRoster,
+  moveToFront,
+  removeFromRoster,
+  rosterEntryFor,
+  FORGOTTEN_MAX,
+  type RosterEntry,
+  type RosterRow,
+} from "./roster.ts";
 // A type-only import from a component, which is the odd part of this file: `QueueBehavior` is the composer's
 // vocabulary for how a prompt joins a run, and `pendingPrompt` has to speak it so a parked prompt is sent with
 // the same behaviour the reader chose. Imported as a TYPE so no component code is pulled into the reducer.
@@ -109,6 +117,17 @@ export interface UiState {
    */
   roster: RosterEntry[];
   /**
+   * Session FILES the reader removed from the rail, and that must stay removed (issue #204).
+   *
+   * Kept as a separate list rather than as "absence from `roster`", because absence is not durable: `App`
+   * re-remembers every session in `state.live`, and a stopped session is still in `live` (C3). Entries are removed
+   * from this list the moment the session is genuinely RUNNING again, which is a real transition rather than a
+   * stale broadcast — see the `forget` and `remember` cases below.
+   *
+   * Keyed by path, never by handle: a resumed session has a new handle for the same conversation (ADR-0004).
+   */
+  forgotten: string[];
+  /**
    * A prompt waiting for the session it belongs to come back (issue #89, resume-on-send).
    *
    * Sending to a session that is not running has to RESUME first, and the resumed session arrives later with a
@@ -176,6 +195,7 @@ export function initialState(): UiState {
     focusNextNewSession: false,
     focusNextSessionFile: undefined,
     roster: [],
+    forgotten: [],
     pendingPrompt: undefined,
     connection: "connecting",
     connectionDetail: undefined,
@@ -232,9 +252,19 @@ export type LocalAction =
    */
   | { kind: "focusRow"; key: string }
   /** Adopt the roster read from `localStorage` at startup. */
-  | { kind: "loadRoster"; entries: RosterEntry[] }
-  /** Put a session in the roster, or refresh its hints. Order is preserved for one already there. */
-  | { kind: "remember"; entry: RosterEntry }
+  | {
+      kind: "loadRoster";
+      entries: RosterEntry[];
+      /** The removals read from the same stored value, so a reload does not resurrect a removed row (#204). */
+      forgotten?: string[] | undefined;
+    }
+  /**
+   * Put a session in the roster, or refresh its hints. Order is preserved for one already there.
+   *
+   * `running` says the session has a PROCESS. A removal is only spent by a session that is running again: a
+   * stopped session re-described by a broadcast is the same dead row the reader removed (#204).
+   */
+  | { kind: "remember"; entry: RosterEntry; running?: boolean | undefined }
   /** Take a session off the roster. The file is NOT deleted — that is #150. */
   | { kind: "forget"; path: string }
   /** Park a prompt against a session path until that session is running (resume-on-send). */
@@ -287,9 +317,32 @@ export function reduce(
     return state.errors.length === 0 ? state : { ...state, errors: state.errors.slice(1) };
   }
   if (event.kind === "loadRoster") {
-    return { ...state, roster: event.entries };
+    return { ...state, roster: event.entries, forgotten: event.forgotten ?? [] };
   }
   if (event.kind === "remember") {
+    /*
+     * A removed row does not come back — unless the session is RUNNING again (issue #204).
+     *
+     * Without the first half, `forget` was undone by the next broadcast: `App` re-remembers every session in
+     * `state.live`, and a stopped session is still in `live` (`stopped` is a state, not an absence, C3), so the row
+     * the reader had just removed reappeared sub-second later — and again on every reload.
+     *
+     * The second half is not a loophole. Hiding live work is the one thing the rail must not do: *"a hidden live
+     * session would be a session you cannot stop"* (`SessionRail.tsx`). Resuming is a real transition the reader
+     * asked for, or the #185 auto-reopen, so the removal is spent rather than left to fire later.
+     *
+     * `running` is explicit rather than derived from `state.live` here, because the reducer must not guess which
+     * live session a `remember` is about — the caller already knows, and passing it keeps this case honest.
+     */
+    if (event.running === true) {
+      const forgotten = state.forgotten.filter((path) => path !== event.entry.path);
+      return {
+        ...state,
+        roster: addToRoster(state.roster, event.entry),
+        forgotten: forgotten.length === state.forgotten.length ? state.forgotten : forgotten,
+      };
+    }
+    if (state.forgotten.includes(event.entry.path)) return state;
     return { ...state, roster: addToRoster(state.roster, event.entry) };
   }
   if (event.kind === "forget") {
@@ -312,16 +365,23 @@ export function reduce(
      *
      * The key is either a live session's handle or a roster entry's path (issue #89), so both spellings are compared.
      * Forgetting a row nobody is looking at must still not move the reader.
+     *
+     * The path is also RECORDED as forgotten (issue #204). Dropping the entry is not durable on its own: `App`
+     * re-remembers every session in `state.live`, and a stopped one is still there (C3), so the row returned on the
+     * next broadcast and on the next reload. Recording it also means `forgotten` is what a reload reads back.
      */
     const roster = removeFromRoster(state.roster, event.path);
+    const forgotten = state.forgotten.includes(event.path)
+      ? state.forgotten
+      : [...state.forgotten, event.path].slice(-FORGOTTEN_MAX);
     const key = state.focusedId;
-    if (key === undefined) return { ...state, roster };
+    if (key === undefined) return { ...state, roster, forgotten };
 
     const owner = state.live.find((session) => session.sessionFile === event.path);
     const forgettingFocused = key === event.path || (owner !== undefined && key === owner.id);
-    if (!forgettingFocused) return { ...state, roster };
+    if (!forgettingFocused) return { ...state, roster, forgotten };
 
-    return { ...state, roster, focusedId: undefined };
+    return { ...state, roster, forgotten, focusedId: undefined };
   }
   if (event.kind === "queuePrompt") {
     return {

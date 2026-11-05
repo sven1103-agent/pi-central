@@ -32,6 +32,14 @@
  * `Supervisor` allocates `id` from a per-process counter (`s${++this.#created}`), so `s1` after a restart is a
  * DIFFERENT session. A roster keyed by handle would not fail loudly; it would point at the wrong conversation.
  *
+ * ## A removal is part of the roster, not a side effect of it (issue #204)
+ *
+ * `forgotten` is the set of paths the reader removed, and it is persisted BESIDE the entries rather than being
+ * expressed by their absence. Absence cannot work: `App` re-remembers every session in `state.live` on every
+ * change to it, and a **stopped** session is still in `live` (`stopped` is a state, not an absence, C3) — so a
+ * row removed by deleting it from the list was put straight back by the next broadcast, and again by the next
+ * page load. A removal that has to survive both has to be recorded, not implied.
+ *
  * ## Where it is stored
  *
  * Browser `localStorage`, beside `pi-central.panel` (#75) and `pi-central.reading` (#134). A roster answers
@@ -72,6 +80,12 @@ export interface RosterEntry {
 
 export const ROSTER_PREFS_KEY = "pi-central.roster";
 
+/** What `parseRoster` returns: the list the rail shows, plus the removals it must respect. */
+export interface ParsedRoster {
+  entries: RosterEntry[];
+  forgotten: string[];
+}
+
 /**
  * Upper bound on roster length.
  *
@@ -80,6 +94,14 @@ export const ROSTER_PREFS_KEY = "pi-central.roster";
  * no harder to run than one") and far below anything that costs visibly.
  */
 export const ROSTER_MAX = 200;
+
+/**
+ * Upper bound on the removal list, so a corrupt store cannot grow it without limit (issue #204).
+ *
+ * Same reasoning as `ROSTER_MAX`, and deliberately larger: a few hundred forgotten rows is exactly the
+ * "pollution over time" the reader was fixing, so this bound must not be reachable by using the feature.
+ */
+export const FORGOTTEN_MAX = 500;
 
 /** A value that could be a path from this app: non-empty, absolute, no NUL. */
 function isPlausiblePath(value: unknown): value is string {
@@ -115,21 +137,24 @@ function withoutUndefined(entry: RosterEntry): Partial<RosterEntry> {
  * degrade to an EMPTY one — which fills in as sessions are used — and never to a broken rail.
  *
  * Duplicate paths collapse, keeping the FIRST: the order is the reader's, and the first is where they put it.
+ *
+ * Two shapes are accepted. A bare array is what `serializeRoster` wrote before issue #204 and what it still falls
+ * back to when nothing has been removed; `{entries, forgotten}` is what it writes once a removal has to be
+ * recorded. Reading only the object form would silently empty the rail of everyone who upgrades.
  */
-export function parseRoster(raw: string | null): RosterEntry[] {
-  if (raw === null || raw === "") return [];
+export function parseRoster(raw: string | null): ParsedRoster {
+  if (raw === null || raw === "") return { entries: [], forgotten: [] };
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return [];
+    return { entries: [], forgotten: [] };
   }
-  // A bare array is what `serializeRoster` writes. `{entries: […]} ` is accepted too so a later version can add
-  // sibling fields without this parser throwing the whole value away.
+  const record = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : undefined;
   const list = Array.isArray(parsed)
     ? parsed
-    : typeof parsed === "object" && parsed !== null && Array.isArray((parsed as Record<string, unknown>)["entries"])
-      ? ((parsed as Record<string, unknown>)["entries"] as unknown[])
+    : Array.isArray(record?.["entries"])
+      ? (record["entries"] as unknown[])
       : [];
 
   const seen = new Set<string>();
@@ -137,27 +162,48 @@ export function parseRoster(raw: string | null): RosterEntry[] {
   for (const item of list) {
     if (entries.length >= ROSTER_MAX) break;
     if (typeof item !== "object" || item === null) continue;
-    const record = item as Record<string, unknown>;
-    const path = record["path"];
+    const row = item as Record<string, unknown>;
+    const path = row["path"];
     if (!isPlausiblePath(path) || seen.has(path)) continue;
     seen.add(path);
     const entry: RosterEntry = { path };
-    const sessionId = optionalText(record["sessionId"], 128);
+    const sessionId = optionalText(row["sessionId"], 128);
     if (sessionId !== undefined) entry.sessionId = sessionId;
     // Validated AS A PATH, because `cwd` reaches a spawn decision. A relative or NUL-bearing value must never
     // survive parsing; a bad `cwd` drops the FIELD, not the whole entry.
-    if (isPlausiblePath(record["cwd"])) entry.cwd = record["cwd"];
-    const name = optionalText(record["name"], 200);
+    if (isPlausiblePath(row["cwd"])) entry.cwd = row["cwd"];
+    const name = optionalText(row["name"], 200);
     if (name !== undefined) entry.name = name;
-    if (typeof record["scratch"] === "boolean") entry.scratch = record["scratch"];
+    if (typeof row["scratch"] === "boolean") entry.scratch = row["scratch"];
     entries.push(entry);
   }
-  return entries;
+
+  const removed = record?.["forgotten"];
+  const forgotten: string[] = [];
+  const removedSeen = new Set<string>();
+  if (Array.isArray(removed)) {
+    for (const item of removed) {
+      if (forgotten.length >= FORGOTTEN_MAX) break;
+      // The same path check the entries get: this value drives a filter, and a plausible-looking entry that is
+      // not a path can never match one, so dropping it is both safer and honest about what was stored.
+      if (!isPlausiblePath(item) || removedSeen.has(item)) continue;
+      removedSeen.add(item);
+      forgotten.push(item);
+    }
+  }
+  return { entries, forgotten };
 }
 
-/** Serialize for `localStorage`. Beside `parseRoster` so the two cannot drift. */
-export function serializeRoster(entries: readonly RosterEntry[]): string {
-  return JSON.stringify(entries.slice(0, ROSTER_MAX));
+/**
+ * Serialize for `localStorage`. Beside `parseRoster` so the two cannot drift.
+ *
+ * The bare array is kept for the no-removals case rather than always writing the object: an install that never
+ * removes a row stores exactly the bytes it stored before, so this change is invisible to it.
+ */
+export function serializeRoster(entries: readonly RosterEntry[], forgotten: readonly string[] = []): string {
+  const list = entries.slice(0, ROSTER_MAX);
+  if (forgotten.length === 0) return JSON.stringify(list);
+  return JSON.stringify({ entries: list, forgotten: forgotten.slice(0, FORGOTTEN_MAX) });
 }
 
 /**
