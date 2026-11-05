@@ -10,12 +10,23 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+**One protocol change: `PROTOCOL_VERSION` 7 → 8.** The directory chooser is one new control
+(`listPlaces`) and three new events (`places`, `placeListing`, `placeError`). A 0.9.0 UI against this
+orchestrator keeps working and simply does not offer the chooser; a UI that offers it against an older
+orchestrator would answer `bad control: unknown kind 'listPlaces'`, so the pane is withheld instead.
+
 ### Added
 
 - CI inventories the shipped release tree, scans it with Grype, and publishes a report, SARIF and a README badge ([#206]).
 - On `main` the scan fails on fixable findings at or above High, and never on findings with no fix ([#206]).
 - The badge is published from a job that can write to the repository, so the first run on `main` no longer fails with a 403 ([#206]).
+- A directory can be browsed instead of typed: the sheet lists the folders under `~` and descends one
+  level at a time ([#76]).
+- A typed path completes against directories inside the folder being typed and against recent ones ([#76]).
+- A typed `~` path is expanded at submit, and the expanded path is shown before anything starts ([#76]).
+- A place that is not on this machine is named, rather than hidden ([#76]).
 
+[#76]: https://github.com/sven1103-agent/pi-central/issues/76
 [#206]: https://github.com/sven1103-agent/pi-central/issues/206
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->

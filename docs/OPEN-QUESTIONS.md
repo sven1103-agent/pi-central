@@ -112,6 +112,17 @@ now has a precise meaning, because credential state exists:
 **Decision needed:** confirm the location, and whether an approval audit log is in scope
 for v1 (it interacts with Q6).
 
+## Q9a — Can a directory be chosen without typing it?
+
+**Resolved (issue #76, [ADR-0012](decisions/0012-directory-chooser.md)).** Yes, and not by a native
+panel — that route does not exist on this stack (`showDirectoryPicker` returns an opaque handle,
+`webkitdirectory` yields no path, and `osascript` is the spawn-a-script shape ADR-0007 avoids).
+
+The orchestrator gained a second filesystem capability, bounded by a closed set of roots derived from
+`$HOME` rather than by a session's `cwd`, offering **directories only**. The sheet keeps its text input
+and completes it, so a path is either browsed or typed, and both end at the same `start` control with
+the same validation.
+
 ## Q9 — File navigation scope
 
 **Resolved:** per project (one tree per workdir), accessed **directly at the user's UID**,

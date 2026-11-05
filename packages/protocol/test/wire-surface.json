@@ -1,5 +1,5 @@
 {
-  "version": 7,
+  "version": 8,
   "control": [
     "abort",
     "answerDialog",
@@ -8,6 +8,7 @@
     "list",
     "listFiles",
     "listModels",
+    "listPlaces",
     "listThinkingLevels",
     "prompt",
     "readFile",
@@ -28,6 +29,9 @@
     "history",
     "models",
     "modelsError",
+    "placeError",
+    "placeListing",
+    "places",
     "queue",
     "queueCleared",
     "record",

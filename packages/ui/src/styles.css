@@ -4681,3 +4681,158 @@ select.btn { font-family: var(--sans); }
 .queue-actions { display: flex; align-items: center; gap: var(--sp-2); }
 .queue-clear { color: var(--danger-text); }
 .queue-clear:hover { color: var(--danger-text); background: var(--danger-tint); }
+
+/* ------------------------------------------------------------------ directory chooser (issue #76) */
+
+/*
+ * The chooser sits inside the sheet, between the recent list and the text input.
+ *
+ * It is a bordered block rather than a bare list because it is a DIFFERENT KIND of control from the recents above
+ * it: those are one-click destinations, this is a place you navigate inside. Without an edge, the crumb bar reads as
+ * another heading over the same list, and the reader cannot tell that pressing a row descends instead of starting.
+ */
+.chooser {
+  margin-bottom: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--panel-2);
+  padding: var(--sp-2) var(--sp-2) var(--sp-2);
+  /* The sheet is 620px wide at most and a deep tree adds up: cap it and scroll, rather than growing past the dialog. */
+  max-height: 260px;
+  overflow-y: auto;
+}
+.chooser-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  min-width: 0;
+}
+/*
+ * The crumb takes the row's spare width and truncates. `tabIndex={-1}` makes it the focus target after a navigation,
+ * so it needs a visible focus ring of its own — otherwise the screen reader moves and the sighted reader sees nothing
+ * change, which is the failure the effect in `DirectoryChooser` exists to prevent.
+ */
+.chooser-crumb {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chooser-crumb:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--r-1); }
+.chooser-crumb-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: var(--r-1);
+}
+.chooser-crumb-link:hover { text-decoration: underline; }
+.chooser-crumb-link:focus-visible { outline: none; box-shadow: var(--focus); }
+.chooser-crumb-here { color: var(--text); font-weight: 600; }
+.chooser-sep { color: var(--dim); margin: 0 3px; }
+.chooser-up { flex: none; font-size: var(--fs-xs); padding: 1px 8px; }
+
+.chooser-roots, .chooser-entries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.chooser-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+  text-align: left;
+  padding: 4px 6px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.chooser-row:hover { border-color: var(--line); background: var(--panel-3); }
+/* The path keeps its last segment visible when it truncates: `…/git/project` still reads as a path, `~/git/very-long-…`
+   does not say which folder it is, and `direction: rtl` above is what puts the ellipsis at the START instead of the end. */
+.chooser-row:focus-visible { outline: none; box-shadow: var(--focus); }
+.chooser-name { font-size: var(--fs-sm); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/*
+ * A mono path is the one thing in this dialog that can be arbitrarily long, and an unbreakable 120-character path
+ * would push the row — and with it the modal's own intrinsic width — past 620px. The path truncates and the full value
+ * is in the row's `title`, which is the same trade the rail and the header make for a directory.
+ */
+.chooser-path {
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+/* The chevron says "this descends" at rest, so a row is not mistaken for a destination. `aria-hidden` in the markup:
+   it is decoration for the eye, and the button's own label already says what the row is. */
+.chooser-open { color: var(--dim); flex: none; }
+.chooser-current { margin: 0 0 var(--sp-2); }
+.chooser-current .btn { font-size: var(--fs-xs); padding: 3px 10px; }
+.chooser-note { margin: var(--sp-1) 0 0; font-size: var(--fs-xs); color: var(--dim); }
+/*
+ * Absent roots are stated, not hidden — the same rule the recent list follows for a directory whose volume is
+ * unmounted. Quiet, because there is nowhere to click.
+ */
+.chooser-absent { margin: var(--sp-2) 0 0; font-size: var(--fs-xs); color: var(--dim); }
+.chooser-failure { margin-top: var(--sp-1); }
+
+/*
+ * Path completions under the sheet's input (issue #76).
+ *
+ * Above the input rather than below the dialog, and inside the form, because a list that overlaps the buttons makes
+ * "Open here" unreachable exactly when a reader is mid-word.
+ */
+.completions {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.completion {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  padding: 3px 8px;
+  font: var(--fs-xs) / 1.5 var(--mono);
+  color: var(--dim);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.completion:hover { border-color: var(--accent); background: var(--accent-tint); }
+.completion:focus-visible { outline: none; box-shadow: var(--focus); }
+/*
+ * What is already typed is quiet and what accepting would ADD is bright — the same two-tone every completion list uses,
+ * and the reason the split is computed rather than guessed: a single-colour row makes the reader re-read the whole path
+ * to find the part they are choosing.
+ */
+.completion-typed { color: var(--dim); }
+.completion-rest { color: var(--text); font-weight: 600; }
+
+/* The expanded form of a `~` path, shown when it differs from what was typed. Quiet: it is a confirmation, not a step. */
+.expanded-path { margin: 6px 0 0; font-size: var(--fs-xs); color: var(--dim); }

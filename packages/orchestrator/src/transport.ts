@@ -38,6 +38,7 @@ import type { Supervisor } from "./supervisor.ts";
 import type { FileError } from "./files.ts";
 import { acceptImages } from "./prompt-images.ts";
 import { discover, sessionAt } from "./registry.ts";
+import { abbreviate, listPlace, nameOf, placesFor } from "./places.ts";
 import { deleteSessionFile } from "./delete-session.ts";
 import type { Config } from "./config.ts";
 import { createUiRequestHandler, resolveUiDistDir, servedUiIdentity } from "./static-ui.ts";
@@ -93,6 +94,7 @@ const CONTROL_KINDS: Record<Control["kind"], true> = {
   resume: true,
   retry: true,
   listFiles: true,
+  listPlaces: true,
   readFile: true,
 };
 
@@ -619,6 +621,53 @@ export class Transport {
       //
       // Everything below is read at the ORCHESTRATOR's UID, deliberately (ADR-0007). No sandbox is
       // involved: Safehouse confines agents, and this serves the person.
+      // --- The directory chooser (issue #76, ADR-0012) -----------------------------------------
+      //
+      // A DIFFERENT capability from `listFiles`, and deliberately a different control (see
+      // `Control.listPlaces`): the file tree is confined to a session's cwd, while this reads directories
+      // that no session owns, restricted instead to the fixed places `placesFor` derives from `$HOME`.
+      //
+      // Both branches live here rather than in the supervisor, because there is no session involved — no
+      // session id, no cwd, nothing for the supervisor's registry to look up. Putting it behind a method
+      // that takes no session would be a supervisor that no longer answers only about sessions.
+      case "listPlaces": {
+        const places = placesFor(this.#config.home);
+        if (control.path === undefined) {
+          this.#broadcast({ kind: "places", places, home: this.#config.home });
+          return;
+        }
+        const result = listPlace(places, control.path, {
+          ...(control.includeHidden === undefined ? {} : { includeHidden: control.includeHidden }),
+        });
+        if (!result.ok) {
+          /*
+           * `not-found` and `unreadable` are kept apart, and the message is the orchestrator's (it carries
+           * the errno). The path is echoed as SENT, for the reason `fileError` does: the complaint is about
+           * what was asked for, and a resolved path would describe something the reader never chose.
+           */
+          this.#broadcast({
+            kind: "placeError",
+            path: control.path,
+            reason: result.error.reason,
+            ...(result.error.code === undefined ? {} : { code: result.error.code }),
+            message: result.error.message,
+          });
+          return;
+        }
+        this.#broadcast({
+          kind: "placeListing",
+          path: control.path,
+          listing: {
+            path: result.value.path,
+            abbreviated: abbreviate(result.value.path, this.#config.home),
+            name: nameOf(result.value.path),
+            ...(result.value.parent === undefined ? {} : { parent: result.value.parent }),
+            entries: result.value.entries,
+            truncated: result.value.truncated,
+          },
+        });
+        return;
+      }
       case "listFiles": {
         const result = this.#supervisor.listFiles(control.sessionId, control.path, {
           ...(control.includeHidden === undefined ? {} : { includeHidden: control.includeHidden }),

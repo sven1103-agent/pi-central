@@ -17,6 +17,7 @@ reader can tell whether a decision still holds.
 | [0009](0009-direct-session-discovery.md) | Discovery parses session files directly; no Pi agent core at runtime | Accepted |
 | [0010](0010-agent-credential-identity.md) | Agent credential identity: agent-owned secrets, delivered per session | Accepted |
 | [0011](0011-distribution-and-update.md) | Distribution by bundled npm artifact; update = detect freely, apply on request | Accepted (application pending #56) |
+| [0012](0012-directory-chooser.md) | A placed directory browser in the orchestrator, not a native OS panel | Accepted |
 
 ## Format
 
@@ -33,7 +34,7 @@ record. Do not rewrite history in place.
 
 ## Constraint references
 
-ADRs cite the hard limits in [../CONSTRAINTS.md](../CONSTRAINTS.md) as `C1`–`C13`. Those
+ADRs cite the hard limits in [../CONSTRAINTS.md](../CONSTRAINTS.md) as `C1`–`C15`. Those
 limits were verified against the Pi and Agent Safehouse versions recorded in
 [../CONSTRAINTS.md](../CONSTRAINTS.md); re-verify them when either is upgraded, since an ADR's
 premises can expire. (The versions are not repeated here: a README may state no version at all,

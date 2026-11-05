@@ -249,6 +249,22 @@ export type Control =
   | { kind: "listFiles"; sessionId: string; path: string; includeHidden?: boolean }
   /** Read one text file, confined the same way. Answered with `file` or `fileError`. */
   | { kind: "readFile"; sessionId: string; path: string }
+  /**
+   * List the directories inside one of the chooser's places (issue #76, ADR-0012).
+   *
+   * ## Why this is a separate control from `listFiles`, and not a flag on it
+   *
+   * `listFiles` is scoped to a SESSION and confined to its `cwd`; that confinement is the whole of #8's
+   * safety story. This asks a different question with a different boundary: "which directories are here"
+   * for a path that no session owns yet, restricted to a fixed set of roots instead. Folding the two into
+   * one control would mean one handler whose confinement depends on a flag — the shape where the weaker
+   * check eventually wins.
+   *
+   * `path` is ABSOLUTE, which `listFiles` refuses, because there is no single root to be relative to. The
+   * orchestrator resolves it and refuses anything outside the places (`places.ts`). `undefined` asks for the
+   * places themselves, which is the first thing the sheet needs and is not a directory listing.
+   */
+  | { kind: "listPlaces"; path?: string | undefined; includeHidden?: boolean }
   | { kind: "resume"; path: string; mode?: "sandboxed" | "direct" };
 
 /**
@@ -518,7 +534,30 @@ export type Event =
    * make that guess a coin flip — with the failure then recorded against the wrong one.
    */
   | { kind: "fileError"; sessionId: string; path: string; request: "list" | "read"; reason: FileErrorReason; code?: string | undefined; message: string }
-  | { kind: "error"; message: string; sessionId?: string | undefined };
+  | { kind: "error"; message: string; sessionId?: string | undefined }
+  /**
+   * The roots the directory chooser offers, in display order (issue #76, ADR-0012).
+   *
+   * A ROOT THAT DOES NOT EXIST IS SENT, with `exists: false`. Hiding it would read as "Pi Central does not
+   * know where your code is" — a different and worse claim than "this machine has no `~/Projects`", which is
+   * what is true and is what the row says.
+   */
+  | { kind: "places"; places: PlaceInfo[]; home: string }
+  /**
+   * The directories inside one place path, in response to `listPlaces`.
+   *
+   * `path` is echoed so the client can tell WHICH request this answers — the same reason `files` carries it,
+   * and the same bug it prevents: a slow listing rendered under another directory's heading.
+   */
+  | { kind: "placeListing"; path: string; listing: PlaceListingInfo }
+  /**
+   * A place request was refused.
+   *
+   * A distinct event from an empty `placeListing`, for the reason `transcriptError` is distinct from an empty
+   * transcript: "this directory has no subdirectories" and "this directory could not be read" are opposite
+   * facts, and rendering one as the other sends the reader to the wrong fix.
+   */
+  | { kind: "placeError"; path: string | undefined; reason: FileErrorReason; code?: string | undefined; message: string };
 
 /** One entry in a directory listing. Metadata only: a listing never reads file contents. */
 export interface FileEntry {
@@ -569,6 +608,46 @@ export type FileErrorReason =
   | "not-found"
   | "permission"
   | "unreadable";
+
+/** One root the directory chooser offers (issue #76). */
+export interface PlaceInfo {
+  /** Stable across machines; what the client round-trips. */
+  id: string;
+  /** A root's own name — `Home`, `git` — never a path. */
+  label: string;
+  /** The absolute path, for display and for the first request. */
+  path: string;
+  /** False when the directory is not on this machine. Sent anyway; see the `places` event. */
+  exists: boolean;
+}
+
+/** One directory in a place listing. NO files, and no metadata beyond the name (ADR-0012). */
+export interface PlaceEntryInfo {
+  name: string;
+  /** Absolute, so a click needs no re-derivation on the client. */
+  path: string;
+}
+
+/** A place listing as it travels (issue #76). */
+export interface PlaceListingInfo {
+  /** The directory as resolved by the orchestrator, which is what a session would be started in. */
+  path: string;
+  /** How this path reads as `~/git/project`, for the sheet's crumb. */
+  abbreviated: string;
+  /** The name of the directory itself, for the crumb's last segment. */
+  name: string;
+  /**
+   * The parent to ascend to, or `undefined` at a root.
+   *
+   * Computed by the orchestrator rather than by the client string-slicing a path: only the side that knows the
+   * places can say whether going up would leave them, and a client that guessed would offer an "up" that the
+   * next request refuses.
+   */
+  parent?: string | undefined;
+  entries: PlaceEntryInfo[];
+  /** True when the directory held more subdirectories than the cap. */
+  truncated: boolean;
+}
 
 /**
  * The wire version, checked by BOTH sides on `hello`.
@@ -624,8 +703,14 @@ export type FileErrorReason =
  *
  * Note what `DELETE_SINCE_PROTOCOL` is for on top of this: a 0.8.0 UI *built from files* can be talking to an older
  * in-memory orchestrator in a dev checkout, where the version skew check is the only warning available.
+ *
+ * v8 (issue #76, ADR-0012): the `listPlaces` control, and the `places` / `placeListing` / `placeError` events.
+ *
+ * Four new KINDS, so `wire-surface.test.ts` catches this one — and the bump is not optional regardless: a v7
+ * orchestrator receiving `listPlaces` would answer `bad control: unknown kind 'listPlaces'`, and the sheet would
+ * silently offer no places at all, which looks exactly like a machine with no directories on it.
  */
-export const PROTOCOL_VERSION = 7 as const;
+export const PROTOCOL_VERSION = 8 as const;
 
 /**
  * The first protocol version that understands the `retry` control (issue #11).
@@ -652,6 +737,21 @@ export const RETRY_SINCE_PROTOCOL = 4;
  * rather than promising something it cannot do.
  */
 export const DELETE_SINCE_PROTOCOL = 6;
+
+/**
+ * The first protocol version that understands the directory chooser's controls (issue #76).
+ *
+ * The same reasoning as `DELETE_SINCE_PROTOCOL`, with a milder consequence: a UI that offered places against an
+ * orchestrator that predates them would show a pane that is permanently empty, which reads as "there is nothing
+ * here" rather than as "you are running two versions". The pane is withheld instead, and the sheet stays the
+ * text input it was.
+ */
+export const PLACES_SINCE_PROTOCOL = 8;
+
+/** Whether a peer speaking `protocol` can list the chooser's places. */
+export function supportsPlaces(protocol: number | undefined): boolean {
+  return protocol === undefined ? true : protocol >= PLACES_SINCE_PROTOCOL;
+}
 
 /** Whether a peer speaking `protocol` can be asked to delete a session. */
 export function supportsDelete(protocol: number | undefined): boolean {

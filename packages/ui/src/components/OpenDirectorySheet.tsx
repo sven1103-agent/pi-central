@@ -18,12 +18,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ownInstallationWarning } from "@pi-central/protocol";
 import { abbreviateCwd, baseName, type RecentDirectory } from "../recent.ts";
+import { completeDirectory, completionBase, expandHome } from "../complete.ts";
+import type { PlacesState } from "../places.ts";
+import { DirectoryChooser } from "./DirectoryChooser.tsx";
 
 export function OpenDirectorySheet({
   installationRoot,
   home,
   recent = [],
   initialPath = "",
+  places,
+  onListPlaces,
   onClose,
   onOpen,
 }: {
@@ -40,11 +45,42 @@ export function OpenDirectorySheet({
   recent?: readonly RecentDirectory[];
   /** A prefilled path, which a test uses to reach a given state without simulating typing. */
   initialPath?: string;
+  /**
+   * The directory chooser's state, when the orchestrator can offer one (issue #76, ADR-0012).
+   *
+   * `undefined` means the orchestrator is older than the chooser and does not answer for places. The pane is then
+   * WITHHELD rather than rendered empty — an empty pane reads as "there are no folders on this machine", which is a
+   * false claim about the machine rather than an honest statement about the versions. The sheet falls back to
+   * exactly what it was: recents plus the text input.
+   */
+  places?: PlacesState | undefined;
+  /** Ask for the roots, or for one directory inside them. Ignored when `places` is absent. */
+  onListPlaces?: ((path?: string) => void) | undefined;
   onClose: () => void;
   onOpen: (cwd: string) => void;
 }) {
   const [path, setPath] = useState(initialPath);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Ask for the roots when the pane first appears.
+   *
+   * The RESPONSE is held by the shell (`App`), because the socket listener is where every other orchestrator
+   * answer lands and a second `useReducer` here would be a second copy of the same state. What belongs here is the
+   * request: the pane exists only while this sheet is open, so asking at mount is asking exactly when it is needed
+   * and not on every snapshot.
+   *
+   * Guarded on `roots === undefined` so a re-render cannot spam the socket; `onListPlaces` is stable, so the effect
+   * runs once per open.
+   */
+  useEffect(() => {
+    if (places === undefined || onListPlaces === undefined) return;
+    // EVERY open, not only the first: the answer also clears the listings cached by the previous open, which is what
+    // makes a folder created in between visible. See `PlacesAction.reload`.
+    onListPlaces();
+    // Deliberately not dependent on `places`: an answer must not re-trigger the request that caused it. `onListPlaces`
+    // is stable, so this runs exactly once per mount — i.e. once per open.
+  }, [onListPlaces]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -56,13 +92,47 @@ export function OpenDirectorySheet({
   }, [onClose]);
 
   const trimmed = path.trim();
+  /*
+   * `~` is expanded here rather than refused (issue #76).
+   *
+   * The orchestrator requires an absolute path and always did. But `~/git/project` is what a reader TYPES, and telling
+   * them to rewrite it as `/Users/them/git/project` is friction with no purpose: `$HOME` is sent in every snapshot, so
+   * the expansion is a fact this component already holds. What is NOT relaxed is the requirement itself — an
+   * unexpanded `~someone/else` still fails, because this process cannot know where another user's home is.
+   */
+  const expanded = useMemo(() => expandHome(trimmed, home), [trimmed, home]);
+
   // Client-side validation is advisory only: the orchestrator validates the directory before
   // spawning, and a directory can vanish between the two checks (D-4).
   const problem = useMemo(() => {
     if (trimmed.length === 0) return "Enter a directory.";
-    if (!trimmed.startsWith("/")) return "Enter an absolute path, starting with /.";
+    if (!expanded.startsWith("/")) return "Enter an absolute path, starting with /.";
     return undefined;
-  }, [trimmed]);
+  }, [trimmed, expanded]);
+
+  /**
+   * The completions for what is being typed (issue #76).
+   *
+   * Candidates come from the recent list (directories used before, #149) and from the chooser's cache — the folder
+   * currently being typed into, whose contents the reader may already have loaded. The second source is why this costs
+   * no new request: a completion of `~/git/pro` only needs `~/git`, which the chooser already asked for when the reader
+   * was there.
+   *
+   * Suppressed while a `problem` is showing EXCEPT the absolute-path one, because completing `/Us` is exactly how a
+   * reader gets to an absolute path. See the guard below.
+   */
+  const completions = useMemo(() => {
+    if (trimmed === "" || expanded === "") return [];
+    const { dir } = completionBase(expanded);
+    const known = places?.directories[dir];
+    const siblings = known?.status === "loaded" ? known.listing.entries.map((entry) => entry.path) : [];
+    return completeDirectory({
+      typed: trimmed,
+      home,
+      recent: recent.map((entry) => entry.cwd),
+      siblings,
+    });
+  }, [trimmed, expanded, home, recent, places]);
 
   /**
    * The self-hosting hazard, evaluated while the path is being typed (issue #25).
@@ -152,10 +222,26 @@ export function OpenDirectorySheet({
           The session is sandboxed to this directory. Pi Central does not change a session's
           directory later, so start it where the work belongs.
         </p>
+        {/*
+          The chooser comes after the recent list and before the text input.
+
+          That order is the frequency order: "a directory I used before" and "the project I am working in" are both
+          one click above, and browsing is for the case neither answers — a project you have never opened here. Putting
+          it above the input keeps the exact-path route (the fastest one for someone who knows the path) reachable
+          without scrolling past a folder list.
+        */}
+        {places !== undefined && onListPlaces !== undefined && (
+          <DirectoryChooser
+            state={places}
+            onList={(target) => onListPlaces(target)}
+            onListRoots={() => onListPlaces()}
+            onChoose={onOpen}
+          />
+        )}
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (problem === undefined) onOpen(trimmed);
+            if (problem === undefined) onOpen(expanded);
           }}
         >
           <input
@@ -180,6 +266,42 @@ export function OpenDirectorySheet({
           {problem !== undefined && path.length > 0 && (
             <p style={{ color: "var(--warn-text)", fontSize: 12, margin: "6px 0 0" }}>{problem}</p>
           )}
+          {/*
+            Suggestions, under the input and only when there is something to suggest.
+
+            A list that appears before anything is typed would cover the recent list above with a duplicate of itself.
+            Each row ACCEPTS by filling the input rather than submitting, so a reader can descend two levels without
+            starting a session by accident — and the last click is always the explicit "Open here".
+          */}
+          {completions.length > 0 && (
+            <ul className="completions" aria-label="Matching directories">
+              {completions.map((completion) => (
+                <li key={completion.path}>
+                  <button
+                    type="button"
+                    className="completion"
+                    title={completion.path}
+                    onClick={() => {
+                      /*
+                       * The DISPLAY form with a trailing slash, not the absolute path.
+                       *
+                       * Display form because the reader must see a value they would recognise: someone who typed
+                       * `~/git/pro` and got `/Users/them/git/project` back has been handed a different string, and the
+                       * expansion happens once at submit. The slash because every completion is a directory — so the
+                       * next list immediately offers its contents, instead of making the reader type the slash that
+                       * this feature exists to save.
+                       */
+                      setPath(`${completion.display}/`);
+                      inputRef.current?.focus();
+                    }}
+                  >
+                    <span className="completion-typed">{completion.typedPart}</span>
+                    <strong className="completion-rest">{completion.remainder}</strong>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           {hazard !== undefined && (
             // `role="status"` rather than `alert`: this updates as the user types, and an alert on
             // every keystroke would interrupt a screen reader mid-word. Not an error — the submit
@@ -187,6 +309,15 @@ export function OpenDirectorySheet({
             <p className="hazard" role="status">
               <span aria-hidden="true">⚠ </span>
               {hazard}
+            </p>
+          )}
+          {/*
+            What will actually be used, when a `~` was expanded. The alternative is a session started in a directory
+            the reader never saw written down — the same class of dishonesty as a rename that silently retargets.
+          */}
+          {problem === undefined && expanded !== trimmed && (
+            <p className="expanded-path mono" role="status">
+              {expanded}
             </p>
           )}
           <div className="dialog-actions">

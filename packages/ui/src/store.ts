@@ -621,6 +621,13 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
     case "files":
     case "file":
     case "fileError":
+    // The directory chooser's three answers (issue #76, ADR-0012) are the same shape of no-op: they feed
+    // `places.ts`, which is held by `App` beside the sheet. Named individually rather than folded into one
+    // case with the file events above, because they answer a different question about a different scope —
+    // and a reader looking for "what happens to the chooser here" should find the answer, not infer it.
+    case "places":
+    case "placeListing":
+    case "placeError":
       return state;
 
     case "error":

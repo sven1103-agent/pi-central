@@ -9,7 +9,7 @@
  * rather than inferring "streaming" from having seen a delta (C8).
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { PROTOCOL_VERSION, supportsDelete, supportsRetry, type Control, type HistoricalSession, type LiveSession, type ModelOption } from "@pi-central/protocol";
+import { PROTOCOL_VERSION, supportsDelete, supportsPlaces, supportsRetry, type Control, type HistoricalSession, type LiveSession, type ModelOption } from "@pi-central/protocol";
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
 import { ConfirmDelete } from "./components/ConfirmDelete.tsx";
 import { StoppedSession } from "./components/StoppedSession.tsx";
@@ -126,6 +126,7 @@ import {
 import { ModelPicker } from "./components/ModelPicker.tsx";
 import { OpenDirectorySheet } from "./components/OpenDirectorySheet.tsx";
 import { recentDirectories } from "./recent.ts";
+import { initialPlacesState, reducePlaces } from "./places.ts";
 import { InlineRename } from "./components/InlineRename.tsx";
 import { ThinkingPicker } from "./components/ThinkingPicker.tsx";
 import { SessionHeader } from "./components/SessionHeader.tsx";
@@ -385,6 +386,14 @@ export function App() {
   // demand, a different lifecycle from session state (issue #8). `filesRef` mirrors it so the
   // connection's event handler can read current state without being rebound on every change.
   const [files, dispatchFiles] = useReducer(reduceFiles, undefined, initialFilesState);
+  /**
+   * The directory chooser's state (issue #76, ADR-0012).
+   *
+   * Held HERE rather than inside `OpenDirectorySheet` because the socket listener below is where every
+   * orchestrator answer lands, and the sheet unmounts. State that lived in the sheet would be re-requested on
+   * every open; state that lived here survives a reopen, so navigating back to a folder you were just in is free.
+   */
+  const [places, dispatchPlaces] = useReducer(reducePlaces, undefined, initialPlacesState);
   const filesRef = useRef(files);
   filesRef.current = files;
 
@@ -472,6 +481,34 @@ export function App() {
               bytes: event.bytes,
               content: event.content,
             });
+            break;
+          case "places":
+            dispatchPlaces({ kind: "placesLoaded", places: event.places, home: event.home });
+            break;
+          case "placeListing":
+            dispatchPlaces({
+              kind: "listingLoaded",
+              // Keyed by the path the CLIENT asked for, for the reason `files` is: the client holds the loading state
+              // under the key it sent, so filing the answer under a different spelling would leave it loading forever.
+              path: event.path,
+              listing: event.listing,
+            });
+            break;
+          case "placeError":
+            /*
+             * A failed ROOTS request has no path, and `reducePlaces` ignores `placesFailed` — the transport answers a
+             * refusal with an `error` event, which the strip above renders. A failed LISTING is recorded against its
+             * path, so the pane can state the reason and offer a retry instead of an empty folder.
+             */
+            if (event.path !== undefined) {
+              dispatchPlaces({
+                kind: "listingFailed",
+                path: event.path,
+                reason: event.reason,
+                ...(event.code === undefined ? {} : { code: event.code }),
+                message: event.message,
+              });
+            }
             break;
           case "fileError":
             // `request` says which question failed, so this routes to the right cache instead of
@@ -996,6 +1033,29 @@ export function App() {
     dispatch({ kind: "expectNewSession" });
     send({ kind: "start" });
   }, [send]);
+
+  /**
+   * Ask for the chooser's places, or for one directory inside them (issue #76, ADR-0012).
+   *
+   * `path === undefined` asks for the roots. The loading marker is set only for a directory, because the roots have
+   * no row to mark: the pane renders "Reading your places…" from `roots === undefined`, which is already the state
+   * it is in.
+   */
+  const onListPlaces = useCallback(
+    (path?: string) => {
+      /*
+       * A request for the ROOTS is the sheet opening, so the listings it cached last time are dropped first.
+       *
+       * Without this, a folder created while the sheet was closed is missing from a listing the reader descends into —
+       * the same staleness #189 fixed for the file tree, which had no expiry at all. One extra directory read per
+       * descent is the price, and it is the read the reader asked for.
+       */
+      if (path === undefined) dispatchPlaces({ kind: "reload" });
+      else dispatchPlaces({ kind: "listingLoading", path });
+      send({ kind: "listPlaces", ...(path === undefined ? {} : { path }) });
+    },
+    [send],
+  );
 
   const onOpenDirectory = useCallback(
     (cwd: string) => {
@@ -1566,6 +1626,9 @@ export function App() {
           /* Derived from history, not stored (issue #149). `state.history` is the newest page, which is
              exactly the right input: "recent" cannot be older than the page it is drawn from. */
           recent={recentDirectories(state.history)}
+          /* Withheld, never empty, when the orchestrator predates the chooser: an empty pane would claim this machine
+             has no folders. See the `places` prop's comment. */
+          {...(supportsPlaces(state.install?.protocol) ? { places, onListPlaces } : {})}
           onClose={() => setSheetOpen(false)}
           onOpen={onOpenDirectory}
         />

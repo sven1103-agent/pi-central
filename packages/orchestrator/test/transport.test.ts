@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocket } from "ws";
@@ -1188,5 +1188,115 @@ test("a STREAMING prompt with images carries both, in the right slots", async ()
     client.close();
   } finally {
     await transport.close();
+  }
+});
+
+// --- The directory chooser (issue #76, ADR-0012) --------------------------------------------------
+//
+// The chooser's boundary is tested in `places.test.ts`. What these pin is the ROUTING: that the control reaches it at
+// all (an unlisted kind answers `bad control: unknown kind 'listPlaces'` and the pane stays empty forever), that a
+// refusal arrives as `placeError` rather than as an empty listing, and that the request's own path is echoed so the
+// client can tell which answer it is holding.
+
+/** A temp `$HOME` with one project in it, plus a config pointed at it. */
+function placesConfig(root: string): Config {
+  return { ...emptyConfig(), home: root };
+}
+
+test("an unknown path in the places request is refused with its errno, not answered with an empty listing", async () => {
+  const { mkdtempSync, mkdirSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  // REALPATH'd, because the orchestrator resolves what it lists: on macOS `$TMPDIR` is under `/var`, a symlink to
+  // `/private/var`, so an un-resolved fixture path would never equal the answer. That is the same asymmetry
+  // `places.ts` handles for display, asserted from the other side here.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-central-transport-places-")));
+  mkdirSync(join(root, "git", "alpha"), { recursive: true });
+  const transport = new Transport(new FakeSupervisor() as never, placesConfig(root), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "listPlaces", path: join(root, "git", "nope") });
+    const event = await client.next("placeError");
+    assert.equal(event.kind, "placeError");
+    assert.equal(event.path, join(root, "git", "nope"), "the path as SENT is echoed, so the client can file it");
+    assert.equal(event.reason, "not-found");
+    assert.equal(event.code, "ENOENT", "the OS code reaches the reader");
+    client.close();
+  } finally {
+    await transport.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a path outside the places is refused by the ROUTE, so the capability has one gatekeeper", async () => {
+  // The control is reachable by any local client (C5), so this is the check that stops it becoming an arbitrary
+  // directory listing service: `/etc` is not inside any place and must be refused without being read.
+  const transport = new Transport(new FakeSupervisor() as never, placesConfig("/Users/tester"), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "listPlaces", path: "/etc" });
+    const event = await client.next("placeError");
+    assert.equal(event.kind, "placeError");
+    assert.match(event.message, /not inside one of the places/);
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("the roots are answered with the home-relative form and the absent ones marked", async () => {
+  const { mkdtempSync, mkdirSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-central-transport-roots-")));
+  mkdirSync(join(root, "git"), { recursive: true });
+  const transport = new Transport(new FakeSupervisor() as never, placesConfig(root), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "listPlaces" });
+    const event = await client.next("places");
+    assert.equal(event.kind, "places");
+    assert.equal(event.home, root);
+    const git = event.places.find((place) => place.id === "git");
+    assert.equal(git?.exists, true);
+    // `~/Projects` does not exist in this fixture and is still reported — hiding it would claim Pi Central does not
+    // know where code lives, rather than that this machine has no such folder.
+    assert.equal(event.places.find((place) => place.id === "projects")?.exists, false);
+    client.close();
+  } finally {
+    await transport.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a listing is abbreviated and names its own folder, so the crumb needs no path surgery", async () => {
+  const { mkdtempSync, mkdirSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-central-transport-listing-")));
+  mkdirSync(join(root, "git", "project"), { recursive: true });
+  const transport = new Transport(new FakeSupervisor() as never, placesConfig(root), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "listPlaces", path: join(root, "git") });
+    const event = await client.next("placeListing");
+    assert.equal(event.kind, "placeListing");
+    if (event.kind !== "placeListing") return;
+    assert.equal(event.listing.abbreviated, "~/git", "abbreviated against the orchestrator's own $HOME");
+    assert.equal(event.listing.name, "git");
+    assert.equal(event.listing.entries[0]?.name, "project");
+    assert.equal(event.listing.entries[0]?.path, join(root, "git", "project"), "absolute, so a click needs no guess");
+    client.close();
+  } finally {
+    await transport.close();
+    rmSync(root, { recursive: true, force: true });
   }
 });
