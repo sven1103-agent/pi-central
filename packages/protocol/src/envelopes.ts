@@ -441,6 +441,17 @@ export type Event =
   | { kind: "transcriptError"; sessionId: string; message: string }
   | { kind: "history"; history: HistoricalSession[]; total: number }
   /**
+   * A transcript was deleted from disk (issue #150), so every surface must drop it.
+   *
+   * A distinct event rather than inferring from the `history` + `snapshot` pair that follows a delete. Those two say
+   * "here is the store now" and "here are the live sessions", and a client cannot tell a deleted session from one that
+   * simply scrolled out of the discovered page — the roster is `localStorage` and keeps its own list, so it needs to be
+   * TOLD what was removed. Reported as: *"when deleting a transcript, it is not removed from the rail"*.
+   *
+   * `path` is the session file, which is the durable identity every surface keys on (ADR-0004).
+   */
+  | { kind: "deleted"; path: string }
+  /**
    * The session's CURRENT message queue, in full.
    *
    * A whole-list event rather than a delta, for the same reason `transcript` replaces rather than
@@ -614,7 +625,7 @@ export type FileErrorReason =
  * Note what `DELETE_SINCE_PROTOCOL` is for on top of this: a 0.8.0 UI *built from files* can be talking to an older
  * in-memory orchestrator in a dev checkout, where the version skew check is the only warning available.
  */
-export const PROTOCOL_VERSION = 6 as const;
+export const PROTOCOL_VERSION = 7 as const;
 
 /**
  * The first protocol version that understands the `retry` control (issue #11).

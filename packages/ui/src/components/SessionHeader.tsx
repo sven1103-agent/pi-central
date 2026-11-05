@@ -40,6 +40,7 @@ import { InlineRename } from "./InlineRename.tsx";
 import { ModelPicker } from "./ModelPicker.tsx";
 import { ThinkingPicker } from "./ThinkingPicker.tsx";
 import { ContextMeter } from "./ContextMeter.tsx";
+import { SessionControlBar, type SessionControlCaps } from "./SessionControlBar.tsx";
 
 export function SessionHeader({
   session,
@@ -52,6 +53,7 @@ export function SessionHeader({
   onRequestThinkingLevels,
   onSelectThinkingLevel,
   onRename,
+  controls = {},
   onNewInDirectory,
   busy = false,
   warnings = [],
@@ -66,6 +68,13 @@ export function SessionHeader({
   onRequestThinkingLevels: () => void;
   onSelectThinkingLevel: (level: string) => void;
   onRename: (name: string) => void;
+  /**
+   * The controls for THIS session, rendered as one bar on the header row.
+   *
+   * Passed through rather than derived here: which actions exist depends on the session's state AND on what the
+   * connected orchestrator can do, and that decision already lives in one place (`sessionControlsFor`).
+   */
+  controls?: SessionControlCaps | undefined;
   /**
    * Start a NEW session in this session's directory (issue #149).
    *
@@ -179,6 +188,20 @@ export function SessionHeader({
         <span className="header-cost mono" title="Total cost reported for this session">
           {formatCost(session.cost)}
         </span>
+
+        {/*
+          THE SESSION'S CONTROLS, at the TOP RIGHT of the companion.
+
+          They were the bottom-left of a column — the last thing before the transcript — where an unoutlined icon adrift
+          on its own read as a status marker rather than as something pressable. Reported as: *"users dont interprete the
+          icon as a control, especially on the bottom. Why dont we have them on the top right of the panel, because they
+          are primary session control."*
+
+          On this row rather than the title row because the title has a long, truncating name and two chips to fit in
+          340px; the stats row is short, so `margin-left: auto` here gives a clean right edge without squeezing the
+          identity. It also groups the controls with the session's health — which is the question they answer.
+        */}
+        <SessionControlBar session={session} {...controls} />
       </div>
 
       {/*
@@ -193,7 +216,17 @@ export function SessionHeader({
         </div>
       )}
 
-      <div className="picker picker-grid">
+      {/*
+        The pickers and the control bar travel together as ONE column.
+
+        The header is a single flex line (`flex-wrap: nowrap`) — deliberately, because letting it wrap freely is what
+        produced the four-row header of `img_23.png`. So a second row is not achieved by wrapping: it is achieved by
+        putting both bands in one child, which is one flex item to the header and a column inside.
+
+        Asked for from use: *"just put it below the model selection."*
+      */}
+      <div className="header-lower">
+        <div className="picker picker-grid">
         <ModelPicker
           session={session}
           models={models}
@@ -212,6 +245,19 @@ export function SessionHeader({
             />
           }
         />
+      </div>
+
+        {/*
+          THE CONTROL BAR, on its own line below the model and thinking pickers.
+
+        Asked for: *"just put it below the model selection."* On the stats row it was clipped — `Delete tran…` ran off
+        the edge — because that row is sized by the meter, the cost and the pickers, not by a variable number of
+        buttons. Its own row is sized by the actions themselves, so the bar can hold however many a state offers.
+
+        Below the pickers rather than above them because the pickers are a standing choice about the session, while
+        these act on it once; a control that ends or resumes the session should not sit between the reader and the
+        thing they adjust most.
+      */}
       </div>
     </header>
   );

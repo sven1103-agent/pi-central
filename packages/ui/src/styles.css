@@ -542,19 +542,37 @@ button { font: inherit; color: inherit; }
  *
  * They were the same `--panel-2` fill, so the selected session was only distinguishable from whatever the mouse
  * happened to be over — and a review could not tell which session the workspace was showing by looking at the
- * rail. Selection is now a persistent fill AND the state-coloured left edge, which is the shape the eye already
- * reads as "this one"; hover stays a light wash with no edge.
+ * rail. Selection is a persistent fill AND the state-coloured left edge, which is the shape the eye already reads
+ * as "this one"; hover stays a light wash with no edge.
+ *
+ * The SELECTION fill is the accent tint rather than `--panel-2` (chosen from use: *"make the selected like in the
+ * current refactor, the highlighting of the background is better"*). `--panel-2` is one step from the `--panel-3`
+ * hover wash, so a selected row and a hovered row read as nearly the same thing; the accent tint cannot be confused
+ * with either, and it needs no extra channel to carry it.
  *
  * The words stay full-strength either way: selection is not the only signal, `aria-current` carries it to
  * assistive tech, and the left border does not depend on colour vision alone because it is a shape change. */
 .rail-row:hover { background: var(--panel-3); }
 .rail-row.is-focused,
 .rail-row[aria-current="true"] {
+  /*
+   * Selection is a solid fill plus a bar on the RIGHT edge — not a colour wash.
+   *
+   * The wash (`--accent-tint`) tinted everything inside the row, including the context gauge, which then had almost no
+   * contrast against its own track: the progress bar became invisible on exactly the row the reader was looking at.
+   * Asked for from use: *"what about changing the background of the selected card, we introduce a vertical bar on the
+   * right side of the card?"* — yes, and it uses the rail's own two-channel convention:
+   *
+   *   - the LEFT edge is STATE (colour by state, thickened on selection);
+   *   - the RIGHT edge is SELECTION (always the accent, so it cannot be read as a state).
+   *
+   * A shape on each edge, and a plain `--panel-2` surface in between that leaves every value inside the row at full
+   * contrast.
+   */
   background: var(--panel-2);
   color: var(--text);
-  /* The rail row's left border is the STATE stripe; selection thickens it rather than recolouring it, so the two
-     facts stay on separate channels. */
   border-left-width: 4px;
+  box-shadow: inset -3px 0 0 var(--accent);
 }
 .rail-row.is-focused .name { color: var(--text); }
 .rail-row.is-focused .r2,
@@ -581,10 +599,10 @@ button { font: inherit; color: inherit; }
 .rail-row .ask { color: var(--warn-text); }
 
 /*
- * A rail row holds two controls (issue #89): the row itself, and — when the session is not running — Forget.
+ * A rail row holds two controls (issue #89): the row itself, and the `⋯` menu of actions.
  *
- * The row is a `<div>` now because nesting buttons is invalid HTML that browsers resolve by breaking the inner
- * one. `.rail-row-main` carries the old button's layout so the visual rhythm is unchanged.
+ * The row is a `<div>` because nesting buttons is invalid HTML that browsers resolve by breaking the inner one.
+ * `.rail-row-main` carries the button's layout so the visual rhythm is unchanged.
  */
 .rail-row { display: flex; flex-direction: column; position: relative; }
 .rail-row-main {
@@ -594,71 +612,159 @@ button { font: inherit; color: inherit; }
   width: 100%;
 }
 .rail-row-main:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--r-1); }
+
 /*
- * Forget is deliberately quiet: it is housekeeping, not a primary act. Never red — the session is not being
- * deleted, only taken off the rail, and a danger colour would promise a consequence that does not happen.
+ * The session's control bar, on the header row above the transcript.
+ *
+ * Where the actions finally live, after three rejected placements: inline buttons on the rail row (they overlapped the
+ * text and could not be clicked), a `⋯` menu in the same corner ("very tiny"), and the side panel ("i dont see actions
+ * in the panel" — it is collapsed by default, so they were behind a toggle).
+ *
+ * The header row is horizontal and already carries the name, the directory, the meter and the cost, so a bar fits
+ * here without a menu. Buttons are quiet until hovered: the header's one loud control is the composer below it.
  */
 /*
- * `Forget`: a real control, and it does not change the row's height.
+ * The lower band of the header: the pickers, and the control bar beneath them.
  *
- * Two defects from a screenshot review (`img_35.png`). It was plain text with no affordance on a line of its own, which
- * made a DESTRUCTIVE action look like leaked hover text — and because it was a third line in the row's column layout it
- * made the selected row taller than its neighbours, so the rail's rhythm broke exactly on the row that matters most.
- *
- * `position: absolute` takes it out of that flow: the row height is now decided by its content alone, and the control
- * floats at the row's trailing edge, appearing on hover and on keyboard focus. Still reachable by Tab, because it is a
- * real button and `:focus-within` reveals it.
+ * One flex ITEM to the header, so the header keeps its single nowrap line (the guard that stops the four-row defect of
+ * `img_23.png`), and a column inside to stack the two bands.
  */
-.rail-row-forget {
-  position: absolute;
-  right: var(--sp-2);
-  bottom: var(--sp-2);
-  background: var(--panel-3);
-  border: 1px solid var(--line);
-  border-radius: var(--r-1);
-  padding: 1px 6px;
-  font: inherit; font-size: var(--fs-2xs);
-  color: var(--dim); cursor: pointer;
-  /* Hidden until the row is engaged, but never `display: none` — a control that vanishes from the tab order cannot be
-     reached by the keyboard that is the reason it is hidden. */
-  opacity: 0;
-}
-/*
- * The stopped row's two controls share ONE absolutely-positioned box (issue #150).
- *
- * `Forget` and `Delete` were each `position: absolute; right; bottom` — the same corner — so a second one would
- * stack on top of the first. The wrapper takes the position and lays them out in a row, which keeps the row's height
- * decided by its content (the reason `absolute` was chosen in the first place) and makes the pair's order explicit
- * rather than accidental.
- */
-.rail-row-stopped-actions {
-  position: absolute;
-  right: var(--sp-2);
-  bottom: var(--sp-2);
-  flex-direction: row;
-  align-items: center;
-  gap: var(--sp-1);
-  /* Hidden until the row is engaged, exactly as the single control was. */
-  opacity: 0;
-}
-.rail-row:hover .rail-row-stopped-actions,
-.rail-row:focus-within .rail-row-stopped-actions { opacity: 1; }
-/* Inside the wrapper the buttons are ordinary flex children, so they must not re-position themselves. */
-.rail-row-stopped-actions .rail-row-forget {
-  position: static;
-  opacity: 1;
-}
-/* Deleting is the irreversible one, so it carries the danger colour on hover while `Forget` stays neutral: the
-   difference between them is the whole point of having both. */
-.rail-row-stopped-actions .rail-row-delete:hover {
-  color: var(--danger-text);
-  border-color: var(--danger);
-  background: var(--danger-tint);
+.header-lower {
+  display: flex;
+  flex-direction: column;
+  /* Stretch, so the control bar gets the full width of this band and does not inherit the PICKERS' narrower
+     content width. With `flex: none` the column was as wide as the pickers, and three controls wrapped onto a second
+     line inside a header that had room to spare — reported from a screenshot as "not sure if it is an improvement". */
+  align-items: stretch;
+  gap: var(--sp-2);
+  /* Sized to its content, so it does not push the identity block out; the pickers keep their own widths. */
+  flex: none;
+  min-width: 0;
 }
 
-.rail-row:hover .rail-row-forget, .rail-row:focus-within .rail-row-forget { opacity: 1; }
-.rail-row-forget:hover { color: var(--danger-text); border-color: var(--danger); }
-.rail-row-forget:focus-visible { outline: none; box-shadow: var(--focus); opacity: 1; }
+.session-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  /*
+   * The trailing group of the stats row — the top-right of the companion, above the pickers.
+   *
+   * Positioned by the ROW's `justify-content: space-between` rather than by an `auto` margin here: one mechanism for one
+   * job, and it cannot depend on space the row does not have.
+   */
+  /*
+   * ONE line, and it may not shrink.
+   *
+   * `flex: none` is the fix for the screenshot that showed a 2x2 block of buttons with the stats line pushed down.
+   * Inside `.header-stats` (which is `flex: none`, sized to the meter and the cost) these three buttons had no room, so
+   * `flex-wrap: wrap` did what it says: two on the first line, one on the second, and the taller row shoved `ctx`/`$`
+   * off its baseline.
+   *
+   * Three 32px buttons and two 4px gaps is 104px — it fits the 340px companion easily. The wrapping was never needed;
+   * it was a symptom of the bar being allowed to shrink. `nowrap` plus `flex: none` states the intent, and the stats row
+   * gets `justify-content: space-between` so the group still sits against the right edge.
+   */
+  flex: none;
+  flex-wrap: nowrap;
+}
+/*
+ * An ICON-ONLY control, and no shared `btn` class.
+ *
+ * The previous version carried `btn btn-quiet session-control`. `.btn` is defined LATER in this file and sets a
+ * background, a border and a radius at the same specificity — so it won the cascade and the "no chrome" bar still drew
+ * as three bordered buttons with long labels, which is what the screenshot showed after I claimed the chrome was gone.
+ * These are the only icon-only buttons in the app, so they own their styling outright.
+ *
+ * Colour is reinforcement, never the carrier. `--ok` on Resume says "this continues the work"; `--danger-text` on
+ * Delete says "this removes a file". Both are the app's existing tokens, so the bar belongs to the theme rather than
+ * importing a new palette — and both marks differ in SHAPE too (a play triangle, a bin), so nothing depends on colour
+ * vision. The words live in `aria-label` and `title`; see the component's header for why that is enough here.
+ */
+.session-control {
+  display: inline-grid;
+  place-items: center;
+  /* `relative` for the hairline that `.session-control-delete::before` draws beside it. */
+  position: relative;
+  /*
+   * 32x32, which is the app's OWN stated minimum for row actions (DESIGN.md §713: "row actions 32×32 minimum even
+   * though this is a mouse product"). It was 28 — a documented standard the code did not meet, and these are the only
+   * icon-only controls in the app, so there was no consistency argument for the exception.
+   */
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  /*
+   * A RESTING outline, not `transparent`.
+   *
+   * With no edge at rest the icons read as glyphs adrift in the panel — one reader described the lone stop square as
+   * looking like a status marker. A hairline says "button" before anything is hovered, which is the whole point of an
+   * icon-only control; `--line` rather than `--line-strong` keeps it quiet against the panel, and `--panel-3` gives it a
+   * surface so the shape is legible in `forced-colors` too.
+   */
+  background: var(--panel-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  color: var(--dim);
+  cursor: pointer;
+  /* The hover wash has to be visible against `--panel-2`, which is what the header is drawn on. */
+  transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
+}
+.session-control:hover { border-color: var(--line-strong); }
+.session-control:focus-visible { outline: none; box-shadow: var(--focus); }
+.session-control:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Resume continues the work, so it carries the "go" colour the app already uses for a healthy run. */
+.session-control-resume { color: var(--ok); }
+.session-control-resume:hover { color: var(--ok); background: var(--ok-tint); border-color: var(--ok); }
+/* Retry is the same idea for a failed run: it starts something again. */
+.session-control-retry { color: var(--ok); }
+.session-control-retry:hover { color: var(--ok); background: var(--ok-tint); border-color: var(--ok); }
+/* Stop ends a run. Amber rather than red: the transcript survives, so this is not destruction. */
+.session-control-stop { color: var(--warn-text); }
+.session-control-stop:hover { color: var(--warn-text); background: var(--warn-tint); border-color: var(--warn); }
+/* Delete removes a file and cannot be undone — the only destructive control, in the app's danger colour. */
+.session-control-danger { color: var(--danger-text); }
+.session-control-danger:hover,
+.session-control-delete:hover { color: var(--danger-text); background: var(--danger-tint); border-color: var(--danger); }
+/* Forget hides a row and keeps the file, so it stays neutral — the difference from Delete is exactly this. */
+.session-control-forget { color: var(--dim); }
+.session-control-forget:hover { color: var(--text); }
+
+/*
+ * A hairline before Delete.
+ *
+ * `Resume · Forget · Delete` at a uniform 4px gap presented three peers, with the one irreversible action separated from
+ * a safe one by nothing. Colour helped but said nothing about GROUPING — and Forget is the control a reader is most
+ * likely to have guessed wrong about, which makes its proximity to Delete the wrong thing to leave implicit.
+ *
+ * A margin rather than a border: this reads as a gap between groups, not as a decoration on a button.
+ */
+.session-control-delete {
+  color: var(--danger-text);
+  margin-left: var(--sp-2);
+}
+.session-control-delete::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--sp-2) - 1px);
+  top: 20%;
+  height: 60%;
+  width: 1px;
+  background: var(--line-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-control { transition: none; }
+}
+
+/*
+ * The rail row carries NO actions of its own.
+ *
+ * They were inline buttons pinned to the row's corner, then a `⋯` menu in the same corner. Both are cramped in a 288px
+ * column: the buttons overlapped the row's text and could not be clicked, and the menu was reported as "very tiny".
+ * The controls now live in the session companion panel beside the transcript, which has the width for them — see
+ * `sessionControlsFor` in `Inspector.tsx`.
+ */
 
 /*
  * The inline rename field (issues #78, #79).
@@ -806,14 +912,6 @@ button { font: inherit; color: inherit; }
 .history-delete:hover { color: var(--danger-text); background: var(--danger-tint); }
 .history-delete:focus-visible { outline: none; box-shadow: var(--focus); }
 
-.rail-row-actions { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
-.rail-row-retry {
-  background: none; border: 0; padding: 0 0 2px 2px;
-  font: inherit; font-size: var(--fs-2xs); font-weight: 600;
-  color: var(--accent-text); cursor: pointer;
-}
-.rail-row-retry:hover { text-decoration: underline; }
-.rail-row-retry:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--r-1); }
 /*
  * The earlier failure, kept after a retry. One dim line, truncated: it is evidence to compare against the next
  * attempt, not something to read in full on a rail row — the full text is on the row's `title`.
@@ -825,9 +923,6 @@ button { font: inherit; color: inherit; }
   font-size: var(--fs-2xs); color: var(--dim);
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-@media (prefers-reduced-motion: no-preference) { .rail-row-forget { transition: opacity 120ms ease; } }
-/* Touch and keyboard users get it without hovering, since there is no hover to give. */
-@media (hover: none) { .rail-row-forget { opacity: 1; } }
 
 .state-idle { border-left-color: var(--dim); }
 .state-starting { border-left-color: var(--accent); }
@@ -1791,6 +1886,99 @@ select.btn { font-family: var(--sans); }
 .empty h2 { margin: 0; font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.01em; }
 .empty p { margin: 0; color: var(--dim); font-size: var(--fs-md); }
 .empty .action { color: var(--text); }
+
+/*
+ * A stopped session, selected from the rail (issue #89).
+ *
+ * Every class here — `.stopped-session`, `.stopped-path`, `.stopped-facts`, `.stopped-actions` — had NO styling at all
+ * until a screenshot showed the result. The component was written as `.empty`, which is the CENTRING placeholder for
+ * "nothing is selected", so a stopped session rendered as centred prose with an unstyled description list and three
+ * loose buttons: the one view a reader sees when recovering work looked less finished than the screen it replaced.
+ *
+ * Left-aligned and top-aligned, like every other surface (DESIGN: alignment is left throughout, because every surface
+ * is either a scan list or a document). A short block near the top, not centred in a tall column, so it reads as a
+ * record rather than as a welcome screen.
+ */
+.stopped-session {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-5) 18px;
+  /* The same measure as the transcript, so the path and the facts line up with the prose above and below. */
+  max-width: 72ch;
+  min-height: 0;
+  overflow-y: auto;
+}
+.stopped-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+/* The transcript path: ONE line, ellipsised, with the whole thing in `title`. It was four wrapped lines of mono above
+   everything else, which pushed the actions down for no benefit — the path is identity, not reading matter. */
+.stopped-path {
+  margin: 0;
+  width: 100%;
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A labelled grid, not a bare `<dl>`: `dt`/`dd` default to a stacked pair with no styles, which is what made the
+   unstyled version look like loose text. */
+.stopped-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--sp-1) var(--sp-3);
+  margin: 0;
+  font-size: var(--fs-sm);
+  align-items: baseline;
+}
+.stopped-facts dt {
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.stopped-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.stopped-note {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+/* A directory that is gone: stated as the blocker it is, in the warning colour rather than as body prose. */
+.stopped-blocked {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--warn);
+  background: var(--warn-tint);
+  color: var(--warn-text);
+  font-size: var(--fs-sm);
+  border-radius: 0 var(--r-2) var(--r-2) 0;
+}
+
+/* The actions: labelled buttons on one line, wrapping only when the column is narrow. The same order as the live
+   header's control bar — the work-continuing action first, the irreversible one last. */
+.stopped-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+}
 
 .section-label {
   font-size: var(--fs-xs);
@@ -2765,8 +2953,16 @@ select.btn { font-family: var(--sans); }
   max-width: var(--gauge-width);
   height: 4px;
   border-radius: var(--r-pill);
+  /*
+   * The track is `--panel-3`, with the `--line` hairline — the gauge as it has always been drawn.
+   *
+   * Two attempts to make it survive a filled row were rejected, both because they changed the rendering rather than
+   * the row: a global `--bg` track, then a per-state override that darkened it on hover and selection. Reported as
+   * *"make the bar rendering as we always had it."* And it holds up: selection is `--panel-2`, which is DARKER than
+   * `--panel-3`, so the track reads against it. The only row where the track matches its surface is hover — which is
+   * transient, and not a place to compromise the appearance of every row.
+   */
   background: var(--panel-3);
-  /* A hairline edge so the track is visible at 0, where "empty" and "not rendered" would otherwise look alike. */
   box-shadow: inset 0 0 0 1px var(--line);
   overflow: hidden;
   /* Centred against the mono label's cap height rather than its baseline box. */
@@ -2780,6 +2976,7 @@ select.btn { font-family: var(--sans); }
   transition: width 240ms ease-out;
 }
 .context-bar.is-full .context-bar-fill { background: var(--warn); }
+
 
 /*
  * Recent directories in the open sheet (issue #149).
@@ -3197,7 +3394,18 @@ select.btn { font-family: var(--sans); }
 .transcript-header .session-header .title { min-width: 0; }
 /* The stats sit under the name, not pushed to a far edge: the `auto` margin belongs to a ROW layout, and inside a
    column it became the gap that a screenshot showed between `idle` and `ctx 2%` (`img_27.png`). */
-.transcript-header .header-stats { margin-left: 0; }
+.transcript-header .header-stats {
+  margin-left: 0;
+  /*
+   * Full width, with the telemetry left and the controls right.
+   *
+   * It used to be `flex: none` — sized to the meter and the cost — which left the control bar nothing to sit in, so it
+   * wrapped into a 2x2 block. `space-between` keeps the trailing edge without depending on the bar's own
+   * `margin-left: auto` finding space that does not exist.
+   */
+  width: 100%;
+  justify-content: space-between;
+}
 /* Same for the picker block: anchored left, under the stats, with its own label column intact. */
 /*
  * The pickers STACK in the companion box: label above control, one control per row.

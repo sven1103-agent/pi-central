@@ -261,6 +261,21 @@ export class Supervisor extends EventEmitter {
     const live = this.#findLiveByPath(session.path);
     if (live) return { ok: true, session: live }; // one process per session file (ADR-0004)
 
+    /*
+     * NO TRANSCRIPT YET means "start fresh", not "this session does not exist".
+     *
+     * Pi reports `sessionFile` from `get_state` — the path it WILL write — but creates the file lazily, on the first
+     * message. So a session stopped before it was ever prompted has a handle, a cwd and a path, and nothing on disk.
+     * Resuming it used to fail with `no such session: <path>`, which reads as a data-loss message for a session the
+     * reader had deliberately just stopped: reported as *"when i want to resume a session i have just stoppend, i get an
+     * error"*.
+     *
+     * Nothing is lost by starting fresh — there was never a transcript to resume — and the alternative is a rail entry
+     * that can only be deleted. `--session` is withheld in that case, because handing Pi a path that does not exist is
+     * exactly what its exit-1-on-missing-session path is for.
+     */
+    const hasTranscript = existsSync(session.path);
+
     const id = `s${++this.#created}`;
     const mode = options.mode ?? "sandboxed";
     const spawned = this.#spawn({
@@ -270,13 +285,15 @@ export class Supervisor extends EventEmitter {
       // No name: the session already carries its own, and re-applying one would append a
       // redundant session_info entry to a file we did not create.
       ...(options.env ? { env: options.env } : {}),
-      sessionPath: session.path,
+      ...(hasTranscript ? { sessionPath: session.path } : {}),
     });
     // Recorded HERE as well as from `#refreshState`, because reopening a session on the next launch
     // is the whole point of #185, and a resumed session that failed to start must still be
     // remembered — otherwise one bad spawn at startup would quietly shrink the rail on the launch
     // after it. `resume` is the only path that knows the file synchronously.
-    if (spawned.ok && this.#rememberOpenSessions) this.#open.remember(session.path, mode);
+    // A session with no transcript is remembered under the file Pi reports after it starts, not under `session.path` —
+    // otherwise the next launch would try to reopen a path that was never written.
+    if (spawned.ok && hasTranscript && this.#rememberOpenSessions) this.#open.remember(session.path, mode);
     return spawned;
   }
 
@@ -288,6 +305,45 @@ export class Supervisor extends EventEmitter {
    */
   listedByFile(sessionPath: string): LiveSession | undefined {
     return this.#findLiveByPath(sessionPath);
+  }
+
+  /**
+   * The session entry for one file, in ANY state — including `stopped` and `failed`.
+   *
+   * ## Why this is separate from `listedByFile`
+   *
+   * `listedByFile` answers "is a PROCESS holding this transcript open", because that is what refusing a delete needs,
+   * and it therefore excludes `stopped` and `failed`. Reusing it to answer "do I know this session" was wrong in a way
+   * that made a fix dead code: resuming a session the reader had just stopped asked `listedByFile`, got `undefined`,
+   * and refused with `no such session` — the exact report — because a stopped session is by definition not running.
+   *
+   * The two questions are different and now have different names.
+   */
+  /**
+   * Drop a session entry whose transcript has been deleted (issue #150).
+   *
+   * The FILE is already gone by the time this runs; what remains is a supervisor entry for a file that no longer exists.
+   * Left in place it would be re-broadcast in the next snapshot, and the client's "every live session belongs in the
+   * roster" effect would restore the row the reader had just deleted.
+   *
+   * Refused for a session that is still RUNNING. The delete path already refuses that case; this is the second guard,
+   * because forgetting a live entry would leave a process writing to a file nothing is tracking, which is the branch
+   * point ADR-0004 exists to prevent.
+   */
+  forgetFile(sessionPath: string): void {
+    const entry = this.entryByFile(sessionPath);
+    if (entry === undefined) return;
+    if (entry.state !== "stopped" && entry.state !== "failed") return;
+    this.#sessions.delete(entry.id);
+    this.#processes.delete(entry.id);
+    this.#open.forget(sessionPath);
+  }
+
+  entryByFile(sessionPath: string): LiveSession | undefined {
+    for (const session of this.#sessions.values()) {
+      if (session.sessionFile === sessionPath) return session;
+    }
+    return undefined;
   }
 
   #findLiveByPath(sessionPath: string): LiveSession | undefined {

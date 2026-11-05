@@ -241,6 +241,28 @@ test("History offers NO Delete when the orchestrator cannot delete", () => {
 });
 
 /** The rail's props, for the stopped-row tests. */
+/** A live session in the given state, with only the fields the panel's controls read. */
+const live = (over = {}) => ({
+  id: "s3",
+  name: "data manager work",
+  cwd: "/Users/x/git/data-manager",
+  state: "stopped",
+  mode: "sandboxed",
+  isolation: "",
+  command: "",
+  scratch: false,
+  messageCount: 4,
+  pending: 0,
+  contextPercent: 40,
+  tokensTotal: null,
+  cost: null,
+  dialogs: [],
+  warnings: [],
+  startedAt: 0,
+  sessionFile: "/sessions/p/a.jsonl",
+  ...over,
+});
+
 const railProps = {
   focusedId: undefined,
   onFocusRow() {},
@@ -255,93 +277,38 @@ const railProps = {
   onCloseDrawer() {},
 };
 
-test("a stopped rail row offers Forget AND Delete, and they are distinguishable", () => {
-  const html = renderToString(
-    createElement(SessionRail, {
-      ...railProps,
-      rows: [{ entry: { path: "/sessions/p/a.jsonl", name: "old task", cwd: "/Users/x/git/project" } }],
-      onDeleteRow() {},
-    }),
-  );
-  const doc = new JSDOM(`<body>${html}</body>`).window.document;
-  const forget = doc.querySelector(".rail-row-forget:not(.rail-row-delete)");
-  const del = doc.querySelector(".rail-row-delete");
-  assert.ok(forget, "Forget is present");
-  assert.ok(del, "Delete is present beside it");
+test("a stopped session offers Forget and Delete in the companion panel, and they differ", async () => {
+  // The controls moved off the rail row (asked for from use: they were "very tiny" there). Asserted as the panel's
+  // list, which is where they now live.
+  const { sessionControlsFor } = await server.ssrLoadModule("/src/components/Inspector.tsx");
+  const controls = sessionControlsFor(live({ state: "stopped" }), {
+    onForget() {},
+    onDelete() {},
+    onStop() {},
+    onResume() {},
+    retryAvailable: true,
+  });
+  const forget = controls.find((c) => c.key === "forget");
+  const del = controls.find((c) => c.key === "delete");
+  assert.ok(forget, "Forget is offered");
+  assert.ok(del, "Delete is offered beside it");
   // The irreversibility is stated on the control, because the two sit next to each other.
   assert.match(del.title, /cannot be undone/);
   assert.match(forget.title, /not deleted/, "and Forget says the opposite, so neither is mistaken for the other");
+  assert.equal(del.danger, true, "only the irreversible one is rendered in the danger colour");
 });
 
-test("a LIVE rail row offers neither, because a running transcript cannot be deleted", () => {
-  const live = {
-    id: "s1", name: "running", cwd: "/Users/x/git/project", state: "streaming", mode: "sandboxed",
-    isolation: "", command: "", scratch: false, messageCount: 1, pending: 0, contextPercent: null,
-    tokensTotal: null, cost: null, dialogs: [], warnings: [], startedAt: 0,
-  };
-  const html = renderToString(
-    createElement(SessionRail, {
-      ...railProps,
-      rows: [{ entry: { path: "/sessions/p/a.jsonl", cwd: live.cwd, name: live.name }, session: live }],
-      onDeleteRow() {},
-    }),
-  );
-  assert.ok(!/rail-row-delete/.test(html), `no delete on a live row: ${html}`);
-});
-
-// --- The refusal must be actionable (reported from use) ----------------------------------------
-
-test("a RUNNING rail row offers Stop, so a delete refusal can be acted on", () => {
+test("a RUNNING session offers Stop, so a delete refusal can be acted on", async () => {
   // Reported: "I get a warning, that I shall stop this session first. I dont see a session open with that id though."
-  // The rail had no Stop at all — it lived in the Session panel for the focused session only — so the instruction
-  // pointed at a control the reader could not reach from the list they were looking at.
-  const live = {
-    id: "s4", name: "data manager work", cwd: "/Users/x/git/data-manager", state: "idle", mode: "sandboxed",
-    isolation: "", command: "", scratch: false, messageCount: 3, pending: 0, contextPercent: null,
-    tokensTotal: null, cost: null, dialogs: [], warnings: [], startedAt: 0,
-  };
-  const html = renderToString(
-    createElement(SessionRail, {
-      ...railProps,
-      rows: [{ entry: { path: "/sessions/p/a.jsonl", cwd: live.cwd, name: live.name }, session: live }],
-      onStopRow() {},
-    }),
-  );
-  const doc = new JSDOM(`<body>${html}</body>`).window.document;
-  const stop = doc.querySelector(".rail-row-stop button");
-  assert.ok(stop, "a Stop control is rendered on the live row");
-  assert.match(stop.textContent, /Stop/);
-  // The consequence, not the mechanic — and the opposite of Delete's warning, so the two cannot be confused.
+  // The instruction has to be followable from the place the reader is already looking.
+  const { sessionControlsFor } = await server.ssrLoadModule("/src/components/Inspector.tsx");
+  const controls = sessionControlsFor(live({ state: "idle" }), { onStop() {}, onDelete() {}, retryAvailable: true });
+  const stop = controls.find((c) => c.key === "stop");
+  assert.ok(stop, "a Stop control is offered for a live session");
+  assert.match(stop.label, /Stop/);
+  // The consequence, not the mechanic — and the opposite of Delete's warning.
   assert.match(stop.title, /transcript stays/);
-});
-
-test("Stop is not offered where it cannot act", () => {
-  // `stopped` and `failed` have nothing to stop; a control that cannot act is worse than none.
-  const stopped = renderToString(
-    createElement(SessionRail, {
-      ...railProps,
-      rows: [{ entry: { path: "/sessions/p/a.jsonl", cwd: "/Users/x/git/p" } }],
-      onStopRow() {},
-    }),
-  );
-  // Matched with a boundary: `rail-row-stop` is a PREFIX of `rail-row-stopped-actions`, so a bare substring test
-  // matched the stopped-row wrapper and reported a Stop button that was not there.
-  assert.ok(!/rail-row-stop[\s"]/.test(stopped), "no Stop on a stopped row");
-});
-
-test("an orchestrator without the Stop control is not offered it", () => {
-  const live = {
-    id: "s1", name: "x", cwd: "/Users/x/git/p", state: "idle", mode: "sandboxed", isolation: "", command: "",
-    scratch: false, messageCount: 0, pending: 0, contextPercent: null, tokensTotal: null, cost: null,
-    dialogs: [], warnings: [], startedAt: 0,
-  };
-  const html = renderToString(
-    createElement(SessionRail, {
-      ...railProps,
-      rows: [{ entry: { path: "/sessions/p/a.jsonl", cwd: live.cwd, name: live.name }, session: live }],
-    }),
-  );
-  assert.ok(!/rail-row-stop[\s"]/.test(html), "withheld rather than shown-and-broken");
+  assert.ok(!controls.some((c) => c.key === "delete"), "and nothing destructive while the transcript is open");
 });
 
 // --- Pagination placement and the session count -----------------------------------------------

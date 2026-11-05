@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "control": [
     "abort",
     "answerDialog",
@@ -20,6 +20,7 @@
     "stop"
   ],
   "event": [
+    "deleted",
     "error",
     "file",
     "fileError",

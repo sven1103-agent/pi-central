@@ -33,11 +33,20 @@ const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").
   "",
 );
 
-/** The LAST rule for a selector: source order decides equal specificity, so the first match can be stale. */
+/**
+ * The rule whose SELECTOR IS EXACTLY `selector`.
+ *
+ * Anchored at the start of a line, and that anchor is load-bearing: a compound selector that *ends* in the same class
+ * matches a loose pattern. `.rail-row:hover .context-bar { ... }` satisfied `/\\.context-bar ?\\{/`, so a question
+ * about the BASE track answered itself with a state override and this test failed for a reason that had nothing to do
+ * with the gauge. Found when a hover override was added to the rail; the selector is the subject, so it is matched as
+ * one.
+ *
+ * The LAST match still wins, because source order decides equal specificity.
+ */
 function rule(selector) {
-  const normalised = css.replace(/\s+/g, " ");
   const wanted = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const all = [...normalised.matchAll(new RegExp(`(?<![\\w-])${wanted} ?\\{([^}]*)\\}`, "g"))];
+  const all = [...css.matchAll(new RegExp(`^${wanted} ?\\{([^}]*)\\}`, "gm"))];
   return all.length > 0 ? all[all.length - 1][1] : undefined;
 }
 

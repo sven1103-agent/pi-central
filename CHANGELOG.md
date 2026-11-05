@@ -35,6 +35,17 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- Forgetting the session you are looking at returns to the empty-state placeholder, never to another session ([#89]).
+- A selected stopped session renders as a styled record instead of centred, unstyled prose ([#89]).
+- Deleting a transcript also forgets the session, so the rail row stays gone and the placeholder shows ([#89]).
+
+- Resuming a session that was stopped before its first message starts it fresh, instead of reporting no such session
+  ([#89]).
+
+- A session's controls are 32px outlined icon buttons at the top right of the session header ([#89]).
+- The Forget control draws a list with a minus, not an eye with a slash, so "take it off the rail" reads as itself ([#89]).
+- The selected rail row is marked by a bar on its right edge, so its contents keep full contrast ([#89]).
+
 - Clicking a History session that is already running focuses it, instead of leaving the view on another session
   ([#150]).
 - A resumed session is focused when it arrives, and an unrelated new session can no longer claim that focus ([#150]).

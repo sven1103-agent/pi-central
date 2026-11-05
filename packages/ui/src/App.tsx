@@ -13,6 +13,7 @@ import { PROTOCOL_VERSION, supportsDelete, supportsRetry, type Control, type His
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
 import { ConfirmDelete } from "./components/ConfirmDelete.tsx";
 import { StoppedSession } from "./components/StoppedSession.tsx";
+import type { SessionControlCaps } from "./components/SessionControlBar.tsx";
 import {
   SKEW_PREFIX,
   assessProtocolSkew,
@@ -1192,30 +1193,6 @@ export function App() {
             setRailOpen(false);
           }}
           onForgetRow={(row) => dispatch({ kind: "forget", path: row.entry.path })}
-          /*
-            Delete is offered only when the orchestrator understands it (issue #150): a UI built from files can be
-            talking to an older in-memory orchestrator, and an unknown control on the one irreversible action would
-            appear to work and do nothing.
-          */
-          /*
-            Stop from the row, so a delete refusal is actionable (issue #150 follow-up). The refusal tells the reader to
-            stop the session; without this they had to find it, focus it, and stop it from the Session panel.
-          */
-          onStopRow={(row) => {
-            if (row.session !== undefined) send({ kind: "stop", sessionId: row.session.id });
-          }}
-          onDeleteRow={
-            supportsDelete(state.install?.protocol)
-              ? (row) =>
-                  setPendingDelete({
-                    paths: [row.entry.path],
-                    // The same label the row showed — including its first prompt, which the row may be labelled by —
-                    // so the dialog cannot name a different session than the one clicked.
-                    label: rowLabel(row, rowPrompt(row)),
-                    cwd: row.entry.cwd ?? "",
-                  })
-              : undefined
-          }
           retryAvailable={supportsRetry(state.install?.protocol)}
           onRetryRow={(row) => {
             // Only a live session has a handle to retry with; a row that is not running has no process to
@@ -1346,6 +1323,47 @@ export function App() {
               modelError={focused ? state.modelErrors[focused.id] : undefined}
               onRename={renameFocused}
               onNewInDirectory={onOpenDirectory}
+              /*
+                The control bar for the focused session, on its header row.
+
+                Stop, Resume, Retry, Forget and Delete, on the row above the transcript — where the session's name and
+                directory already are, and where it is always visible. Not the side panel (collapsed by default, so
+                unreachable) and not the rail row (two cramped attempts). Each action addresses the session by its FILE
+                where a path is needed: a stopped session has no process, so its handle means nothing durable.
+              */
+              controls={{
+                onStop: () => setConfirmStop(focusedSession(state) ?? undefined),
+                onResume: () => {
+                  const target = focusedSession(state);
+                  if (target?.sessionFile === undefined) return;
+                  dispatch({ kind: "focusRow", key: target.sessionFile });
+                  dispatch({ kind: "expectNewSession", file: target.sessionFile });
+                  send({ kind: "resume", path: target.sessionFile });
+                },
+                onRetry: () => {
+                  const target = focusedSession(state);
+                  if (target === undefined) return;
+                  send({ kind: "retry", sessionId: target.id });
+                },
+                retryAvailable: supportsRetry(state.install?.protocol),
+                onForget: () => {
+                  const target = focusedSession(state);
+                  if (target?.sessionFile !== undefined) dispatch({ kind: "forget", path: target.sessionFile });
+                },
+                ...(supportsDelete(state.install?.protocol)
+                  ? {
+                      onDelete: () => {
+                        const target = focusedSession(state);
+                        if (target?.sessionFile === undefined) return;
+                        setPendingDelete({
+                          paths: [target.sessionFile],
+                          label: displayName(target),
+                          cwd: target.cwd,
+                        });
+                      },
+                    }
+                  : {}),
+              }}
               onAnswer={onAnswer}
               onRequestModels={() => {
                 if (focused) send({ kind: "listModels", sessionId: focused.id });
@@ -1476,6 +1494,37 @@ export function App() {
               home={home}
               onStop={() => focused && setConfirmStop(focused)}
               onRename={renameFocused}
+              /*
+                The session's controls live HERE, not on the rail row (asked for from use: "maybe we introduce these as
+                session control actions in the session companion next to the transcript?"). The row gave them 288px and
+                a tiny `⋯`; this panel has room for labels that say what they do.
+
+                Each one acts on the FOCUSED session, by its file where a path is needed — a stopped session has no
+                process, so its handle addresses nothing durable (ADR-0004).
+              */
+              onResume={() => {
+                if (!focused?.sessionFile) return;
+                dispatch({ kind: "focusRow", key: focused.sessionFile });
+                dispatch({ kind: "expectNewSession", file: focused.sessionFile });
+                send({ kind: "resume", path: focused.sessionFile });
+              }}
+              onRetry={() => focused && send({ kind: "retry", sessionId: focused.id })}
+              retryAvailable={supportsRetry(state.install?.protocol)}
+              onForget={() => {
+                if (focused?.sessionFile) dispatch({ kind: "forget", path: focused.sessionFile });
+              }}
+              {...(supportsDelete(state.install?.protocol)
+                ? {
+                    onDelete: () => {
+                      if (!focused?.sessionFile) return;
+                      setPendingDelete({
+                        paths: [focused.sessionFile],
+                        label: displayName(focused),
+                        cwd: focused.cwd,
+                      });
+                    },
+                  }
+                : {})}
             />
           ) : focused ? (
             <FilesPanel
@@ -1620,6 +1669,7 @@ function SessionView({
   onAnswer,
   onRename,
   onNewInDirectory,
+  controls,
   onRequestModels,
   onSelectModel,
   thinking,
@@ -1667,6 +1717,8 @@ function SessionView({
   onRename: (name: string) => void;
   /** Start a NEW session in this session's directory (issue #149). */
   onNewInDirectory?: ((cwd: string) => void) | undefined;
+  /** The session's control bar — Stop, Resume, Retry, Forget, Delete. Built by the shell. */
+  controls?: SessionControlCaps | undefined;
   onRequestModels: () => void;
   onSelectModel: (provider: string, modelId: string) => void;
   thinking: { levels: string[] | undefined; error: string | undefined };
@@ -1774,6 +1826,7 @@ function SessionView({
             onSelectThinkingLevel={onSelectThinkingLevel}
             onRename={onRename}
             onNewInDirectory={onNewInDirectory}
+            controls={controls}
             busy={busy}
             warnings={session.warnings}
           />

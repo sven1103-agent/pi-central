@@ -23,7 +23,7 @@ import type {
   PiRecord,
 } from "@pi-central/protocol";
 import { applyRecord, emptyTranscript, seedTranscript, type Transcript } from "./transcript.ts";
-import { addToRoster, moveToFront, removeFromRoster, type RosterEntry, type RosterRow } from "./roster.ts";
+import { addToRoster, moveToFront, removeFromRoster, rosterEntryFor, type RosterEntry, type RosterRow } from "./roster.ts";
 // A type-only import from a component, which is the odd part of this file: `QueueBehavior` is the composer's
 // vocabulary for how a prompt joins a run, and `pendingPrompt` has to speak it so a parked prompt is sent with
 // the same behaviour the reader chose. Imported as a TYPE so no component code is pulled into the reducer.
@@ -293,7 +293,35 @@ export function reduce(
     return { ...state, roster: addToRoster(state.roster, event.entry) };
   }
   if (event.kind === "forget") {
-    return { ...state, roster: removeFromRoster(state.roster, event.path) };
+    /*
+     * Forgetting the FOCUSED session clears the view. It does not fall to another session.
+     *
+     * Removing the roster entry used to leave `focusedId` alone, so the session stayed open in the middle column after
+     * the reader had removed it from the rail — *"When a user removes a session from the roster, it is still open in the
+     * active session pannel."*
+     *
+     * The first fix fell back to the next live session, on the theory that running work should not be hidden. Reported
+     * back from use: *"when stopping a session and then click on forget, it jumps to the next idle one. I want it to not
+     * select any random session, we do not know what the user wants to see. Show the startup window instead."* That is
+     * correct, and it is the stronger rule: **a choice the reader did not make must not put a session in front of
+     * them.** Landing on an arbitrary conversation invites typing into the wrong one, and the reader has no way to tell
+     * whether it was chosen or fell there.
+     *
+     * So the focus clears, and the placeholder appears — which says what the state actually is: nothing is selected, and
+     * here is how to open something.
+     *
+     * The key is either a live session's handle or a roster entry's path (issue #89), so both spellings are compared.
+     * Forgetting a row nobody is looking at must still not move the reader.
+     */
+    const roster = removeFromRoster(state.roster, event.path);
+    const key = state.focusedId;
+    if (key === undefined) return { ...state, roster };
+
+    const owner = state.live.find((session) => session.sessionFile === event.path);
+    const forgettingFocused = key === event.path || (owner !== undefined && key === owner.id);
+    if (!forgettingFocused) return { ...state, roster };
+
+    return { ...state, roster, focusedId: undefined };
   }
   if (event.kind === "queuePrompt") {
     return {
@@ -340,13 +368,29 @@ export function reduce(
 function applyEvent(state: UiState, event: import("@pi-central/protocol").Event): UiState {
   switch (event.kind) {
     case "snapshot": {
-      // Authoritative replacement, both halves. `focusedId` is preserved when that session is
-      // still present, so a reconnect does not move the user's view.
-      const stillPresent = state.focusedId && event.live.some((s) => s.id === state.focusedId);
-      const focusedId = stillPresent
+      /*
+       * Authoritative replacement, both halves. Focus is preserved when it still resolves, and NOT chosen otherwise.
+       *
+       * It used to fall back to `event.live[0]`, on the theory that "a user arriving expects a session". But a snapshot
+       * also arrives after a DELETE, and the reader had just deliberately removed the session they were looking at — so
+       * the fallback put a different conversation on screen in place of the placeholder. Reported as: *"when deleting a
+       * transcript, it is not removed from the rail and not the default entry app layout shown."*
+       *
+       * The rule is the same one `forget` follows: **a choice the reader did not make must not put a session in front of
+       * them.** Landing on an arbitrary conversation invites typing into the wrong one, and the reader cannot tell
+       * whether it was selected or fell there.
+       *
+       * A genuinely FIRST snapshot is different — `ready` is false and there is nothing to preserve — and there the
+       * first live session is the useful default, because the reader has expressed no intent at all.
+       */
+      const stillPresent =
+        state.focusedId !== undefined && event.live.some((s) => s.id === state.focusedId);
+      const focusStillResolvable =
+        stillPresent || state.roster.some((entry) => entry.path === state.focusedId);
+      const focusedId = focusStillResolvable
         ? state.focusedId
-        : // Otherwise focus the first session, which is what a user arriving expects.
-          event.live[0]?.id;
+        : // Only on the first snapshot, before the reader has had a chance to focus anything.
+          (state.ready ? undefined : event.live[0]?.id);
       return {
         ...state,
         live: event.live,
@@ -527,6 +571,44 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
       };
     }
 
+    case "deleted": {
+      /*
+       * A transcript was removed from disk: drop the row, and move the view off it if it was focused.
+       *
+       * Distinct from `forget`, which removes a row and KEEPS the file. Deleting is irreversible, so the row must not
+       * survive as a tombstone: the reader would press Delete again and the second attempt would fail on a file that no
+       * longer exists — reported as: *"it is not removed from the rail and not the default entry app layout shown. This
+       * leads to users trying to trigger delete again and then this step fails, because the session file was indeed
+       * deleted."*
+       *
+       * `history` and the `snapshot` that follow cannot express this: they say what exists now, and a session that
+       * scrolled out of the discovered page looks identical to one that was deleted. The roster is `localStorage`, so it
+       * has to be told.
+       */
+      const roster = removeFromRoster(state.roster, event.path);
+      const owner = state.live.find((session) => session.sessionFile === event.path);
+      const key = state.focusedId;
+      const wasFocused = key !== undefined && (key === event.path || (owner !== undefined && key === owner.id));
+
+      /*
+       * The session is dropped from `live` TOO, and that is what makes the deletion stick.
+       *
+       * `App` re-remembers every live session on any change to `state.live` — correct, since a running session belongs
+       * in the rail. But a STOPPED session also lives in `state.live` (`stopped` is a state, not an absence, C3), so
+       * removing the roster row alone left it to be added straight back by that effect on the next render. Reported
+       * as: *"When I stop a session and click delete, they are still in the roster."*
+       *
+       * Dropping it here is honest rather than a workaround: the transcript is gone, so the supervisor's entry is a
+       * row for a file that no longer exists. The orchestrator already refuses the delete for a RUNNING session, so
+       * this cannot arrive for one, and the snapshot that follows is authoritative about what is still running.
+       */
+      const live = owner === undefined ? state.live : state.live.filter((session) => session.id !== owner.id);
+
+      return wasFocused
+        ? { ...state, roster, live, focusedId: undefined }
+        : { ...state, roster, live };
+    }
+
     case "history":
       return { ...state, history: event.history, historyTotal: event.total, ready: true };
 
@@ -629,22 +711,34 @@ export function focusedStoppedRow(state: UiState): RosterRow | undefined {
   const id = state.focusedId;
   if (id === undefined) return undefined;
   /*
-   * A live handle wins, so one session never gets two views.
+   * A live handle wins — UNLESS the session is stopped.
    *
-   * Defence in depth rather than a live fix: a live handle (`s1`) can never equal a roster path (an absolute `.jsonl`
-   * path), so the `find` below would return nothing anyway. It is kept because the two branches render DIFFERENT
-   * components for the same row — `SessionView` or `StoppedSession` — and a future change that made a handle and a path
-   * collide would silently render both.
-   *
-   * Stated plainly because I could not falsify it on its own: removing it changes no test, which is what "cannot fail"
-   * looks like from the outside.
+   * `stopped` is a state, not an absence (C3): the supervisor keeps the session object, so a stopped row still has a
+   * handle. Gating on "a live session exists" therefore sent a stopped session to `SessionView`, which renders a
+   * running session's furniture for a process that is not there — and, before `isRunning` existed, left the row with no
+   * Resume at all. A stopped session is a stopped session whether or not its object lingers.
    */
-  if (state.live.some((session) => session.id === id)) return undefined;
+  const live = state.live.find((session) => session.id === id);
+  if (live !== undefined && live.state !== "stopped") return undefined;
+  if (live !== undefined) {
+    /*
+     * Build the row from the live session, because a stopped session may never have been in the roster under this
+     * handle's path — and `StoppedSession` needs an entry with a path to resume from.
+     */
+    const entry = state.roster.find((candidate) => candidate.path === live.sessionFile) ?? rosterEntryFor(live);
+    if (entry === undefined) return undefined;
+    return { entry, session: live };
+  }
   const entry = state.roster.find((candidate) => candidate.path === id);
   if (entry === undefined) return undefined;
-  // A session that came back is live again; the live branch above already returned in that case, but a snapshot can
-  // race a focus, so the join is done here rather than trusted.
-  const session = state.live.find((candidate) => candidate.sessionFile === entry.path);
+  /*
+   * Join the session only when it is STOPPED.
+   *
+   * A path focus can race a resume: `focusRow` resolves a file to a handle when a live session holds it, but a snapshot
+   * could land between the two. Returning the running session here would render the stopped-session view for a live
+   * process, so the running case is deliberately excluded rather than trusted to the ordering above.
+   */
+  const session = state.live.find((candidate) => candidate.sessionFile === entry.path && candidate.state === "stopped");
   return { entry, session };
 }
 

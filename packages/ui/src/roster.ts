@@ -410,3 +410,24 @@ export function shortSessionId(path: string): string {
   if (match === null) return stem;
   return `${match[1]} · ${match[2]!.split("-")[0]!.slice(0, 8)}`;
 }
+
+/**
+ * Is this row's session actually RUNNING?
+ *
+ * ## The defect this exists for
+ *
+ * The rail's controls were gated on `session === undefined`, i.e. "this row has no live session object". But stopping
+ * a session does not remove it from the live list — the supervisor keeps it (C3: `stopped` is a state, not an absence)
+ * — so after pressing Stop the row had a session, `state === "stopped"`, and therefore **no controls at all**: no
+ * Resume, no Forget, no Delete. Reported as: *"the session roster can stop sessions, but then you cant resume them or
+ * remove them from the roster."*
+ *
+ * A stopped session is not running, and every question the rail asks about a row — may I resume it, may I forget it,
+ * may I stop it — is about that, not about whether an object exists.
+ *
+ * `failed` is deliberately NOT included: a failed session has its own Retry, and treating it as "not running" would
+ * move it into the stopped-session view and lose that.
+ */
+export function isRunning(session: LiveSession | undefined): boolean {
+  return session !== undefined && session.state !== "stopped";
+}

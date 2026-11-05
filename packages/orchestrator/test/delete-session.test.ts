@@ -213,3 +213,88 @@ test("deleting one session leaves its siblings alone", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+/**
+ * The supervisor's entry goes with the file (reported from use).
+ *
+ * > "When I stop a session and click delete, they are still in the roster."
+ *
+ * Unlinking the file was not enough: the supervisor still held an entry for it, which the next snapshot re-broadcast,
+ * and the client's "every live session belongs in the roster" effect restored the row. Deleting is therefore
+ * forget-and-delete as one act — the reader is not asked to do both.
+ */
+test("forgetFile drops a stopped entry, so a snapshot cannot restore it", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-central-forget-file-"));
+  try {
+    const cwd = join(root, "work");
+    mkdirSync(cwd, { recursive: true });
+    mkdirSync(join(root, "sessions"), { recursive: true });
+    const { Supervisor } = await import("../src/supervisor.ts");
+    const supervisor = new Supervisor({
+      workspaceRoot: join(root, "w"),
+      stateRoot: join(root, "s"),
+      sessionsRoot: join(root, "sessions"),
+      safehouse: "safehouse-not-present",
+      pi: "pi-not-present",
+      agentRoot: join(root, "agent"),
+      fragmentDir: join(root, "s", "policy"),
+      agentRootManaged: true,
+      providerAgentDir: join(root, "provider"),
+      home: root,
+      installationRoot: undefined,
+    });
+    supervisor.on("error", () => {});
+
+    const started = supervisor.start({ cwd });
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+    const file = join(root, "sessions", "--work--", "x.jsonl");
+    started.session.sessionFile = file;
+    // Stopped, which is the state a delete is allowed from.
+    await supervisor.stop(started.session.id);
+
+    assert.equal(supervisor.list().length, 1, "the entry exists");
+    supervisor.forgetFile(file);
+    assert.deepEqual(supervisor.list(), [], "and is gone, so no snapshot can re-broadcast it");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("forgetFile refuses a RUNNING session, so a live process is never orphaned", async () => {
+  // The delete path already refuses a live session; this is the second guard. Forgetting a running entry would leave a
+  // process writing to a file nothing tracks, which is the branch point ADR-0004 prevents.
+  const root = mkdtempSync(join(tmpdir(), "pi-central-forget-live-"));
+  try {
+    const cwd = join(root, "work");
+    mkdirSync(cwd, { recursive: true });
+    mkdirSync(join(root, "sessions"), { recursive: true });
+    const { Supervisor } = await import("../src/supervisor.ts");
+    const supervisor = new Supervisor({
+      workspaceRoot: join(root, "w"),
+      stateRoot: join(root, "s"),
+      sessionsRoot: join(root, "sessions"),
+      safehouse: "safehouse-not-present",
+      pi: "pi-not-present",
+      agentRoot: join(root, "agent"),
+      fragmentDir: join(root, "s", "policy"),
+      agentRootManaged: true,
+      providerAgentDir: join(root, "provider"),
+      home: root,
+      installationRoot: undefined,
+    });
+    supervisor.on("error", () => {});
+    const started = supervisor.start({ cwd });
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+    const file = join(root, "sessions", "--work--", "x.jsonl");
+    started.session.sessionFile = file;
+    started.session.state = "streaming";
+
+    supervisor.forgetFile(file);
+    assert.equal(supervisor.list().length, 1, "a running session is not forgotten");
+    await supervisor.stopAll({ forget: false });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

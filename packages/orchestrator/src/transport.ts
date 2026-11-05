@@ -379,10 +379,53 @@ export class Transport {
          */
         const target = await sessionAt(this.#config, control.path);
         if (!target) {
-          this.#broadcast({
-            kind: "error",
-            message: `no such session: ${control.path}`,
-          });
+          /*
+           * An unresolvable path is REFUSED only when no live session holds it.
+           *
+           * Pi reports `sessionFile` from `get_state` — the path it will write — and creates the file lazily, on the
+           * first message. A session stopped before it was ever prompted therefore has a rail entry whose file does not
+           * exist, and `sessionAt` correctly returns nothing for it. `no such session` reads as data loss for a session
+           * the reader had just deliberately stopped: *"when i want to resume a session i have just stoppend, i get an
+           * error"*.
+           *
+           * The supervisor's `resume` already draws the distinction — it withholds `--session` when there is no
+           * transcript and starts fresh in the recorded directory — so this only has to stop refusing before that.
+           * The entry is reconstructed from the live session, which is where the cwd and mode still are.
+           */
+          // `entryByFile`, NOT `listedByFile`: the latter excludes `stopped`, which is exactly the state being resumed.
+          const owner = this.#supervisor.entryByFile(control.path);
+          if (owner === undefined) {
+            this.#broadcast({
+              kind: "error",
+              message: `no such session: ${control.path}. Its transcript is not on disk, and no running session holds it.`,
+            });
+            return;
+          }
+          /*
+           * A minimal `HistoricalSession`: `resume` reads `path` and `cwd`, and the rest describe the transcript that
+           * does not exist. Filling them with zeros would be inventing facts, so they are stated as what they are —
+           * nothing yet — and the supervisor's own `checkResumable` decides the directory's fate.
+           */
+          const resumed = this.#supervisor.resume(
+            {
+              path: control.path,
+              cwd: owner.cwd,
+              id: owner.sessionId ?? owner.id,
+              created: "",
+              modifiedMs: 0,
+              bytes: 0,
+              messageCount: 0,
+              firstMessage: "",
+              cwdExists: true,
+              scratch: owner.scratch,
+            },
+            control.mode ? { mode: control.mode } : {},
+          );
+          if (!resumed.ok) {
+            this.#broadcast({ kind: "error", message: resumed.message });
+            return;
+          }
+          this.#broadcast({ kind: "session", session: resumed.session });
           return;
         }
         const result = this.#supervisor.resume(target, control.mode ? { mode: control.mode } : {});
@@ -504,7 +547,28 @@ export class Transport {
         if (result.sidecarFailure !== undefined) {
           this.#broadcast({ kind: "error", message: result.sidecarFailure });
         }
-        // Re-discover and re-broadcast, so both the rail and History drop the row from one authoritative answer
+        /*
+         * TELL the clients what was deleted, before the store is re-described.
+         *
+         * `history` and `snapshot` say what exists now; neither can say what was removed, because a session that
+         * scrolled out of the discovered page looks the same as a deleted one. The roster is `localStorage` and keeps
+         * its own list, so it has to be told — otherwise the rail keeps a row whose transcript is gone, the reader
+         * presses Delete again, and the second attempt fails on a file that no longer exists. Reported as: *"when
+         * deleting a transcript, it is not removed from the rail"*.
+         */
+        /*
+         * The supervisor FORGETS the session too, not just the file being unlinked.
+         *
+         * Its entry is a row for a file that no longer exists, and it would be re-broadcast in the snapshot below —
+         * so the client's "every live session belongs in the roster" effect would put the row straight back, and the
+         * deletion would not stick. Reported as: *"When I stop a session and click delete, they are still in the
+         * roster."* Deleting is therefore forget-and-delete, as one act; the reader is not asked to do both.
+         */
+        await this.#supervisor.forgetFile(control.path);
+
+        this.#broadcast({ kind: "deleted", path: control.path });
+
+        // Then re-describe the store, so both the rail and History drop the row from one authoritative answer
         // rather than each removing it locally and possibly disagreeing.
         const after = await discover(this.#config);
         this.#broadcast({ kind: "history", history: after.sessions, total: after.total });
