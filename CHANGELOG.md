@@ -36,6 +36,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 ### Fixed
 
 - Forgetting the session you are looking at returns to the empty-state placeholder, never to another session ([#89]).
+- A selected stopped session renders as a styled record instead of centred, unstyled prose ([#89]).
 
 - Resuming a session that was stopped before its first message starts it fresh, instead of reporting no such session
   ([#89]).

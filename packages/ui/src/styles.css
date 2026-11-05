@@ -1887,6 +1887,99 @@ select.btn { font-family: var(--sans); }
 .empty p { margin: 0; color: var(--dim); font-size: var(--fs-md); }
 .empty .action { color: var(--text); }
 
+/*
+ * A stopped session, selected from the rail (issue #89).
+ *
+ * Every class here — `.stopped-session`, `.stopped-path`, `.stopped-facts`, `.stopped-actions` — had NO styling at all
+ * until a screenshot showed the result. The component was written as `.empty`, which is the CENTRING placeholder for
+ * "nothing is selected", so a stopped session rendered as centred prose with an unstyled description list and three
+ * loose buttons: the one view a reader sees when recovering work looked less finished than the screen it replaced.
+ *
+ * Left-aligned and top-aligned, like every other surface (DESIGN: alignment is left throughout, because every surface
+ * is either a scan list or a document). A short block near the top, not centred in a tall column, so it reads as a
+ * record rather than as a welcome screen.
+ */
+.stopped-session {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-5) 18px;
+  /* The same measure as the transcript, so the path and the facts line up with the prose above and below. */
+  max-width: 72ch;
+  min-height: 0;
+  overflow-y: auto;
+}
+.stopped-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+/* The transcript path: ONE line, ellipsised, with the whole thing in `title`. It was four wrapped lines of mono above
+   everything else, which pushed the actions down for no benefit — the path is identity, not reading matter. */
+.stopped-path {
+  margin: 0;
+  width: 100%;
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A labelled grid, not a bare `<dl>`: `dt`/`dd` default to a stacked pair with no styles, which is what made the
+   unstyled version look like loose text. */
+.stopped-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--sp-1) var(--sp-3);
+  margin: 0;
+  font-size: var(--fs-sm);
+  align-items: baseline;
+}
+.stopped-facts dt {
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.stopped-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.stopped-note {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--dim);
+}
+/* A directory that is gone: stated as the blocker it is, in the warning colour rather than as body prose. */
+.stopped-blocked {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--warn);
+  background: var(--warn-tint);
+  color: var(--warn-text);
+  font-size: var(--fs-sm);
+  border-radius: 0 var(--r-2) var(--r-2) 0;
+}
+
+/* The actions: labelled buttons on one line, wrapping only when the column is narrow. The same order as the live
+   header's control bar — the work-continuing action first, the irreversible one last. */
+.stopped-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+}
+
 .section-label {
   font-size: var(--fs-xs);
   color: var(--dim);

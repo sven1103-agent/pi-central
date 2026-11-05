@@ -22,6 +22,7 @@
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import { createServer } from "vite";
 import { createElement } from "react";
@@ -196,4 +197,52 @@ test("Resume is disabled, with the reason, when the directory is gone", () => {
 test("Delete is offered only when the orchestrator can delete", () => {
   assert.ok(!/Delete transcript/.test(stoppedView()), "no delete control without the capability");
   assert.match(stoppedView({ onDelete() {} }), /Delete transcript/, "and one with it");
+});
+
+// --- The view must be STYLED (from a screenshot: "now the old stoped sessions look weird") --------------
+
+test("every class this view renders has a rule in the stylesheet", () => {
+  // The component was written as `<div className="empty stopped-session">` and never looked at. `.empty` is the CENTRING
+  // placeholder for "nothing is selected", so a stopped session rendered as centred prose with an unstyled <dl> and
+  // three loose buttons — the recovery view looked less finished than the screen it replaced.
+  //
+  // This is a guard against the whole class of defect, not just this instance: a component that names a class nobody
+  // styles renders as unstyled markup, and nothing else in the suite notices.
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const html = renderToString(
+    createElement(StoppedSession, {
+      row: { entry: twinEntries[0] },
+      history: { path: twinEntries[0].path, id: "a", cwd: "/x/git/p", created: "", modifiedMs: 1_700_000_000_000,
+        bytes: 9800, messageCount: 26, firstMessage: "a question", cwdExists: true, scratch: false },
+      home: "/x",
+      onResume() {},
+      onForget() {},
+      onDelete() {},
+    }),
+  );
+  const classes = new Set(
+    [...new JSDOM(`<body>${html}</body>`).window.document.querySelectorAll("[class]")].flatMap((el) =>
+      el.className.split(" ").filter((c) => c.length > 0),
+    ),
+  );
+  const styled = Object.fromEntries(
+    [...classes].map((cls) => [cls, new RegExp(`\\.${cls}(?![\\w-])`).test(css)]),
+  );
+  assert.deepEqual(
+    Object.entries(styled).filter(([, ok]) => !ok).map(([cls]) => cls),
+    [],
+    "a class with no rule renders as unstyled markup",
+  );
+  // And specifically NOT the centring placeholder: this is a record with actions, not a welcome screen.
+  assert.ok(!classes.has("empty"), "must not borrow the empty-state layout");
+});
+
+test("the transcript path is one ellipsised line, not four wrapped ones", () => {
+  // It was four lines of mono above everything else, pushing the actions below the fold for no benefit.
+  const rule = /\.stopped-path\s*\{([^}]*)\}/.exec(
+    readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, ""),
+  )?.[1];
+  assert.ok(rule, ".stopped-path has a rule");
+  assert.match(rule, /text-overflow:\s*ellipsis/);
+  assert.match(rule, /white-space:\s*nowrap/);
 });
