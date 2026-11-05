@@ -589,11 +589,24 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
       const owner = state.live.find((session) => session.sessionFile === event.path);
       const key = state.focusedId;
       const wasFocused = key !== undefined && (key === event.path || (owner !== undefined && key === owner.id));
+
       /*
-       * `live` is left alone: the orchestrator refuses to delete a live session's transcript, so this cannot arrive for
-       * one, and the snapshot that follows is authoritative about what is running.
+       * The session is dropped from `live` TOO, and that is what makes the deletion stick.
+       *
+       * `App` re-remembers every live session on any change to `state.live` — correct, since a running session belongs
+       * in the rail. But a STOPPED session also lives in `state.live` (`stopped` is a state, not an absence, C3), so
+       * removing the roster row alone left it to be added straight back by that effect on the next render. Reported
+       * as: *"When I stop a session and click delete, they are still in the roster."*
+       *
+       * Dropping it here is honest rather than a workaround: the transcript is gone, so the supervisor's entry is a
+       * row for a file that no longer exists. The orchestrator already refuses the delete for a RUNNING session, so
+       * this cannot arrive for one, and the snapshot that follows is authoritative about what is still running.
        */
-      return wasFocused ? { ...state, roster, focusedId: undefined } : { ...state, roster };
+      const live = owner === undefined ? state.live : state.live.filter((session) => session.id !== owner.id);
+
+      return wasFocused
+        ? { ...state, roster, live, focusedId: undefined }
+        : { ...state, roster, live };
     }
 
     case "history":

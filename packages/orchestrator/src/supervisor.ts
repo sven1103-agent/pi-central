@@ -319,6 +319,26 @@ export class Supervisor extends EventEmitter {
    *
    * The two questions are different and now have different names.
    */
+  /**
+   * Drop a session entry whose transcript has been deleted (issue #150).
+   *
+   * The FILE is already gone by the time this runs; what remains is a supervisor entry for a file that no longer exists.
+   * Left in place it would be re-broadcast in the next snapshot, and the client's "every live session belongs in the
+   * roster" effect would restore the row the reader had just deleted.
+   *
+   * Refused for a session that is still RUNNING. The delete path already refuses that case; this is the second guard,
+   * because forgetting a live entry would leave a process writing to a file nothing is tracking, which is the branch
+   * point ADR-0004 exists to prevent.
+   */
+  forgetFile(sessionPath: string): void {
+    const entry = this.entryByFile(sessionPath);
+    if (entry === undefined) return;
+    if (entry.state !== "stopped" && entry.state !== "failed") return;
+    this.#sessions.delete(entry.id);
+    this.#processes.delete(entry.id);
+    this.#open.forget(sessionPath);
+  }
+
   entryByFile(sessionPath: string): LiveSession | undefined {
     for (const session of this.#sessions.values()) {
       if (session.sessionFile === sessionPath) return session;

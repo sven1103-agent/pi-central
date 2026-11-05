@@ -37,8 +37,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 - Forgetting the session you are looking at returns to the empty-state placeholder, never to another session ([#89]).
 - A selected stopped session renders as a styled record instead of centred, unstyled prose ([#89]).
-- Deleting a transcript removes its rail row and returns to the placeholder, instead of leaving a row that fails on a
-  second attempt ([#89]).
+- Deleting a transcript also forgets the session, so the rail row stays gone and the placeholder shows ([#89]).
 
 - Resuming a session that was stopped before its first message starts it fresh, instead of reporting no such session
   ([#89]).

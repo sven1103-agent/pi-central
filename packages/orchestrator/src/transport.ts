@@ -556,6 +556,16 @@ export class Transport {
          * presses Delete again, and the second attempt fails on a file that no longer exists. Reported as: *"when
          * deleting a transcript, it is not removed from the rail"*.
          */
+        /*
+         * The supervisor FORGETS the session too, not just the file being unlinked.
+         *
+         * Its entry is a row for a file that no longer exists, and it would be re-broadcast in the snapshot below —
+         * so the client's "every live session belongs in the roster" effect would put the row straight back, and the
+         * deletion would not stick. Reported as: *"When I stop a session and click delete, they are still in the
+         * roster."* Deleting is therefore forget-and-delete, as one act; the reader is not asked to do both.
+         */
+        await this.#supervisor.forgetFile(control.path);
+
         this.#broadcast({ kind: "deleted", path: control.path });
 
         // Then re-describe the store, so both the rail and History drop the row from one authoritative answer

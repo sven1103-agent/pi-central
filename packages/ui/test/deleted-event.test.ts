@@ -112,3 +112,30 @@ test("a reconnect preserves the focus, and a stopped row's path still resolves",
     installationRoot: undefined, install: undefined });
   assert.equal(state.focusedId, B, "a focused stopped row survives a reconnect");
 });
+
+test("the row does NOT come back, because the session is dropped from `live` too", () => {
+  /*
+   * Reported after the first fix: "When I stop a session and click delete, they are still in the roster."
+   *
+   * `App` re-remembers every live session on any change to `state.live` — correct, since a running session belongs in
+   * the rail. But a STOPPED session is also in `state.live` (`stopped` is a state, not an absence, C3), so removing
+   * the roster row alone left that effect to put it straight back on the next render.
+   *
+   * This simulates that effect, which is the part the earlier test could not see.
+   */
+  const rememberAll = (state: UiState): UiState =>
+    state.live.reduce(
+      (acc, session) => reduce(acc, { kind: "remember", entry: { path: session.sessionFile ?? "", cwd: session.cwd } }),
+      state,
+    );
+
+  let state: UiState = { ...initialState(), live: [live("s1", A)], focusedId: "s1", ready: true };
+  state = reduce(state, { kind: "remember", entry: { path: A, cwd: "/x" } });
+  state = rememberAll(state);
+  assert.equal(state.roster.length, 1, "the running session is in the rail");
+
+  state = reduce(state, { kind: "deleted", path: A });
+  assert.deepEqual(state.live, [], "and it leaves `live`, so the effect has nothing to re-add");
+  state = rememberAll(state);
+  assert.deepEqual(state.roster, [], "the row does not come back");
+});
