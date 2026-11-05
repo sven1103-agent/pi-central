@@ -12,6 +12,18 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
+## [0.9.0] — 2026-11-05
+
+The rail becomes the place the fleet is run from, and History becomes a place you can work in. Everything here
+started as something reported from use: a stopped session could not be resumed, a deleted session stayed on the
+rail, and a directory that was merely unreadable was reported as gone.
+
+**One protocol change: `PROTOCOL_VERSION` 5 → 7.** Deleting a transcript is the only irreversible action in the
+program, so it is a control of its own (`deleteSession`, identified by path) and a `deleted` event of its own —
+the roster is `localStorage` and cannot infer a removal from "here is the store now". Both are new KINDS, which
+is why the wire version moved; a 0.8.0 UI still works against a 0.9.0 orchestrator, and the controls it cannot
+offer are withheld rather than appearing to work.
+
 ### Added
 
 - The directory sheet lists directories used before, one click each, derived from session history ([#149]).
@@ -30,7 +42,6 @@ They are kept because each one is the reason a constraint or an invariant test e
 ### Changed
 
 - Each rail section is ordered by most recent activity, so the row that just changed is at the top ([#68]).
-
 - Every rail row draws the context-usage bar, so pressure is compared across sessions by eye ([#13]).
 
 ### Fixed
@@ -38,22 +49,14 @@ They are kept because each one is the reason a constraint or an invariant test e
 - Forgetting the session you are looking at returns to the empty-state placeholder, never to another session ([#89]).
 - A selected stopped session renders as a styled record instead of centred, unstyled prose ([#89]).
 - Deleting a transcript also forgets the session, so the rail row stays gone and the placeholder shows ([#89]).
-
-- Resuming a session that was stopped before its first message starts it fresh, instead of reporting no such session
-  ([#89]).
-
+- Resuming a session that was stopped before its first message starts it fresh, instead of reporting no such session ([#89]).
 - A session's controls are 32px outlined icon buttons at the top right of the session header ([#89]).
 - The Forget control draws a list with a minus, not an eye with a slash, so "take it off the rail" reads as itself ([#89]).
 - The selected rail row is marked by a bar on its right edge, so its contents keep full contrast ([#89]).
-
-- Clicking a History session that is already running focuses it, instead of leaving the view on another session
-  ([#150]).
+- Clicking a History session that is already running focuses it, instead of leaving the view on another session ([#150]).
 - A resumed session is focused when it arrives, and an unrelated new session can no longer claim that focus ([#150]).
-
 - Selecting a stopped session shows it, with a Resume control, instead of a dead end ([#89]).
-- Rows that were named after their directory — several sessions all reading `data-manager` — now show the prompt or a
-  unique short id ([#89]).
-
+- Rows that were named after their directory — several sessions all reading `data-manager` — now show the prompt or a unique short id ([#89]).
 - History says a directory is unreadable when it exists but cannot be read, instead of calling it gone ([#196]).
 - Discovery and resume share one directory classification, so the History chip and the refusal dialog agree ([#196]).
 - The context-pressure threshold is one shared constant instead of three separate `80`s ([#13]).
@@ -65,7 +68,6 @@ They are kept because each one is the reason a constraint or an invariant test e
 [#149]: https://github.com/sven1103-agent/pi-central/issues/149
 [#150]: https://github.com/sven1103-agent/pi-central/issues/150
 [#196]: https://github.com/sven1103-agent/pi-central/issues/196
-[#150]: https://github.com/sven1103-agent/pi-central/issues/150
 
 ## [0.8.0] — 2026-11-01
 
