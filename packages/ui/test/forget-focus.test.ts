@@ -7,11 +7,12 @@
  * The reducer removed the roster entry and left `focusedId` alone, so the middle column kept rendering a session the
  * reader had just taken off the rail. The rail and the workspace then disagreed about what was still in play.
  *
- * Three cases, because the key is either a live handle or a roster path (issue #89) and the right fallback differs:
+ * The rule, after two rounds of feedback: **forgetting the focused session clears the view, always** — it does not
+ * fall to another session. *"I want it to not select any random session, we do not know what the user wants to see. Show
+ * the startup window instead."* A choice the reader did not make must not put a conversation in front of them: landing
+ * on an arbitrary one invites typing into the wrong place, with no way to tell whether it was chosen or fell there.
  *
- *   - the focused session has no live process  → clear, and the placeholder appears;
- *   - a live session was focused and others remain → fall to another, so running work is not hidden;
- *   - a row nobody is looking at is forgotten  → focus must NOT move.
+ * What still must hold: a row nobody is looking at does not move the reader, and both key spellings are recognised.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -67,16 +68,16 @@ test("forgetting a STOPPED session clears the view, so the placeholder shows", (
   assert.equal(state.focusedId, undefined, "and nothing is focused, which is the placeholder");
 });
 
-test("forgetting a LIVE session falls to another running one, not to nothing", () => {
-  // Live work must not be hidden: the reader removed a ROW, not the process. Showing an empty column with a session
-  // still running would be the rail lying about what is happening.
+test("forgetting a LIVE session clears the view, even when others are running", () => {
+  // The reported behaviour: it used to fall to the next idle session. That is a guess about what the reader wants to
+  // see, and a wrong guess puts a conversation in front of them that they did not choose.
   let state = setup([live("s1", A), live("s2", B)], "s1");
   state = reduce(state, { kind: "forget", path: A });
-  assert.equal(state.focusedId, "s2", "focus moves to the session still in the rail");
-  assert.equal(focusedSession(state)?.id, "s2");
+  assert.equal(state.focusedId, undefined, "the placeholder, not another session");
+  assert.equal(focusedSession(state), undefined);
 });
 
-test("forgetting a LIVE session with nothing else running clears the view", () => {
+test("forgetting the only live session clears the view", () => {
   let state = setup([live("s1", A)], "s1");
   state = reduce(state, { kind: "forget", path: A });
   assert.equal(state.focusedId, undefined, "no other session, so the placeholder");
@@ -103,5 +104,5 @@ test("a live session focused by its FILE is still recognised as the one being fo
   assert.equal(state.focusedId, "s1", "focusRow resolves the file to the handle");
 
   state = reduce(state, { kind: "forget", path: A });
-  assert.equal(state.focusedId, "s2", "and forgetting the same file still moves the view");
+  assert.equal(state.focusedId, undefined, "and forgetting the same file still clears the view");
 });
