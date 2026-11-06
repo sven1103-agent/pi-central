@@ -23,9 +23,11 @@
  *   3. **No writes, no execution, no spawning.** This module imports `node:fs` read calls and nothing else.
  *
  * That is a genuine capability increase over `files.ts`, and it is recorded as one: ADR-0012, which extends
- * ADR-0007 rather than quietly widening it. The alternative on this stack — a native OS panel — does not exist
- * (`showDirectoryPicker` is Chromium-only and returns an opaque handle; `osascript` is the shape of thing
- * ADR-0007 exists to avoid), which is why the capability is built here instead of delegated.
+ * ADR-0007 rather than quietly widening it. The browser's own picker CANNOT answer this question — a page may open
+ * the OS folder panel, but `webkitRelativePath` is relative to the chosen root and `showDirectoryPicker`'s handle
+ * carries no path, while `cwd` must be absolute (ADR-0012 §Alternatives, verified). The server-side alternative
+ * (`osascript`) works and is rejected on cost: it would be this product's first OS-specific code path. That is why
+ * the capability is built here instead of delegated.
  *
  * ## Why the roots are computed and not configured
  *

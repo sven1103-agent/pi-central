@@ -19,17 +19,16 @@ an absolute path, which forces user to open a terminal and navigate to the targe
 to get the path, which they then need to copy manually."* That loop survives for a new project. It is
 not fixed by a longer recent list, because the directory has never been used.
 
-### Why a native OS panel is not available
+### Why the browser cannot supply the path (the full answer is below)
 
-The product is a **browser UI over a loopback WebSocket** ([ADR-0005](0005-typescript-stack.md)). No
-desktop shell exists, and every browser-side route to a native directory panel fails for a different
-reason:
+The product is a **browser UI over a loopback WebSocket** ([ADR-0005](0005-typescript-stack.md)). A web
+page *can* open the OS's own folder panel — that is what an upload dialog is — but it cannot learn the
+absolute path of what was chosen. `webkitRelativePath` is relative to the chosen root by design, and
+a `FileSystemDirectoryHandle` exposes no path at all. Since `cwd` must be absolute, the browser's
+picker cannot answer this question at any price.
 
-| Route | Why it cannot work |
-|---|---|
-| `<input type="file" webkitdirectory>` | Yields `File` handles, not an absolute host path. `cwd` is a path. |
-| `showDirectoryPicker()` (File System Access) | Chromium-only, returns an **opaque handle** rather than a path, and is unavailable in the Safari standalone window this project recommends installing (#119). |
-| `osascript -e 'choose folder'` | Works on macOS and is exactly the shape of thing ADR-0007 exists to avoid: the orchestrator spawning an AppleScript to act on the user's behalf, on one platform only (C10). |
+The server-side alternative (`osascript`) *does* work and is **rejected on cost, not feasibility** —
+see [the alternatives](#alternatives-considered), where the reopening condition is also stated.
 
 So the choice was never "native panel or not". It was: **build the capability in the orchestrator, or
 leave the requirement unmet.**
@@ -104,14 +103,56 @@ self-hosting hazard, #49's root check) stays the only answer to "may I work here
 
 ## Alternatives considered
 
+### The browser's own directory picker — tested, and it cannot work (verified 2026-11-06)
+
+This is the obvious first choice, and it is worth stating *why* it fails rather than quoting a
+principle, because the answer is narrower than "a web app may not do that".
+
+**A native directory dialog can be opened from the page.** `<input type="file" webkitdirectory>`
+opens the OS's own folder panel, and it is what ordinary web apps use for uploads. Any web app can do
+that today. What a browser does not hand back is the one thing `cwd` needs:
+
+| Route | What comes back | Why it cannot feed `cwd` |
+|---|---|---|
+| `<input webkitdirectory>` | `File` objects whose `webkitRelativePath` is **relative to the chosen root**, e.g. `proj/src/a.ts` | The root's own absolute path is never revealed — that is the fingerprinting defence, and it is not configurable. `cwd` needs the absolute path, or nothing. |
+| `showDirectoryPicker()` | a `FileSystemDirectoryHandle` with `.name` and nothing else | Chromium-only; Firefox and Safari **oppose** it (Safari cites security), and it is absent from the Safari standalone window this project recommends (#119). The handle's path is withheld for the same reason. |
+| `navigator.storage` / `launchQueue` `LaunchParams` | a handle, on Chromium + installed PWA only | Same opacity, plus an install requirement. A "file handler" is about *opening* a file, not about telling the server where it lives. |
+
+So the picker is not missing from the web platform — **it is the one thing the platform deliberately
+will not answer.** The workarounds are all the same workaround: upscale the *selected contents*, which
+is an upload, and an upload cannot become a working directory.
+
+### Server-side native panels — a decision, not a blocker
+
+`osascript -e 'choose folder'` on macOS **does work**: it returns a POSIX path on stdout, and a cancel
+is distinguishable from a failure (AE `-128`), which is the distinction C14 requires. Verified here
+only to the extent this environment allows: in the agent sandbox it fails with
+`Connection Invalid error for service com.apple.hiservices-xpcservice` (**C1** — no XPC access to the
+GUI services), which is evidence about *this* shell and not about a user's terminal.
+
+It is rejected on **cost**, not feasibility:
+
+- It would be the product's **first OS-specific code path** — a platform dependency for a dialog, on a
+  feature whose baseline already works in the recommended Safari window.
+- It needs a blocking round trip on a transport that has none: a panel stays open until a human acts,
+  so the request needs a timeout, a cancel path, and a distinct cancelled answer, or a dismissed panel
+  leaves a browser waiting with no way to resolve it.
+- It is untestable where this project's tests run (C1, both in CI and in an agent shell), so it can
+  never be `verified/auto` — only a manual claim.
+- `osascript` is a general AppleScript interpreter, so adopting it means adopting "interpret this
+  script" as an orchestrator power, needing the same single-argv-site guard `policy.ts` has.
+
+**Reversible, and the reopening condition is stated:** a native panel is worth its cost only if the
+in-app chooser proves insufficient **in use** — which is a measurement, not a prediction. The natural
+shape if it ever happens is an optional accelerator that is offered only where the platform can answer,
+refuses loudly where it cannot, and passes its result through the same `start` control so nothing is
+validated twice.
+
+### Other shapes
+
 **A desktop shell (Tauri/Electron).** Rejected: it supersedes ADR-0005's stack decision and
 ADR-0011's "one npm artifact", for one dialog. The cost is a second runtime, a second updater, and a
 second signing story.
-
-**An orchestrator round trip through a native panel (`osascript`, `zenity`).** Rejected for the reason
-ADR-0007 gives: spawning a script to act on the user's behalf is the shape that decision avoids, it is
-macOS-only (C10), and the panel's result would be a path the orchestrator must then re-validate
-anyway — so it buys the picker and nothing else.
 
 **Drop the requirement.** Rejected as the outcome, and it is what the status quo amounts to. The
 recent list is the right answer for a directory you have used; it is no answer at all for a new one,
