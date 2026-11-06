@@ -1867,6 +1867,15 @@ select.btn { font-family: var(--sans); }
   padding: var(--sp-5);
   max-width: 620px;
 }
+/*
+ * The dialog is focusable (`tabIndex={-1}`) so it can RECEIVE focus on open, which is what lets Escape work without the
+ * reader clicking and keeps a keyboard reader inside it. That is a focus ANCHOR, not a control, so it must not paint a
+ * ring — a blue outline around a whole dialog reads as a selected element rather than as "you are here".
+ *
+ * `:focus-visible` is deliberately NOT used: the anchor is only ever focused programmatically, so there is no case
+ * where a ring would be wanted.
+ */
+.modal-sheet:focus { outline: none; }
 .modal h3 { margin: 0 0 var(--sp-2); font-size: var(--fs-md); }
 .modal p { margin: 0; color: var(--dim); font-size: var(--fs-base); }
 
@@ -2985,7 +2994,37 @@ select.btn { font-family: var(--sans); }
  * native select cannot show three. A list also keeps the row whole as one click target, which matters because the
  * whole point is that this is faster than typing a path.
  */
-.recent-dirs { margin-bottom: var(--sp-3); }
+.recent-dirs { margin-bottom: var(--sp-3); min-height: 0; }
+/*
+ * The recents are a bounded scroll region, not an unbounded list (screenshot evidence).
+ *
+ * With six recents — ordinary for anyone who has used a handful of projects — the sheet's fixed content left the
+ * browser a 4.5-row window: visible, and unusable. Capping the HISTORY is what gives the browse surface room, and it is
+ * the right thing to cap because the directory you want is in the first two rows.
+ */
+.recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 176px;
+  overflow-y: auto;
+  /* The platform's default bar is a bright channel on a dark page — the defect `styles.css` already fixed for the
+     transcript and the rail. A new scroll region inherits the same treatment rather than the OS's. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.recent-list::-webkit-scrollbar { width: 10px; }
+.recent-list::-webkit-scrollbar-track { background: transparent; }
+.recent-list::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--r-pill);
+}
+.recent-list::-webkit-scrollbar-thumb:hover { background: var(--dim); background-clip: padding-box; }
 .recent-dirs-label {
   font-size: var(--fs-xs);
   color: var(--dim);
@@ -2994,6 +3033,9 @@ select.btn { font-family: var(--sans); }
   margin: 0 0 var(--sp-2);
 }
 .recent-dirs ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+/* The sheet's own layout lives with the chooser's, at the end of this file — ONE rule per selector, so an override
+   cannot silently win over the base and make a test read the wrong declaration (the mistake `nested-scroll.test.mjs`
+   records for `.trace-detail`). */
 .recent-dir {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -4681,3 +4723,520 @@ select.btn { font-family: var(--sans); }
 .queue-actions { display: flex; align-items: center; gap: var(--sp-2); }
 .queue-clear { color: var(--danger-text); }
 .queue-clear:hover { color: var(--danger-text); background: var(--danger-tint); }
+
+/* ------------------------------------------------------------------ directory chooser (issue #76) */
+
+/*
+ * A TWO-PANE file dialog: places rail on the left, listing on the right (issue #76, after a screenshot review).
+ *
+ * The first version was two stacked scrollers in a narrow column, which the review called out as the shape that makes
+ * navigation impossible: no rail, no filter, no parent control, and the browser squeezed into whatever height the
+ * recent list left. A file dialog has this layout for a reason — the rail answers "where could I be", the listing
+ * answers "what is here", and they must not scroll together.
+ */
+/* ONE width for the date column, shared by the header and the rows.
+ *
+ * `auto` was wrong and it is a subtle bug: each grid resolves `auto` against ITS OWN contents, so the header's third
+ * column sized to "MODIFIED" and the rows' to the widest date ("9 Jul 2025"). Different widths meant a different 1fr for
+ * the name column in each grid — so the headers drifted out of line with the data they describe, by a few pixels, more
+ * with a longer date. A shared custom property is the only way two separate grid containers can agree. */
+.chooser { --chooser-meta-col: 74px; display: grid;
+  /* 200px: enough for `pi-central-dev` and a session badge without wrapping, which is what made the old 150px rail
+     unreadable ("Not on this machine: ~/src, ~/dev…" broke across four lines). */
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 0;
+  margin-bottom: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--panel-2);
+  /* Bounded, because a deep tree otherwise grows the dialog past the window. Inside `.modal-sheet` the region flexes
+     instead, so a tall window gives the listing more rows rather than leaving dead space at the bottom. */
+  overflow: hidden;
+}
+.chooser-empty { grid-template-columns: 1fr; padding: var(--sp-3); }
+
+/* --- the places rail ------------------------------------------------------------------------- */
+
+.chooser-places {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--sp-2) var(--sp-1);
+  min-width: 0;
+  border-right: 1px solid var(--line);
+  /* Its own scroller only if there are more places than fit — seven roots rarely need one, and a scroller over three
+     rows was one of the defects the review named. */
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+  background: var(--panel);
+}
+.chooser-place {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  padding: 4px 6px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.chooser-place:hover { background: var(--panel-3); border-color: var(--line); }
+.chooser-place:focus-visible { outline: none; box-shadow: var(--focus); }
+/* The current place is marked by a colour AND a fill, so it is legible without relying on hue alone. */
+.chooser-place.is-current {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+}
+.chooser-place-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A recent row's session count, as a badge on the right. The number is the evidence that this is a place you work. */
+.chooser-place-badge {
+  flex: none;
+  font-size: var(--fs-2xs);
+  font-family: var(--mono);
+  color: var(--dim);
+  background: var(--bg);
+  border-radius: var(--r-pill);
+  padding: 0 5px;
+  /* Wide enough for `170×`; `/` and `~` are the only things in the name column that must never be squeezed out. */
+  min-width: 26px;
+  text-align: center;
+}
+.chooser-place.is-current .chooser-place-badge { color: var(--text); }
+/* The group labels ("Used before" / "Places") separate two KINDS of row in one column: a destination you have been to,
+   and a place you browse. Without them the rail is one undifferentiated list of names. */
+.chooser-rail-label {
+  margin: var(--sp-2) 6px var(--sp-1);
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.chooser-rail-label:first-child { margin-top: 0; }
+.chooser-recents { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+/* A recent row commits, so it is marked — quietly — as a different kind of move from browsing a place. */
+.chooser-recent:disabled { opacity: 0.5; cursor: not-allowed; }
+.chooser-recent:disabled .chooser-icon { color: var(--warn-text); }
+
+/* --- the listing ---------------------------------------------------------------------------- */
+
+.chooser-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-2);
+}
+.chooser-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  min-width: 0;
+}
+.chooser-crumb {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chooser-crumb:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--r-1); }
+.chooser-crumb-root { color: var(--dim); }
+.chooser-crumb-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: var(--r-1);
+}
+.chooser-crumb-link:hover { text-decoration: underline; }
+.chooser-crumb-link:focus-visible { outline: none; box-shadow: var(--focus); }
+.chooser-crumb-here { color: var(--text); font-weight: 600; }
+.chooser-sep { color: var(--dim); margin: 0 3px; }
+.chooser-up { flex: none; font-size: var(--fs-xs); padding: 1px 8px; }
+
+/*
+ * The action row: "Use <folder>", the filter, and the two view toggles.
+ *
+ * The primary action is HERE rather than at the bottom of the dialog, because it acts on the folder in the crumb and a
+ * reader looking at the listing should not have to travel to the footer to commit. It is also the only control on this
+ * surface that starts a session — descending never does, which was the review's most serious finding.
+ */
+.chooser-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.chooser-filter {
+  flex: 1;
+  min-width: 90px;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  padding: 3px 8px;
+  color: var(--text);
+  font: var(--fs-xs) / 1.4 var(--mono);
+}
+.chooser-filter:focus-visible { outline: none; box-shadow: var(--focus); }
+/* Toggles say what the CURRENT state is beside what the click will do; `aria-pressed` carries the truth for AT. */
+/*
+ * The listing's column headers: Name and Modified, both clickable.
+ *
+ * This replaced a `Recent` / `A–Z` chip, which had two defects a screenshot made obvious: it named only the order
+ * currently in force (so "sort by name" was undiscoverable — you cannot look for an option the control never mentions),
+ * and the ages beside each row had no label at all, so `4m` could be minutes or months.
+ *
+ * A header row fixes both at once and is what every file manager does. The grid columns MATCH `.chooser-row` exactly,
+ * so the labels sit over the data they describe.
+ */
+.chooser-head {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) var(--chooser-meta-col) 12px;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 6px 3px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 2px;
+}
+.chooser-head-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 1px 0;
+  font: inherit;
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  cursor: pointer;
+  border-radius: var(--r-1);
+  /* The label names the COLUMN; the arrow carries the state. Kept quiet so it does not compete with the folder names
+     below, which are what the reader is scanning. */
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.chooser-head-cell:hover { color: var(--text); }
+.chooser-head-cell:focus-visible { outline: none; box-shadow: var(--focus); }
+/* The active column is brighter AND carries the arrow — colour alone would not say which direction. */
+.chooser-head-cell[aria-pressed="true"] { color: var(--text); font-weight: 600; }
+.chooser-head-name { justify-self: start; }
+.chooser-head-modified { justify-self: end; text-align: right; }
+.chooser-sort-arrow { font-size: var(--fs-2xs); }
+
+.chooser-sort, .chooser-hidden {
+  flex: none;
+  font-size: var(--fs-xs);
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  color: var(--dim);
+}
+.chooser-sort:hover, .chooser-hidden:hover { color: var(--text); border-color: var(--line-strong); }
+.chooser-hidden[aria-pressed="true"] { color: var(--text); border-color: var(--accent); }
+
+/* The listing is the ONE scroller in this pane: the crumb and the action row stay put while it moves. */
+.chooser-entries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.chooser-entries::-webkit-scrollbar,
+.chooser-places::-webkit-scrollbar { width: 10px; }
+.chooser-entries::-webkit-scrollbar-track,
+.chooser-places::-webkit-scrollbar-track { background: transparent; }
+.chooser-entries::-webkit-scrollbar-thumb,
+.chooser-places::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--r-pill);
+}
+.chooser-entries::-webkit-scrollbar-thumb:hover,
+.chooser-places::-webkit-scrollbar-thumb:hover { background: var(--dim); background-clip: padding-box; }
+
+/*
+ * A row: icon, name, age, chevron.
+ *
+ * `grid` rather than `flex` so the age column is ALIGNED down the list — a ragged right edge is what makes a list of
+ * names unscannable, and it was one of the review's findings about the first version. The chevron sits in its own
+ * column so every row's "this descends" mark lines up too.
+ */
+.chooser-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) var(--chooser-meta-col) 12px;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  text-align: left;
+  padding: 3px 6px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.chooser-row:hover { border-color: var(--line); background: var(--panel-3); }
+.chooser-row:focus-visible { outline: none; box-shadow: var(--focus); }
+.chooser-icon { width: 16px; height: 16px; flex: none; color: var(--dim); }
+.chooser-row:hover .chooser-icon, .chooser-place.is-current .chooser-icon { color: var(--accent); }
+.chooser-name {
+  font-size: var(--fs-sm);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/*
+ * NO `direction: rtl` anywhere in this file, and the removal is the fix for a reported bug.
+ *
+ * A `direction: rtl` on the path hint was meant to put the ellipsis at the START of a long path so the last segment
+ * stayed visible. What it does instead is reverse the RUN ORDER of the line: the rendered result was `git~/` and
+ * `projects~/`, seen in a screenshot and reported as "is that a bug?". It also mangles any path containing a `/` at a
+ * bidi boundary, and reverses a path whose segments mix Latin with Hebrew or Arabic.
+ *
+ * The honest shape is the one every file manager uses: the LAST SEGMENT is the row's own text (`.chooser-name`), and
+ * the full path lives in the `title`. Truncating the secondary line from the right is then harmless, because the
+ * primary line is what identifies the folder.
+ */
+.chooser-meta {
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  font-family: var(--mono);
+  white-space: nowrap;
+  /* The shared column width, so `empty`, `4 min` and `12 Oct 2025` cannot shift the name column or the header above it. */
+  text-align: right;
+}
+.chooser-open { color: var(--dim); font-size: var(--fs-sm); text-align: right; }
+.chooser-row:hover .chooser-open { color: var(--accent); }
+.chooser-note { margin: var(--sp-1) 0 0; font-size: var(--fs-xs); color: var(--dim); }
+/* Stated, never hidden — but it must not wrap into four lines and eat the rail. One line, ellipsised, full list in the
+   title. The old block was the single worst offender in the screenshot. */
+.chooser-absent {
+  margin: var(--sp-2) 6px 0;
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chooser-failure { margin-top: var(--sp-1); }
+
+/* --- the sheet's own layout ----------------------------------------------------------------- */
+
+/*
+ * The sheet as a COLUMN with one flexible region, which is only possible because the recent list is bounded and the
+ * chooser is the thing that grows.
+ *
+ * `max-height` on the dialog is not cosmetic. `.modal-backdrop` is `place-items: center` with no scroller, so a dialog
+ * taller than the window loses its top AND its bottom — and the bottom is where the actions are.
+ */
+.modal-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  /*
+   * Wider and taller than it was, and the number is a trade rather than a taste.
+   *
+   * 720px was chosen when the dialog had three stacked regions; with the recents in the rail there are two, and the
+   * listing is the one that needs room. A file dialog is one of the few surfaces where "as large as the window allows"
+   * is correct: the reader is doing a spatial search, and every extra row is one fewer scroll.
+   */
+  width: min(940px, calc(100vw - 2 * var(--sp-5)));
+  max-width: none;
+  height: min(680px, calc(100dvh - 2 * var(--sp-4)));
+  overflow: hidden;
+}
+/* Shrinks before the chooser does: history is the thing to lose, not the browser. */
+.modal-sheet .recent-dirs { display: flex; flex-direction: column; min-height: 0; flex: 0 1 auto; }
+.modal-sheet .recent-list { min-height: 0; }
+/* The chooser IS the dialog's body now, so it takes everything the title and the form leave. */
+.modal-sheet .chooser { flex: 1 1 auto; min-height: 0; max-height: none; }
+/* The form does not shrink: its contents are a field, a list and the two buttons, and half of them is not a dialog. */
+.modal-sheet form { flex: none; }
+.sheet-footnote { margin: var(--sp-2) 0 0; font-size: var(--fs-xs); color: var(--dim); }
+
+/*
+ * The dialog's actions: Cancel on the left, Open on the RIGHT — the conventional order in a file dialog, and the one
+ * the reporter asked for. `margin-left: auto` is what does it, so the pair stays anchored right whatever the dialog's
+ * width becomes.
+ */
+.modal-sheet .dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  justify-content: flex-end;
+}
+
+/*
+ * The primary action of the sheet, once.
+ *
+ * There used to be two controls that started a session — a filled one inside the listing and a bare `Open here` at the
+ * bottom — so neither read as the dialog's outcome. This is the only one, it is filled, and it sits bottom-right where
+ * an OK button belongs. `--accent-text` on `--accent-tint` keeps the measured pairing `affordance.test.mjs` asserts.
+ */
+.btn-primary-sheet {
+  min-width: 96px;
+  font-weight: 600;
+  background: var(--accent-tint);
+  border: 1px solid var(--accent-text);
+  color: var(--accent-text);
+  border-radius: var(--r-2);
+  padding: 5px 16px;
+  cursor: pointer;
+}
+.btn-primary-sheet:hover:not(:disabled) { background: var(--accent); color: var(--bg); }
+.btn-primary-sheet:focus-visible { outline: none; box-shadow: var(--focus); }
+.btn-primary-sheet:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* The text field and its Clear control, side by side — the field keeps the width, the clear does not. */
+.path-row { display: flex; align-items: center; gap: var(--sp-2); }
+.path-row input { flex: 1; min-width: 0; }
+.path-clear { flex: none; font-size: var(--fs-xs); padding: 2px 8px; border: 1px solid var(--line); border-radius: var(--r-pill); }
+
+/*
+ * WHAT WILL BE OPENED — the line that stops the two inputs competing.
+ *
+ * The field and the browser both name a directory, and which one wins is a rule the reader should not have to infer.
+ * This states it, directly above the button, with the winning path in mono. `role="status"` so it is announced when it
+ * changes, rather than being a silent visual.
+ */
+.effective-path {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin: 6px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text);
+  min-width: 0;
+}
+.effective-path-label {
+  flex: none;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: var(--fs-2xs);
+}
+.effective-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-dirs { margin-bottom: var(--sp-3); min-height: 0; }
+
+/*
+ * The recents are a bounded scroll region, not an unbounded list (screenshot evidence).
+ *
+ * With six recents — ordinary for anyone who has used a handful of projects — the sheet's fixed content left the
+ * browser a 4.5-row window: visible, and unusable. Capping the HISTORY is what gives the browse surface room, and it is
+ * the right thing to cap because the directory you want is in the first two rows.
+ */
+.recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 176px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.recent-list::-webkit-scrollbar { width: 10px; }
+.recent-list::-webkit-scrollbar-track { background: transparent; }
+.recent-list::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--r-pill);
+}
+.recent-list::-webkit-scrollbar-thumb:hover { background: var(--dim); background-clip: padding-box; }
+
+/*
+ * Path completions under the sheet's input (issue #76).
+ *
+ * Above the input rather than below the dialog, and inside the form, because a list that overlaps the buttons makes
+ * "Open here" unreachable exactly when a reader is mid-word.
+ */
+.completions {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  /* A long suggestion list must not push the buttons off a short window — the same reason the recents are capped. */
+  max-height: 132px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.completions::-webkit-scrollbar { width: 10px; }
+.completions::-webkit-scrollbar-track { background: transparent; }
+.completions::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--r-pill);
+}
+.completion {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  padding: 3px 8px;
+  font: var(--fs-xs) / 1.5 var(--mono);
+  color: var(--dim);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.completion:hover { border-color: var(--accent); background: var(--accent-tint); }
+.completion:focus-visible { outline: none; box-shadow: var(--focus); }
+/*
+ * What is already typed is quiet and what accepting would ADD is bright — the same two-tone every completion list uses,
+ * and the reason the split is computed rather than guessed: a single-colour row makes the reader re-read the whole path
+ * to find the part they are choosing.
+ */
+.completion-typed { color: var(--dim); }
+.completion-rest { color: var(--text); font-weight: 600; }
+
+/* The expanded form of a `~` path, shown when it differs from what was typed. Quiet: it is a confirmation, not a step. */
+.expanded-path { margin: 6px 0 0; font-size: var(--fs-xs); color: var(--dim); }
+
+/*
+ * "Places" at the root of the trail is a LABEL, and it must not look like the buttons beside it.
+ *
+ * Reported from a screenshot: the trail read `Places / Home / git` with the first segment inert and the next two
+ * controls, which is a row where two of three things that look the same do nothing. The root is muted and not
+ * underlined on hover, so the affordance is truthfully "this is where you are", not "this goes somewhere".
+ */
+.chooser-crumb-root { color: var(--dim); }

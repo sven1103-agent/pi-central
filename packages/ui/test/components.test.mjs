@@ -966,24 +966,37 @@ const sampleRecent = [
 
 async function sheetWith(recent) {
   const { OpenDirectorySheet } = await server.ssrLoadModule("/src/components/OpenDirectorySheet.tsx");
+  /*
+   * A places state is REQUIRED for the rail to exist (issue #76): with none, the chooser is withheld on the grounds
+   * that an empty pane would claim the machine has no folders — so a test about recent rows must supply one, or it
+   * asserts against a sheet that deliberately does not render them.
+   */
+  const { reducePlaces, initialPlacesState } = await server.ssrLoadModule("/src/places.ts");
+  const places = reducePlaces(initialPlacesState(), {
+    kind: "placesLoaded",
+    home: "/Users/x",
+    places: [{ id: "home", label: "Home", path: "/Users/x", exists: true }],
+  });
   return renderToString(createElement(OpenDirectorySheet, {
     installationRoot: undefined,
     home: "/Users/x",
     recent,
+    places,
+    onListPlaces() {},
     onClose() {},
     onOpen() {},
   }));
 }
 
 test("used directories are one click each, most recent first, with the count", async () => {
+  // They live in the chooser's RAIL now, beside the places (issue #76). That is what let the dialog stop being three
+  // stacked regions fighting over one column — the listing was the third thing down and always got the leftovers.
   const html = await sheetWith(sampleRecent);
-  assert.match(text(html), /Used before/, "the list is named for what it is");
-  assert.match(html, /~/ && /project/, "the path is abbreviated");
+  assert.match(text(html), /Used before/, "the group is named for what it is");
+  assert.match(html, /~/ && /project/, "the row shows the name and the tooltip carries the path");
   assert.match(text(html), /4 sessions/, "a directory says how many sessions ran there");
-  // One button per directory, and the click target is the whole row — including the unavailable ones, which are
-  // rendered DISABLED rather than omitted (see the next test for why they must stay visible).
-  assert.equal((html.match(/class="recent-dir"/g) ?? []).length, 3, "one row per directory");
-  // Order: the recent one precedes the missing one.
+  assert.equal((html.match(/class="chooser-place chooser-recent"/g) ?? []).length, 3, "one row per directory");
+  // Order: the recent one precedes the missing one — the derivation's order is preserved into the rail.
   assert.ok(html.indexOf("project") < html.indexOf("unmounted"), "most recently used comes first");
 });
 
@@ -991,10 +1004,14 @@ test("a directory that no longer exists is shown, DISABLED, and says why", async
   // Hidden would read as "Pi Central forgot my project" for a volume that is merely unmounted; allowed would
   // spend a spawn on a directory that cannot work, because RPC-mode Pi exits 1 rather than prompting (C2).
   const html = await sheetWith(sampleRecent);
-  const missing = html.slice(html.indexOf("unmounted") - 400, html.indexOf("unmounted") + 200);
-  assert.match(missing, /disabled/, "the button cannot be pressed");
-  assert.match(missing, /missing/, "and it states the reason rather than looking broken");
-  assert.match(missing, /no longer exists/, "the title carries the full path and the reason");
+  // The ROW, not a character window around it: the name sits between the icon and the badge, so a fixed-width slice
+  // either side of the name reads the wrong elements (and did, after the rail moved the badge to the right).
+  const doc = new JSDOM(`<body>${html}</body>`).window.document;
+  const missing = [...doc.querySelectorAll(".chooser-recent")].find((row) => row.textContent.includes("unmounted"));
+  assert.ok(missing, "the row exists");
+  assert.ok(missing.disabled, "the button cannot be pressed");
+  assert.match(missing.textContent, /missing/, "and it states the reason rather than looking broken");
+  assert.match(missing.title, /no longer exists/, "the title carries the full path and the reason");
 });
 
 test("the sheet distinguishes a MISSING directory from an UNREADABLE one (issue #196)", async () => {
@@ -1002,7 +1019,7 @@ test("the sheet distinguishes a MISSING directory from an UNREADABLE one (issue 
   // access granted — and the second is often fixable right now. Saying "missing" for both is what History did.
   const html = await sheetWith(sampleRecent);
   const doc = new JSDOM(`<body>${html}</body>`).window.document;
-  const rows = [...doc.querySelectorAll(".recent-dir")];
+  const rows = [...doc.querySelectorAll(".chooser-recent")];
 
   const gone = rows.find((row) => row.textContent.includes("unmounted"));
   assert.ok(gone?.disabled, "a genuinely missing directory is disabled");
@@ -1027,7 +1044,7 @@ test("the sheet is fed by the REAL derivation, so an unreadable directory surviv
   ];
   const html = await sheetWith(recentDirectories(history));
   const doc = new JSDOM(`<body>${html}</body>`).window.document;
-  const rows = [...doc.querySelectorAll(".recent-dir")];
+  const rows = [...doc.querySelectorAll(".chooser-recent")];
   assert.match(rows[0].textContent, /unreadable/, "the unreadable directory keeps its reason end to end");
   assert.match(rows[1].textContent, /missing/, "and the missing one keeps its own");
 });

@@ -127,6 +127,22 @@ The UI merges them: a session row is *historical* if only in (1), *live* if in (
 `get_state` per live process supplies `model`, `thinkingLevel`, `isStreaming`,
 `sessionName`, `messageCount`, `pendingMessageCount` for the rail.
 
+## Two filesystem capabilities, not one
+
+Both run at the orchestrator's UID (ADR-0007), and they are deliberately separate rather than one
+handler with a flag:
+
+| Capability | Module | Boundary | Serves |
+|---|---|---|---|
+| File browser | [`files.ts`](../packages/orchestrator/src/files.ts) | confined to a session's `cwd` | reading a project |
+| Directory chooser | [`places.ts`](../packages/orchestrator/src/places.ts) | a closed set of roots derived from `$HOME` | choosing a project |
+
+The chooser exists because the workdir has to be named *before* there is a session to confine it
+to, so "inside the session's cwd" cannot be its rule. It is restricted instead to directories only,
+inside those roots, with one gatekeeper (`resolveInPlaces`, segment-wise containment) — see
+[ADR-0012](decisions/0012-directory-chooser.md). Neither path involves Safehouse: the sandbox
+confines agents, not the person.
+
 ## Working-directory handling
 
 Because of C2, cwd is a property of the **process**, decided at spawn:

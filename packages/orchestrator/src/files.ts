@@ -39,6 +39,7 @@ import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "no
 import { isAbsolute, join, resolve, sep } from "node:path";
 // Shared with the UI so a size in the tree and a size in a refusal cannot disagree (protocol/bytes.ts).
 import { formatBytes } from "@pi-central/protocol";
+import { fromErrno as fromErrnoCode } from "./fs-error.ts";
 export { formatBytes };
 
 /**
@@ -181,29 +182,16 @@ export function containsPath(parent: string, child: string): boolean {
   return child.startsWith(withSep);
 }
 
-/** Turn an errno into a {@link FileError}, preserving the code. */
+/**
+ * Turn an errno into a {@link FileError}, preserving the code.
+ *
+ * The mapping itself lives in `fs-error.ts`, shared with the directory chooser (ADR-0012) so an `EACCES`
+ * says the same thing on both surfaces. What stays here is the LABEL: only this module knows that an
+ * empty relative path means the session's working directory, and calling it `""` would be a sentence
+ * about nothing.
+ */
 function fromErrno(error: unknown, what: string, relPath: string): FileError {
-  const code = (error as NodeJS.ErrnoException | undefined)?.code;
-  const label = relPath === "" ? "the working directory" : `"${relPath}"`;
-  switch (code) {
-    case "ENOENT":
-      return { reason: "not-found", code, message: `${what} ${label}: no such file or directory (ENOENT)` };
-    case "EACCES":
-    case "EPERM":
-      return { reason: "permission", code, message: `${what} ${label}: permission denied (${code})` };
-    case "ENOTDIR":
-      return { reason: "not-a-directory", code, message: `${what} ${label}: not a directory (ENOTDIR)` };
-    case "EISDIR":
-      return { reason: "is-directory", code, message: `${what} ${label}: is a directory (EISDIR)` };
-    default:
-      // No code, or one not worth special-casing. The code is still reported when present; what is
-      // forbidden is inventing one.
-      return {
-        reason: "unreadable",
-        code,
-        message: code === undefined ? `${what} ${label}: ${String(error)}` : `${what} ${label}: ${String(error)} (${code})`,
-      };
-  }
+  return fromErrnoCode(error, what, relPath === "" ? "the working directory" : `"${relPath}"`);
 }
 
 /**

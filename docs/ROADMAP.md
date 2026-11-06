@@ -255,6 +255,12 @@ File access runs **directly at the user's UID** — no sidecar, no sandbox in th
       symlinks resolved before the check (issue #8). Containment compares path **segments** — the
       prefix form is the bug `own-installation.ts` already shipped once. The lexical check runs
       first so a nonexistent escape is reported as an escape, not as "missing".
+- [x] **A directory chooser that is not a native OS panel** (issue #76, [ADR-0012](decisions/0012-directory-chooser.md)).
+      The orchestrator lists the DIRECTORIES inside a closed set of roots derived from `$HOME`
+      (`places.ts`), and the sheet presents them one level at a time beside its text input, which now
+      completes a typed prefix and expands `~`. Directories only, one gatekeeper (`resolveInPlaces`,
+      segment-wise containment), and no read path for file contents — the capability is wider than
+      `files.ts` and is recorded as a second boundary rather than as an exception to the first.
 - [ ] File operations: create file/dir, rename, move, delete — destructive actions behind
       explicit confirmation, never an implicit recursive delete.
 - [ ] Content editing stays out of scope; Pi mutates file contents from inside its sandbox.
@@ -270,7 +276,9 @@ session should be refused outright is #49's question and is deliberately not dec
 
 ## Phase 3 — Fleet ergonomics
 
-- [ ] Create a session in a new working directory from the UI.
+- [x] Create a session in a new working directory from the UI — the directory sheet's recent list
+      (#149) and, for a directory never used here, the placed chooser (issue #76,
+      [ADR-0012](decisions/0012-directory-chooser.md)).
 - [ ] Resume a historical session: read its header `cwd`, compose a profile, spawn there.
 - [ ] Fork / clone / rename from the rail.
 - [ ] Bulk view: which sessions are streaming, which await approval, which are near

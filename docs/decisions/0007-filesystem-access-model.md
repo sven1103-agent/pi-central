@@ -3,6 +3,8 @@
 - **Status:** Accepted
 - **Date:** 2026-06-24
 - **Supersedes:** the file-navigation portion of the earlier ADR-0006 draft
+- **Amended by:** [ADR-0012](0012-directory-chooser.md) — a second, separately bounded filesystem
+  capability (a directory chooser for a directory no session owns yet)
 
 ## Context
 

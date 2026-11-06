@@ -10,12 +10,43 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+**One protocol change: `PROTOCOL_VERSION` 7 → 8.** The directory chooser is one new control
+(`listPlaces`) and three new events (`places`, `placeListing`, `placeError`). A 0.9.0 UI against this
+orchestrator keeps working and simply does not offer the chooser; a UI that offers it against an older
+orchestrator would answer `bad control: unknown kind 'listPlaces'`, so the pane is withheld instead.
+
 ### Added
 
 - CI inventories the shipped release tree, scans it with Grype, and publishes a report, SARIF and a README badge ([#206]).
 - On `main` the scan fails on fixable findings at or above High, and never on findings with no fix ([#206]).
 - The badge is published from a job that can write to the repository, so the first run on `main` no longer fails with a 403 ([#206]).
+- The directory sheet is a two-pane file dialog: one rail of used-before directories and places, a filterable
+  listing beside it, and the full dialog height available to the listing ([#76]).
+- A folder row carries an icon, its name, when it changed, and a chevron saying it descends ([#76]).
+- The listing is sorted by clicking a Name or Modified column header, and clicking it again reverses the order ([#76]).
+- A folder's age is written out — `4 min`, `2 d`, `9 Jul` — instead of an abbreviation that could be minutes or months ([#76]).
+- The listing can be filtered and shows or hides dotfolders ([#76]).
+- The picker opens on your home folder by default, and on the directory you last started a session in ([#76]).
+- A used-before directory is a row in the rail with its session count, so a destination reads differently from a place ([#76]).
+- A typed path completes against directories inside the folder being typed and against recent ones ([#76]).
+- A typed `~` path is expanded at submit, and the expanded path is shown before anything starts ([#76]).
+- A place that is not on this machine is named, rather than hidden ([#76]).
+- The dialog has one Open button, at the bottom right, and it commits the folder selected above ([#76]).
+- The path that will be opened is stated above the button, so the typed field and the browser never disagree ([#76]).
+- The path field no longer takes focus when the sheet opens, so browsing is obviously the first gesture ([#76]).
 
+### Fixed
+
+- The picker reopened in a folder that was only ever browsed, and remembered it on every click ([#76]).
+
+### Fixed
+
+- A path hint rendered as `git~/` instead of `~/git`, an artefact of a right-to-left truncation trick ([#76]).
+- The sheet's list of used directories is capped and scrolls, so the browser is not squeezed to a few visible rows ([#76]).
+- The sheet fits a short window: its buttons are reachable instead of falling below the viewport ([#76]).
+- The trail's root reads as a label rather than as a button that does nothing ([#76]).
+
+[#76]: https://github.com/sven1103-agent/pi-central/issues/76
 [#206]: https://github.com/sven1103-agent/pi-central/issues/206
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
