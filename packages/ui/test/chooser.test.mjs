@@ -245,7 +245,10 @@ test("a recent directory in a DIFFERENT folder is not offered as a completion of
   });
   // The RECENT list legitimately shows `~/work/alpha` — it is a directory used before. What must not happen is a
   // COMPLETION for it, because accepting that would replace `~/git/al` instead of extending it.
-  const completions = html.slice(html.indexOf('<ul class="completions"'));
+  // Bounded at the list's own end: a slice "from here to the document" grew to include the footnote when the footnote
+  // moved below the actions, and the word `work` in prose then failed an assertion about completions.
+  const start = html.indexOf('<ul class="completions"');
+  const completions = html.slice(start, html.indexOf("</ul>", start));
   assert.ok(!/work/.test(completions), `no completion from another folder: ${completions}`);
 });
 
@@ -271,4 +274,83 @@ test("a long path in the chooser truncates instead of widening the dialog", asyn
   assert.match(rule, /min-width:\s*0/, "and is allowed to — a flex child cannot shrink below its content otherwise");
   assert.match(rule, /direction:\s*rtl/, "keeping the LAST segment visible, which is the part that identifies the folder");
   assert.match(/\.chooser\s*\{([^}]*)\}/.exec(css)?.[1] ?? "", /max-height/, "and the list scrolls rather than growing");
+});
+
+// --- The layout the screenshot exposed (issue #76, found by looking at it) -------------------------
+//
+// Every test above passed while the dialog was unusable: six recents plus an uncapped browser meant the browse surface
+// was 4.5 visible rows, the trail's first segment looked like a button and was not, and a shorter window would have put
+// "Open here" off-screen with nothing to scroll. None of that is expressible in static markup, so these assert the
+// stylesheet and the structure — the same approach `affordance.test.mjs` and `nested-scroll.test.mjs` use.
+
+/** The stylesheet with its comments stripped: a rule's prose must not satisfy an assertion about its declarations. */
+let cssText;
+async function stylesheet() {
+  if (cssText === undefined) {
+    const { readFileSync } = await import("node:fs");
+    cssText = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  }
+  return cssText;
+}
+
+/** One rule's declarations, matched on the EXACT selector (an unanchored match reads an override — see nested-scroll). */
+async function rule(selector) {
+  const css = await stylesheet();
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matches = [...css.matchAll(new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`, "g"))];
+  return matches.length > 0 ? matches[0][1] : undefined;
+}
+
+test("the recents are BOUNDED, so the browser is not squeezed to a few rows", async () => {
+  // Measured from the screenshot: four to six recents (one per project a person has used) took the dialog's fixed
+  // height, leaving the chooser 4.5 rows — present and unusable at the same time.
+  const body = await rule(".recent-list");
+  assert.ok(body, ".recent-list must have a rule");
+  assert.match(body, /max-height:\s*\d+px/, "it has a ceiling rather than growing with session count");
+  assert.match(body, /overflow-y:\s*auto/, "and scrolls, so the older rows are still reachable");
+});
+
+test("the dialog cannot grow past the window, because its buttons are at the BOTTOM", async () => {
+  // `.modal-backdrop` is `place-items: center` with no scroller, so a taller-than-viewport dialog loses its top AND its
+  // bottom — and the bottom is where "Open here" is. The 900px screenshot fitted by luck; 700px would not have.
+  const body = await rule(".modal-sheet");
+  assert.ok(body, ".modal-sheet must exist — the chooser's dialog is a column");
+  assert.match(body, /max-height:/, "an explicit ceiling, in viewport units");
+  assert.match(body, /100dvh|100vh/, "tied to the window, not to a pixel guess");
+});
+
+test("the chooser is the region that GROWS, and history is what gives way", async () => {
+  const chooser = await rule(".modal-sheet .chooser");
+  assert.ok(chooser, "the chooser flexes inside the sheet");
+  assert.match(chooser, /flex:\s*1/, "it takes the remaining height");
+  assert.match(chooser, /min-height:/, "but never collapses to nothing, which would hide the browser entirely");
+  const form = await rule(".modal-sheet form");
+  assert.match(form ?? "", /flex:\s*none/, "the input and the buttons keep their size");
+});
+
+test('the trail\'s root is a LABEL element, not just a muted button', async () => {
+  // Two assertions, because either alone is passable by the wrong thing: the CLASS could vanish (styling gone) or the
+  // root could go back to being a `<button>` (truthfully clickable, and it does nothing at the root). The screenshot
+  // showed the second half as the actual defect — an inert segment that looked exactly like two live ones.
+  const html = render({ places: stateWith(), onListPlaces() {} });
+  assert.match(html, /<span class="chooser-crumb-root">Places<\/span>/, "at the root it is a span");
+  assert.ok(!/<button[^>]*chooser-crumb-link[^>]*>Places<\/button>/.test(html), "never a link that goes nowhere");
+});
+
+test('the trail\'s root is muted so it does not read as a control', async () => {
+  // The screenshot read `Places / Home / git` with the first segment inert and the other two live — a row where two of
+  // three things that look alike do nothing. The root is a span now, and the stylesheet mutes it.
+  const rootRule = await rule(".chooser-crumb-root");
+  assert.ok(rootRule, ".chooser-crumb-root must exist");
+  assert.match(rootRule, /color:\s*var\(--dim\)/, "quiet, so it does not read as a control");
+});
+
+test("every new scroll region is styled by this stylesheet, not by the platform", async () => {
+  // The bright channel the platform draws on a dark page is a defect this file has already fixed twice (#73, and the
+  // transcript). A new scroller inheriting the OS default reintroduces it, which the screenshot showed.
+  const css = await stylesheet();
+  for (const selector of [".recent-list", ".chooser", ".completions"]) {
+    assert.ok(css.includes(`${selector}::-webkit-scrollbar-thumb`), `${selector} needs the inset pill thumb`);
+    assert.match((await rule(selector)) ?? "", /scrollbar-color:/, `${selector} needs the Firefox/Chromium form too`);
+  }
 });

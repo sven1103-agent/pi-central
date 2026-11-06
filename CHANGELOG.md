@@ -25,6 +25,9 @@ orchestrator would answer `bad control: unknown kind 'listPlaces'`, so the pane 
 - A typed path completes against directories inside the folder being typed and against recent ones ([#76]).
 - A typed `~` path is expanded at submit, and the expanded path is shown before anything starts ([#76]).
 - A place that is not on this machine is named, rather than hidden ([#76]).
+- The sheet's list of used directories is capped and scrolls, so the browser is not squeezed to a few visible rows ([#76]).
+- The sheet fits a short window: its buttons are reachable instead of falling below the viewport ([#76]).
+- The trail's root reads as a label rather than as a button that does nothing ([#76]).
 
 [#76]: https://github.com/sven1103-agent/pi-central/issues/76
 [#206]: https://github.com/sven1103-agent/pi-central/issues/206

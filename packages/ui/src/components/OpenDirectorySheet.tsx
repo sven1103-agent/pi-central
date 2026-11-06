@@ -151,7 +151,7 @@ export function OpenDirectorySheet({
   return (
     <div className="modal-backdrop" onClick={onClose} role="presentation">
       <div
-        className="modal"
+        className="modal modal-sheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby="open-dir-title"
@@ -172,7 +172,15 @@ export function OpenDirectorySheet({
             <p className="recent-dirs-label" id="recent-dirs-label">
               Used before
             </p>
-            <ul aria-labelledby="recent-dirs-label">
+            {/*
+              The list is its own scroll region with a BOUNDED height, not "however many there are".
+
+              Screenshot evidence: 68 sessions in `$HOME` and 170 in `data-manager` produced six recents whose height
+              left the chooser a 4.5-row window — the browser was visible and unusable at the same time. A cap on the
+              recents is what gives the chooser the room to BE a chooser; six rows of history is still plenty, because
+              the directory you want is almost always in the first two.
+            */}
+            <ul className="recent-list" aria-labelledby="recent-dirs-label">
               {recent.map((entry) => (
                 <li key={entry.cwd}>
                   <button
@@ -218,10 +226,6 @@ export function OpenDirectorySheet({
             </ul>
           </div>
         )}
-        <p style={{ marginBottom: 12 }}>
-          The session is sandboxed to this directory. Pi Central does not change a session's
-          directory later, so start it where the work belongs.
-        </p>
         {/*
           The chooser comes after the recent list and before the text input.
 
@@ -328,6 +332,18 @@ export function OpenDirectorySheet({
               Cancel
             </button>
           </div>
+          {/*
+            The sandbox/exemption sentence is a FOOTNOTE, below the actions.
+
+            It sat between the recents and the chooser, where it cost two lines of a 900px dialog to say something a
+            reader needs once and cannot act on — while the two things they DO act on were competing for that space.
+            A sentence about consequences belongs beside the consequence (the buttons), not between the two ways of
+            choosing.
+          */}
+          <p className="sheet-footnote">
+            The session is sandboxed to this directory, and Pi Central does not change a session's directory later.
+            Start it where the work belongs.
+          </p>
         </form>
       </div>
     </div>

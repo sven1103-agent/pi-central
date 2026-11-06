@@ -2985,7 +2985,37 @@ select.btn { font-family: var(--sans); }
  * native select cannot show three. A list also keeps the row whole as one click target, which matters because the
  * whole point is that this is faster than typing a path.
  */
-.recent-dirs { margin-bottom: var(--sp-3); }
+.recent-dirs { margin-bottom: var(--sp-3); min-height: 0; }
+/*
+ * The recents are a bounded scroll region, not an unbounded list (screenshot evidence).
+ *
+ * With six recents — ordinary for anyone who has used a handful of projects — the sheet's fixed content left the
+ * browser a 4.5-row window: visible, and unusable. Capping the HISTORY is what gives the browse surface room, and it is
+ * the right thing to cap because the directory you want is in the first two rows.
+ */
+.recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 176px;
+  overflow-y: auto;
+  /* The platform's default bar is a bright channel on a dark page — the defect `styles.css` already fixed for the
+     transcript and the rail. A new scroll region inherits the same treatment rather than the OS's. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.recent-list::-webkit-scrollbar { width: 10px; }
+.recent-list::-webkit-scrollbar-track { background: transparent; }
+.recent-list::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--r-pill);
+}
+.recent-list::-webkit-scrollbar-thumb:hover { background: var(--dim); background-clip: padding-box; }
 .recent-dirs-label {
   font-size: var(--fs-xs);
   color: var(--dim);
@@ -2994,6 +3024,28 @@ select.btn { font-family: var(--sans); }
   margin: 0 0 var(--sp-2);
 }
 .recent-dirs ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+/*
+ * The sheet as a COLUMN with one flexible region, which is only possible because the recents are bounded and the
+ * chooser is the thing that grows. Two unbounded scroll regions competing for a fixed height is what the screenshot
+ * showed: the browser open at four and a half rows while the dialog had room to give.
+ *
+ * `max-height` on the dialog itself is not cosmetic. `.modal-backdrop` is `place-items: center` with no scroller, so a
+ * dialog taller than the window loses its top AND its bottom — and the bottom is where "Open here" is. A 900px-tall
+ * window fitted this one by luck; a 700px one would have hidden the buttons with nothing to scroll.
+ */
+.modal-sheet {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 2 * var(--sp-5));
+  overflow: hidden;
+}
+/* Shrinks before the chooser does: history is the thing to lose, not the browser. */
+.modal-sheet .recent-dirs { display: flex; flex-direction: column; min-height: 0; flex: 0 1 auto; }
+.modal-sheet .recent-list { min-height: 0; }
+.modal-sheet .chooser { flex: 1 1 140px; min-height: 120px; max-height: none; }
+/* The form does not shrink: its contents are a field, a list and the two buttons, and half of them is not a dialog. */
+.modal-sheet form { flex: none; }
+.sheet-footnote { margin: var(--sp-3) 0 0; font-size: var(--fs-xs); color: var(--dim); }
 .recent-dir {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -4696,11 +4748,27 @@ select.btn { font-family: var(--sans); }
   border: 1px solid var(--line);
   border-radius: var(--r-2);
   background: var(--panel-2);
-  padding: var(--sp-2) var(--sp-2) var(--sp-2);
-  /* The sheet is 620px wide at most and a deep tree adds up: cap it and scroll, rather than growing past the dialog. */
-  max-height: 260px;
+  padding: var(--sp-2);
+  /*
+   * Bounded, because a deep tree otherwise grows the dialog past the window. The CAP is a fallback for the standalone
+   * case (no `.modal-sheet` parent); inside the sheet the region flexes instead, so a tall window gives the browser
+   * more rows rather than leaving dead space at the bottom of the dialog.
+   */
+  max-height: 320px;
   overflow-y: auto;
+  /* Same scrollbar treatment as every other scroller here: the platform default is the bright channel. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
 }
+.chooser::-webkit-scrollbar { width: 10px; }
+.chooser::-webkit-scrollbar-track { background: transparent; }
+.chooser::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--r-pill);
+}
+.chooser::-webkit-scrollbar-thumb:hover { background: var(--dim); background-clip: padding-box; }
 .chooser-bar {
   display: flex;
   align-items: center;
@@ -4808,6 +4876,19 @@ select.btn { font-family: var(--sans); }
   display: flex;
   flex-direction: column;
   gap: 1px;
+  /* A long suggestion list must not push the buttons off a short window — the same reason the recents are capped. */
+  max-height: 132px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.completions::-webkit-scrollbar { width: 10px; }
+.completions::-webkit-scrollbar-track { background: transparent; }
+.completions::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--r-pill);
 }
 .completion {
   display: block;
@@ -4836,3 +4917,12 @@ select.btn { font-family: var(--sans); }
 
 /* The expanded form of a `~` path, shown when it differs from what was typed. Quiet: it is a confirmation, not a step. */
 .expanded-path { margin: 6px 0 0; font-size: var(--fs-xs); color: var(--dim); }
+
+/*
+ * "Places" at the root of the trail is a LABEL, and it must not look like the buttons beside it.
+ *
+ * Reported from a screenshot: the trail read `Places / Home / git` with the first segment inert and the next two
+ * controls, which is a row where two of three things that look the same do nothing. The root is muted and not
+ * underlined on hover, so the affordance is truthfully "this is where you are", not "this goes somewhere".
+ */
+.chooser-crumb-root { color: var(--dim); }

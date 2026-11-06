@@ -96,7 +96,15 @@ export function DirectoryChooser({
       <div className="chooser-bar">
         {at === undefined ? (
           <p className="chooser-crumb" ref={headingRef} tabIndex={-1}>
-            Places
+            {/*
+              "Places" is a LABEL here, not a control, and it must not look like one.
+
+              Reported from a screenshot: the trail read `Places / Home / git`, where the first segment was plain text
+              and the next two were buttons — so the one thing a reader tries first ("go back to the top") did not
+              respond, and the two that did looked identical to it. At the root there is nowhere above "Places", so it
+              is styled as the muted label it is.
+            */}
+            <span className="chooser-crumb-root">Places</span>
           </p>
         ) : (
           <Breadcrumb state={state} at={at} onNavigate={setAt} headingRef={headingRef} />
