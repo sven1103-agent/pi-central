@@ -4727,7 +4727,9 @@ select.btn { font-family: var(--sans); }
  */
 .chooser {
   display: grid;
-  grid-template-columns: 150px minmax(0, 1fr);
+  /* 200px: enough for `pi-central-dev` and a session badge without wrapping, which is what made the old 150px rail
+     unreadable ("Not on this machine: ~/src, ~/dev…" broke across four lines). */
+  grid-template-columns: 200px minmax(0, 1fr);
   gap: 0;
   margin-bottom: var(--sp-3);
   border: 1px solid var(--line);
@@ -4735,8 +4737,6 @@ select.btn { font-family: var(--sans); }
   background: var(--panel-2);
   /* Bounded, because a deep tree otherwise grows the dialog past the window. Inside `.modal-sheet` the region flexes
      instead, so a tall window gives the listing more rows rather than leaving dead space at the bottom. */
-  max-height: 320px;
-  min-height: 200px;
   overflow: hidden;
 }
 .chooser-empty { grid-template-columns: 1fr; padding: var(--sp-3); }
@@ -4748,6 +4748,7 @@ select.btn { font-family: var(--sans); }
   flex-direction: column;
   gap: 1px;
   padding: var(--sp-2) var(--sp-1);
+  min-width: 0;
   border-right: 1px solid var(--line);
   /* Its own scroller only if there are more places than fit — seven roots rarely need one, and a scroller over three
      rows was one of the defects the review named. */
@@ -4782,7 +4783,35 @@ select.btn { font-family: var(--sans); }
   color: var(--text);
   font-weight: 600;
 }
-.chooser-place-name { overflow: hidden; text-overflow: ellipsis; }
+.chooser-place-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A recent row's session count, as a badge on the right. The number is the evidence that this is a place you work. */
+.chooser-place-badge {
+  flex: none;
+  font-size: var(--fs-2xs);
+  font-family: var(--mono);
+  color: var(--dim);
+  background: var(--bg);
+  border-radius: var(--r-pill);
+  padding: 0 5px;
+  /* Wide enough for `170×`; `/` and `~` are the only things in the name column that must never be squeezed out. */
+  min-width: 26px;
+  text-align: center;
+}
+.chooser-place.is-current .chooser-place-badge { color: var(--text); }
+/* The group labels ("Used before" / "Places") separate two KINDS of row in one column: a destination you have been to,
+   and a place you browse. Without them the rail is one undifferentiated list of names. */
+.chooser-rail-label {
+  margin: var(--sp-2) 6px var(--sp-1);
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.chooser-rail-label:first-child { margin-top: 0; }
+.chooser-recents { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+/* A recent row commits, so it is marked — quietly — as a different kind of move from browsing a place. */
+.chooser-recent:disabled { opacity: 0.5; cursor: not-allowed; }
+.chooser-recent:disabled .chooser-icon { color: var(--warn-text); }
 
 /* --- the listing ---------------------------------------------------------------------------- */
 
@@ -4841,7 +4870,7 @@ select.btn { font-family: var(--sans); }
   margin-bottom: var(--sp-2);
   flex-wrap: wrap;
 }
-.chooser-use { font-size: var(--fs-xs); padding: 3px 10px; }
+
 .chooser-filter {
   flex: 1;
   min-width: 90px;
@@ -4950,7 +4979,17 @@ select.btn { font-family: var(--sans); }
 .chooser-open { color: var(--dim); font-size: var(--fs-sm); text-align: right; }
 .chooser-row:hover .chooser-open { color: var(--accent); }
 .chooser-note { margin: var(--sp-1) 0 0; font-size: var(--fs-xs); color: var(--dim); }
-.chooser-absent { margin: var(--sp-2) 4px 0; font-size: var(--fs-2xs); color: var(--dim); line-height: 1.4; }
+/* Stated, never hidden — but it must not wrap into four lines and eat the rail. One line, ellipsised, full list in the
+   title. The old block was the single worst offender in the screenshot. */
+.chooser-absent {
+  margin: var(--sp-2) 6px 0;
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .chooser-failure { margin-top: var(--sp-1); }
 
 /* --- the sheet's own layout ----------------------------------------------------------------- */
@@ -4965,18 +5004,91 @@ select.btn { font-family: var(--sans); }
 .modal-sheet {
   display: flex;
   flex-direction: column;
-  width: min(720px, calc(100vw - 2 * var(--sp-5)));
+  gap: 0;
+  /*
+   * Wider and taller than it was, and the number is a trade rather than a taste.
+   *
+   * 720px was chosen when the dialog had three stacked regions; with the recents in the rail there are two, and the
+   * listing is the one that needs room. A file dialog is one of the few surfaces where "as large as the window allows"
+   * is correct: the reader is doing a spatial search, and every extra row is one fewer scroll.
+   */
+  width: min(940px, calc(100vw - 2 * var(--sp-5)));
   max-width: none;
-  max-height: calc(100dvh - 2 * var(--sp-5));
+  height: min(680px, calc(100dvh - 2 * var(--sp-4)));
   overflow: hidden;
 }
 /* Shrinks before the chooser does: history is the thing to lose, not the browser. */
 .modal-sheet .recent-dirs { display: flex; flex-direction: column; min-height: 0; flex: 0 1 auto; }
 .modal-sheet .recent-list { min-height: 0; }
-.modal-sheet .chooser { flex: 1 1 240px; min-height: 200px; max-height: none; }
+/* The chooser IS the dialog's body now, so it takes everything the title and the form leave. */
+.modal-sheet .chooser { flex: 1 1 auto; min-height: 0; max-height: none; }
 /* The form does not shrink: its contents are a field, a list and the two buttons, and half of them is not a dialog. */
 .modal-sheet form { flex: none; }
-.sheet-footnote { margin: var(--sp-3) 0 0; font-size: var(--fs-xs); color: var(--dim); }
+.sheet-footnote { margin: var(--sp-2) 0 0; font-size: var(--fs-xs); color: var(--dim); }
+
+/*
+ * The dialog's actions: Cancel on the left, Open on the RIGHT — the conventional order in a file dialog, and the one
+ * the reporter asked for. `margin-left: auto` is what does it, so the pair stays anchored right whatever the dialog's
+ * width becomes.
+ */
+.modal-sheet .dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  justify-content: flex-end;
+}
+
+/*
+ * The primary action of the sheet, once.
+ *
+ * There used to be two controls that started a session — a filled one inside the listing and a bare `Open here` at the
+ * bottom — so neither read as the dialog's outcome. This is the only one, it is filled, and it sits bottom-right where
+ * an OK button belongs. `--accent-text` on `--accent-tint` keeps the measured pairing `affordance.test.mjs` asserts.
+ */
+.btn-primary-sheet {
+  min-width: 96px;
+  font-weight: 600;
+  background: var(--accent-tint);
+  border: 1px solid var(--accent-text);
+  color: var(--accent-text);
+  border-radius: var(--r-2);
+  padding: 5px 16px;
+  cursor: pointer;
+}
+.btn-primary-sheet:hover:not(:disabled) { background: var(--accent); color: var(--bg); }
+.btn-primary-sheet:focus-visible { outline: none; box-shadow: var(--focus); }
+.btn-primary-sheet:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* The text field and its Clear control, side by side — the field keeps the width, the clear does not. */
+.path-row { display: flex; align-items: center; gap: var(--sp-2); }
+.path-row input { flex: 1; min-width: 0; }
+.path-clear { flex: none; font-size: var(--fs-xs); padding: 2px 8px; border: 1px solid var(--line); border-radius: var(--r-pill); }
+
+/*
+ * WHAT WILL BE OPENED — the line that stops the two inputs competing.
+ *
+ * The field and the browser both name a directory, and which one wins is a rule the reader should not have to infer.
+ * This states it, directly above the button, with the winning path in mono. `role="status"` so it is announced when it
+ * changes, rather than being a silent visual.
+ */
+.effective-path {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin: 6px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text);
+  min-width: 0;
+}
+.effective-path-label {
+  flex: none;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: var(--fs-2xs);
+}
+.effective-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recent-dirs { margin-bottom: var(--sp-3); min-height: 0; }
 
 /*

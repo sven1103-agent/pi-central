@@ -261,19 +261,37 @@ export interface RosterRow {
  *   dropping a running process from the rail would be a worse lie than putting it at the end.
  * - A live session with no file yet cannot be matched or stored, so it is appended with its handle as the key.
  *   It becomes a normal entry on the next render after `get_state` answers.
+ *
+ * ## Why a removal has to be applied HERE as well as in the reducer (issue #204)
+ *
+ * Removing the roster entry is not enough to remove the ROW, because this join is what the rail renders and the
+ * append loop below is unconditional. `state.roster` could be `[]` and the reader still saw the row: a **stopped**
+ * session is in `live` (`stopped` is a state, not an absence, C3), so it came straight back through here on the next
+ * render — measured, with the reducer's `forgotten` list correct and populated. The two places must agree, which is
+ * why the removal list is an argument rather than something the caller filters afterwards: a filter at the call site
+ * would leave this function free to re-add what the caller just dropped, which is the defect itself.
  */
-export function rosterRows(entries: readonly RosterEntry[], live: readonly LiveSession[]): RosterRow[] {
+export function rosterRows(
+  entries: readonly RosterEntry[],
+  live: readonly LiveSession[],
+  forgotten: readonly string[] = [],
+): RosterRow[] {
   const byFile = new Map<string, LiveSession>();
   for (const session of live) {
     if (session.sessionFile !== undefined) byFile.set(session.sessionFile, session);
   }
 
+  const removed = new Set(forgotten);
   const rows: RosterRow[] = entries.map((entry) => ({ entry, session: byFile.get(entry.path) }));
   const listed = new Set(entries.map((entry) => entry.path));
 
   for (const session of live) {
     const file = session.sessionFile;
     if (file !== undefined && listed.has(file)) continue;
+    // The removal holds unless the session has a PROCESS — see `hasProcess`. A hidden live session would be one the
+    // reader cannot stop, so a forgotten row that is running again must be shown, and the reducer spends the removal
+    // on the same transition so the next render takes the ordinary path.
+    if (file !== undefined && removed.has(file) && !hasProcess(session)) continue;
     const entry = rosterEntryFor(session) ?? {
       // No durable key yet. The handle is used ONLY as a render key, never persisted — `addToRoster` refuses it
       // because it is not an absolute path.
@@ -427,7 +445,42 @@ export function shortSessionId(path: string): string {
  *
  * `failed` is deliberately NOT included: a failed session has its own Retry, and treating it as "not running" would
  * move it into the stopped-session view and lose that.
+ *
+ * ## Not the same question as `hasProcess`
+ *
+ * This answers *"which controls may I offer"*, so `failed` counts — that is how a failed row keeps its Retry instead
+ * of collapsing into the stopped view. It is the wrong predicate for *"is this work that must not be hidden"*, and
+ * using it there is what made a forgotten FAILED session reappear: `remember` spends a removal when the session is
+ * "running again", a failed session is not stopped so it read as running, and the row returned on the next broadcast.
+ * Use `hasProcess` for that question.
  */
 export function isRunning(session: LiveSession | undefined): boolean {
   return session !== undefined && session.state !== "stopped";
+}
+
+/**
+ * Does this session have a live PROCESS behind it?
+ *
+ * The question a removal is spent by (issue #204): work that is actually happening must never be hidden from the
+ * rail, because *"a hidden live session would be a session you cannot stop"* (`SessionRail.tsx`). Asked of the
+ * STATES rather than of the object, because the supervisor keeps an entry for a dead session (C3) — this is the same
+ * distinction `Supervisor#findLiveByPath` draws by excluding `stopped` and `failed`.
+ *
+ * `registered` is not a process either: it is a file known from discovery (ARCHITECTURE). It is unreachable in this
+ * phase — `Supervisor#spawn` starts at `starting` — and it is excluded for the same reason `failed` is, rather than
+ * left to be rediscovered as a resurrection bug if it ever becomes reachable.
+ *
+ * Distinct from `isRunning` on purpose: that one decides which CONTROLS a row offers and includes `failed` so a
+ * failed row keeps its Retry. Reusing it here is what let a removed failed session come back.
+ */
+export function hasProcess(session: LiveSession | undefined): boolean {
+  if (session === undefined) return false;
+  switch (session.state) {
+    case "stopped":
+    case "failed":
+    case "registered":
+      return false;
+    default:
+      return true;
+  }
 }

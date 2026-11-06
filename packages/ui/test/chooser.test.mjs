@@ -106,6 +106,8 @@ function renderChooserIn(dir, props = {}) {
       onList() {},
       onChoose() {},
       onNavigated() {},
+      recent: props.recent ?? [],
+      onChooseRecent() {},
       ...props,
       // The starting location is the component's own; a test that needs to be inside a folder passes a state whose
       // listing is loaded for it and asserts through the resumed render below.
@@ -143,17 +145,44 @@ function render(props) {
   );
 }
 
-test("the roots are one row each in a PLACES RAIL, labelled by name", () => {
-  // Restructured after the screenshot review: the three roots were a static menu under the recent list, which the
-  // review called out as the thing that makes navigation impossible. They are a rail now — the shape a file dialog
-  // uses — and the label is the root's own NAME (`git`, `Projects`) with the full path in the tooltip, because a
-  // `direction: rtl` path hint was rendering as `git~/`.
-  const html = render({ places: stateWith(), onListPlaces() {} });
-  assert.match(html, /<nav class="chooser-places" aria-label="Places">/, "a labelled navigation landmark");
-  assert.match(text(html), /Home/);
-  assert.match(text(html), /git/);
-  assert.match(html, /title="\/Users\/x\/git"/, "the path is in the tooltip, not mangled in the row");
-  assert.ok(!/git~\//.test(html), "and never the reversed form the rtl rule produced");
+test("the rail holds BOTH groups: used-before directories and places", () => {
+  // The change that made the dialog fit. Three stacked regions (recents, places, listing) each got a slice of one
+  // column, and the loser was always the listing — four visible folders in a 900px dialog. One rail, two groups.
+  const html = render({
+    places: stateWith(),
+    onListPlaces() {},
+    recent: [{ cwd: "/Users/x/git/alpha", sessions: 12, lastUsedMs: 1, cwdExists: true }],
+  });
+  assert.match(html, /<nav class="chooser-places" aria-label="Places and recent directories">/, "one navigation landmark");
+  assert.match(text(html), /Used before/, "the first group is named");
+  assert.match(text(html), /Places/, "and the second");
+  // The order is significant: a destination you have been to comes before a place you browse.
+  assert.ok(text(html).indexOf("Used before") < text(html).indexOf("Home"), "recents above places");
+  assert.match(html, /title="\/Users\/x\/git"/, "a place's full path is in the tooltip");
+  assert.ok(!/git~\//.test(html), "and never the reversed form the old rtl rule produced");
+});
+
+test("a recent row is a DESTINATION: it shows a session count and commits", () => {
+  // It is not a place to browse — clicking it starts a session there, which is why it carries a count rather than a
+  // chevron, and why a reader can tell the two groups apart at a glance and not only by reading the labels.
+  const html = render({
+    places: stateWith(),
+    onListPlaces() {},
+    recent: [{ cwd: "/Users/x/git/alpha", sessions: 12, lastUsedMs: 1, cwdExists: true }],
+  });
+  assert.match(html, /chooser-place-badge/, "a count badge");
+  assert.match(text(html), /12/, "the number of sessions that ran there");
+  assert.match(html, /chooser-recent/, "marked as its own kind of row");
+});
+
+test("a recent directory that is GONE is disabled and says why", () => {
+  const html = render({
+    places: stateWith(),
+    onListPlaces() {},
+    recent: [{ cwd: "/mnt/unmounted", sessions: 2, lastUsedMs: 1, cwdExists: false, cwdMissing: "unreadable" }],
+  });
+  assert.match(html, /chooser-place chooser-recent" disabled/, "unclickable, not hidden");
+  assert.match(text(html), /cannot be read/, "with the recoverable reason, not 'missing'");
 });
 
 test("a root that is not on this machine is STATED, never hidden", () => {
@@ -164,20 +193,21 @@ test("a root that is not on this machine is STATED, never hidden", () => {
   assert.match(text(html), /~\/Projects/);
 });
 
-test("the chooser appears BETWEEN the recents and the input, so the exact-path route stays reachable", () => {
-  // Order is a usability decision and not cosmetic: browsing above the input means a reader who knows the path is not
-  // made to scroll past a folder tree to reach the field that takes it.
+test("the dialog is ONE browser plus a path field, not a stack of three regions", () => {
+  // The old shape had a recent strip, then the browser, then the input — so the listing was the third thing down and got
+  // whatever height was left. The recents now live in the rail, and the ordering assertion below is what pins that.
   const html = render({
     places: stateWith(),
     onListPlaces() {},
     recent: [{ cwd: `${home}/work`, sessions: 1, lastUsedMs: 1, cwdExists: true }],
   });
-  const recents = html.indexOf("Used before");
-  const chooser = html.indexOf("Places");
-  const input = html.indexOf("absolute/path/to/project");
-  assert.ok(recents >= 0 && chooser >= 0 && input >= 0, "all three sections are present");
-  assert.ok(recents < chooser, "recents first — one click each");
-  assert.ok(chooser < input, "and the chooser before the text field");
+  const rail = html.indexOf('class="chooser-places"');
+  const input = html.indexOf("Or type an absolute path");
+  assert.ok(rail >= 0 && input >= 0, "both are present");
+  assert.ok(rail < input, "the browser comes before the exact-path field");
+  assert.match(html, /Or type an absolute path/, "and the field is labelled as the ALTERNATIVE, not the primary route");
+  // There is no separate recents REGION outside the rail any more.
+  assert.ok(!/class="recent-dirs"/.test(html), "no second recents block above the browser");
 });
 
 test("with no places at all, the pane says so and points at the two routes that still work", () => {
@@ -266,7 +296,7 @@ test("with an orchestrator that cannot offer places, the pane is ABSENT — not 
   const html = render({});
   assert.ok(!/Places/.test(html), `no chooser pane: ${html}`);
   assert.match(text(html), /Open in a directory/, "and the sheet is still the sheet");
-  assert.match(html, /absolute\/path\/to\/project/, "with the text input it has always had");
+  assert.match(html, /Or type an absolute path/, "with the text input it has always had");
 });
 
 // --- Completion, in the sheet's own markup --------------------------------------------------------
@@ -303,12 +333,13 @@ test("a recent directory in a DIFFERENT folder is not offered as a completion of
   assert.ok(!/work/.test(completions), `no completion from another folder: ${completions}`);
 });
 
-test("an expanded `~` is SHOWN before submission, so the directory used is the one written down", () => {
-  // The reader typed `~/git/alpha` and the session will be started in `/Users/x/git/alpha`. Saying so is the same
-  // honesty a rename or a delete owes: the action must not act on a string the reader never saw.
+test("the path that will be OPENED is stated, once, above the button", () => {
+  // Two inputs name a directory — the field and the browser — and the reader should not have to work out which wins.
+  // The dialog says so: typed text wins, the expansion is shown, and the line sits directly above the one Open button.
+  // Before this, Enter in the autofocused field committed the empty field instead of the folder on screen.
   const html = render({ places: stateWith(), onListPlaces() {}, initialPath: "~/git/alpha" });
   assert.match(text(html), /\/Users\/x\/git\/alpha/, "the expanded path is visible");
-  assert.match(html, /expanded-path/);
+  assert.match(html, /effective-path/);
 });
 
 // --- The pane survives a long path ----------------------------------------------------------------
@@ -370,7 +401,9 @@ test("the dialog cannot grow past the window, because its buttons are at the BOT
   // bottom — and the bottom is where "Open here" is. The 900px screenshot fitted by luck; 700px would not have.
   const body = await rule(".modal-sheet");
   assert.ok(body, ".modal-sheet must exist — the chooser's dialog is a column");
-  assert.match(body, /max-height:/, "an explicit ceiling, in viewport units");
+  // `height` (a fixed measure, so the listing has a predictable size) STILL bounded by the viewport, which is the
+  // property that matters: `calc(100dvh - …)` cannot exceed the window whatever the pixel value is.
+  assert.match(body, /height:\s*min\(/, "a measured height, capped");
   assert.match(body, /100dvh|100vh/, "tied to the window, not to a pixel guess");
 });
 
@@ -474,7 +507,7 @@ test("a resumed directory is where the picker OPENS, without a request from the 
   assert.match(html, /chooser-crumb-here">alpha</, "the current folder is the trail's last, non-clickable segment");
   assert.match(html, />work</, "with its ancestors beside it, clickable");
   // `text()` normalises React's `<!-- -->` separators; matching the raw markup would fail on a cosmetic insertion.
-  assert.match(text(html), /Use “alpha”/, "and the primary action names the folder you are in");
+  assert.match(html, /chooser-crumb-here/, "and the folder you are in is named in the trail");
   assert.ok(!/<p class="chooser-crumb" tabindex="-1"><span class="chooser-crumb-root">Places<\/span><\/p>/.test(html), "NOT the bare 'Places' pane");
 });
 
@@ -495,4 +528,70 @@ test("exactly ONE place is marked current, even though $HOME contains every othe
   const html = renderChooserIn("/Users/x/git/alpha", { state });
   assert.equal((html.match(/chooser-place is-current/g) ?? []).length, 1, "one highlighted row, not two");
   assert.match(html, /chooser-place is-current" title="\/Users\/x\/git"/, "and it is the MOST SPECIFIC place");
+});
+
+// --- ONE commit target (issue #76, reported from a screenshot) ------------------------------------
+//
+// Three defects came from having two commit paths — "Use «folder»" for the browser and "Open here" for the form. They
+// were reported as one worry ("the manual path field and the selection compete; users get confused") and one layout
+// complaint ("the choose button is ill placed; why not bottom-right, like Open"). Both are the same defect.
+
+test("there is exactly ONE primary action, and it is at the END of the dialog", () => {
+  // A filled control in the middle of the listing plus a bare one at the bottom meant neither read as the dialog's
+  // outcome. Cancel-then-Open, at the bottom right, is what every file dialog does.
+  const html = render({ places: stateWith(), onListPlaces() {}, initialPath: "/Users/x/git/alpha" });
+  assert.equal((html.match(/btn-primary-sheet/g) ?? []).length, 1, "one primary, not two");
+  assert.ok(!/chooser-use/.test(html), "and no second commit button inside the listing");
+  const cancel = html.indexOf(">Cancel<");
+  const open = html.indexOf("btn-primary-sheet");
+  assert.ok(cancel >= 0 && open > cancel, "Cancel first, Open last — the conventional order");
+  assert.match(text(html), />\s*Open\s*</, "and it says Open, not 'Open here'");
+});
+
+test("the button does NOT say 'here', because 'here' was ambiguous", () => {
+  // "Open here" meant "the text field" while reading as "this folder", so a reader who had selected a folder and pressed
+  // it was told to enter an absolute path. One word, one meaning now.
+  const html = render({ places: stateWith(), onListPlaces() {} });
+  assert.ok(!/Open here/.test(html), "no 'here' anywhere in the dialog");
+});
+
+test("with nothing typed, the BROWSED folder is what Open commits", () => {
+  // The defect: the field is autofocused and inside the form, so Enter committed the empty field rather than the folder
+  // on screen. With typed text empty, the browsed selection is the selection — and the dialog says which one it is.
+  const state = resumedInto("/Users/x/git");
+  const html = renderChooserIn("/Users/x/git", { state });
+  assert.match(html, /chooser-crumb-here/, "the folder on screen is named");
+  // The sheet holds it as its selection: `effectivePath` is `browsed` when the field is empty, and `problem` is
+  // therefore NOT "choose a folder" — asserted through the sheet, which owns the rule.
+  const sheet = render({ places: { ...state }, onListPlaces() {} });
+  assert.match(sheet, /effective-path/, "the line that states what will be opened is rendered");
+  assert.match(text(sheet), /Selected/, "labelled as a SELECTION, not as something to type");
+});
+
+test("typed text WINS over the browsed folder, and the dialog says so", () => {
+  // The precedence rule, stated rather than inferred. Without it the two inputs really do compete: a reader cannot tell
+  // whether their typing or their clicking counts.
+  const state = resumedInto("/Users/x/git");
+  const html = render({ places: state, onListPlaces() {}, initialPath: "~/git/alpha" });
+  const line = html.slice(html.indexOf("effective-path"));
+  assert.match(text(line), /Opening/, "typed text is the one being opened");
+  assert.match(text(line), /\/Users\/x\/git\/alpha/, "expanded, so the reader sees the real path");
+});
+
+test("a Clear control exists, so the typed override can be undone", () => {
+  // Without it there is no way back: a reader who typed and changed their mind would have to select and delete the text,
+  // and clicking a folder would look broken because it no longer changed what Open would use.
+  const html = render({ places: stateWith(), onListPlaces() {}, initialPath: "~/git/alpha" });
+  assert.match(html, /path-clear/, "a clear control beside the field");
+  const empty = render({ places: stateWith(), onListPlaces() {} });
+  assert.ok(!/path-clear/.test(empty), "and nothing to clear when the field is empty");
+});
+
+test("Open is DISABLED until there is something to open", () => {
+  // A disabled primary is the honest state of "nothing selected": it says the dialog is waiting for a decision rather
+  // than offering a button whose only outcome is a refusal.
+  const html = render({ places: stateWith(), onListPlaces() {} });
+  assert.match(html, /btn-primary-sheet" disabled/, "disabled with no selection and no typed path");
+  const withSelection = render({ places: resumedInto("/Users/x/git"), onListPlaces() {} });
+  assert.ok(!/btn-primary-sheet" disabled/.test(withSelection), "enabled once a folder is selected");
 });

@@ -33,6 +33,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PlaceEntryInfo, PlaceInfo } from "@pi-central/protocol";
 import { placeAt, type PlacesState } from "../places.ts";
+import { abbreviateCwd, baseName, type RecentDirectory } from "../recent.ts";
 import type { PlaceSort } from "../chooser-prefs.ts";
 import { ageOf } from "../age.ts";
 import { FileErrorNote } from "./FileErrorNote.tsx";
@@ -44,8 +45,9 @@ export function DirectoryChooser({
   onSort,
   onToggleHidden,
   onList,
-  onChoose,
   onNavigated,
+  recent,
+  onChooseRecent,
 }: {
   state: PlacesState;
   /** How rows are ordered. Remembered across opens (`chooser-prefs.ts`). */
@@ -56,10 +58,18 @@ export function DirectoryChooser({
   onToggleHidden: (path: string) => void;
   /** List one absolute path. The roots are requested by the sheet, not here. */
   onList: (path: string) => void;
-  /** Start a session in this directory. Called ONLY from an explicit "use this folder" control. */
-  onChoose: (path: string) => void;
   /** Report where the reader went, so the next open resumes there. */
   onNavigated: (path: string) => void;
+  /**
+   * Directories used before, most recent first — the rail's first group (issue #76).
+   *
+   * They live in the RAIL rather than in a strip above the browser, which is the change that made this dialog fit:
+   * two navigation concepts stacked vertically (a recent list, then a places rail, then a listing) is three answers to
+   * "where could I go" competing for one column, and the loser was always the listing. One rail, two groups.
+   */
+  recent: readonly RecentDirectory[];
+  /** Start a session in a recent directory. A recent row IS a destination, so it commits rather than navigates. */
+  onChooseRecent: (cwd: string) => void;
 }) {
   /**
    * Where the reader is.
@@ -159,15 +169,65 @@ export function DirectoryChooser({
     <div className="chooser">
       {/* The places rail: what a file dialog puts on the left. Its own fixed column, so it never scrolls with the
           listing — the two answer different questions and must not move together. */}
-      <nav className="chooser-places" aria-label="Places">
+      <nav className="chooser-places" aria-label="Places and recent directories">
+        {recent.length > 0 && (
+          <>
+            <p className="chooser-rail-label" id="chooser-recent-label">
+              Used before
+            </p>
+            {/*
+              A recent row COMMITS: it is a destination, not a location to browse. That is what distinguishes it from
+              every row below, and why it carries the session count instead of a chevron — a reader can tell at a
+              glance which rows start something.
+            */}
+            <ul className="chooser-recents" aria-labelledby="chooser-recent-label">
+              {recent.map((entry) => (
+                <li key={entry.cwd}>
+                  <button
+                    type="button"
+                    className="chooser-place chooser-recent"
+                    disabled={!entry.cwdExists}
+                    title={
+                      entry.cwdExists
+                        ? `${entry.cwd} — start a session here (${entry.sessions} session${entry.sessions === 1 ? "" : "s"})`
+                        : entry.cwdMissing === "unreadable"
+                          ? `${entry.cwd} — exists but cannot be read`
+                          : `${entry.cwd} — no longer exists`
+                    }
+                    onClick={() => onChooseRecent(entry.cwd)}
+                  >
+                    <RecentIcon />
+                    <span className="chooser-place-name">{baseName(entry.cwd)}</span>
+                    {/*
+                      The count is the EVIDENCE that this is a place you work, so it is shown — but as `170×`, not
+                      `170 sessions`. In a 200px rail, three extra words per row squeeze the folder name, which is the
+                      thing the reader is actually scanning. The full sentence is in the title.
+                    */}
+                    <span className="chooser-place-badge" aria-label={`${entry.sessions} sessions`}>
+                      {entry.cwdExists
+                        ? `${entry.sessions}×`
+                        : entry.cwdMissing === "unreadable"
+                          ? "unreadable"
+                          : "missing"}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <p className="chooser-rail-label" id="chooser-places-label">
+              Places
+            </p>
+          </>
+        )}
         <button
           type="button"
           className={`chooser-place${at === undefined ? " is-current" : ""}`}
           onClick={() => setAt(undefined)}
           aria-current={at === undefined ? "page" : undefined}
+          title="The folders Pi Central offers"
         >
           <PlaceIcon kind="roots" />
-          <span className="chooser-place-name">Places</span>
+          <span className="chooser-place-name">All places</span>
         </button>
         {existing.map((place) => (
           <button
@@ -183,8 +243,13 @@ export function DirectoryChooser({
           </button>
         ))}
         {absent.length > 0 && (
-          <p className="chooser-absent">
-            Not on this machine: {absent.map((place) => abbreviateWith(place.path, state.home)).join(", ")}
+          /*
+            Stated, never hidden (the rule the recent list set), but in ONE line: at 200px wide the old block wrapped
+            to four lines and took a third of the rail to say "these four folders are not on this machine". The full
+            list is in the title, so truncation hides nothing.
+          */
+          <p className="chooser-absent" title={`Not on this machine: ${absent.map((place) => abbreviateWith(place.path, state.home)).join(", ")}`}>
+            Not on this machine: {absent.length} place{absent.length === 1 ? "" : "s"}
           </p>
         )}
       </nav>
@@ -224,13 +289,18 @@ export function DirectoryChooser({
           )
         ) : (
           <>
-            {/* The primary action sits at the TOP of the listing, next to where the reader is looking, and it says what
-                it will do to THIS folder. It is the only control on this surface that starts a session. */}
+            {/*
+              NO "use this folder" button here, and its removal is a fix rather than a loss.
+
+              It was a SECOND commit path beside the dialog's own Open button, and the two could disagree: Enter in the
+              autofocused text field committed the field (often empty) instead of the folder on screen, and "Open here"
+              meant "the text field" while reading as "this folder". One dialog cannot have two outcomes. What this row
+              does instead is NAVIGATE and REPORT — the sheet holds the browsed folder as its selection, and the footer's
+              Open commits it. The filter, sort and dotfolders stay, because they change what is being looked at rather
+              than what will be opened.
+            */}
             {here !== undefined && (
               <div className="chooser-actions">
-                <button type="button" className="btn chooser-use" onClick={() => onChoose(here.path)}>
-                  Use “{here.name}”
-                </button>
                 <input
                   ref={filterRef}
                   type="search"
@@ -400,6 +470,16 @@ function FolderIcon() {
         strokeWidth="1.2"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+/** A clock for "used before", so a rail of two groups is distinguishable by shape and not only by a label. */
+function RecentIcon() {
+  return (
+    <svg className="chooser-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M8 4.8V8l2.2 1.4" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
     </svg>
   );
 }

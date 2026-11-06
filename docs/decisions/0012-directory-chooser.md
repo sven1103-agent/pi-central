@@ -226,3 +226,77 @@ found by a human looking at a screenshot after a green test suite. The tests ass
 exists, a class is present — and none asserted *geometry or affordance*, because Chromium cannot run in
 the development sandbox (C1). That is the gap `verified/manual` exists to name, and this is now the
 second time on this issue that looking at it found more than the suite did.
+
+## Amendment 2 — one rail, and a dialog that fills the window
+
+A second screenshot showed the two-pane version was still too small: a 720px-wide dialog whose right pane was
+mostly empty, because the recents were a strip stacked *above* the browser, so three vertical regions shared
+one column and the listing — the thing being browsed — got the leftovers. Four visible folders in a 900px
+dialog.
+
+The reporter proposed a rail with **Recent** and **File system** entries. That is the right shape and it is
+what shipped, with one refinement: "file system" is not the second group, because ADR-0012 deliberately does
+not browse the filesystem — it browses a closed set of **places**. So the rail's groups are *used before*
+(a destination: clicking starts a session there, marked by a session count) and *places* (a location: clicking
+browses it, marked by a chevron on its rows). Two kinds of move, one column, labelled.
+
+Three consequences worth recording:
+
+- **The dialog is now measured rather than shrink-wrapped**: `940px` wide and `680px` tall, both capped against
+  the viewport. A file dialog is one of the few surfaces where "as large as the window allows" is correct —
+  the reader is doing a spatial search, and every extra row is one fewer scroll.
+- **The badge is `170×`, not `170 sessions`.** At 200px of rail the long form squeezed the folder name, which is
+  the thing being scanned. The evidence is kept; the words are in the tooltip.
+- **"Not on this machine: 3 places"** replaced a comma-separated list that wrapped to four lines and took a
+  third of the rail. Stated, never hidden — the title still lists every absent place.
+
+## Amendment 3 — one commit target, and why the two inputs competed
+
+Reported from a third screenshot, as two observations that turned out to be one defect:
+
+> *"the button to choose the directory selected in the directory picker is ill placed. Why not on the bottom right,
+> like 'Open'. I am also worried about the competition of the manual path textfield and the selection, that users
+> get confused."*
+
+Both are right, and both came from **two independent commit paths** in one dialog:
+
+| Control | Committed |
+|---|---|
+| `Use «folder»` (inside the listing) | the folder the browser had navigated to |
+| `Open here` (a form submit) | the **text field** |
+
+The consequences were not cosmetic:
+
+1. **Enter did the wrong thing.** The field is autofocused and inside the `<form>`, so pressing Enter committed
+   whatever it held — which, after browsing and not typing, was `""`. The button that reads as the dialog's OK
+   button silently depended on having typed.
+2. **"Open here" was false in the browse case.** It said "here" while meaning "the text field"; a reader who had
+   selected a folder and pressed it was told to enter an absolute path.
+3. **Two primaries, neither the dialog's outcome.** A filled control in the middle of the listing and a bare one at
+   the bottom, both starting a session.
+
+**The fix is a rule, not a restyle: the text field is an INPUT to one selection, not a competing source of truth.**
+
+```
+effectivePath = typed !== "" ? expand(typed) : (browsed ?? resumed)
+```
+
+Typed text wins — a reader who typed has explicitly overridden the browser — otherwise the browsed (or resumed)
+folder. One `Open` commits `effectivePath`, at the **bottom right**, with `Cancel` to its left, which is where every
+OS file dialog puts its outcome. Enter commits the same thing, because Enter submits the same form.
+
+Two supporting changes, both about not making the reader infer the rule:
+
+- **The dialog states what will be opened**, one line above the button (`Selected …` / `Opening …`, with the
+  expanded path in mono). That line is the whole answer to "do these two inputs compete": they do not, and the
+  dialog shows which one won.
+- **A `Clear` control** appears when the field has text. Without it there is no way back from a typed override: a
+  reader who typed and changed their mind would have to select and delete the text, and clicking a folder would look
+  broken because it no longer changed what Open would use.
+
+**One defect the tests caught while doing this**: the picker resumes *inside* the remembered folder, but the sheet's
+selection was only set by navigation — so opening the sheet and pressing Open without moving gave a **disabled**
+button while a folder was plainly on screen. The selection now falls back to `resumed`.
+
+The "used before" rows in the rail still commit directly, and that is the one deliberate second path: a recent row
+names its directory explicitly, so there is nothing for it to disagree with.

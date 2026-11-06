@@ -4,12 +4,31 @@
  * Deliberately a sheet rather than the greeting. The common case is a session with no path (US-1);
  * this exists for the case where the work already has a home.
  *
- * ## Two different things are checked here, and they are different in kind
+ * ## ONE commit target, and that is the whole design (issue #76)
+ *
+ * There are two ways to name a directory — the browser, and the text field — and the first version had **two
+ * independent commit paths**: "Use «folder»" committed the browsed selection while "Open here" (a form submit)
+ * committed the text field. Three defects came out of that one duplication, all reported from a screenshot:
+ *
+ *   1. **Enter did the wrong thing.** The field is autofocused and inside the `<form>`, so pressing Enter committed
+ *      whatever it held — which, when the reader had been browsing, was the empty string. The button that looks like
+ *      the dialog's OK button silently depended on having typed something.
+ *   2. **"Open here" was a lie in the browse case.** It said "here" while meaning "the text field". A reader who
+ *      selected `~/git/data-management` and pressed it was told to enter an absolute path.
+ *   3. **Two primaries.** A filled control in the middle of the listing and a bare one at the bottom, both starting a
+ *      session, neither obviously the dialog's outcome.
+ *
+ * So: **the text field is an INPUT to one selection, not a competing source of truth.** The selection is
+ * `effectivePath` — what the reader typed if they typed anything, otherwise the folder they browsed to. One "Open"
+ * button commits it, at the bottom right where every file dialog puts it, and Enter commits it too. There is no state
+ * in which two buttons can disagree, because there is only one.
+ *
+ * ## Two different things are still checked here, and they are different in kind
  *
  * `problem` is a **validation error**: the path cannot be used, and submission is blocked.
  * `hazard` is a **warning**: the path is usable and the consequences are worth knowing, so
- * submission is NOT blocked. Collapsing them would make the app refuse something the user may have
- * a good reason to do — which is the wrong trade for a hazard whose whole purpose is to inform.
+ * submission is NOT blocked. Collapsing them would make the app refuse something the user may
+ * have a good reason to do — which is the wrong trade for a hazard whose whole purpose is to inform.
  *
  * The hazard uses `ownInstallationWarning` from the shared protocol package, the SAME function the
  * orchestrator calls when it attaches the warning to a session. Two implementations would mean the
@@ -17,7 +36,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ownInstallationWarning } from "@pi-central/protocol";
-import { abbreviateCwd, baseName, type RecentDirectory } from "../recent.ts";
+import type { RecentDirectory } from "../recent.ts";
 import { completeDirectory, completionBase, expandHome } from "../complete.ts";
 import type { PlacesState } from "../places.ts";
 import type { ChooserPrefs } from "../chooser-prefs.ts";
@@ -77,6 +96,23 @@ export function OpenDirectorySheet({
   const inputRef = useRef<HTMLInputElement>(null);
 
   /**
+   * The folder the reader browsed to, reported up by the chooser as they move.
+   *
+   * Held here rather than only inside `DirectoryChooser` because the Open button needs it: the dialog's outcome is one
+   * directory, and something has to know which one when the click lands.
+   */
+  const [browsed, setBrowsed] = useState<string | undefined>(undefined);
+
+  /**
+   * The selection: where the reader navigated, or the folder the chooser RESUMED into.
+   *
+   * The fallback is not a convenience — it was a bug. The picker opens inside the remembered directory (`resumeAt`), so
+   * a reader who opened the sheet and pressed Open without navigating got a disabled button while looking straight at a
+   * folder. Found by a test that expected the primary to be enabled once a folder is on screen.
+   */
+  const selection = browsed ?? places?.resumeAt;
+
+  /**
    * Ask for the roots when the pane first appears.
    *
    * The RESPONSE is held by the shell (`App`), because the socket listener is where every other orchestrator
@@ -116,13 +152,40 @@ export function OpenDirectorySheet({
    */
   const expanded = useMemo(() => expandHome(trimmed, home), [trimmed, home]);
 
+  /**
+   * THE selection — the one directory "Open" commits.
+   *
+   * Typed text WINS when there is any, because a reader who typed has explicitly overridden the browser; otherwise the
+   * browsed folder. That precedence is also what makes the two inputs stop competing: the field no longer needs to be
+   * cleared or avoided, and the browser no longer needs its own commit button, because typing simply replaces the
+   * selection the browser set.
+   *
+   * Before this, the two were separate commit paths — and Enter, in an autofocused field inside a `<form>`, committed
+   * the empty text field rather than the folder on screen.
+   */
+  const effectivePath = trimmed !== "" ? expanded : (selection ?? "");
+
   // Client-side validation is advisory only: the orchestrator validates the directory before
   // spawning, and a directory can vanish between the two checks (D-4).
   const problem = useMemo(() => {
-    if (trimmed.length === 0) return "Enter a directory.";
-    if (!expanded.startsWith("/")) return "Enter an absolute path, starting with /.";
+    if (effectivePath === "") return "Choose a folder below, or type a path.";
+    if (!effectivePath.startsWith("/")) return "Enter an absolute path, starting with /.";
     return undefined;
-  }, [trimmed, expanded]);
+  }, [effectivePath]);
+
+  /**
+   * The self-hosting hazard, evaluated while the path is being typed (issue #25).
+   *
+   * Advisory and non-blocking: the user may have a good reason, and the warning exists to inform the
+   * decision rather than to make it. `problem` gates submission; this deliberately does not.
+   *
+   * Skipped when the path is already invalid, because a sentence about consequences next to "enter
+   * an absolute path" would be noise about something the user cannot act on yet.
+   */
+  const hazard = useMemo(() => {
+    if (problem !== undefined) return undefined;
+    return ownInstallationWarning(effectivePath, installationRoot);
+  }, [effectivePath, installationRoot, problem]);
 
   /**
    * The completions for what is being typed (issue #76).
@@ -148,19 +211,10 @@ export function OpenDirectorySheet({
     });
   }, [trimmed, expanded, home, recent, places]);
 
-  /**
-   * The self-hosting hazard, evaluated while the path is being typed (issue #25).
-   *
-   * Advisory and non-blocking: the user may have a good reason, and the warning exists to inform the
-   * decision rather than to make it. `problem` gates submission; this deliberately does not.
-   *
-   * Skipped when the path is already invalid, because a sentence about consequences next to "enter
-   * an absolute path" would be noise about something the user cannot act on yet.
-   */
-  const hazard = useMemo(() => {
-    if (problem !== undefined) return undefined;
-    return ownInstallationWarning(trimmed, installationRoot);
-  }, [trimmed, installationRoot, problem]);
+  /** Commit the ONE selection. The only place a session is started from this dialog. */
+  const commit = () => {
+    if (problem === undefined) onOpen(effectivePath);
+  };
 
   return (
     <div className="modal-backdrop" onClick={onClose} role="presentation">
@@ -173,88 +227,24 @@ export function OpenDirectorySheet({
       >
         <h3 id="open-dir-title">Open in a directory</h3>
         {/*
-          Recent directories come FIRST, and they are the reason this sheet is usable at all (issue #149).
+          ONE navigation surface: the recent directories and the places share a rail, and the listing fills the rest.
 
-          Before this the sheet was a bare text input: starting a second task in a project you were already
-          working in meant retyping an absolute path from memory. The list is derived from session headers
-          (`recentDirectories`), so it is a projection of what is on disk rather than a cache that could
-          disagree with it — and a directory that has since been deleted is still shown, marked, and
-          refused before anything is spawned (the #11 rule) rather than silently omitted.
-        */}
-        {recent.length > 0 && (
-          <div className="recent-dirs">
-            <p className="recent-dirs-label" id="recent-dirs-label">
-              Used before
-            </p>
-            {/*
-              The list is its own scroll region with a BOUNDED height, not "however many there are".
-
-              Screenshot evidence: 68 sessions in `$HOME` and 170 in `data-manager` produced six recents whose height
-              left the chooser a 4.5-row window — the browser was visible and unusable at the same time. A cap on the
-              recents is what gives the chooser the room to BE a chooser; six rows of history is still plenty, because
-              the directory you want is almost always in the first two.
-            */}
-            <ul className="recent-list" aria-labelledby="recent-dirs-label">
-              {recent.map((entry) => (
-                <li key={entry.cwd}>
-                  <button
-                    type="button"
-                    className="recent-dir"
-                    /*
-                      A directory that no longer exists is DISABLED rather than hidden or allowed.
-
-                      Hidden would make the list silently forget a project whose volume is unmounted — the
-                      reader would conclude Pi Central forgot it. Allowed would spend a spawn on a directory
-                      that cannot work: RPC-mode Pi exits 1 rather than prompting (C2), so the failure would
-                      arrive as an unexplained crash instead of a stated reason.
-                    */
-                    disabled={!entry.cwdExists}
-                    /*
-                      The reason, not just "no longer exists" (issue #196).
-
-                      `cwdExists: false` from an orchestrator that predates `cwdMissing` keeps the old wording — a
-                      missing cause must not be invented. When the reason IS known, it decides the sentence, because
-                      "unreadable" is often fixable now and "gone" is not.
-                    */
-                    title={
-                      entry.cwdExists
-                        ? entry.cwd
-                        : entry.cwdMissing === "unreadable"
-                          ? `${entry.cwd} — exists but cannot be read`
-                          : `${entry.cwd} — no longer exists`
-                    }
-                    onClick={() => onOpen(entry.cwd)}
-                  >
-                    <span className="recent-dir-name">{baseName(entry.cwd)}</span>
-                    <span className="recent-dir-path mono">{abbreviateCwd(entry.cwd, home)}</span>
-                    <span className="recent-dir-count">
-                      {entry.cwdExists
-                        ? `${entry.sessions} session${entry.sessions === 1 ? "" : "s"}`
-                        : entry.cwdMissing === "unreadable"
-                          ? "unreadable"
-                          : "missing"}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {/*
-          The chooser comes after the recent list and before the text input.
-
-          That order is the frequency order: "a directory I used before" and "the project I am working in" are both
-          one click above, and browsing is for the case neither answers — a project you have never opened here. Putting
-          it above the input keeps the exact-path route (the fastest one for someone who knows the path) reachable
-          without scrolling past a folder list.
+          This replaced a recent list stacked ABOVE the browser, and the reason is measurable in the screenshot that
+          prompted it: the dialog was 720px wide with a mostly-empty right pane, because three vertical blocks (recents,
+          places, listing) were each given a slice of a 900px dialog. Nobody could see more than four folders. Moving
+          the recents into the rail does three things at once — the listing gets the whole height, "where could I go"
+          has ONE answer instead of two, and the two ways of choosing (a destination I used before, versus a place I
+          browse) become visually distinct groups in one column rather than two competing regions.
         */}
         {places !== undefined && onListPlaces !== undefined && (
           <DirectoryChooser
             state={places}
+            recent={recent}
+            onChooseRecent={(cwd) => onOpen(cwd)}
             sort={chooser?.sort ?? "name"}
             showHidden={chooser?.showHidden === true}
             onSort={(sort) => onChooserChange?.({ ...(chooser ?? { sort: "name", showHidden: false }), sort })}
-            onToggleHidden={(path) => {
+            onToggleHidden={(target) => {
               const next = { ...(chooser ?? { sort: "name" as const, showHidden: false }), showHidden: chooser?.showHidden !== true };
               onChooserChange?.(next);
               /*
@@ -264,38 +254,67 @@ export function OpenDirectorySheet({
                * orchestrator caps a listing at 500 entries, and a client-side filter would hide dotfolders the cap had
                * already displaced — the toggle would appear to do nothing. (Same reasoning as `listFiles`.)
                */
-              onListPlaces(path, next.showHidden);
+              onListPlaces(target, next.showHidden);
             }}
             onList={(target) => onListPlaces(target, chooser?.showHidden === true)}
-            onNavigated={(path) => onNavigated?.(path)}
-            onChoose={onOpen}
+            onNavigated={(target) => {
+              // The browsed folder IS the selection, reported up so the footer's Open button can commit it. It is also
+              // remembered, so the next open resumes there.
+              setBrowsed(target);
+              onNavigated?.(target);
+            }}
+            /*
+             * A row in "used before" COMMITS — it is a destination, not a location — so it goes straight to `onOpen`
+             * rather than through `commit`. That is the one deliberate second path, and it is not a second SOURCE: the
+             * row names its directory explicitly, so there is nothing to disagree about.
+             */
           />
         )}
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (problem === undefined) onOpen(expanded);
+            commit();
           }}
         >
-          <input
-            ref={inputRef}
-            type="text"
-            value={path}
-            spellCheck={false}
-            placeholder="/absolute/path/to/project"
-            aria-label="Working directory"
-            aria-invalid={problem !== undefined && path.length > 0}
-            onChange={(event) => setPath(event.target.value)}
-            style={{
-              width: "100%",
-              background: "var(--bg)",
-              border: "1px solid var(--line-strong)",
-              borderRadius: 6,
-              padding: "8px 10px",
-              color: "var(--text)",
-              font: "13px var(--mono)",
-            }}
-          />
+          <div className="path-row">
+            <input
+              ref={inputRef}
+              type="text"
+              value={path}
+              spellCheck={false}
+              placeholder="Or type an absolute path"
+              aria-label="Working directory"
+              aria-invalid={problem !== undefined && path.length > 0}
+              onChange={(event) => setPath(event.target.value)}
+              style={{
+                width: "100%",
+                background: "var(--bg)",
+                border: "1px solid var(--line-strong)",
+                borderRadius: 6,
+                padding: "8px 10px",
+                color: "var(--text)",
+                font: "13px var(--mono)",
+              }}
+            />
+            {/*
+              Clear the typed override and fall back to the browsed selection. Without this there is no way back: a
+              reader who typed a path and then changed their mind would have to select the text and delete it, and the
+              browser would look broken because clicking a folder no longer changed what Open would use.
+            */}
+            {trimmed !== "" && (
+              <button
+                type="button"
+                className="btn btn-quiet path-clear"
+                onClick={() => {
+                  setPath("");
+                  inputRef.current?.focus();
+                }}
+                title="Clear the typed path and use the folder selected above"
+              >
+                Clear
+              </button>
+            )}
+          </div>
           {problem !== undefined && path.length > 0 && (
             <p style={{ color: "var(--warn-text)", fontSize: 12, margin: "6px 0 0" }}>{problem}</p>
           )}
@@ -304,7 +323,7 @@ export function OpenDirectorySheet({
 
             A list that appears before anything is typed would cover the recent list above with a duplicate of itself.
             Each row ACCEPTS by filling the input rather than submitting, so a reader can descend two levels without
-            starting a session by accident — and the last click is always the explicit "Open here".
+            starting a session by accident — and the last click is always the explicit Open.
           */}
           {completions.length > 0 && (
             <ul className="completions" aria-label="Matching directories">
@@ -320,7 +339,7 @@ export function OpenDirectorySheet({
                        *
                        * Display form because the reader must see a value they would recognise: someone who typed
                        * `~/git/pro` and got `/Users/them/git/project` back has been handed a different string, and the
-                       * expansion happens once at submit. The slash because every completion is a directory — so the
+                       * expansion happens once at commit. The slash because every completion is a directory — so the
                        * next list immediately offers its contents, instead of making the reader type the slash that
                        * this feature exists to save.
                        */
@@ -345,20 +364,31 @@ export function OpenDirectorySheet({
             </p>
           )}
           {/*
-            What will actually be used, when a `~` was expanded. The alternative is a session started in a directory
-            the reader never saw written down — the same class of dishonesty as a rename that silently retargets.
+            WHAT WILL BE OPENED, stated — because one of the two inputs may have won, and the reader is entitled to see
+            which. This is the fix for the competition the reporter noticed: instead of asking the reader to work out
+            whether their typing or their clicking counts, the dialog says so in one line, right above the button.
+
+            No longer only "when a `~` was expanded": it appears whenever the two inputs differ, which is exactly when
+            the precedence is not obvious.
           */}
-          {problem === undefined && expanded !== trimmed && (
-            <p className="expanded-path mono" role="status">
-              {expanded}
+          {problem === undefined && effectivePath !== trimmed && (
+            <p className="effective-path mono" role="status">
+              <span className="effective-path-label">
+                {trimmed === "" ? "Selected" : "Opening"}
+              </span>
+              {effectivePath}
             </p>
           )}
           <div className="dialog-actions">
-            <button type="submit" className="btn" disabled={problem !== undefined}>
-              Open here
-            </button>
+            {/*
+              Cancel first, primary last: the conventional order in a file dialog, and it puts the primary at the
+              bottom RIGHT, where the reporter (and every OS file picker) expects the outcome of the dialog.
+            */}
             <button type="button" className="btn btn-ghost" onClick={onClose}>
               Cancel
+            </button>
+            <button type="submit" className="btn btn-primary-sheet" disabled={problem !== undefined}>
+              Open
             </button>
           </div>
           {/*
