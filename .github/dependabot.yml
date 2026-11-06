@@ -1,0 +1,74 @@
+# Dependabot: version updates for the dependencies this repository keeps up to date.
+#
+# ## What this file is NOT
+#
+# It is **not** the vulnerability report. Known CVEs in what Pi Central SHIPS are found by
+# `.github/workflows/dependency-vulnerability-scan.yml`, which scans a CycloneDX SBOM with Grype,
+# gates `main`, and publishes a README badge. This file only raises upgrade pull requests.
+#
+# ## Why both exist, and why neither covers the other
+#
+# The Grype scan reads the RELEASE TREE (see `docs/SECURITY.md`): Pi and TypeScript are devDependencies
+# here and never enter the shipped bundle, so a CVE in Pi's own dependencies is deliberately invisible
+# to that gate. Measured when the scan was added: the full install had 9 fixable findings, the shipped
+# tree had 0, and every one of the 9 was `undici`/`minimatch` under `pi-coding-agent`.
+#
+# That exclusion is correct and it leaves a hole: **nothing was watching the development toolchain.**
+# This file is that watch, and it is why the scan's exclusion does not mean "unwatched".
+#
+# ## Enabling Dependabot alerts is a separate, one-time Settings step
+#
+# This file controls VERSION updates only. CVE detection needs **Settings → Code security →
+# Dependabot alerts**, which is a repository setting and cannot be turned on from a file. Without it,
+# a vulnerable dev dependency is reported nowhere: the gate does not look at the dev tree, and
+# version updates only open a PR when a newer version exists — not when an advisory is published
+# against the version already installed.
+version: 2
+updates:
+  # `github-actions` is scanned for the same reason as npm: a workflow's actions are dependencies
+  # that run with this repository's token. Grouped into one PR because they are almost always
+  # independent of each other and of the product.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  # npm workspaces are resolved from the LOCKFILE at the root, so one entry covers the root manifest
+  # and all three under `packages/`. Listing the workspace directories as well would produce duplicate
+  # PRs for the same lockfile.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Minor and patch together, so a routine week is one reviewable PR rather than fifteen. Majors are
+    # excluded from the group and therefore arrive individually, which is what a major deserves: each
+    # one is a decision, not an errand.
+    groups:
+      npm-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    # A cap, so a major-heavy week cannot open thirty PRs and bury the ones that matter. Groups count
+    # as one, so this is generous for the minor/patch traffic.
+    open-pull-requests-limit: 5
+    # `@earendil-works/pi-coding-agent` IS PINNED EXACTLY (`"1.4.0"`, no range) on purpose: Pi Central
+    # is written against one verified RPC surface, and `docs/CONSTRAINTS.md` records what was verified
+    # against which Pi version. Dependabot will therefore offer a PR for every Pi release — that is
+    # wanted, because a Pi that fixes CVEs in its own tree should reach us — but a Pi bump is not a
+    # routine merge:
+    #
+    #   1. `npm run typecheck` must pass. The RPC types are `import type` from Pi, so a renamed
+    #      command or event is a compile error here rather than a supervisor that silently
+    #      misunderstands the wire.
+    #   2. `docs/CONSTRAINTS.md` and `docs/PROTOCOL.md` name the verified Pi version, and any
+    #      constraint measured against it needs re-checking.
+    #   3. A real sandboxed session must be started by hand (`verified/manual` in the issue labels):
+    #      CI has no Safehouse and no macOS (C10).
+    #
+    # Not `ignore`d, because an ignored advisory is the failure mode this repository keeps finding.

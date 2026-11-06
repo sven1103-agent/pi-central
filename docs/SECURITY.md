@@ -34,6 +34,22 @@ shipped tree matches no known advisory. A CVE inside `dist/ui/assets/index-*.js`
 package scanner, because Vite has flattened the library into a bundle. That question belongs to CodeQL,
 and the report says so on every run rather than leaving it to be assumed.
 
+### The development toolchain is watched by Dependabot, not by the gate
+
+Excluding devDependencies is correct — they do not ship — and it leaves a hole worth naming: the gate
+says nothing about a CVE in Pi's own dependency tree, and when this scan was added the full install had
+**9 fixable findings**, all `undici`/`minimatch` under `pi-coding-agent`.
+
+That hole is covered by [`.github/dependabot.yml`](../.github/dependabot.yml), which raises weekly
+upgrade PRs for `npm` and `github-actions`. Two limits, stated rather than implied:
+
+- **Version updates are not CVE reports.** Dependabot opens a PR when a newer version exists, not when
+  an advisory is published against the version already installed. CVE detection needs **Settings →
+  Code security → Dependabot alerts**, which is a repository setting and cannot be enabled from a file.
+- **A Pi update is not a routine merge.** `pi-coding-agent` is pinned exactly because the RPC surface is
+  verified against one version (see `docs/CONSTRAINTS.md`); a bump needs a typecheck, a re-check of the
+  constraints measured against it, and a real sandboxed session, which CI cannot run (C10).
+
 ## Where the results appear
 
 | Surface | What it shows |
