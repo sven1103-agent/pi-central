@@ -88,6 +88,14 @@ can be exfiltrated. `scripts/release-workflow.test.mjs` forbids a stored-credent
 workflow, and this pipeline keeps that invariant rather than weakening it. A branch push with
 `contents: write` is scoped to this repository and expires with the run.
 
+That write permission lives in a **separate `badge` job**, not in the scanner. The first version put
+the push inside the scan job, which declares `contents: read`, and the first run on `main` failed with a
+403: a job-level `permissions:` block *replaces* the workflow-level one, so the push got the read-only
+token. The fix was not to widen the scanner — it runs `npm ci` and a third-party action — but to move
+the one step that writes into a job that installs nothing and executes no third-party code.
+`scripts/vulnerability-workflow.test.mjs` asserts both halves: the badge job can write, and the scan job
+cannot.
+
 The badge updates from `main` only, and never from a pull request: it describes `main`, so a PR writing
 it would make the default branch's README report a branch that does not exist.
 

@@ -14,6 +14,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 - CI inventories the shipped release tree, scans it with Grype, and publishes a report, SARIF and a README badge ([#206]).
 - On `main` the scan fails on fixable findings at or above High, and never on findings with no fix ([#206]).
+- The badge is published from a job that can write to the repository, so the first run on `main` no longer fails with a 403 ([#206]).
 
 [#206]: https://github.com/sven1103-agent/pi-central/issues/206
 
