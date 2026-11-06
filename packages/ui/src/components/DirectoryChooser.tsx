@@ -58,7 +58,12 @@ export function DirectoryChooser({
   onToggleHidden: (path: string) => void;
   /** List one absolute path. The roots are requested by the sheet, not here. */
   onList: (path: string) => void;
-  /** Report where the reader went, so the next open resumes there. */
+  /**
+   * Report where the reader is, so the SHEET can treat it as its selection.
+   *
+   * Not a request to persist anything: navigating is looking, and looking is not choosing. (It used to persist, which
+   * made the picker reopen inside whatever folder had last been peeked at.)
+   */
   onNavigated: (path: string) => void;
   /**
    * Directories used before, most recent first — the rail's first group (issue #76).

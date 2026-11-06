@@ -24,7 +24,7 @@ orchestrator would answer `bad control: unknown kind 'listPlaces'`, so the pane 
   listing beside it, and the full dialog height available to the listing ([#76]).
 - A folder row carries an icon, its name, how long ago it changed, and a chevron saying it descends ([#76]).
 - The listing can be filtered, ordered by name or recency, and shows or hides dotfolders ([#76]).
-- The picker reopens in the directory you left it in, instead of starting from the places again ([#76]).
+- The picker opens on your home folder by default, and on the directory you last started a session in ([#76]).
 - A used-before directory is a row in the rail with its session count, so a destination reads differently from a place ([#76]).
 - A typed path completes against directories inside the folder being typed and against recent ones ([#76]).
 - A typed `~` path is expanded at submit, and the expanded path is shown before anything starts ([#76]).
@@ -32,6 +32,10 @@ orchestrator would answer `bad control: unknown kind 'listPlaces'`, so the pane 
 - The dialog has one Open button, at the bottom right, and it commits the folder selected above ([#76]).
 - The path that will be opened is stated above the button, so the typed field and the browser never disagree ([#76]).
 - The path field no longer takes focus when the sheet opens, so browsing is obviously the first gesture ([#76]).
+
+### Fixed
+
+- The picker reopened in a folder that was only ever browsed, and remembered it on every click ([#76]).
 
 ### Fixed
 

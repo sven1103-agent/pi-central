@@ -37,7 +37,19 @@ export type PlaceSort = "name" | "modified";
 
 export interface ChooserPrefs {
   /**
-   * The directory the chooser was last left in, or `undefined` for "never navigated".
+   * The directory a session was last STARTED in from this picker — never merely one that was browsed.
+   *
+   * ## This field was a bug, and the reporter caught it
+   *
+   * *"Please make the users home folder the default one. I don't know from where this project folder is coming from."*
+   *
+   * It set itself on every DESCENT, so merely looking inside `~/git/data-management` made it the place the picker
+   * opened from then on, for good. Nothing about looking at a folder says "this is where I want to start" — so the
+   * value could only ever appear from nowhere, which is exactly how it read.
+   *
+   * It is now written in exactly one circumstance: `Open` succeeded. That is the only moment at which a reader has
+   * expressed a preference about where to begin, and it is also the only moment at which they would be surprised to
+   * start somewhere else next time.
    *
    * Absolute, as the orchestrator resolved it. Only ever used as the STARTING point — never submitted — and only after
    * it is confirmed to be inside a place and to exist, so a stale value cannot start a session anywhere.
@@ -52,11 +64,36 @@ export interface ChooserPrefs {
 export const CHOOSER_PREFS_KEY = "pi-central.chooser";
 
 /**
+ * The key chooser preferences were stored under before the descent bug was fixed.
+ *
+ * ## Why this exists at all
+ *
+ * That release wrote `lastDirectory` on every DESCENT, so an existing browser holds a folder the reader only ever
+ * *looked* at — `data-management`, in the report this fixes. Fixing the writer is not enough: the bad value is already
+ * in `localStorage`, and it would go on opening the picker there until something overwrote it. The reporter would press
+ * refresh, open the picker, and see the same unexplained folder.
+ *
+ * ## What is carried forward, and what is not
+ *
+ * `sort` and `showHidden` were never affected by the descent bug, so they migrate — discarding them would punish the
+ * reader twice for one defect. `lastDirectory` is **dropped**, deliberately: it was never a considered choice, so there
+ * is nothing worth keeping, and keeping it would leave the reader looking at exactly the folder they complained about.
+ *
+ * ## Why a versioned envelope rather than deleting the old key
+ *
+ * Deleting `pi-central.chooser` outright would also be correct, but it would throw away two preferences that are fine.
+ * So the envelope records `version`, and the migration runs when a stored value is versionless — i.e. written by the
+ * buggy release. The SAME key is reused, which is why both fields are written together on every save: a reader can never
+ * end up with a version stamp and no payload, or the reverse.
+ */
+const CHOOSER_PREFS_VERSION = 2;
+
+/**
  * `localStorage`, or an in-memory stand-in when it is unavailable.
  *
- * The same shape `update-check.ts` uses for `sessionStorage`, and for the same reason: private mode and a full quota
- * both throw on `setItem`, and a picker that cannot remember a directory must still open. Degrading to memory means the
- * feature works within the tab and is forgotten on reload — a smaller promise, honestly kept.
+ * Private mode and a full quota both throw on the first `setItem`; a picker that cannot remember a directory must still
+ * open. Degrading to memory means the feature works within the tab and is forgotten on reload — a smaller promise,
+ * honestly kept. (Same shape as `update-check.ts`'s `safeSessionStorage`.)
  */
 export function safeLocalStorage(): Storage {
   try {
@@ -84,11 +121,11 @@ export function defaultChooserPrefs(): ChooserPrefs {
 }
 
 /**
- * Read remembered chooser preferences, discarding anything not recognised.
+ * Read preferences from a stored string, discarding anything not recognised.
  *
- * A `sort` naming a mode that no longer exists degrades to `name` rather than to an empty list; a `lastDirectory` that
- * is not a string (or is not absolute) is dropped rather than half-used, because a relative path cannot be resumed and
- * silently substituting one would start a session somewhere the reader never chose.
+ * Every field validated rather than trusted: `localStorage` is shared with whatever else runs on this origin and
+ * outlives upgrades, so a stored `sort` may name a mode that no longer exists and `lastDirectory` may be a number, a
+ * relative path, or absent. A refused value degrades to the default, never to a half-used one.
  */
 export function parseChooserPrefs(raw: string | null): ChooserPrefs {
   const fallback = defaultChooserPrefs();
@@ -105,37 +142,66 @@ export function parseChooserPrefs(raw: string | null): ChooserPrefs {
 
   const last = record["lastDirectory"];
   return {
-    // Absolute only. `startsWith("/")` is the same test the sheet applies to a typed path, and it is what stops a
-    // corrupted value becoming a relative path that resolves somewhere unexpected.
+    // Absolute only. The same test the sheet applies to a typed path, and what stops a corrupted value becoming a
+    // relative path that resolves somewhere unexpected.
     ...(typeof last === "string" && last.startsWith("/") ? { lastDirectory: last } : {}),
     sort: record["sort"] === "modified" ? "modified" : "name",
     showHidden: record["showHidden"] === true,
   };
 }
 
-/** Serialize for `localStorage`. Kept beside `parseChooserPrefs` so the two cannot drift. */
+/** Read from `localStorage`, or any other string store. */
+export type PrefsReader = (key: string) => string | null;
+
+/**
+ * Read the stored preferences, migrating a value written by the buggy release.
+ *
+ * The caller cannot tell whether a migration happened, which is the point: nothing else in the app should have to know
+ * that a field was once written on every click.
+ */
+export function loadChooserPrefs(read: PrefsReader): ChooserPrefs {
+  const raw = read(CHOOSER_PREFS_KEY);
+  const parsed = parseDoc(raw);
+  if (parsed === undefined) return defaultChooserPrefs();
+  if (parsed.version === CHOOSER_PREFS_VERSION) return parseChooserPrefs(raw);
+
+  /*
+   * VERSIONLESS means "written by the release that persisted on every descent". Carry the two preferences that were
+   * never wrong, drop `lastDirectory` (see the module comment), and report the result at the current version so the
+   * migration runs once.
+   */
+  const carried = parseChooserPrefs(raw);
+  return { sort: carried.sort, showHidden: carried.showHidden };
+}
+
+/** What {@link serializeChooserPrefs} writes: the preferences plus the envelope's version. */
 export function serializeChooserPrefs(prefs: ChooserPrefs): string {
-  return JSON.stringify(prefs);
+  return JSON.stringify({ ...prefs, version: CHOOSER_PREFS_VERSION });
+}
+
+/** The parsed document, or `undefined` when the stored value is not an object at all. */
+function parseDoc(raw: string | null): { version?: number } | undefined {
+  if (raw === null || raw === "") return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    const version = (parsed as Record<string, unknown>)["version"];
+    return typeof version === "number" ? { version } : {};
+  } catch {
+    return undefined;
+  }
 }
 
 /**
  * Whether a remembered directory is usable as a starting point.
  *
- * ## Two conditions, and the second is the one I got wrong first
+ * Two conditions, and the second was a bug: the directory must be inside a place (or the picker would open where the
+ * orchestrator refuses to list), AND the directory must itself still be reportable. Checking only the first answers the
+ * wrong question — `$HOME` exists on every machine, so a remembered `~/Projects/notes` where `notes` was deleted passed
+ * and the reader got `not-found` before touching anything.
  *
- * The directory must be inside a place (`resumable` would otherwise open somewhere the orchestrator refuses to list),
- * AND the directory must itself still be reportable. The first version checked only "is its place present", which
- * answers the wrong question: `$HOME` exists on every machine, so a remembered `~/Projects/notes` on a machine where
- * `notes` was deleted passed the test — the chooser then opened there and the reader saw `not-found` before touching
- * anything. Found by a test that expected `undefined` and got the path back.
- *
- * `exists` for the directory itself comes from the caller, which has just listed the parent (or is about to): the
- * chooser asks the orchestrator, and this function only decides. Keeping the decision pure is what makes the failure
- * above testable without a filesystem.
- *
- * Returning `undefined` rather than a corrected path is deliberate: "start at the nearest place above the old
- * directory" sounds helpful and would silently open a DIFFERENT folder from the one remembered, which reads as the app
- * forgetting where you were. Falling back to `Places` is honest — it says "start again" instead of pretending.
+ * `undefined` rather than a corrected path when it fails: "start at the nearest place above the old directory" sounds
+ * helpful and would silently open a DIFFERENT folder from the one remembered, which reads as the app forgetting you.
  */
 export function resumable(
   last: string | undefined,
@@ -144,9 +210,9 @@ export function resumable(
   lastExists?: boolean,
 ): string | undefined {
   if (last === undefined || places === undefined) return undefined;
-  // A known-missing directory is refused even though its place is fine. `undefined` (not checked) is allowed through:
-  // the listing it triggers is what will report the truth, and refusing on "unknown" would make every first open
-  // start at Places.
+  // A known-missing directory is refused even though its place is fine. `undefined` is "not checked", which is NOT
+  // "missing" — the listing it triggers reports the truth, and refusing on "unknown" would make every first open start
+  // at Places, so the feature would look broken.
   if (lastExists === false) return undefined;
   for (const place of places) {
     if (!place.exists) continue;
@@ -154,4 +220,30 @@ export function resumable(
     if (last === place.path || last.startsWith(`${place.path}/`)) return last;
   }
   return undefined;
+}
+
+/**
+ * Where the picker should OPEN, in priority order (issue #76).
+ *
+ *   1. the directory a session was last **started** in, if it is still usable;
+ *   2. `$HOME` — the reporter's requirement, and the right default: it is the one root that exists on every machine and
+ *      is never empty, so a first run opens somewhere useful instead of on a menu of seven names;
+ *   3. `undefined`, which means the Places pane (a machine with an unusual layout, where `$HOME` is not itself inside a
+ *      place).
+ *
+ * The second step is what makes "the home folder is the default" true, and the first is what keeps the earlier
+ * requirement — *"pick up the last directory"* — without the two contradicting each other: a fresh install has no
+ * history, so it gets home; once a session has been opened somewhere, that is a stronger signal than home.
+ *
+ * Both candidates go through `resumable`, so neither can open the picker somewhere the orchestrator cannot list.
+ *
+ * Kept as a named function rather than inline in the event handler because it IS the rule, and a rule buried in a
+ * callback is a rule no test can reach.
+ */
+export function openingDirectory(
+  prefs: ChooserPrefs,
+  places: readonly { path: string; exists: boolean }[] | undefined,
+  home: string,
+): string | undefined {
+  return resumable(prefs.lastDirectory, places) ?? resumable(home, places);
 }

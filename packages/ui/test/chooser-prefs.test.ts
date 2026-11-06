@@ -17,6 +17,8 @@ import assert from "node:assert/strict";
 import {
   CHOOSER_PREFS_KEY,
   defaultChooserPrefs,
+  loadChooserPrefs,
+  openingDirectory,
   parseChooserPrefs,
   resumable,
   serializeChooserPrefs,
@@ -113,4 +115,100 @@ test("a FUTURE mtime reads as 'now', never as a negative age", async () => {
   // Two machines disagree about the clock, and `-2m ago` in a folder list reads as a bug rather than as skew.
   const now = Date.UTC(2026, 10, 6, 12, 0, 0);
   assert.equal(ageOf(now + 60_000, now), "now");
+});
+
+// --- What the picker opens on (issue #76, reported from a screenshot) ------------------------------
+//
+// "Please make the users home folder the default one. I don't know from where this project folder is coming from."
+//
+// Both halves were one bug: `lastDirectory` was written on every DESCENT, so merely looking inside a folder made it the
+// place the picker reopened from, forever. Nothing about looking at a folder says "start here", which is why the value
+// appeared from nowhere.
+
+test("with no history, the picker opens at HOME", () => {
+  // The default the reporter asked for, and the right one: `$HOME` exists on every machine and is never empty, so a
+  // first run lands somewhere useful instead of on a menu of seven names.
+  assert.equal(openingDirectory(defaultChooserPrefs(), places, "/Users/x"), "/Users/x");
+});
+
+test("once a session has been STARTED somewhere, that wins over home", () => {
+  // The earlier requirement — "pick up the last directory" — and it does not contradict the new one: a fresh install has
+  // no history, so it gets home; after a session is opened somewhere, that is a stronger signal than home is.
+  const prefs = { ...defaultChooserPrefs(), lastDirectory: "/Users/x/git/project" };
+  assert.equal(openingDirectory(prefs, places, "/Users/x"), "/Users/x/git/project");
+});
+
+test("a remembered directory that is gone falls back to HOME, not to Places", () => {
+  // Degrading to home rather than to the place menu: the reader still gets somewhere they can work, and the fallback is
+  // the same default a first run gets.
+  const prefs = { ...defaultChooserPrefs(), lastDirectory: "/Volumes/unmounted/project" };
+  assert.equal(openingDirectory(prefs, places, "/Users/x"), "/Users/x");
+});
+
+test("a HOME that is not inside any place falls through to Places, rather than failing to list", () => {
+  // Not hypothetical in a container: if `$HOME` is `/root` and no place covers it, opening there would mean the first
+  // listing is refused. `undefined` is honest — the reader gets the Places pane.
+  assert.equal(openingDirectory(defaultChooserPrefs(), [{ path: "/Users/x/git", exists: true }], "/root"), undefined);
+});
+
+test("nothing is remembered when the reader merely LOOKS inside a folder", async () => {
+  /*
+   * The bug itself, tested at the seam that carried it.
+   *
+   * `onNavigated` used to persist on every row click, so browsing into `~/git/data-management` set the resume point. This
+   * asserts the CALLBACK SHAPE: the sheet may pass navigation up (it needs it as the selection), but persistence is
+   * `App#onOpenDirectory`'s job — it is called there and nowhere else.
+   */
+  const { readFileSync } = await import("node:fs");
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  // EXACTLY ONE INVOCATION — the definition and the dependency array are the other two mentions, and a second call site
+  // is precisely the bug being prevented.
+  const invocations = [...app.matchAll(/rememberOpenedDirectory\((?!cwd\b)/g)].length;
+  assert.equal(invocations, 0, "no call without the opened directory — the only invocation passes the cwd");
+  assert.equal([...app.matchAll(/rememberOpenedDirectory\(cwd\)/g)].length, 1, "exactly one: inside onOpenDirectory");
+  assert.match(app, /const onOpenDirectory = useCallback\([\s\S]{0,400}?rememberOpenedDirectory\(cwd\)/, "called when a session starts");
+  // And nothing routes navigation into it.
+  assert.ok(!/onNavigated:\s*remember/.test(app), "navigation is not persistence");
+});
+
+// --- Migrating the value the buggy release left behind --------------------------------------------
+//
+// Fixing the writer is not enough. The bad `lastDirectory` is already in the reporter's `localStorage`, and it would go
+// on opening the picker in that folder until something overwrote it — so they would refresh, open the picker, and see
+// the same unexplained folder the fix was supposed to remove.
+
+/** A store backed by a plain map, so a migration can be exercised without a browser. */
+function store(initial: Record<string, string> = {}) {
+  const map = new Map(Object.entries(initial));
+  return (key: string) => map.get(key) ?? null;
+}
+
+test("a VERSIONLESS stored value drops the browsed directory but keeps the real preferences", () => {
+  // Written by the release that persisted on every descent: `data-management` is a folder the reader only LOOKED at.
+  const raw = JSON.stringify({ lastDirectory: "/Users/x/git/data-management", sort: "modified", showHidden: true });
+  const prefs = loadChooserPrefs(store({ "pi-central.chooser": raw }));
+  assert.equal(prefs.lastDirectory, undefined, "the unexplained folder is gone");
+  assert.equal(prefs.sort, "modified", "but a preference that was never wrong survives");
+  assert.equal(prefs.showHidden, true, "including this one — punishing it twice for one defect would be unfair");
+});
+
+test("a CURRENT value is read as written, so the migration does not eat a real choice", () => {
+  // After the fix, `lastDirectory` means "a session was started here", which IS worth keeping.
+  const raw = serializeChooserPrefs({ lastDirectory: "/Users/x/git/project", sort: "name", showHidden: false });
+  const prefs = loadChooserPrefs(store({ "pi-central.chooser": raw }));
+  assert.equal(prefs.lastDirectory, "/Users/x/git/project", "kept");
+});
+
+test("the migration leaves the picker opening at HOME, which is what was asked for", () => {
+  // End to end: the stored value is the bad one, and the outcome is home rather than `data-management`.
+  const raw = JSON.stringify({ lastDirectory: "/Users/x/git/data-management", sort: "name", showHidden: false });
+  const prefs = loadChooserPrefs(store({ "pi-central.chooser": raw }));
+  assert.equal(openingDirectory(prefs, places, "/Users/x"), "/Users/x");
+});
+
+test("nothing stored means defaults, and no crash", () => {
+  assert.deepEqual(loadChooserPrefs(store()), defaultChooserPrefs());
+  assert.deepEqual(loadChooserPrefs(store({ "pi-central.chooser": "not json" })), defaultChooserPrefs());
 });

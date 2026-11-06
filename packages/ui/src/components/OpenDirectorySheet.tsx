@@ -51,7 +51,6 @@ export function OpenDirectorySheet({
   onListPlaces,
   chooser,
   onChooserChange,
-  onNavigated,
   onClose,
   onOpen,
 }: {
@@ -87,8 +86,6 @@ export function OpenDirectorySheet({
    */
   chooser?: ChooserPrefs | undefined;
   onChooserChange?: ((next: ChooserPrefs) => void) | undefined;
-  /** Report where the reader navigated, so the next open resumes there. */
-  onNavigated?: ((path: string) => void) | undefined;
   onClose: () => void;
   onOpen: (cwd: string) => void;
 }) {
@@ -277,10 +274,15 @@ export function OpenDirectorySheet({
             }}
             onList={(target) => onListPlaces(target, chooser?.showHidden === true)}
             onNavigated={(target) => {
-              // The browsed folder IS the selection, reported up so the footer's Open button can commit it. It is also
-              // remembered, so the next open resumes there.
+              /*
+               * The browsed folder IS the selection, reported up so the footer's Open button can commit it.
+               *
+               * It is deliberately NOT a request to remember anything. That was the bug: this callback used to persist
+               * the folder, so merely looking inside one became the place the picker reopened from — reported as
+               * "I don't know from where this project folder is coming from". Persistence now happens on `Open` only
+               * (`App#onOpenDirectory`), which is the one moment a preference has actually been expressed.
+               */
               setBrowsed(target);
-              onNavigated?.(target);
             }}
             /*
              * A row in "used before" COMMITS — it is a destination, not a location — so it goes straight to `onOpen`

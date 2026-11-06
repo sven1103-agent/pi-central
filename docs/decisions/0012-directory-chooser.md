@@ -322,3 +322,40 @@ the top of the document, and — because it is only ever focused programmaticall
 
 Focus still moves to the **heading** when the reader navigates, which is a different case: there the content changed
 under them, and announcing that is what a focus move is for.
+
+## Amendment 5 — home is the default, and looking is not choosing
+
+> *"Please make the users home folder the default one. I don't know from where this project folder is coming from."*
+
+Both halves were the same bug, and it was mine, from Amendment 1.
+
+**Where the folder came from.** `lastDirectory` was written whenever the reader **descended** — `onNavigated`, fired
+on every row click. So *looking inside* `~/git/data-management` once made it the place the picker opened from, for
+good. Nothing about looking at a folder says "start here", so the value could only ever appear from nowhere, which is
+exactly how it read.
+
+Fixed in two places, because there were two:
+
+1. **The writer.** Persistence now happens in exactly one circumstance — `onOpenDirectory`, i.e. a session was
+   actually started there. That is the only moment a preference about "where to begin next time" has been expressed,
+   and the only moment a reader would be surprised to start somewhere else. `onNavigated` still exists, because the
+   sheet needs the browsed folder as its *selection*, but it no longer persists anything.
+2. **The value already stored.** Fixing the writer would leave the bad value in the reporter's `localStorage` — they
+   would refresh, open the picker, and see the same unexplained folder. Stored preferences now carry a `version`; a
+   versionless value was written by the buggy release, so its `lastDirectory` is **dropped** while `sort` and
+   `showHidden` (never affected) migrate. Discarding those would punish the reader twice for one defect.
+
+**What the default is now** (`openingDirectory`):
+
+| Priority | Value | Why |
+|---|---|---|
+| 1 | the directory a session was last **started** in | the earlier requirement — *"pick up the last directory"* — and a stronger signal than home once it exists |
+| 2 | **`$HOME`** | the reporter's ask, and the right default: the one root that exists on every machine and is never empty, so a first run lands somewhere useful instead of on a menu of seven names |
+| 3 | `Places` | a machine whose `$HOME` is inside no place (a container with `HOME=/root`), where opening there would mean the first listing is refused |
+
+The two requirements do not contradict each other: a fresh install has no history so it gets home, and once you have
+opened a session somewhere, that is a considered choice worth honouring.
+
+**The lesson, stated because this is the second time on this issue.** A preference was shipped without deciding *when*
+it should be written, and the answer "on any navigation" was never examined — it was simply the callback that happened
+to exist. A stored value the reader cannot account for is worse than no stored value.

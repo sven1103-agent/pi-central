@@ -129,9 +129,8 @@ import { recentDirectories } from "./recent.ts";
 import { initialPlacesState, reducePlaces } from "./places.ts";
 import {
   CHOOSER_PREFS_KEY,
-  defaultChooserPrefs,
-  parseChooserPrefs,
-  resumable,
+  loadChooserPrefs,
+  openingDirectory,
   safeLocalStorage,
   serializeChooserPrefs,
   type ChooserPrefs,
@@ -411,7 +410,12 @@ export function App() {
    * name a directory that no longer exists.
    */
   const chooserStorage = useMemo(() => safeLocalStorage(), []);
-  const [chooser, setChooser] = useState<ChooserPrefs>(() => parseChooserPrefs(chooserStorage.getItem(CHOOSER_PREFS_KEY)));
+  /*
+   * `loadChooserPrefs`, not `parseChooserPrefs`: an existing browser may hold a `lastDirectory` written by the release
+   * that persisted it on every descent — the folder the reporter could not account for. That value is dropped on read
+   * (`chooser-prefs.ts` explains why), so the fix reaches a reader who does not clear storage.
+   */
+  const [chooser, setChooser] = useState<ChooserPrefs>(() => loadChooserPrefs((key) => chooserStorage.getItem(key)));
   const rememberChooser = useCallback(
     (next: ChooserPrefs) => {
       setChooser(next);
@@ -419,8 +423,17 @@ export function App() {
     },
     [chooserStorage],
   );
-  /** The last directory the reader navigated to, reported by the chooser as they descend. */
-  const rememberDirectory = useCallback(
+  /**
+   * Remember the directory a session was STARTED in — and nothing else.
+   *
+   * This used to be `rememberDirectory`, called on every descent, so browsing into a folder silently became the place
+   * the picker reopened from. Reported as *"I don't know from where this project folder is coming from"* — correctly,
+   * because nothing the reader did had chosen it.
+   *
+   * Called from `onOpenDirectory` only: a successful `Open` is the one moment a preference about "where to begin next
+   * time" has actually been expressed.
+   */
+  const rememberOpenedDirectory = useCallback(
     (path: string) => {
       setChooser((current) => {
         if (current.lastDirectory === path) return current;
@@ -530,7 +543,7 @@ export function App() {
               places: event.places,
               home: event.home,
               ...(() => {
-                const start = resumable(chooser.lastDirectory, event.places);
+                const start = openingDirectory(chooser, event.places, event.home);
                 return start === undefined ? {} : { resumeAt: start };
               })(),
             });
@@ -1115,10 +1128,12 @@ export function App() {
     (cwd: string) => {
       dispatch({ kind: "expectNewSession" });
       send({ kind: "start", cwd });
+      // The ONE place the picker remembers a place to begin: a session was actually started here.
+      rememberOpenedDirectory(cwd);
       setSheetOpen(false);
       setTab("sessions");
     },
-    [send],
+    [send, rememberOpenedDirectory],
   );
 
   const onAnswer = useCallback(
@@ -1683,7 +1698,7 @@ export function App() {
           /* Withheld, never empty, when the orchestrator predates the chooser: an empty pane would claim this machine
              has no folders. See the `places` prop's comment. */
           {...(supportsPlaces(state.install?.protocol)
-            ? { places, onListPlaces, chooser, onChooserChange: rememberChooser, onNavigated: rememberDirectory }
+            ? { places, onListPlaces, chooser, onChooserChange: rememberChooser }
             : {})}
           onClose={() => setSheetOpen(false)}
           onOpen={onOpenDirectory}
