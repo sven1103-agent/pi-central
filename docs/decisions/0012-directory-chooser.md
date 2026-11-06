@@ -300,3 +300,25 @@ button while a folder was plainly on screen. The selection now falls back to `re
 
 The "used before" rows in the rail still commit directly, and that is the one deliberate second path: a recent row
 names its directory explicitly, so there is nothing for it to disagree with.
+
+## Amendment 4 — nothing takes focus on open
+
+> *"The textfield shall only be active when the user actively clicked into it, not by default when the dialog opens."*
+
+Correct, and the autofocus was the last surviving piece of the design that caused Amendments 1–3.
+
+A focused field is a claim about primacy: it says the caret belongs there, so this surface is for typing. It is not.
+**Browsing is the primary act and the field is the alternative** for a path you already know — which is why its
+placeholder reads *"Or type an absolute path"*. Two focus calls were removed:
+
+| Was focused | Why it was wrong |
+|---|---|
+| The sheet's path field | Said "type here" about a dialog whose job is to be browsed — and it was the mechanism behind the Enter bug: an autofocused field inside a `<form>` means Enter commits it, so pressing Enter after browsing committed an empty string. |
+| The listing's filter (at `Places`) | The same mistake in a second place. A filter is reached for when a folder is not already on screen; it does not deserve the caret before you have looked. |
+
+What receives focus instead is **the dialog itself** (`tabIndex={-1}`): the focused element is the surface, not a
+control in it. That keeps Escape working without a click, keeps a keyboard reader inside the dialog rather than at
+the top of the document, and — because it is only ever focused programmatically — paints no ring.
+
+Focus still moves to the **heading** when the reader navigates, which is a different case: there the content changed
+under them, and announcing that is what a focus move is for.

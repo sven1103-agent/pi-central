@@ -595,3 +595,53 @@ test("Open is DISABLED until there is something to open", () => {
   const withSelection = render({ places: resumedInto("/Users/x/git"), onListPlaces() {} });
   assert.ok(!/btn-primary-sheet" disabled/.test(withSelection), "enabled once a folder is selected");
 });
+
+// --- Focus on open (issue #76, reported from a screenshot) ----------------------------------------
+//
+// "The textfield shall only be active when the user actively clicked into it, not by default when the dialog opens."
+// The autofocus was also the mechanism behind the Enter bug: an autofocused field inside a `<form>` means Enter commits
+// it. SSR runs no effects, so these assert the SOURCE — there is no other way to see an effect from here, and the
+// property is "this call does not exist", which is exactly what a source assertion can prove.
+
+test("the path field does not take focus when the dialog opens", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("../src/components/OpenDirectorySheet.tsx", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  assert.ok(!/inputRef\.current\?\.focus\(\)/.test(source.split("const commit")[0]), "no focus call on mount");
+  assert.ok(!/autoFocus/.test(source), "and no autoFocus attribute");
+});
+
+test("the DIALOG receives focus instead, so Escape works without clicking", async () => {
+  // Removing the autofocus must not remove keyboard entry entirely: a reader who opens the sheet must be able to press
+  // Escape, and a reader arriving by keyboard must land inside the dialog rather than at the top of the document.
+  const html = render({ places: stateWith(), onListPlaces() {} });
+  assert.match(html, /class="modal modal-sheet"[^>]*tabindex="-1"/, "the dialog is focusable but not in the Tab order");
+});
+
+test("the listing's filter does not steal focus either", async () => {
+  // The same mistake in the second place: the filter took the caret at `Places`, saying "type here" about a surface whose
+  // job is to be browsed. A filter is reached for when a folder is not on screen.
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("../src/components/DirectoryChooser.tsx", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+  assert.ok(!/filterRef/.test(source), "no ref that focuses the filter");
+  assert.match(source, /headingRef\.current\?\.focus\(\)/, "focus goes to the heading, which is where the content changed");
+});
+
+test("the path field is labelled as the ALTERNATIVE route", async () => {
+  // Placeholder text is the only thing that can say this without spending a sentence on it.
+  const html = render({ places: stateWith(), onListPlaces() {} });
+  assert.match(html, /placeholder="Or type an absolute path"/, "'Or' — it is the second way in, not the way in");
+});
+
+test("the dialog's focus anchor paints no ring", async () => {
+  // Comments stripped: the CSS comment above the rule explains why a ring is unwanted, and a rule-scanning assertion
+  // satisfied by prose would be the seventh time this repository has been bitten by that.
+  // A blue outline around a whole dialog reads as "this element is selected", not "you are here" — and the anchor is only
+  // ever focused programmatically, so there is no case where a ring would be wanted.
+  const body = await rule(".modal-sheet:focus");
+  assert.ok(body, "the rule must exist");
+  assert.match(body, /outline:\s*none/, "no ring on the anchor");
+});

@@ -31,6 +31,7 @@ orchestrator would answer `bad control: unknown kind 'listPlaces'`, so the pane 
 - A place that is not on this machine is named, rather than hidden ([#76]).
 - The dialog has one Open button, at the bottom right, and it commits the folder selected above ([#76]).
 - The path that will be opened is stated above the button, so the typed field and the browser never disagree ([#76]).
+- The path field no longer takes focus when the sheet opens, so browsing is obviously the first gesture ([#76]).
 
 ### Fixed
 

@@ -132,8 +132,23 @@ export function OpenDirectorySheet({
     // is stable, so this runs exactly once per mount — i.e. once per open.
   }, [onListPlaces]);
 
+  /*
+   * NO AUTOFOCUS, and it was the last trace of the old design (issue #76).
+   *
+   * The field used to take focus when the dialog opened, which said — in the loudest way a dialog can — that typing is
+   * the primary act here. It is not: browsing is, and the field is the alternative for a path you already know. The
+   * reporter put it plainly: *"the textfield shall only be active when the user actively clicked into it."*
+   *
+   * It was also the mechanism behind the Enter bug. An autofocused field inside a `<form>` means Enter commits it, so
+   * pressing Enter after browsing committed an empty string while a folder sat on screen. That is fixed by the single
+   * commit target, and the autofocus is the part of it that had no remaining purpose.
+   *
+   * What still gets focus on open is the DIALOG, so a keyboard reader lands inside it and Escape works without clicking
+   * first — the dialog is the focused element, not a control inside it.
+   */
+  const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    inputRef.current?.focus();
+    dialogRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
@@ -219,8 +234,12 @@ export function OpenDirectorySheet({
   return (
     <div className="modal-backdrop" onClick={onClose} role="presentation">
       <div
+        ref={dialogRef}
         className="modal modal-sheet"
         role="dialog"
+        // Focusable itself, so it can RECEIVE focus without putting the caret in a field. `tabIndex={-1}` keeps it out of
+        // the Tab order; it is a focus anchor, not a control.
+        tabIndex={-1}
         aria-modal="true"
         aria-labelledby="open-dir-title"
         onClick={(event) => event.stopPropagation()}

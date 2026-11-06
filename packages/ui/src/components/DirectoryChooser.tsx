@@ -80,7 +80,6 @@ export function DirectoryChooser({
    */
   const [at, setAt] = useState<string | undefined>(state.resumeAt);
   const [filter, setFilter] = useState("");
-  const filterRef = useRef<HTMLInputElement>(null);
   const headingRef = useRef<HTMLParagraphElement>(null);
 
   const listing = at === undefined ? undefined : placeAt(state, at);
@@ -116,11 +115,15 @@ export function DirectoryChooser({
     onList(at);
   }, [at, state, onList]);
 
-  // Focus follows the location, so a keyboard reader is placed where the content changed. The filter is the exception:
-  // once the reader is typing in it, moving focus on every descent would interrupt the word they are mid-way through.
+  /*
+   * Focus follows the location, so a keyboard reader is placed where the content changed.
+   *
+   * The heading, NOT the filter — and the filter used to take focus at `Places`, which was the same mistake the sheet's
+   * autofocused path field made: it said "type here" about a surface whose job is to be browsed. A filter is a tool you
+   * reach for when a folder is not on screen; it does not deserve the caret before you have looked.
+   */
   useEffect(() => {
-    if (at === undefined) filterRef.current?.focus();
-    else headingRef.current?.focus();
+    headingRef.current?.focus();
   }, [at]);
 
   useEffect(() => {
@@ -302,7 +305,6 @@ export function DirectoryChooser({
             {here !== undefined && (
               <div className="chooser-actions">
                 <input
-                  ref={filterRef}
                   type="search"
                   className="chooser-filter"
                   value={filter}

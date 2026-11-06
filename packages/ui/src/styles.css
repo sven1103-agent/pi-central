@@ -1867,6 +1867,15 @@ select.btn { font-family: var(--sans); }
   padding: var(--sp-5);
   max-width: 620px;
 }
+/*
+ * The dialog is focusable (`tabIndex={-1}`) so it can RECEIVE focus on open, which is what lets Escape work without the
+ * reader clicking and keeps a keyboard reader inside it. That is a focus ANCHOR, not a control, so it must not paint a
+ * ring — a blue outline around a whole dialog reads as a selected element rather than as "you are here".
+ *
+ * `:focus-visible` is deliberately NOT used: the anchor is only ever focused programmatically, so there is no case
+ * where a ring would be wanted.
+ */
+.modal-sheet:focus { outline: none; }
 .modal h3 { margin: 0 0 var(--sp-2); font-size: var(--fs-md); }
 .modal p { margin: 0; color: var(--dim); font-size: var(--fs-base); }
 
