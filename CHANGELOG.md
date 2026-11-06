@@ -10,6 +10,15 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+<!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
+
+## [0.10.0] — 2026-11-06
+
+The directory picker becomes something you navigate, and the rail stops putting back what you removed.
+Both halves started as a report from use: *"Opening a session in a target directory is hard"* (and then,
+of the first fix, *"still very small"*), and a forgotten row that kept returning. The second is why the
+release notes name a state — `failed` — that looks like a detail and was the whole bug.
+
 **One protocol change: `PROTOCOL_VERSION` 7 → 8.** The directory chooser is one new control
 (`listPlaces`) and three new events (`places`, `placeListing`, `placeError`). A 0.9.0 UI against this
 orchestrator keeps working and simply does not offer the chooser; a UI that offers it against an older
@@ -20,8 +29,7 @@ orchestrator would answer `bad control: unknown kind 'listPlaces'`, so the pane 
 - CI inventories the shipped release tree, scans it with Grype, and publishes a report, SARIF and a README badge ([#206]).
 - On `main` the scan fails on fixable findings at or above High, and never on findings with no fix ([#206]).
 - The badge is published from a job that can write to the repository, so the first run on `main` no longer fails with a 403 ([#206]).
-- The directory sheet is a two-pane file dialog: one rail of used-before directories and places, a filterable
-  listing beside it, and the full dialog height available to the listing ([#76]).
+- The directory sheet is a two-pane file dialog: one rail of used-before directories and places, a filterable listing beside it, and the full dialog height available to the listing ([#76]).
 - A folder row carries an icon, its name, when it changed, and a chevron saying it descends ([#76]).
 - The listing is sorted by clicking a Name or Modified column header, and clicking it again reverses the order ([#76]).
 - A folder's age is written out — `4 min`, `2 d`, `9 Jul` — instead of an abbreviation that could be minutes or months ([#76]).
@@ -48,8 +56,6 @@ orchestrator would answer `bad control: unknown kind 'listPlaces'`, so the pane 
 [#76]: https://github.com/sven1103-agent/pi-central/issues/76
 [#204]: https://github.com/sven1103-agent/pi-central/issues/204
 [#206]: https://github.com/sven1103-agent/pi-central/issues/206
-
-<!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.9.0] — 2026-11-05
 
