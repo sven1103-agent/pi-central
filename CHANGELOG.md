@@ -43,6 +43,7 @@ orchestrator would answer `bad control: unknown kind 'listPlaces'`, so the pane 
 - The sheet fits a short window: its buttons are reachable instead of falling below the viewport ([#76]).
 - The trail's root reads as a label rather than as a button that does nothing ([#76]).
 - A session removed from the rail stays removed, through later events and through a reload ([#204]).
+- A removed failed session is not re-added by the next event, and a removed row is not drawn back by the rail's own join ([#204]).
 
 [#76]: https://github.com/sven1103-agent/pi-central/issues/76
 [#204]: https://github.com/sven1103-agent/pi-central/issues/204

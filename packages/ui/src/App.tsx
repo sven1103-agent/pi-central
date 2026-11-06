@@ -143,7 +143,7 @@ import { displayName, formatContext, formatCost, formatTokens, headerLocation, n
 import { stateLabel, type UiState } from "./store.ts";
 import {
   ROSTER_PREFS_KEY,
-  isRunning,
+  hasProcess,
   parseRoster,
   rosterEntryFor,
   rosterRows,
@@ -1040,13 +1040,15 @@ export function App() {
       const entry = rosterEntryFor(session);
       if (entry !== undefined) {
         /*
-         * `running` is what spends a removal (issue #204). Without it a stopped session — which is still in `live`,
-         * because `stopped` is a state and not an absence (C3) — was re-added here immediately after the reader
-         * removed it, and the row came back on every broadcast. With it, a session that has a PROCESS is put back
-         * (it must never be hidden: *"a hidden live session would be a session you cannot stop"*), and a dead row
-         * the reader dismissed stays dismissed.
+         * `running` is what spends a removal (issue #204), and it must be `hasProcess` rather than `isRunning`.
+         *
+         * Without the flag a stopped session — still in `live`, because `stopped` is a state and not an absence (C3)
+         * — was re-added here immediately after the reader removed it. With `isRunning` the fix was half done: that
+         * predicate includes `failed`, so removing a FAILED row was undone by the next broadcast, which is the
+         * intermittently-reported half of this bug. `hasProcess` asks the question this needs — "is there work whose
+         * row must not be hidden" — and a failed or stopped session is not.
          */
-        dispatch({ kind: "remember", entry, running: isRunning(session) });
+        dispatch({ kind: "remember", entry, running: hasProcess(session) });
       }
     }
   }, [state.live]);
@@ -1310,7 +1312,7 @@ export function App() {
            * fills each row's activity. A row whose session is not running renders as `stopped` and stays where
            * the reader left it — that is the whole point of the issue.
            */
-          rows={rosterRows(state.roster, state.live)}
+          rows={rosterRows(state.roster, state.live, state.forgotten)}
           /*
             The prompt, for an unnamed session's label (issue #149 follow-up).
 
