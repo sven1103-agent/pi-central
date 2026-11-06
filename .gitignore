@@ -37,3 +37,11 @@ Screenshot*.png
 # rather than as `*.md` so real documentation can never be caught by it.
 transcript-ui-review-report.md
 *-review-report.md
+# The vulnerability scan's own outputs (scripts/production-sbom.mjs and the workflow). They are
+# regenerated on every run and belong in the workflow artifact, not the repository — and a local run
+# during a slice would otherwise leave four untracked files that `git add -A` could sweep in.
+pi-central-sbom.json
+grype.json
+grype.sarif
+grype.raw.sarif
+dependency-vulnerability-report.md

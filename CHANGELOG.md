@@ -10,6 +10,13 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+### Added
+
+- CI inventories the shipped release tree, scans it with Grype, and publishes a report, SARIF and a README badge ([#206]).
+- On `main` the scan fails on fixable findings at or above High, and never on findings with no fix ([#206]).
+
+[#206]: https://github.com/sven1103-agent/pi-central/issues/206
+
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
 ## [0.9.0] — 2026-11-05
