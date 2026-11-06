@@ -23,7 +23,7 @@ orchestrator would answer `bad control: unknown kind 'listPlaces'`, so the pane 
 - The directory sheet is a two-pane file dialog: one rail of used-before directories and places, a filterable
   listing beside it, and the full dialog height available to the listing ([#76]).
 - A folder row carries an icon, its name, when it changed, and a chevron saying it descends ([#76]).
-- The listing is sorted by clicking a Name or Modified column header, and the header shows which is in force ([#76]).
+- The listing is sorted by clicking a Name or Modified column header, and clicking it again reverses the order ([#76]).
 - A folder's age is written out — `4 min`, `2 d`, `9 Jul` — instead of an abbreviation that could be minutes or months ([#76]).
 - The listing can be filtered and shows or hides dotfolders ([#76]).
 - The picker opens on your home folder by default, and on the directory you last started a session in ([#76]).

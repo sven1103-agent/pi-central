@@ -32,8 +32,59 @@
  * costs one failed listing at worst and never a session started in the wrong place.
  */
 
-/** How a listing is ordered. `name` is the convention; the others answer "what did I touch recently". */
-export type PlaceSort = "name" | "modified";
+/**
+ * How a listing is ordered: which column, and which way.
+ *
+ * ## Why direction is separate from the column
+ *
+ * *"Clicking the header again shall also revert the order, so users can decide about the sorting direction"* — and that
+ * is the behaviour every file manager has, because ascending is not the only useful order for either column. Newest
+ * first is what you want from "Modified" almost always, and A→Z is what you want from "Name" almost always; but the
+ * one time you want the opposite (the oldest backup, the project starting with `z`), a control that cannot express it
+ * sends you scrolling instead.
+ *
+ * Two fields rather than one doubled string (`"name-desc"`), because the column and the direction are independent: a
+ * reader toggling direction does not change which column is in force, and storing them apart is what keeps that true.
+ */
+export type SortDirection = "ascending" | "descending";
+
+export interface SortState {
+  column: "name" | "modified";
+  direction: SortDirection;
+}
+
+/**
+ * What a column's FIRST click means.
+ *
+ * Per column, because the useful default differs: "Modified" is almost always wanted newest-first, and starting it
+ * oldest-first would make the first click produce the less useful of the two orders. "Name" is the reverse — A→Z is
+ * what a name column is for.
+ *
+ * This is the rule that makes the toggle feel obvious rather than arbitrary, and it is why `defaultSort` is a function
+ * rather than a constant.
+ */
+export function firstDirection(column: SortState["column"]): SortDirection {
+  return column === "modified" ? "descending" : "ascending";
+}
+
+/**
+ * What clicking `column` does to the current state.
+ *
+ * Same column → flip the direction. Different column → switch to it at that column's useful default. One function,
+ * because the two behaviours are one gesture and splitting them would make the header's own logic the place where they
+ * could disagree.
+ */
+export function nextSort(current: SortState, column: SortState["column"]): SortState {
+  if (current.column === column) {
+    return { column, direction: current.direction === "ascending" ? "descending" : "ascending" };
+  }
+  return { column, direction: firstDirection(column) };
+}
+
+/** The order a fresh installation uses: names, A→Z, which is how a folder list reads before you touch it. */
+export function defaultSort(): SortState {
+  return { column: "name", direction: "ascending" };
+}
 
 export interface ChooserPrefs {
   /**
@@ -55,8 +106,8 @@ export interface ChooserPrefs {
    * it is confirmed to be inside a place and to exist, so a stale value cannot start a session anywhere.
    */
   lastDirectory?: string | undefined;
-  /** Ascending name order, or newest-modified first. */
-  sort: PlaceSort;
+  /** Which column, and which way. See {@link SortState}. */
+  sort: SortState;
   /** Whether dotfolders are shown. A view preference, so it is remembered like one. */
   showHidden: boolean;
 }
@@ -117,7 +168,7 @@ export function safeLocalStorage(): Storage {
 }
 
 export function defaultChooserPrefs(): ChooserPrefs {
-  return { sort: "name", showHidden: false };
+  return { sort: defaultSort(), showHidden: false };
 }
 
 /**
@@ -145,7 +196,7 @@ export function parseChooserPrefs(raw: string | null): ChooserPrefs {
     // Absolute only. The same test the sheet applies to a typed path, and what stops a corrupted value becoming a
     // relative path that resolves somewhere unexpected.
     ...(typeof last === "string" && last.startsWith("/") ? { lastDirectory: last } : {}),
-    sort: record["sort"] === "modified" ? "modified" : "name",
+    sort: parseSort(record["sort"]),
     showHidden: record["showHidden"] === true,
   };
 }
@@ -190,6 +241,24 @@ function parseDoc(raw: string | null): { version?: number } | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Read a stored sort, accepting the previous release's bare string.
+ *
+ * `"modified"` was stored as a plain string before direction existed, so it migrates to that column at its useful
+ * default rather than being thrown away — a reader's choice of column survives the upgrade, and only the direction they
+ * never had is chosen for them.
+ */
+export function parseSort(raw: unknown): SortState {
+  if (typeof raw === "object" && raw !== null) {
+    const record = raw as Record<string, unknown>;
+    const column = record["column"] === "modified" ? "modified" : "name";
+    return { column, direction: record["direction"] === "descending" ? "descending" : "ascending" };
+  }
+  // The previous release's form: a bare column name with no direction.
+  if (raw === "modified") return { column: "modified", direction: firstDirection("modified") };
+  return defaultSort();
 }
 
 /**

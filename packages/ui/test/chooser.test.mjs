@@ -525,12 +525,36 @@ test("sorting is by COLUMN HEADER, so the option is discoverable", async () => {
 });
 
 test("the header shows WHICH column is in force, and which way", async () => {
-  const byName = renderChooserIn("/Users/x/git", { state: resumedInto("/Users/x/git"), sort: "name" });
+  const byName = renderChooserIn("/Users/x/git", {
+    state: resumedInto("/Users/x/git"),
+    sort: { column: "name", direction: "ascending" },
+  });
   assert.match(byName, /chooser-head-cell chooser-head-name"[^>]*aria-pressed="true"/, "Name is marked active");
-  assert.match(byName, /chooser-sort-arrow/, "with an arrow, so the state is not colour-only");
+  assert.match(byName, /↑/, "ascending is an UP arrow");
 
-  const byModified = renderChooserIn("/Users/x/git", { state: resumedInto("/Users/x/git"), sort: "modified" });
+  const byModified = renderChooserIn("/Users/x/git", {
+    state: resumedInto("/Users/x/git"),
+    sort: { column: "modified", direction: "descending" },
+  });
   assert.match(byModified, /chooser-head-cell chooser-head-modified"[^>]*aria-pressed="true"/, "Modified marked active");
+  assert.match(byModified, /↓/, "newest-first is a DOWN arrow");
+});
+
+test("both headers are present, so both sort options are discoverable", async () => {
+  // The crop that prompted the direction request showed only NAME. That may have been the crop — the age column sits
+  // further right — but the assertion is cheap and the defect (a grid column collapsing) is real and invisible to me
+  // without a browser.
+  const html = renderChooserIn("/Users/x/git", { state: resumedInto("/Users/x/git") });
+  assert.match(html, /chooser-head-name/, "the Name header");
+  assert.match(html, /chooser-head-modified/, "AND the Modified header");
+  // Both sit in the same grid, and the date column is a SHARED width — otherwise each grid resolves `auto` against its
+  // own contents and the headers drift out of line with the data.
+  const css = await stylesheet();
+  assert.match(css, /--chooser-meta-col:/, "one width for the meta column");
+  const head = css.slice(css.indexOf(".chooser-head {"));
+  assert.match(head.slice(0, head.indexOf("}")), /var\(--chooser-meta-col\)/, "the header uses it");
+  const row = css.slice(css.indexOf(".chooser-row {"));
+  assert.match(row.slice(0, row.indexOf("}")), /var\(--chooser-meta-col\)/, "and so does the row");
 });
 
 test("exactly ONE place is marked current, even though $HOME contains every other place", () => {

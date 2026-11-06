@@ -39,7 +39,7 @@ import { ownInstallationWarning } from "@pi-central/protocol";
 import type { RecentDirectory } from "../recent.ts";
 import { completeDirectory, completionBase, expandHome } from "../complete.ts";
 import type { PlacesState } from "../places.ts";
-import type { ChooserPrefs } from "../chooser-prefs.ts";
+import { defaultChooserPrefs, defaultSort, type ChooserPrefs } from "../chooser-prefs.ts";
 import { DirectoryChooser } from "./DirectoryChooser.tsx";
 
 export function OpenDirectorySheet({
@@ -257,11 +257,11 @@ export function OpenDirectorySheet({
             state={places}
             recent={recent}
             onChooseRecent={(cwd) => onOpen(cwd)}
-            sort={chooser?.sort ?? "name"}
+            sort={chooser?.sort ?? defaultSort()}
             showHidden={chooser?.showHidden === true}
-            onSort={(sort) => onChooserChange?.({ ...(chooser ?? { sort: "name", showHidden: false }), sort })}
+            onSort={(next) => onChooserChange?.({ ...(chooser ?? defaultChooserPrefs()), sort: next })}
             onToggleHidden={(target) => {
-              const next = { ...(chooser ?? { sort: "name" as const, showHidden: false }), showHidden: chooser?.showHidden !== true };
+              const next = { ...(chooser ?? defaultChooserPrefs()), showHidden: chooser?.showHidden !== true };
               onChooserChange?.(next);
               /*
                * Re-read the folder the reader is LOOKING AT, not the remembered one.

@@ -4734,8 +4734,13 @@ select.btn { font-family: var(--sans); }
  * recent list left. A file dialog has this layout for a reason — the rail answers "where could I be", the listing
  * answers "what is here", and they must not scroll together.
  */
-.chooser {
-  display: grid;
+/* ONE width for the date column, shared by the header and the rows.
+ *
+ * `auto` was wrong and it is a subtle bug: each grid resolves `auto` against ITS OWN contents, so the header's third
+ * column sized to "MODIFIED" and the rows' to the widest date ("9 Jul 2025"). Different widths meant a different 1fr for
+ * the name column in each grid — so the headers drifted out of line with the data they describe, by a few pixels, more
+ * with a longer date. A shared custom property is the only way two separate grid containers can agree. */
+.chooser { --chooser-meta-col: 74px; display: grid;
   /* 200px: enough for `pi-central-dev` and a session badge without wrapping, which is what made the old 150px rail
      unreadable ("Not on this machine: ~/src, ~/dev…" broke across four lines). */
   grid-template-columns: 200px minmax(0, 1fr);
@@ -4904,7 +4909,7 @@ select.btn { font-family: var(--sans); }
  */
 .chooser-head {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto 12px;
+  grid-template-columns: 16px minmax(0, 1fr) var(--chooser-meta-col) 12px;
   align-items: center;
   gap: var(--sp-2);
   padding: 0 6px 3px;
@@ -4984,7 +4989,7 @@ select.btn { font-family: var(--sans); }
  */
 .chooser-row {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto 12px;
+  grid-template-columns: 16px minmax(0, 1fr) var(--chooser-meta-col) 12px;
   align-items: center;
   gap: var(--sp-2);
   width: 100%;
@@ -5025,9 +5030,7 @@ select.btn { font-family: var(--sans); }
   color: var(--dim);
   font-family: var(--mono);
   white-space: nowrap;
-  /* Fixed width so the column lines up with the "Modified" header above it; `empty`, `4 min` and `12 Oct 2025` must not
-     shift the name column. */
-  min-width: 52px;
+  /* The shared column width, so `empty`, `4 min` and `12 Oct 2025` cannot shift the name column or the header above it. */
   text-align: right;
 }
 .chooser-open { color: var(--dim); font-size: var(--fs-sm); text-align: right; }

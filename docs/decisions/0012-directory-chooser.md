@@ -392,3 +392,35 @@ a date is easier to place than "eleven months ago".
 **A detail found by writing the test**: the headers were inside the "has rows" branch, so an *empty* folder had no
 header at all — sorting is a property of the folder, and a reader should be able to see and change the order before it
 has anything in it.
+
+## Amendment 7 — direction is a choice, and the columns must line up
+
+> *"Clicking the header again shall also revert the order, so users can decide about the sorting direction."*
+
+Right, and the reason is that ascending is not the only useful order for either column — the oldest backup and the
+project beginning with `z` are real things to look for. `SortState` is now `{ column, direction }` rather than a bare
+column name, because the two are independent facts and a doubled string (`"name-desc"`) would invite them to be parsed
+as one.
+
+**The rule is one function** (`nextSort`), so the two behaviours cannot disagree:
+
+| Click | Result |
+|---|---|
+| the **active** column | flip the direction |
+| the **other** column | switch to it at *that column's* useful default |
+
+Per-column defaults (`firstDirection`) rather than one global one, and that is deliberate: `Name` opens A→Z because
+that is what a name column is for, and `Modified` opens **newest-first** because starting it oldest-first would make
+the first click produce the *less* useful of the two orders. Carrying the current direction across columns would be the
+plausible-looking wrong answer — a reader on `Name ↓` who clicks Modified wants newest-first, not "Z→A applied to
+dates".
+
+Direction persists (`sort` was already stored), and a value written by the previous release as a bare `"modified"`
+migrates to that **column** at its default — losing a column choice for an upgrade nobody asked for would be unkind,
+and the direction is the part they never had.
+
+**A layout bug found while answering this.** The header and the rows are two separate grids, and both used `auto` for
+the date column. Each grid resolves `auto` against *its own* contents, so the header sized it to `MODIFIED` and the
+rows to the widest date (`9 Jul 2025`) — different widths, therefore a different `1fr` for the name column in each, so
+the headers drifted a few pixels off the data they describe. Both now share one `--chooser-meta-col` width. That is
+the class of defect I cannot see without a browser, which is why it is written down here rather than just fixed.

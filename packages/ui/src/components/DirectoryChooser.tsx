@@ -34,7 +34,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { PlaceEntryInfo, PlaceInfo } from "@pi-central/protocol";
 import { placeAt, type PlacesState } from "../places.ts";
 import { abbreviateCwd, baseName, type RecentDirectory } from "../recent.ts";
-import type { PlaceSort } from "../chooser-prefs.ts";
+import { nextSort, type SortDirection, type SortState } from "../chooser-prefs.ts";
 import { ageOf } from "../age.ts";
 import { FileErrorNote } from "./FileErrorNote.tsx";
 
@@ -51,9 +51,9 @@ export function DirectoryChooser({
 }: {
   state: PlacesState;
   /** How rows are ordered. Remembered across opens (`chooser-prefs.ts`). */
-  sort: PlaceSort;
+  sort: SortState;
   showHidden: boolean;
-  onSort: (sort: PlaceSort) => void;
+  onSort: (sort: SortState) => void;
   /** Flip dotfolders and RE-READ `path` with the new flag — the sheet owns the request, so it needs the path. */
   onToggleHidden: (path: string) => void;
   /** List one absolute path. The roots are requested by the sheet, not here. */
@@ -139,10 +139,19 @@ export function DirectoryChooser({
     if (listing === undefined || listing.status !== "loaded") return [];
     const needle = filter.trim().toLowerCase();
     const matching = needle === "" ? listing.listing.entries : listing.listing.entries.filter((entry) => entry.name.toLowerCase().includes(needle));
-    // Sorted on the CLIENT, so changing the order is instant and needs no request — the metadata travelled with the listing.
+    /*
+     * Sorted on the CLIENT, so changing the order is instant and needs no request — the metadata travelled with the
+     * listing. The DIRECTION multiplies the comparison rather than being a second branch: one comparator means the two
+     * orders cannot disagree about ties, and a tie is always broken by name so a list of same-timestamp folders does not
+     * shuffle between renders.
+     */
+    const sign = sort.direction === "ascending" ? 1 : -1;
     return [...matching].sort((a, b) => {
-      if (sort === "modified") return b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name);
-      return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      // A tie is broken by NAME in ascending order regardless of direction, so a folder of equal timestamps (a bulk
+      // `git clone`) does not shuffle between renders — the ordering stays total, which is what a stable list needs.
+      const nameOrder = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      if (sort.column === "modified") return sign * (a.mtimeMs - b.mtimeMs) || nameOrder;
+      return sign * nameOrder;
     });
   }, [listing, filter, sort]);
 
@@ -338,25 +347,37 @@ export function DirectoryChooser({
             {loaded !== undefined && (
               <div className="chooser-head" role="row">
                 <span aria-hidden="true" />
+                {/*
+                  Each header is a SORT CONTROL for its own column: clicking the active one flips the direction, and
+                  clicking the other switches to it at that column's useful default (`nextSort`, which is one function so
+                  the two behaviours cannot disagree).
+
+                  The label names the column and the arrow carries the state, which is the pair a reader needs: "NAME ↓"
+                  says both which column is in force and which way, where a bare `Recent` pill said neither.
+                */}
                 <button
                   type="button"
                   className="chooser-head-cell chooser-head-name"
-                  onClick={() => onSort("name")}
-                  aria-pressed={sort === "name"}
-                  title="Sort by name"
+                  onClick={() => onSort(nextSort(sort, "name"))}
+                  aria-pressed={sort.column === "name"}
+                  title={sort.column === "name" ? `Sorted A→Z — click for ${sort.direction === "ascending" ? "Z→A" : "A→Z"}` : "Sort by name"}
                 >
                   Name
-                  {sort === "name" && <SortArrow />}
+                  {sort.column === "name" && <SortArrow direction={sort.direction} />}
                 </button>
                 <button
                   type="button"
                   className="chooser-head-cell chooser-head-modified"
-                  onClick={() => onSort("modified")}
-                  aria-pressed={sort === "modified"}
-                  title="Sort by most recently modified"
+                  onClick={() => onSort(nextSort(sort, "modified"))}
+                  aria-pressed={sort.column === "modified"}
+                  title={
+                    sort.column === "modified"
+                      ? `Sorted ${sort.direction === "descending" ? "newest first" : "oldest first"} — click for ${sort.direction === "descending" ? "oldest first" : "newest first"}`
+                      : "Sort by most recently modified"
+                  }
                 >
                   Modified
-                  {sort === "modified" && <SortArrow />}
+                  {sort.column === "modified" && <SortArrow direction={sort.direction} />}
                 </button>
                 <span aria-hidden="true" />
               </div>
@@ -511,10 +532,10 @@ function FolderIcon() {
  * An arrow rather than a word, because it sits in a header beside a label that already names the column: "Name ↓" reads
  * as a sort state, "Sorted by name" would be a sentence in a table header.
  */
-function SortArrow() {
+function SortArrow({ direction }: { direction: SortDirection }) {
   return (
     <span className="chooser-sort-arrow" aria-hidden="true">
-      {"\u2193"}
+      {direction === "ascending" ? "\u2191" : "\u2193"}
     </span>
   );
 }

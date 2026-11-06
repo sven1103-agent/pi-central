@@ -17,9 +17,13 @@ import assert from "node:assert/strict";
 import {
   CHOOSER_PREFS_KEY,
   defaultChooserPrefs,
+  defaultSort,
+  firstDirection,
   loadChooserPrefs,
+  nextSort,
   openingDirectory,
   parseChooserPrefs,
+  parseSort,
   resumable,
   serializeChooserPrefs,
 } from "../src/chooser-prefs.ts";
@@ -34,7 +38,11 @@ test("nothing stored means the default, not a crash", () => {
 });
 
 test("a remembered directory round-trips", () => {
-  const prefs = { lastDirectory: "/Users/x/git/project", sort: "modified" as const, showHidden: true };
+  const prefs = {
+    lastDirectory: "/Users/x/git/project",
+    sort: { column: "modified" as const, direction: "descending" as const },
+    showHidden: true,
+  };
   assert.deepEqual(parseChooserPrefs(serializeChooserPrefs(prefs)), prefs);
 });
 
@@ -47,7 +55,7 @@ test("a RELATIVE remembered path is DROPPED, not half-used", () => {
 
 test("an unrecognised sort degrades to name, and a truthy-but-wrong flag is not a flag", () => {
   const parsed = parseChooserPrefs('{"sort":"size","showHidden":"yes","lastDirectory":7}');
-  assert.equal(parsed.sort, "name", "a mode that no longer exists cannot empty the list");
+  assert.deepEqual(parsed.sort, defaultSort(), "a mode that no longer exists cannot empty the list");
   assert.equal(parsed.showHidden, false, "only an explicit `true` shows dotfolders");
   assert.equal(parsed.lastDirectory, undefined, "a number is not a path");
 });
@@ -197,13 +205,13 @@ test("a VERSIONLESS stored value drops the browsed directory but keeps the real 
   const raw = JSON.stringify({ lastDirectory: "/Users/x/git/data-management", sort: "modified", showHidden: true });
   const prefs = loadChooserPrefs(store({ "pi-central.chooser": raw }));
   assert.equal(prefs.lastDirectory, undefined, "the unexplained folder is gone");
-  assert.equal(prefs.sort, "modified", "but a preference that was never wrong survives");
+  assert.deepEqual(prefs.sort, { column: "modified", direction: "descending" }, "but a preference that was never wrong survives");
   assert.equal(prefs.showHidden, true, "including this one — punishing it twice for one defect would be unfair");
 });
 
 test("a CURRENT value is read as written, so the migration does not eat a real choice", () => {
   // After the fix, `lastDirectory` means "a session was started here", which IS worth keeping.
-  const raw = serializeChooserPrefs({ lastDirectory: "/Users/x/git/project", sort: "name", showHidden: false });
+  const raw = serializeChooserPrefs({ lastDirectory: "/Users/x/git/project", sort: defaultSort(), showHidden: false });
   const prefs = loadChooserPrefs(store({ "pi-central.chooser": raw }));
   assert.equal(prefs.lastDirectory, "/Users/x/git/project", "kept");
 });
@@ -218,4 +226,55 @@ test("the migration leaves the picker opening at HOME, which is what was asked f
 test("nothing stored means defaults, and no crash", () => {
   assert.deepEqual(loadChooserPrefs(store()), defaultChooserPrefs());
   assert.deepEqual(loadChooserPrefs(store({ "pi-central.chooser": "not json" })), defaultChooserPrefs());
+});
+
+// --- Sorting direction (issue #76) ---------------------------------------------------------------
+//
+// "Clicking the header again shall also revert the order, so users can decide about the sorting direction."
+//
+// Every file manager does this, and the reason is that ascending is not the only useful order for either column: the
+// oldest backup and the project starting with `z` are real things to look for.
+
+test("a column's FIRST click uses the order that column is usually wanted in", () => {
+  // Per column, not one global default. Name is A→Z because that is what a name column is for; Modified is newest-first
+  // because that is what a reader wants from a date nine times in ten, and starting it oldest-first would make the first
+  // click produce the LESS useful of the two orders.
+  assert.equal(firstDirection("name"), "ascending");
+  assert.equal(firstDirection("modified"), "descending");
+});
+
+test("clicking the ACTIVE column again flips the direction", () => {
+  const asc = { column: "name" as const, direction: "ascending" as const };
+  assert.deepEqual(nextSort(asc, "name"), { column: "name", direction: "descending" });
+  assert.deepEqual(nextSort({ column: "name", direction: "descending" }, "name"), { column: "name", direction: "ascending" });
+});
+
+test("clicking the OTHER column switches to it at its own default, not at the current direction", () => {
+  // Carrying the direction across columns would be the plausible-looking wrong answer: a reader on `Name ↓` who clicks
+  // Modified wants newest-first, not "Z→A applied to dates".
+  assert.deepEqual(nextSort({ column: "name", direction: "descending" }, "modified"), {
+    column: "modified",
+    direction: "descending",
+  });
+  assert.deepEqual(nextSort({ column: "modified", direction: "ascending" }, "name"), {
+    column: "name",
+    direction: "ascending",
+  });
+});
+
+test("a stored sort keeps its DIRECTION across a reload", () => {
+  // The direction is a choice the reader made; losing it on every reopen would be the same class of bug as the picker
+  // forgetting where it was.
+  const prefs = { ...defaultChooserPrefs(), sort: { column: "modified" as const, direction: "ascending" as const } };
+  const round = parseChooserPrefs(serializeChooserPrefs(prefs));
+  assert.deepEqual(round.sort, { column: "modified", direction: "ascending" });
+});
+
+test("the PREVIOUS release's bare column name migrates, keeping the column", () => {
+  // `"modified"` was stored as a plain string before direction existed. Throwing it away would reset a reader's column
+  // choice for an upgrade they did not ask for; only the direction they never had is chosen for them.
+  assert.deepEqual(parseSort("modified"), { column: "modified", direction: "descending" });
+  assert.deepEqual(parseSort("name"), defaultSort());
+  assert.deepEqual(parseSort(undefined), defaultSort());
+  assert.deepEqual(parseSort(42), defaultSort());
 });
