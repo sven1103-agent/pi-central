@@ -6,6 +6,7 @@
   <a href="https://www.npmjs.com/package/pi-central"><img alt="npm version" src="https://img.shields.io/npm/v/pi-central" /></a>
   <a href="https://www.npmjs.com/package/pi-central"><img alt="npm downloads" src="https://img.shields.io/npm/dm/pi-central" /></a>
   <a href="https://github.com/sven1103-agent/pi-central/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/sven1103-agent/pi-central/actions/workflows/ci.yml/badge.svg" /></a>
+  <a href="https://github.com/sven1103-agent/pi-central/security/code-scanning"><img alt="dependency vulnerabilities" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/sven1103-agent/pi-central/badges/vulnerabilities.json" /></a>
   <img alt="node version" src="https://img.shields.io/node/v/pi-central" />
   <img alt="license" src="https://img.shields.io/npm/l/pi-central" />
 </p>
@@ -185,6 +186,7 @@ workspaces and the agent root, and how to verify the install.
 | [docs/PRINCIPLES.md](docs/PRINCIPLES.md) | The nine rules, in full |
 | [docs/DOGFOODING.md](docs/DOGFOODING.md) | Using Pi Central to develop Pi Central, and what breaks if you do |
 | [docs/RELEASING.md](docs/RELEASING.md) | Cutting a release: the version source, the tag, provenance, rollback |
+| [docs/SECURITY.md](docs/SECURITY.md) | What the vulnerability scan covers, where results appear, and the gate |
 | [docs/INCREMENTS.md](docs/INCREMENTS.md) · [docs/ROADMAP.md](docs/ROADMAP.md) | How work is sequenced, and the long view |
 | [docs/decisions/](docs/decisions/) | Architecture decision records |
 | [packages/ui/DESIGN.md](packages/ui/DESIGN.md) | The UI design system, as implemented |

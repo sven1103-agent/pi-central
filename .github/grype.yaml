@@ -1,0 +1,20 @@
+# Accepted-risk ledger for the dependency vulnerability scan
+# (.github/workflows/dependency-vulnerability-scan.yml).
+#
+# An entry here suppresses a finding from the report, the SARIF upload and the gate. It is a
+# DECISION, so it is only valid when it records who decided, why, and until when:
+#
+#   * every `reason` MUST contain a ticket reference and an expiry as `exp:YYYY-MM-DD`;
+#   * an entry whose `exp:` has passed is re-reviewed — the daily run is what makes that visible;
+#   * never add an entry for something a version bump would fix. Upgrade instead.
+#
+# The gate already ignores findings with NO fix available, because no pull request could clear them.
+# So this file is for the smaller set where a fix exists and upgrading is the wrong call right now
+# (a major-version jump with a breaking change, or a false positive in the advisory).
+ignore:
+  # Example, kept commented until a risk is actually accepted:
+  #
+  # - vulnerability: GHSA-xxxx-xxxx-xxxx
+  #   package:
+  #     name: ws
+  #   reason: "Vulnerable code path is not reachable from our use; exp:2026-06-30; see issue #1234"
