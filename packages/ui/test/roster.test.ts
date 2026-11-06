@@ -139,7 +139,7 @@ test("a corrupt store degrades to an empty roster, never a broken one", () => {
   // `localStorage` outlives upgrades and is shared with everything else on the origin — the reason `panel.ts`
   // and `reading.ts` both validate every field. A throw here would break the rail on boot.
   for (const bad of [null, "", "{", "[]x", "null", "42", '{"nope":1}', "[1,2,3]", '[{"path":null}]']) {
-    assert.deepEqual(parseRoster(bad), [], JSON.stringify(bad));
+    assert.deepEqual(parseRoster(bad).entries, [], JSON.stringify(bad));
   }
 });
 
@@ -153,16 +153,16 @@ test("an entry needs a plausible absolute path, and a bad cwd drops the FIELD no
     { path: "/ok/two.jsonl", cwd: "relative" },
     { path: 42 },
   ]);
-  assert.deepEqual(parseRoster(raw), [{ path: "/ok/one.jsonl" }, { path: "/ok/two.jsonl" }]);
+  assert.deepEqual(parseRoster(raw).entries, [{ path: "/ok/one.jsonl" }, { path: "/ok/two.jsonl" }]);
 });
 
 test("an unbounded store cannot build unbounded rows", () => {
   const huge = JSON.stringify(Array.from({ length: 5000 }, (_, i) => ({ path: `/s/${i}.jsonl` })));
-  assert.equal(parseRoster(huge).length, ROSTER_MAX);
+  assert.equal(parseRoster(huge).entries.length, ROSTER_MAX);
 });
 
 test("hint text is bounded, and wrong types are dropped", () => {
-  const [entry] = parseRoster(JSON.stringify([{ path: "/a.jsonl", name: "x".repeat(1000), cwd: {}, sessionId: [] }]));
+  const [entry] = parseRoster(JSON.stringify([{ path: "/a.jsonl", name: "x".repeat(1000), cwd: {}, sessionId: [] }])).entries;
   assert.ok(entry!.name!.length <= 200);
   assert.equal(entry!.cwd, undefined);
   assert.equal(entry!.sessionId, undefined);
@@ -170,12 +170,12 @@ test("hint text is bounded, and wrong types are dropped", () => {
 
 test("duplicate paths collapse to the first", () => {
   const raw = JSON.stringify([{ path: "/a.jsonl", name: "first" }, { path: "/a.jsonl", name: "second" }]);
-  assert.deepEqual(parseRoster(raw), [{ path: "/a.jsonl", name: "first" }]);
+  assert.deepEqual(parseRoster(raw).entries, [{ path: "/a.jsonl", name: "first" }]);
 });
 
 test("a roster round-trips", () => {
   const entries: RosterEntry[] = [{ path: "/s/a/s1.jsonl", cwd: "/git/a", name: "task" }, { path: "/s/b/s2.jsonl" }];
-  assert.deepEqual(parseRoster(serializeRoster(entries)), entries);
+  assert.deepEqual(parseRoster(serializeRoster(entries)).entries, entries);
 });
 
 // --- Resume-on-send: the parked prompt finds its session (issue #89) -----------------------------
@@ -240,7 +240,7 @@ test("a name a person chose survives a restart unchanged", () => {
 test("scratch is persisted, so the label rule works after a restart", () => {
   // Without this flag a remembered row cannot know it was a scratch session, and falls back to its handle.
   const entry = rosterEntryFor(live({ id: "s3", name: "s3", scratch: true, sessionFile: "/s/a/s3.jsonl" }))!;
-  const roundTripped = parseRoster(serializeRoster([entry]));
+  const roundTripped = parseRoster(serializeRoster([entry])).entries;
   assert.equal(roundTripped[0]!.scratch, true);
 });
 
@@ -248,7 +248,7 @@ test("a non-scratch session is NOT labelled scratch after a restart", () => {
   // The flag is recorded even when false, so the rule cannot misfire in the other direction.
   const entry = rosterEntryFor(live({ id: "s4", name: "", scratch: false, sessionFile: "/s/a/s4.jsonl" }))!;
   assert.equal(entry.scratch, false);
-  const [restored] = parseRoster(serializeRoster([entry]));
+  const [restored] = parseRoster(serializeRoster([entry])).entries;
   // The label is computed BEFORE any assertion: `assert.equal` narrows the value it checks, and comparing a
   // narrowed literal to `true` is a compile error rather than a failing test.
   const label = nameLabel(restored!.name, restored!.scratch === true, restored!.path);

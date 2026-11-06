@@ -143,6 +143,7 @@ import { displayName, formatContext, formatCost, formatTokens, headerLocation, n
 import { stateLabel, type UiState } from "./store.ts";
 import {
   ROSTER_PREFS_KEY,
+  hasProcess,
   parseRoster,
   rosterEntryFor,
   rosterRows,
@@ -1021,7 +1022,8 @@ export function App() {
    * whatever else runs on this origin.
    */
   useEffect(() => {
-    dispatch({ kind: "loadRoster", entries: parseRoster(localStorage.getItem(ROSTER_PREFS_KEY)) });
+    const restored = parseRoster(localStorage.getItem(ROSTER_PREFS_KEY));
+    dispatch({ kind: "loadRoster", entries: restored.entries, forgotten: restored.forgotten });
   }, []);
 
   /*
@@ -1036,14 +1038,25 @@ export function App() {
   useEffect(() => {
     for (const session of state.live) {
       const entry = rosterEntryFor(session);
-      if (entry !== undefined) dispatch({ kind: "remember", entry });
+      if (entry !== undefined) {
+        /*
+         * `running` is what spends a removal (issue #204), and it must be `hasProcess` rather than `isRunning`.
+         *
+         * Without the flag a stopped session — still in `live`, because `stopped` is a state and not an absence (C3)
+         * — was re-added here immediately after the reader removed it. With `isRunning` the fix was half done: that
+         * predicate includes `failed`, so removing a FAILED row was undone by the next broadcast, which is the
+         * intermittently-reported half of this bug. `hasProcess` asks the question this needs — "is there work whose
+         * row must not be hidden" — and a failed or stopped session is not.
+         */
+        dispatch({ kind: "remember", entry, running: hasProcess(session) });
+      }
     }
   }, [state.live]);
 
   // Persist whatever the rail is showing. One writer, so storage cannot drift from what is rendered.
   useEffect(() => {
     try {
-      localStorage.setItem(ROSTER_PREFS_KEY, serializeRoster(state.roster));
+      localStorage.setItem(ROSTER_PREFS_KEY, serializeRoster(state.roster, state.forgotten));
     } catch {
       // A full or disabled `localStorage` must not break the rail: the roster is a convenience, and an
       // unwritable store degrades to "not remembered", which is the behaviour before this feature existed.
@@ -1299,7 +1312,7 @@ export function App() {
            * fills each row's activity. A row whose session is not running renders as `stopped` and stays where
            * the reader left it — that is the whole point of the issue.
            */
-          rows={rosterRows(state.roster, state.live)}
+          rows={rosterRows(state.roster, state.live, state.forgotten)}
           /*
             The prompt, for an unnamed session's label (issue #149 follow-up).
 

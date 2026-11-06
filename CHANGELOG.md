@@ -38,15 +38,15 @@ orchestrator would answer `bad control: unknown kind 'listPlaces'`, so the pane 
 ### Fixed
 
 - The picker reopened in a folder that was only ever browsed, and remembered it on every click ([#76]).
-
-### Fixed
-
 - A path hint rendered as `git~/` instead of `~/git`, an artefact of a right-to-left truncation trick ([#76]).
 - The sheet's list of used directories is capped and scrolls, so the browser is not squeezed to a few visible rows ([#76]).
 - The sheet fits a short window: its buttons are reachable instead of falling below the viewport ([#76]).
 - The trail's root reads as a label rather than as a button that does nothing ([#76]).
+- A session removed from the rail stays removed, through later events and through a reload ([#204]).
+- A removed failed session is not re-added by the next event, and a removed row is not drawn back by the rail's own join ([#204]).
 
 [#76]: https://github.com/sven1103-agent/pi-central/issues/76
+[#204]: https://github.com/sven1103-agent/pi-central/issues/204
 [#206]: https://github.com/sven1103-agent/pi-central/issues/206
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
@@ -496,7 +496,7 @@ The first release you could install, and a product identity.
 - `steer`, follow-up, and Esc that returns what it cleared ([#3]).
 - Fenced code is syntax-highlighted, lazily ([#4]).
 - Compaction and retry banners ([#5]).
-- A resume flow for a historical session, in its own recorded directory ([#10]).
+- A resume flow for a historical session, in its own recorded directory.
 
 ### Changed
 
@@ -557,7 +557,6 @@ The spike that answered whether this was worth building.
 [#7]: https://github.com/sven1103-agent/pi-central/issues/7
 [#8]: https://github.com/sven1103-agent/pi-central/issues/8
 [#9]: https://github.com/sven1103-agent/pi-central/issues/9
-[#10]: https://github.com/sven1103-agent/pi-central/issues/10
 [#11]: https://github.com/sven1103-agent/pi-central/issues/11
 [#25]: https://github.com/sven1103-agent/pi-central/issues/25
 [#27]: https://github.com/sven1103-agent/pi-central/issues/27

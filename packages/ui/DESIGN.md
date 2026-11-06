@@ -408,7 +408,13 @@ Full line 3 at 288px: `sonnet-4.5 · high · ctx 62% · $0.0142` = 37 chars at 1
 3. **Collapse by state**, never by count. `Stopped`/`Failed` are collapsed by default with a count; `Needs you`/`Running`/`Idle` always show their rows.
 4. **Filter** (`/` focuses the field): matches name, cwd, model. A filter input plus 3 collapsible groups beats a palette for a 20-row list; a ⌘K palette is optional (Phase 2 if cheap).
 5. **Focus changes only on user action.** Starting a session focuses it. An approval arriving in session 9 must *never* yank you out of session 4 — it badges, it counts, it does not teleport. (This is the single most important behavioural rule in the rail.)
-6. **Dismissal, not deletion.** `Dismiss from rail` on stopped/failed rows hides them for this browser session (US-6). No file is ever deleted from the rail — deleting a scratch workspace is an explicit action in the inspector and lands in Phase 2.5.
+6. **Dismissal, not deletion.** `Dismiss from rail` on stopped/failed rows removes them from the rail, and the removal **persists** — across later broadcasts and across a reload (issue #204). No file is ever deleted from the rail — deleting a scratch workspace is an explicit action in the inspector and lands in Phase 2.5.
+
+   This was designed as *"hides them for this browser session"*, which the shipped UI matched and the reported issue did not: a rail that refills with dismissed rows on every event is not a rail you can tidy. The narrow reading also turned out to be unshippable as stated — a removal expressed as *"this path is absent from the list"* cannot survive `App`'s re-remember effect, because a stopped session is still in `live` (C3). The removal is therefore recorded, not implied.
+
+   The one exception, and it is not negotiable: a session that is **running again** (resumed, or auto-reopened per #185) returns to the rail. Hiding live work would be a session you cannot stop.
+
+   Two follow-on corrections, both from the row still coming back after the removal was recorded correctly. First, the removal has to reach the **join** as well as the reducer: `rosterRows` appends every live session missing from the roster, and a stopped session is in `live`, so an empty roster and a visible row were true at once. Second, "running again" means **has a process**, not `isRunning` — that predicate includes `failed` so a failed row keeps its Retry, and reusing it here spent the removal on a session with nothing running behind it. A stopped row stayed gone and a failed one came back, which is why this reads as intermittent.
 
 **Scratch vs project.** Scratch is identified *textually* — `scratch · s7` on line 2 and a `[scratch]` chip in the session header — not by a second border treatment. Rejected alternative: a dashed left border. The 3px left border already encodes **state**, and overloading one channel with two meanings is exactly how a dense rail becomes unreadable. Project rows show a path instead of `scratch · id`; that difference is enough, it survives grayscale, and it needs no legend.
 
@@ -603,7 +609,7 @@ A per-delta announcement of streaming text is the failure mode this design exist
 | Re-check a vanished directory | `Check again` | — |
 | Answer a confirm | `Allow once` · `Deny` · `Cancel request` | — |
 | Rename | `Rename…` | inline field, `Save name` |
-| Hide a dead row | `Dismiss from rail` | `Hidden until you reload. The session file is not deleted.` |
+| Hide a dead row | `Dismiss from rail` | `Removed from the rail. The session file is not deleted.` |
 
 **Empty states** — direction, never mood.
 
