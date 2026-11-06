@@ -98,16 +98,23 @@ test("unknown places and no memory both mean 'start at Places'", () => {
 
 // --- list ordering and ages ----------------------------------------------------------------------
 
-test("an age is coarse, and covers the whole range without inventing a unit", async () => {
-  const { ageOf } = await import("../src/age.ts");
+test("an age writes its UNIT, because the abbreviations were unreadable", async () => {
+  // The first version returned `4m`, `2d`, `2w`. A reviewer said what a reader would say: "users will not understand the
+  // sorting like presented here". `4m` is four minutes or four months, and `2w` needs a pause — compression is only worth
+  // paying for when the reader already knows the unit.
+  const { ageOf, dateOf } = await import("../src/age.ts");
   const now = Date.UTC(2026, 10, 6, 12, 0, 0);
   assert.equal(ageOf(now - 10_000, now), "now");
-  assert.equal(ageOf(now - 5 * 60_000, now), "5m");
-  assert.equal(ageOf(now - 3 * 3_600_000, now), "3h");
-  assert.equal(ageOf(now - 2 * 86_400_000, now), "2d");
-  assert.equal(ageOf(now - 21 * 86_400_000, now), "3w");
-  assert.equal(ageOf(now - 90 * 86_400_000, now), "3mo");
-  assert.equal(ageOf(now - 400 * 86_400_000, now), "1y");
+  assert.equal(ageOf(now - 5 * 60_000, now), "5 min");
+  assert.equal(ageOf(now - 3 * 3_600_000, now), "3 h");
+  assert.equal(ageOf(now + 0, now), "now");
+  // A day gets a word: "yesterday" is what a person says, and `1 d` is the abbreviation this exists to remove.
+  assert.equal(ageOf(now - 1 * 86_400_000, now), "yesterday");
+  assert.equal(ageOf(now - 2 * 86_400_000, now), "2 d");
+
+  // Past a month it is a DATE, which is what Finder and Explorer do: "11 months ago" is harder to place than "12 Oct".
+  assert.equal(ageOf(now - 90 * 86_400_000, now), dateOf(now - 90 * 86_400_000, now));
+  assert.match(ageOf(now - 400 * 86_400_000, now), /\d{4}$/, "an older year is named, so nothing is implied incorrectly");
 });
 
 test("a FUTURE mtime reads as 'now', never as a negative age", async () => {

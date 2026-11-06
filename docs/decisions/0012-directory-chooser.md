@@ -359,3 +359,36 @@ opened a session somewhere, that is a considered choice worth honouring.
 **The lesson, stated because this is the second time on this issue.** A preference was shipped without deciding *when*
 it should be written, and the answer "on any navigation" was never examined — it was simply the callback that happened
 to exist. A stored value the reader cannot account for is worse than no stored value.
+
+## Amendment 6 — sorting by column header, and ages that say what they mean
+
+> *"Users will not understand the sorting like presented here. And they will not easily find out how to sort by name,
+> which gives users a fast overview in larger folders."*
+
+Two defects, one control, and the screenshot shows both:
+
+1. **The sort control named only the order in force.** It was a `Recent` / `A–Z` pill that toggled. A reader looking
+   for "sort by name" had no way to discover that name-sorting existed — a control that shows one option cannot
+   advertise the other, and `Recent` reads as a label rather than as a button.
+2. **The ages had no label and no unit.** `4m`, `2w`, `5d` in an unheaded column. `4m` is four minutes or four months;
+   `2w` needs a pause. Compression is only worth paying for when the reader already knows the unit, and here they do
+   not.
+
+**Both are fixed by the same conventional thing: clickable column headers.**
+
+```
+[icon]  NAME ↓                       MODIFIED ↓
+```
+
+The label says what the column *is* — so `4 min` sits under "Modified" and becomes a fact rather than a riddle — and
+clicking it sorts by that column, so both options are visible without pressing anything. The arrow carries the state,
+which colour alone cannot. This is what Finder, Explorer and every file manager do, and it is now what this does.
+
+**The ages themselves were also rewritten** (`age.ts`): units written out (`5 min`, `3 h`, `2 d`, `yesterday`), and
+anything older than a month rendered as a **date** (`9 Jul`, `9 Jul 2025`). The crossover is what Finder does for the
+same reason: inside a month, "did I touch this recently?" is the question, and an interval answers it; beyond a month,
+a date is easier to place than "eleven months ago".
+
+**A detail found by writing the test**: the headers were inside the "has rows" branch, so an *empty* folder had no
+header at all — sorting is a property of the folder, and a reader should be able to see and change the order before it
+has anything in it.

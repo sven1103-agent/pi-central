@@ -320,14 +320,6 @@ export function DirectoryChooser({
                 />
                 <button
                   type="button"
-                  className="btn btn-quiet chooser-sort"
-                  onClick={() => onSort(sort === "name" ? "modified" : "name")}
-                  title={sort === "name" ? "Sorted by name — click for most recently changed" : "Sorted by most recently changed — click for name"}
-                >
-                  {sort === "name" ? "A–Z" : "Recent"}
-                </button>
-                <button
-                  type="button"
                   className="btn btn-quiet chooser-hidden"
                   onClick={() => onToggleHidden(here.path)}
                   aria-pressed={showHidden}
@@ -335,6 +327,38 @@ export function DirectoryChooser({
                 >
                   {showHidden ? "Hide dots" : "Show dots"}
                 </button>
+              </div>
+            )}
+
+            {/*
+              The column headers belong to the LISTING, so they appear whenever one is loaded — including when it is
+              empty. Sorting is a property of the folder, and a reader should be able to see (and change) how it is
+              ordered before it has anything in it.
+            */}
+            {loaded !== undefined && (
+              <div className="chooser-head" role="row">
+                <span aria-hidden="true" />
+                <button
+                  type="button"
+                  className="chooser-head-cell chooser-head-name"
+                  onClick={() => onSort("name")}
+                  aria-pressed={sort === "name"}
+                  title="Sort by name"
+                >
+                  Name
+                  {sort === "name" && <SortArrow />}
+                </button>
+                <button
+                  type="button"
+                  className="chooser-head-cell chooser-head-modified"
+                  onClick={() => onSort("modified")}
+                  aria-pressed={sort === "modified"}
+                  title="Sort by most recently modified"
+                >
+                  Modified
+                  {sort === "modified" && <SortArrow />}
+                </button>
+                <span aria-hidden="true" />
               </div>
             )}
 
@@ -376,7 +400,7 @@ export function DirectoryChooser({
                       <span className="chooser-name">{entry.name}</span>
                       {/* Age is the second line of information a file dialog gives, and the thing that makes "the
                           project I made yesterday" findable in a list of forty. `isEmpty` stops a dead-end descent. */}
-                      <span className="chooser-meta">
+                      <span className="chooser-meta" title={new Date(entry.mtimeMs).toLocaleString()}>
                         {entry.isEmpty ? "empty" : ageOf(entry.mtimeMs)}
                       </span>
                       <span className="chooser-open" aria-hidden="true">
@@ -478,6 +502,20 @@ function FolderIcon() {
         strokeLinejoin="round"
       />
     </svg>
+  );
+}
+
+/**
+ * Which column is in force, and which way.
+ *
+ * An arrow rather than a word, because it sits in a header beside a label that already names the column: "Name ↓" reads
+ * as a sort state, "Sorted by name" would be a sentence in a table header.
+ */
+function SortArrow() {
+  return (
+    <span className="chooser-sort-arrow" aria-hidden="true">
+      {"\u2193"}
+    </span>
   );
 }
 

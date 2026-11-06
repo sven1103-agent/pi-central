@@ -463,7 +463,7 @@ test("a folder row carries an ICON, its name, an AGE and a chevron", async () =>
   const html = renderChooserIn("/Users/x/git", { state });
   assert.match(html, /<svg class="chooser-icon"/, "a folder glyph");
   assert.match(html, />alpha</, "the name");
-  assert.match(html, /class="chooser-meta">3d</, "an age, so 'the one I made yesterday' is findable");
+  assert.match(html, /class="chooser-meta"[^>]*>3 d</, "an age WITH its unit, so 'the one I made yesterday' is findable");
   assert.match(html, /chooser-open/, "and a chevron saying the row descends");
 
   // And the row is a GRID with four columns, so the age and chevron line up down the list. A markup assertion alone
@@ -511,12 +511,26 @@ test("a resumed directory is where the picker OPENS, without a request from the 
   assert.ok(!/<p class="chooser-crumb" tabindex="-1"><span class="chooser-crumb-root">Places<\/span><\/p>/.test(html), "NOT the bare 'Places' pane");
 });
 
-test("the sort, dotfolder and filter controls exist", async () => {
+test("sorting is by COLUMN HEADER, so the option is discoverable", async () => {
+  // The old control was a `Recent` / `A–Z` chip: it named only the order currently in force, so a reader looking for
+  // "sort by name" had no way to learn that name-sorting existed. Column headers name every column, which is how a file
+  // manager has always solved this.
   const html = renderChooserIn("/Users/x/git", { state: resumedInto("/Users/x/git") });
-  assert.match(html, /chooser-sort/, "a sort control, which the review listed as missing");
-  assert.match(html, /chooser-hidden/, "and a dotfolder toggle");
-  assert.match(html, /Filter folders/, "and a filter, the review's #2 blocker: 'the only way in is a full path'");
-  assert.match(html, /A–Z/, "the sort control says which order is in force");
+  assert.match(html, /class="chooser-head"/, "a header row");
+  assert.match(text(html), /Name/, "the name column is labelled — and it is clickable");
+  assert.match(text(html), /Modified/, "and the age column, which is why `4m` is no longer cryptic");
+  assert.ok(!/A–Z|>Recent</.test(html), "no toggle that hides half the options");
+  assert.match(html, /chooser-hidden/, "the dotfolder toggle stays");
+  assert.match(html, /Filter folders/, "and the filter");
+});
+
+test("the header shows WHICH column is in force, and which way", async () => {
+  const byName = renderChooserIn("/Users/x/git", { state: resumedInto("/Users/x/git"), sort: "name" });
+  assert.match(byName, /chooser-head-cell chooser-head-name"[^>]*aria-pressed="true"/, "Name is marked active");
+  assert.match(byName, /chooser-sort-arrow/, "with an arrow, so the state is not colour-only");
+
+  const byModified = renderChooserIn("/Users/x/git", { state: resumedInto("/Users/x/git"), sort: "modified" });
+  assert.match(byModified, /chooser-head-cell chooser-head-modified"[^>]*aria-pressed="true"/, "Modified marked active");
 });
 
 test("exactly ONE place is marked current, even though $HOME contains every other place", () => {

@@ -22,8 +22,10 @@ orchestrator would answer `bad control: unknown kind 'listPlaces'`, so the pane 
 - The badge is published from a job that can write to the repository, so the first run on `main` no longer fails with a 403 ([#206]).
 - The directory sheet is a two-pane file dialog: one rail of used-before directories and places, a filterable
   listing beside it, and the full dialog height available to the listing ([#76]).
-- A folder row carries an icon, its name, how long ago it changed, and a chevron saying it descends ([#76]).
-- The listing can be filtered, ordered by name or recency, and shows or hides dotfolders ([#76]).
+- A folder row carries an icon, its name, when it changed, and a chevron saying it descends ([#76]).
+- The listing is sorted by clicking a Name or Modified column header, and the header shows which is in force ([#76]).
+- A folder's age is written out — `4 min`, `2 d`, `9 Jul` — instead of an abbreviation that could be minutes or months ([#76]).
+- The listing can be filtered and shows or hides dotfolders ([#76]).
 - The picker opens on your home folder by default, and on the directory you last started a session in ([#76]).
 - A used-before directory is a row in the rail with its session count, so a destination reads differently from a place ([#76]).
 - A typed path completes against directories inside the folder being typed and against recent ones ([#76]).
