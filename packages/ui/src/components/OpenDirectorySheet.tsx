@@ -20,6 +20,7 @@ import { ownInstallationWarning } from "@pi-central/protocol";
 import { abbreviateCwd, baseName, type RecentDirectory } from "../recent.ts";
 import { completeDirectory, completionBase, expandHome } from "../complete.ts";
 import type { PlacesState } from "../places.ts";
+import type { ChooserPrefs } from "../chooser-prefs.ts";
 import { DirectoryChooser } from "./DirectoryChooser.tsx";
 
 export function OpenDirectorySheet({
@@ -29,6 +30,9 @@ export function OpenDirectorySheet({
   initialPath = "",
   places,
   onListPlaces,
+  chooser,
+  onChooserChange,
+  onNavigated,
   onClose,
   onOpen,
 }: {
@@ -55,7 +59,17 @@ export function OpenDirectorySheet({
    */
   places?: PlacesState | undefined;
   /** Ask for the roots, or for one directory inside them. Ignored when `places` is absent. */
-  onListPlaces?: ((path?: string) => void) | undefined;
+  onListPlaces?: ((path: string | undefined, includeHidden: boolean) => void) | undefined;
+  /**
+   * Remembered chooser preferences: sort order, dotfolders, and where to resume (issue #76).
+   *
+   * Owned by `App` because they are persisted (`chooser-prefs.ts`), and passed down rather than read here so the sheet
+   * stays a rendering of state it was given — the same rule `recentDirectories` follows.
+   */
+  chooser?: ChooserPrefs | undefined;
+  onChooserChange?: ((next: ChooserPrefs) => void) | undefined;
+  /** Report where the reader navigated, so the next open resumes there. */
+  onNavigated?: ((path: string) => void) | undefined;
   onClose: () => void;
   onOpen: (cwd: string) => void;
 }) {
@@ -77,7 +91,7 @@ export function OpenDirectorySheet({
     if (places === undefined || onListPlaces === undefined) return;
     // EVERY open, not only the first: the answer also clears the listings cached by the previous open, which is what
     // makes a folder created in between visible. See `PlacesAction.reload`.
-    onListPlaces();
+    onListPlaces(undefined, chooser?.showHidden ?? false);
     // Deliberately not dependent on `places`: an answer must not re-trigger the request that caused it. `onListPlaces`
     // is stable, so this runs exactly once per mount — i.e. once per open.
   }, [onListPlaces]);
@@ -237,8 +251,23 @@ export function OpenDirectorySheet({
         {places !== undefined && onListPlaces !== undefined && (
           <DirectoryChooser
             state={places}
-            onList={(target) => onListPlaces(target)}
-            onListRoots={() => onListPlaces()}
+            sort={chooser?.sort ?? "name"}
+            showHidden={chooser?.showHidden === true}
+            onSort={(sort) => onChooserChange?.({ ...(chooser ?? { sort: "name", showHidden: false }), sort })}
+            onToggleHidden={(path) => {
+              const next = { ...(chooser ?? { sort: "name" as const, showHidden: false }), showHidden: chooser?.showHidden !== true };
+              onChooserChange?.(next);
+              /*
+               * Re-read the folder the reader is LOOKING AT, not the remembered one.
+               *
+               * `includeHidden` is a server-side filter, so toggling it is a request rather than a client filter: the
+               * orchestrator caps a listing at 500 entries, and a client-side filter would hide dotfolders the cap had
+               * already displaced — the toggle would appear to do nothing. (Same reasoning as `listFiles`.)
+               */
+              onListPlaces(path, next.showHidden);
+            }}
+            onList={(target) => onListPlaces(target, chooser?.showHidden === true)}
+            onNavigated={(path) => onNavigated?.(path)}
             onChoose={onOpen}
           />
         )}

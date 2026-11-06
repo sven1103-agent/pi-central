@@ -41,6 +41,15 @@ export interface Listing {
 export interface PlacesState {
   /** The roots, once the orchestrator has answered. `undefined` means "not asked yet". */
   roots: PlaceInfo[] | undefined;
+  /**
+   * Where the chooser should OPEN, when a previous visit left a usable directory (issue #76).
+   *
+   * Resolved against the roots at the moment they arrive (`resumable` in `chooser-prefs.ts`), so a stale value — a
+   * directory deleted since, a volume unmounted, a place that no longer exists — degrades to opening at `Places`
+   * rather than to a listing that fails on load. It is a STARTING POINT and never a submission: only an explicit
+   * "use this folder" starts a session.
+   */
+  resumeAt: string | undefined;
   /** The orchestrator's `$HOME`, for abbreviation. */
   home: string | undefined;
   /** Directory state per absolute path. */
@@ -48,7 +57,7 @@ export interface PlacesState {
 }
 
 export function initialPlacesState(): PlacesState {
-  return { roots: undefined, home: undefined, directories: {} };
+  return { roots: undefined, home: undefined, resumeAt: undefined, directories: {} };
 }
 
 /** Actions on chooser state. Local only: none of these is a protocol message. */
@@ -63,7 +72,7 @@ export type PlacesAction =
    */
   | { kind: "reload" }
   | { kind: "placesLoading" }
-  | { kind: "placesLoaded"; places: PlaceInfo[]; home: string }
+  | { kind: "placesLoaded"; places: PlaceInfo[]; home: string; resumeAt?: string | undefined }
   | { kind: "placesFailed"; message: string }
   | { kind: "listingLoading"; path: string }
   | { kind: "listingLoaded"; path: string; listing: Listing }
@@ -94,6 +103,9 @@ export function reducePlaces(state: PlacesState, action: PlacesAction): PlacesSt
         ...state,
         roots: action.places,
         home: action.home,
+        // Resolved ONCE, when the roots arrive: recomputing it per answer would drag the reader back to the remembered
+        // folder every time a listing returned, which is a page that fights the person using it.
+        resumeAt: state.resumeAt === undefined ? action.resumeAt : state.resumeAt,
         directories: pruneToRoots(state.directories, action.places),
       };
 

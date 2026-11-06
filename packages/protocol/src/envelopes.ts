@@ -621,11 +621,21 @@ export interface PlaceInfo {
   exists: boolean;
 }
 
-/** One directory in a place listing. NO files, and no metadata beyond the name (ADR-0012). */
+/**
+ * One directory in a place listing. NO files (ADR-0012) — but enough metadata to find one quickly.
+ *
+ * `mtimeMs` and `isEmpty` were added after a screenshot review: a list of bare names gives no way to find "the project
+ * I made yesterday" among forty, and no way to sort by anything but the alphabet. They are still metadata ABOUT
+ * directories, which is what ADR-0012 permits; what it forbids is file contents.
+ */
 export interface PlaceEntryInfo {
   name: string;
   /** Absolute, so a click needs no re-derivation on the client. */
   path: string;
+  /** When the directory last changed, in ms. Sortable, and renderable as a relative age. */
+  mtimeMs: number;
+  /** True when the directory holds nothing — so a reader does not descend into a dead end. */
+  isEmpty: boolean;
 }
 
 /** A place listing as it travels (issue #76). */

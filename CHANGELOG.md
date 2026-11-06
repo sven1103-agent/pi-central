@@ -20,11 +20,18 @@ orchestrator would answer `bad control: unknown kind 'listPlaces'`, so the pane 
 - CI inventories the shipped release tree, scans it with Grype, and publishes a report, SARIF and a README badge ([#206]).
 - On `main` the scan fails on fixable findings at or above High, and never on findings with no fix ([#206]).
 - The badge is published from a job that can write to the repository, so the first run on `main` no longer fails with a 403 ([#206]).
-- A directory can be browsed instead of typed: the sheet lists the folders under `~` and descends one
-  level at a time ([#76]).
+- The directory sheet is a two-pane file dialog: places on the left, a filterable listing on the right ([#76]).
+- A folder row carries an icon, its name, how long ago it changed, and a chevron saying it descends ([#76]).
+- The listing can be filtered, ordered by name or recency, and shows or hides dotfolders ([#76]).
+- The picker reopens in the directory you left it in, instead of starting from the places again ([#76]).
 - A typed path completes against directories inside the folder being typed and against recent ones ([#76]).
 - A typed `~` path is expanded at submit, and the expanded path is shown before anything starts ([#76]).
 - A place that is not on this machine is named, rather than hidden ([#76]).
+- The only control that starts a session is the explicit one, so descending never does ([#76]).
+
+### Fixed
+
+- A path hint rendered as `git~/` instead of `~/git`, an artefact of a right-to-left truncation trick ([#76]).
 - The sheet's list of used directories is capped and scrolls, so the browser is not squeezed to a few visible rows ([#76]).
 - The sheet fits a short window: its buttons are reachable instead of falling below the viewport ([#76]).
 - The trail's root reads as a label rather than as a button that does nothing ([#76]).

@@ -35,7 +35,7 @@
  * nothing to migrate. A place that does not exist is reported as absent and is not offered, because a row that
  * cannot be opened is the same lie as a recent directory that looks available.
  */
-import { readdirSync, realpathSync, statSync } from "node:fs";
+import { opendirSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fromErrno, type OsFailure } from "./fs-error.ts";
 
@@ -63,6 +63,22 @@ export interface PlaceEntry {
   name: string;
   /** The absolute path, so a click needs no re-derivation on the client. */
   path: string;
+  /**
+   * When the directory last changed, in ms.
+   *
+   * Carried because a chooser without dates gives a reader no way to find "the project I created yesterday" in a
+   * folder of forty — and no way to sort by anything but the alphabet, which is not how anyone remembers their own
+   * work. It comes from the same `stat` that decided the entry is a directory, so it costs nothing.
+   */
+  mtimeMs: number;
+  /**
+   * Whether this directory holds anything at all.
+   *
+   * The distinction a file manager makes and this was missing: an empty folder and a folder with forty subprojects
+   * look identical in a list of names, so a reader descends into dead ends. `readdirSync` on each child would be N
+   * syscalls per listing, so it is an `opendir`/`read` of ONE entry — enough to answer "is it empty", and bounded.
+   */
+  isEmpty: boolean;
 }
 
 export type PlaceListing = {
@@ -113,6 +129,41 @@ function isDirectory(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * A directory's mtime and whether it is empty — the two facts a list of names cannot convey.
+ *
+ * `undefined` when it is not a directory (or cannot be stat'ed), which is what excludes files from the listing:
+ * a chooser offers folders, and a file in the list is a row whose only outcome is a refusal.
+ *
+ * Emptiness is decided by opening the directory and reading ONE entry, not by `readdirSync`. A `~/git` with two
+ * hundred projects would otherwise cost two hundred full directory reads per listing, for a badge. This is bounded
+ * work for the same answer: "does it have anything in it".
+ */
+function directoryStats(path: string): { mtimeMs: number; isEmpty: boolean } | undefined {
+  let mtimeMs: number;
+  try {
+    const stats = statSync(path);
+    if (!stats.isDirectory()) return undefined;
+    mtimeMs = stats.mtimeMs;
+  } catch {
+    return undefined;
+  }
+
+  let isEmpty = false;
+  try {
+    const handle = opendirSync(path);
+    try {
+      isEmpty = handle.readSync() === null;
+    } finally {
+      handle.closeSync();
+    }
+  } catch {
+    // Unreadable is not empty. Reporting it as empty would be the "gone vs unreadable" mistake in a new place: the
+    // listing is still useful (the folder is right there), and descending will state the real reason.
+  }
+  return { mtimeMs, isEmpty };
 }
 
 /**
@@ -229,6 +280,8 @@ export function listPlace(
   const includeHidden = options.includeHidden ?? false;
   const entries: PlaceEntry[] = [];
   let truncated = false;
+  // Name order, so the list is stable before the client sorts it — and so the CAP below keeps a predictable subset
+  // rather than whichever 500 happened to come back first.
   for (const name of names.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))) {
     if (!includeHidden && name.startsWith(".")) continue;
     const child = join(resolved, name);
@@ -236,12 +289,13 @@ export function listPlace(
     // hide `~/src -> ~/git/elsewhere`, which is ordinary. The containment check already ran on the resolved
     // PARENT; a link that points outside the places is caught when the client asks to list it, because that
     // request is resolved again from scratch.
-    if (!isDirectory(child)) continue;
+    const stats = directoryStats(child);
+    if (stats === undefined) continue;
     if (entries.length >= MAX_PLACE_ENTRIES) {
       truncated = true;
       break;
     }
-    entries.push({ name, path: child });
+    entries.push({ name, path: child, mtimeMs: stats.mtimeMs, isEmpty: stats.isEmpty });
   }
 
   /*

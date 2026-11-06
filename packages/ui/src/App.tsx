@@ -127,6 +127,15 @@ import { ModelPicker } from "./components/ModelPicker.tsx";
 import { OpenDirectorySheet } from "./components/OpenDirectorySheet.tsx";
 import { recentDirectories } from "./recent.ts";
 import { initialPlacesState, reducePlaces } from "./places.ts";
+import {
+  CHOOSER_PREFS_KEY,
+  defaultChooserPrefs,
+  parseChooserPrefs,
+  resumable,
+  safeLocalStorage,
+  serializeChooserPrefs,
+  type ChooserPrefs,
+} from "./chooser-prefs.ts";
 import { InlineRename } from "./components/InlineRename.tsx";
 import { ThinkingPicker } from "./components/ThinkingPicker.tsx";
 import { SessionHeader } from "./components/SessionHeader.tsx";
@@ -394,6 +403,34 @@ export function App() {
    * every open; state that lived here survives a reopen, so navigating back to a folder you were just in is free.
    */
   const [places, dispatchPlaces] = useReducer(reducePlaces, undefined, initialPlacesState);
+  /**
+   * Where the chooser was left, and how it lists (issue #76).
+   *
+   * *"Don't let them start from the default again, pick up the last directory."* Persisted in `localStorage` because it
+   * has to survive a reload and a PWA window reopen; `chooser-prefs.ts` validates every field, since a stored path may
+   * name a directory that no longer exists.
+   */
+  const chooserStorage = useMemo(() => safeLocalStorage(), []);
+  const [chooser, setChooser] = useState<ChooserPrefs>(() => parseChooserPrefs(chooserStorage.getItem(CHOOSER_PREFS_KEY)));
+  const rememberChooser = useCallback(
+    (next: ChooserPrefs) => {
+      setChooser(next);
+      chooserStorage.setItem(CHOOSER_PREFS_KEY, serializeChooserPrefs(next));
+    },
+    [chooserStorage],
+  );
+  /** The last directory the reader navigated to, reported by the chooser as they descend. */
+  const rememberDirectory = useCallback(
+    (path: string) => {
+      setChooser((current) => {
+        if (current.lastDirectory === path) return current;
+        const next = { ...current, lastDirectory: path };
+        chooserStorage.setItem(CHOOSER_PREFS_KEY, serializeChooserPrefs(next));
+        return next;
+      });
+    },
+    [chooserStorage],
+  );
   const filesRef = useRef(files);
   filesRef.current = files;
 
@@ -483,7 +520,20 @@ export function App() {
             });
             break;
           case "places":
-            dispatchPlaces({ kind: "placesLoaded", places: event.places, home: event.home });
+            /*
+             * The remembered directory is resolved against the roots that JUST ARRIVED, not against the ones held from
+             * a previous open: whether a place still exists is a fact about this answer, and resuming into a place that
+             * has since gone would fail the first listing.
+             */
+            dispatchPlaces({
+              kind: "placesLoaded",
+              places: event.places,
+              home: event.home,
+              ...(() => {
+                const start = resumable(chooser.lastDirectory, event.places);
+                return start === undefined ? {} : { resumeAt: start };
+              })(),
+            });
             break;
           case "placeListing":
             dispatchPlaces({
@@ -1042,7 +1092,7 @@ export function App() {
    * it is in.
    */
   const onListPlaces = useCallback(
-    (path?: string) => {
+    (path: string | undefined, includeHidden: boolean) => {
       /*
        * A request for the ROOTS is the sheet opening, so the listings it cached last time are dropped first.
        *
@@ -1052,7 +1102,11 @@ export function App() {
        */
       if (path === undefined) dispatchPlaces({ kind: "reload" });
       else dispatchPlaces({ kind: "listingLoading", path });
-      send({ kind: "listPlaces", ...(path === undefined ? {} : { path }) });
+      send({
+        kind: "listPlaces",
+        ...(path === undefined ? {} : { path }),
+        ...(includeHidden ? { includeHidden: true } : {}),
+      });
     },
     [send],
   );
@@ -1628,7 +1682,9 @@ export function App() {
           recent={recentDirectories(state.history)}
           /* Withheld, never empty, when the orchestrator predates the chooser: an empty pane would claim this machine
              has no folders. See the `places` prop's comment. */
-          {...(supportsPlaces(state.install?.protocol) ? { places, onListPlaces } : {})}
+          {...(supportsPlaces(state.install?.protocol)
+            ? { places, onListPlaces, chooser, onChooserChange: rememberChooser, onNavigated: rememberDirectory }
+            : {})}
           onClose={() => setSheetOpen(false)}
           onOpen={onOpenDirectory}
         />

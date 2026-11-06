@@ -183,3 +183,46 @@ for `pro`. A prefix match on the entry name is what a filesystem path expects.
 
 Falsified by: removing `resolveInPlaces`' containment check (the `/etc` and sibling assertions fail),
 and by reporting a failed listing as an empty one (the `placeError` routing test fails).
+
+## Amendment 1 — the first chooser was not navigable (issue #76, after a screenshot review)
+
+The decision above stands. What it produced did not, and the review's verdict was blunt: *"not fit to
+be the only way to pick a directory — and the fix is restructuring, not restyling."* The full review is
+[docs/ui-reviews/directory-chooser-review.md](../ui-reviews/directory-chooser-review.md); this records
+what changed and why, because "we built a browser" was true of the version that failed.
+
+**The shape was wrong.** A recent list, three root rows and a path field is not a browser: no parent
+navigation, no filtering, no icons, no dates, no sort, and no way to tell that a click descends rather
+than launches. It is now a **two-pane file dialog** — places rail, filterable listing — because that
+layout exists precisely because this problem is hard.
+
+**Every finding, answered:**
+
+| Finding | Now |
+|---|---|
+| No up/back navigation | Crumb with every segment clickable, plus an explicit **Up** |
+| No type-to-filter | A filter box over the listing, autofocused |
+| No row affordance; a click's meaning is ambiguous | Folder icon, aligned age column, chevron, hover, and a separate primary button |
+| No dates, no sorting | Relative age per row, and a Name/Recent toggle |
+| A three-item menu is not a rail | A real places rail, with an icon per place |
+| A used-before row launched an irreversible action on one click | Descending never starts anything; only "Use this folder" does |
+| `git~/` on the right | `direction: rtl` removed — it reversed the line's run order |
+| Two stacked scrollers in a narrow column | One scroller; the rail and the footer are fixed |
+
+**Two things the review could not have asked for, and the reporter did:**
+
+1. *"Don't let them start from the default again, pick up the last directory."* The chooser now resumes
+   where it was left (`chooser-prefs.ts`, `localStorage`). It is **verified before use**: a remembered
+   path under a place that is gone, or a directory that has itself been deleted, degrades to opening at
+   `Places` rather than to a listing that errors before the reader touches anything. That second check
+   was a bug — `$HOME` exists on every machine, so checking only the *place* let a deleted
+   `~/Projects/notes` through.
+2. **The metadata this needed** was not on the wire. `PlaceEntryInfo` gained `mtimeMs` and `isEmpty`,
+   which is still metadata *about directories* and so still within ADR-0012's boundary — `files.ts`
+   remains the only reader of file contents. Emptiness is one `readdir` of one entry, not a full scan.
+
+**What this says about the process, since the project is explicit about it.** Every one of these was
+found by a human looking at a screenshot after a green test suite. The tests asserted *content* — a row
+exists, a class is present — and none asserted *geometry or affordance*, because Chromium cannot run in
+the development sandbox (C1). That is the gap `verified/manual` exists to name, and this is now the
+second time on this issue that looking at it found more than the suite did.

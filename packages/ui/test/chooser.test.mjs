@@ -23,7 +23,7 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 
 let server;
-let OpenDirectorySheet, reducePlaces, initialPlacesState;
+let OpenDirectorySheet, DirectoryChooser, reducePlaces, initialPlacesState;
 
 before(async () => {
   server = await createServer({
@@ -33,6 +33,7 @@ before(async () => {
     logLevel: "error",
   });
   ({ OpenDirectorySheet } = await server.ssrLoadModule("/src/components/OpenDirectorySheet.tsx"));
+  ({ DirectoryChooser } = await server.ssrLoadModule("/src/components/DirectoryChooser.tsx"));
   ({ reducePlaces, initialPlacesState } = await server.ssrLoadModule("/src/places.ts"));
 });
 
@@ -83,6 +84,52 @@ function stateWith(over = {}) {
   return loaded;
 }
 
+/**
+ * Render the CHOOSER directly, inside a directory.
+ *
+ * SSR runs no effects, so the resume-once-on-mount cannot happen: the only way to assert what a resumed picker looks
+ * like is to render it at that location. `DirectoryChooser` takes `at` from local state, so a test would otherwise only
+ * ever see the "Places" pane — which is exactly what four assertions caught on the first attempt.
+ *
+ * The component is handed a state whose `resumeAt` is the folder, and `initialAt` is not exposed because that would be
+ * a test seam in the product. Instead the component is rendered with the state as a RESUMED one and the assertions read
+ * what is on screen — see the note in each test.
+ */
+function renderChooserIn(dir, props = {}) {
+  return renderToString(
+    createElement(DirectoryChooser, {
+      state: props.state ?? stateWith(),
+      sort: props.sort ?? "name",
+      showHidden: props.showHidden ?? false,
+      onSort() {},
+      onToggleHidden() {},
+      onList() {},
+      onChoose() {},
+      onNavigated() {},
+      ...props,
+      // The starting location is the component's own; a test that needs to be inside a folder passes a state whose
+      // listing is loaded for it and asserts through the resumed render below.
+    }),
+  );
+}
+
+/** A state that has been told to resume into `dir`, with that directory's listing loaded. */
+function resumedInto(dir, entries = []) {
+  const loaded = reducePlaces(stateWith(), {
+    kind: "listingLoaded",
+    path: dir,
+    listing: {
+      path: dir,
+      abbreviated: dir.replace("/Users/x", "~"),
+      name: dir.slice(dir.lastIndexOf("/") + 1),
+      parent: dir.slice(0, dir.lastIndexOf("/")),
+      entries,
+      truncated: false,
+    },
+  });
+  return { ...loaded, resumeAt: dir };
+}
+
 function render(props) {
   return renderToString(
     createElement(OpenDirectorySheet, {
@@ -96,13 +143,17 @@ function render(props) {
   );
 }
 
-test("the roots are one row each, labelled by name and abbreviated by path", () => {
+test("the roots are one row each in a PLACES RAIL, labelled by name", () => {
+  // Restructured after the screenshot review: the three roots were a static menu under the recent list, which the
+  // review called out as the thing that makes navigation impossible. They are a rail now — the shape a file dialog
+  // uses — and the label is the root's own NAME (`git`, `Projects`) with the full path in the tooltip, because a
+  // `direction: rtl` path hint was rendering as `git~/`.
   const html = render({ places: stateWith(), onListPlaces() {} });
-  assert.match(text(html), /Places/, "the pane names itself");
-  // A root's label is its own name, and the path beside it is abbreviated — the two facts a reader needs to tell
-  // `~/git` from `~/src`.
+  assert.match(html, /<nav class="chooser-places" aria-label="Places">/, "a labelled navigation landmark");
   assert.match(text(html), /Home/);
-  assert.match(text(html), /~\/git/);
+  assert.match(text(html), /git/);
+  assert.match(html, /title="\/Users\/x\/git"/, "the path is in the tooltip, not mangled in the row");
+  assert.ok(!/git~\//.test(html), "and never the reversed form the rtl rule produced");
 });
 
 test("a root that is not on this machine is STATED, never hidden", () => {
@@ -266,14 +317,18 @@ test("an expanded `~` is SHOWN before submission, so the directory used is the o
 // `affordance.test.mjs` uses. A path that cannot truncate sets the modal's intrinsic width, and a 620px-max dialog
 // that grows to 1200px because one folder name is long is a layout defect visible at rest, not on hover.
 
-test("a long path in the chooser truncates instead of widening the dialog", async () => {
+test("a long FOLDER NAME truncates, and the dialog does not widen", async () => {
+  // The `direction: rtl` trick this used to require is gone, and its removal is the bug fix: it reversed the line's run
+  // order and rendered `git~/`. The name column truncates instead, which is what a file manager does.
   const { readFileSync } = await import("node:fs");
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-  const rule = /\.chooser-path\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
-  assert.match(rule, /text-overflow:\s*ellipsis/, "the path truncates");
-  assert.match(rule, /min-width:\s*0/, "and is allowed to — a flex child cannot shrink below its content otherwise");
-  assert.match(rule, /direction:\s*rtl/, "keeping the LAST segment visible, which is the part that identifies the folder");
-  assert.match(/\.chooser\s*\{([^}]*)\}/.exec(css)?.[1] ?? "", /max-height/, "and the list scrolls rather than growing");
+  const name = /\.chooser-name\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(name, /text-overflow:\s*ellipsis/, "the name truncates");
+  assert.match(name, /min-width:\s*0/, "and is allowed to — a grid child cannot shrink below its content otherwise");
+  assert.ok(!/direction:\s*rtl/.test(css), "no rtl anywhere: it REVERSES the text and rendered as git~/");
+  // The dialog is a fixed measure now, not "as wide as its longest child".
+  const sheetRule = css.slice(css.indexOf(".modal-sheet {"));
+  assert.match(sheetRule.slice(0, sheetRule.indexOf("}")), /width:\s*min\(/, "a bounded width");
 });
 
 // --- The layout the screenshot exposed (issue #76, found by looking at it) -------------------------
@@ -349,8 +404,95 @@ test("every new scroll region is styled by this stylesheet, not by the platform"
   // The bright channel the platform draws on a dark page is a defect this file has already fixed twice (#73, and the
   // transcript). A new scroller inheriting the OS default reintroduces it, which the screenshot showed.
   const css = await stylesheet();
-  for (const selector of [".recent-list", ".chooser", ".completions"]) {
+  for (const selector of [".recent-list", ".chooser-entries", ".chooser-places"]) {
     assert.ok(css.includes(`${selector}::-webkit-scrollbar-thumb`), `${selector} needs the inset pill thumb`);
     assert.match((await rule(selector)) ?? "", /scrollbar-color:/, `${selector} needs the Firefox/Chromium form too`);
   }
+});
+
+// --- Navigation, after the screenshot review (issue #76) -----------------------------------------
+//
+// The review's ranked blockers, each answered by a structure that is checkable in rendered markup: a places rail, a
+// breadcrumb with clickable segments, an explicit Up, a filter box, folder icons, an age column, a sort control, and a
+// primary "use this folder" that is the ONLY control which starts a session.
+
+test("the browser is a places RAIL plus a listing, not two stacked lists", async () => {
+  const html = render({ places: stateWith(), onListPlaces() {} });
+  assert.match(html, /<nav class="chooser-places"/, "a rail, which is what a file dialog puts on the left");
+  assert.match(html, /<div class="chooser-main"/, "and a listing pane beside it");
+});
+
+test("a folder row carries an ICON, its name, an AGE and a chevron", async () => {
+  // All four were missing, and the review named each: no folder glyph, no date, nothing saying a click descends.
+  const state = resumedInto("/Users/x/git", [
+    { name: "alpha", path: "/Users/x/git/alpha", mtimeMs: Date.now() - 3 * 86_400_000, isEmpty: false },
+  ]);
+  const html = renderChooserIn("/Users/x/git", { state });
+  assert.match(html, /<svg class="chooser-icon"/, "a folder glyph");
+  assert.match(html, />alpha</, "the name");
+  assert.match(html, /class="chooser-meta">3d</, "an age, so 'the one I made yesterday' is findable");
+  assert.match(html, /chooser-open/, "and a chevron saying the row descends");
+
+  // And the row is a GRID with four columns, so the age and chevron line up down the list. A markup assertion alone
+  // passed with the icon column deleted, which is why this reads the stylesheet too.
+  const rowRule = await rule(".chooser-row");
+  assert.match(rowRule ?? "", /display:\s*grid/, "rows are a grid");
+  assert.match(rowRule ?? "", /grid-template-columns:\s*16px/, "with the icon's column first — a ragged right edge is what makes a list unscannable");
+});
+
+test("an EMPTY folder says 'empty' instead of a date, so a reader skips the dead end", async () => {
+  const state = resumedInto("/Users/x/git", [{ name: "hollow", path: "/Users/x/git/hollow", mtimeMs: 0, isEmpty: true }]);
+  const html = renderChooserIn("/Users/x/git", { state });
+  assert.match(text(html), /empty/);
+  // And NOT a date, which would suggest there is something in there that changed.
+  assert.ok(!/chooser-meta">now</.test(html), "never a date for an empty folder");
+});
+
+test("the ONLY control that starts a session is the explicit one", async () => {
+  // The review's most serious finding: a used-before row launched an irreversible action on one click, with no warning
+  // that the directory can never be changed afterwards (ADR-0008). Descending must never do that.
+  const html = render({ places: stateWith(), onListPlaces() {} });
+  const starts = [...html.matchAll(/<button[^>]*>(?:(?!<\/button>)[\s\S])*?<\/button>/g)]
+    .filter((match) => /Use /.test(match[0]));
+  for (const button of starts) {
+    assert.match(button[0], /chooser-use/, "the session-starting control is the named one, not a row");
+  }
+  // And a row that descends is NOT one of them.
+  const rows = html.match(/class="chooser-row"/g) ?? [];
+  assert.equal(rows.length, 0, "at rest (Places) there are no rows to descend, so nothing to mis-click");
+});
+
+test("a resumed directory is where the picker OPENS, without a request from the reader", async () => {
+  // The reporter's requirement: "don't let them start from the default again, pick up the last directory". The resume
+  // itself is an effect (SSR cannot run it), so this pins the STATE the effect acts on plus the trail it renders — and
+  // `chooser-prefs.test.ts` pins the decision that produces `resumeAt`.
+  const state = resumedInto("/Users/x/work/alpha");
+  assert.equal(state.resumeAt, "/Users/x/work/alpha", "the state carries the remembered directory");
+  const html = renderChooserIn("/Users/x/work/alpha", { state });
+  // The trail decomposes into segments (`Home / work / alpha`) rather than showing `~/work/alpha` as one string, so the
+  // assertion is on the segments — and on the fact that the picker is INSIDE a folder, which is the requirement.
+  assert.match(html, /chooser-crumb-here">alpha</, "the current folder is the trail's last, non-clickable segment");
+  assert.match(html, />work</, "with its ancestors beside it, clickable");
+  // `text()` normalises React's `<!-- -->` separators; matching the raw markup would fail on a cosmetic insertion.
+  assert.match(text(html), /Use “alpha”/, "and the primary action names the folder you are in");
+  assert.ok(!/<p class="chooser-crumb" tabindex="-1"><span class="chooser-crumb-root">Places<\/span><\/p>/.test(html), "NOT the bare 'Places' pane");
+});
+
+test("the sort, dotfolder and filter controls exist", async () => {
+  const html = renderChooserIn("/Users/x/git", { state: resumedInto("/Users/x/git") });
+  assert.match(html, /chooser-sort/, "a sort control, which the review listed as missing");
+  assert.match(html, /chooser-hidden/, "and a dotfolder toggle");
+  assert.match(html, /Filter folders/, "and a filter, the review's #2 blocker: 'the only way in is a full path'");
+  assert.match(html, /A–Z/, "the sort control says which order is in force");
+});
+
+test("exactly ONE place is marked current, even though $HOME contains every other place", () => {
+  // Found by rendering: `~/git` matched both the `git` row and the `Home` row, so a rail of three showed two highlighted
+  // entries — "you are in both" — which defeats the point of a rail. The most specific place wins.
+  // Nested INSIDE a place is the case that matters: at the place itself there is only one candidate, so an exact-match
+  // implementation would pass and the bug would survive. `~/git/alpha` is inside both `Home` and `git`.
+  const state = resumedInto("/Users/x/git/alpha");
+  const html = renderChooserIn("/Users/x/git/alpha", { state });
+  assert.equal((html.match(/chooser-place is-current/g) ?? []).length, 1, "one highlighted row, not two");
+  assert.match(html, /chooser-place is-current" title="\/Users\/x\/git"/, "and it is the MOST SPECIFIC place");
 });
