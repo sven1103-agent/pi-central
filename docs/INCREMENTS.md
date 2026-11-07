@@ -142,7 +142,7 @@ gave it. The record is [ADR-0013](decisions/0013-application-shell.md).
 | ADR-0013: the shell is a launcher, never the update target (#212) | ✅ merged |
 | A returning window asks for install facts, not a discovery (#220) | ✅ this slice |
 | The shell runs the installed artifact as a supervised child (#214) | ✅ merged |
-| The renderer is locked to the loopback document (#215) | open |
+| The renderer is locked to the loopback document (#215) | ✅ this slice |
 | Close hides, `⌘Q` keeps sessions, the next launch reattaches (#216) | open |
 | The shell applies an update: stop, install, verify, respawn, reload (#217) | open |
 | `npm run install-app` produces a locally signed app (#218) | open |

@@ -21,6 +21,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 - Saved work holds the reload back: unsent text or attachments turn the banner into a sentence instead of discarding them ([#213]).
 - `install` states this installation's facts on its own, so the return-to-view re-check costs one file read instead of a walk of the session store ([#220]).
 - A window whose orchestrator predates `install` re-checks silently instead of filling the error strip once per focus ([#220]).
+- The window can only display the loopback document it was opened for: navigation, redirects, `<webview>` and new windows are refused ([#215]).
+- An `http(s)` link clicked in the window opens in the reader's browser, and any other scheme is dropped rather than handed to the OS ([#215]).
+- Every web permission is refused, from the app's own origin included, so a permission Electron adds later is denied by default ([#215]).
+- The window's options and the shipped bundle are audited before the window opens, so a weakened `contextIsolation`, `sandbox` or `nodeIntegration` fails loudly ([#215]).
 
 ### Changed
 
@@ -35,6 +39,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 [#214]: https://github.com/sven1103-agent/pi-central/issues/214
 [#213]: https://github.com/sven1103-agent/pi-central/issues/213
 [#220]: https://github.com/sven1103-agent/pi-central/issues/220
+[#215]: https://github.com/sven1103-agent/pi-central/issues/215
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 

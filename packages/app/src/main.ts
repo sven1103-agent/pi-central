@@ -21,7 +21,7 @@
  * the window equivalent to a browser tab; #215 asserts them properly, and they are stated here so this
  * slice does not open a window that is already worse than the tab it replaces.
  */
-import { BrowserWindow, app } from "electron";
+import { BrowserWindow, app, shell } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -32,6 +32,17 @@ import {
   type MissingExecutable,
 } from "./executables.ts";
 import { resolvePackage, type PackageRoot } from "./package-root.ts";
+import {
+  FAILURE_PAGE_CSP,
+  FORBIDDEN_MODULES,
+  auditWindowOptions,
+  externalTarget,
+  failureDocument,
+  failureDocumentProblems,
+  navigationDecision,
+  permissionDecision,
+  windowWebPreferences,
+} from "./window-security.ts";
 import {
   LineAccumulator,
   URL_TIMEOUT_MS,
@@ -48,6 +59,23 @@ interface Running {
   httpUrl: string;
   window: BrowserWindow;
 }
+
+/**
+ * The port the child announced, which is the ONLY port the window may display (issue #215).
+ *
+ * Held separately from `Running` because it outlives a failure: when the orchestrator dies the window shows a
+ * failure page, `running` becomes `undefined`, and the "Try again" button navigates back — a navigation that
+ * must still be refused unless it is the document the shell minted.
+ */
+let announcedPort: number | undefined;
+
+/**
+ * The token of the failure page currently displayed, if any (issue #215).
+ *
+ * A `data:` URL is the only document the shell shows that is not the loopback UI, and `data:` is reachable
+ * from the renderer too — so the exception is this one page, named by a random token, rather than the scheme.
+ */
+let failureToken: string | undefined;
 
 let running: Running | undefined;
 let consecutiveFailures = 0;
@@ -100,6 +128,7 @@ function renderFailure(title: string, detail: string): string {
   const escape = (text: string): string =>
     text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escape(title)}</title>
+<meta http-equiv="Content-Security-Policy" content="${FAILURE_PAGE_CSP}">
 <style>
   :root { color-scheme: dark; }
   body { margin: 0; padding: 32px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -126,6 +155,18 @@ function renderFailure(title: string, detail: string): string {
  * either.
  */
 function createWindow(): BrowserWindow {
+  const preferences = windowWebPreferences();
+  /*
+   * The options are AUDITED before the window exists (issue #215, criterion 1).
+   *
+   * `windowWebPreferences` is frozen data, so this cannot fail from the inside — but it fails loudly if a later
+   * change to that function weakens a setting, which is the change that would otherwise be invisible: an
+   * Electron window with `nodeIntegration: true` looks and behaves identically until something exploits it.
+   */
+  const problems = auditWindowOptions({ ...preferences });
+  if (problems.length > 0) {
+    throw new Error(`refusing to open an insecure window:\n  ${problems.join("\n  ")}`);
+  }
   const window = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -134,24 +175,113 @@ function createWindow(): BrowserWindow {
     title: "Pi Central",
     backgroundColor: "#0e1116",
     show: false,
-    webPreferences: {
-      // The window is a browser tab, and is kept equivalent to one. #215 asserts these properly; they
-      // are set here so this slice cannot create a window that is already worse than the tab it replaces.
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-    },
+    // The window is a browser tab, and is kept equivalent to one (issue #215, ADR-0006, C11). The settings
+    // live in `window-security.ts` as data so they are asserted rather than merely written down here.
+    webPreferences: { ...preferences },
   });
   window.once("ready-to-show", () => window.show());
+  hardenWindow(window);
   return window;
 }
 
-/** Show a failure in whichever window exists, or in a fresh one. */
+/**
+ * Lock the window to the loopback document, and to no capability beyond displaying it (issue #215).
+ *
+ * ## Why every hook is here rather than "the renderer is ours"
+ *
+ * The renderer displays **model output** — transcripts, tool results, file contents, and markdown rendered
+ * from all three. ADR-0006 makes that inert in a browser tab through the CSP and DOMPurify, and those still
+ * apply. What a browser tab also has, and a dock window does not, is an address bar: in the tab, a navigation
+ * the reader did not ask for is visible; here it would silently replace the dashboard with something else.
+ *
+ * Five hooks, each closing one route out:
+ *
+ *   - `will-navigate` — a link click or a `location.href` assignment in the top frame.
+ *   - `will-redirect` — a server-side redirect, which fires AFTER `will-navigate` and would otherwise be a
+ *     navigation nobody asked for. Registering only `will-navigate` is the classic gap.
+ *   - `will-attach-webview` — a `<webview>` is a second renderer with its own preferences; prevented at the
+ *     attach point as well as by `webviewTag: false`, because the option is a default and this is a gate.
+ *   - `setWindowOpenHandler` — `window.open` and `target="_blank"`. Denied; an `http(s)` URL the reader
+ *     actually clicked is handed to their browser instead of vanishing.
+ *   - `setPermissionRequestHandler` / `setPermissionCheckHandler` — every web permission, refused, including
+ *     from the allowed origin. Both are registered: the request handler covers an API asking, the check
+ *     handler covers a query made without a prompt (Electron's docs say the pair is what makes handling
+ *     complete, and a permission granted through the unimplemented half would never be visible here).
+ *
+ * ## What this does NOT do, stated rather than implied
+ *
+ * It does not stop the *renderer* from being compromised by a bug in the app's own code. It stops the window
+ * from becoming a browser for somewhere else, which is the privilege a dock icon would otherwise grant
+ * quietly. C5 applies: the loopback origin is hygiene, and the real boundary is the orchestrator's logic.
+ */
+function hardenWindow(window: BrowserWindow): void {
+  const contents = window.webContents;
+
+  contents.on("will-navigate", (event) => {
+    const decision = announcedPort === undefined ? "deny" : navigationDecision(event.url, announcedPort, failureToken);
+    if (decision === "allow") return;
+    event.preventDefault();
+    console.error(`Pi Central: refused a navigation to ${event.url}`);
+  });
+
+  contents.on("will-redirect", (event) => {
+    const decision = announcedPort === undefined ? "deny" : navigationDecision(event.url, announcedPort, failureToken);
+    if (decision === "allow") return;
+    event.preventDefault();
+    console.error(`Pi Central: refused a redirect to ${event.url}`);
+  });
+
+  contents.on("will-attach-webview", (event) => {
+    event.preventDefault();
+    console.error("Pi Central: refused to attach a <webview>; the window is one document");
+  });
+
+  contents.setWindowOpenHandler(({ url }) => {
+    const external = externalTarget(url);
+    if (external !== undefined) {
+      // The reader clicked a link whose intent is to leave. Their browser is where that belongs; the app is
+      // not. `void` because a failed open is the OS's business, not a reason to break the handler.
+      void shell.openExternal(external);
+      return { action: "deny" };
+    }
+    console.error(`Pi Central: refused to open a window for ${url}`);
+    return { action: "deny" };
+  });
+
+  contents.session.setPermissionRequestHandler((_contents, permission, callback, details) => {
+    // `requestingOrigin` is on SOME request shapes (media, openExternal) and not on the base one, so it is read
+    // defensively: the answer is `false` either way, and a permission refused silently is the thing to avoid.
+    const origin = (details as { requestingOrigin?: string }).requestingOrigin;
+    const refused = permissionDecision(permission, origin);
+    console.error(`Pi Central: ${refused.reason}`);
+    callback(false);
+  });
+
+  contents.session.setPermissionCheckHandler((_contents, permission, requestingOrigin) => {
+    const refused = permissionDecision(permission, requestingOrigin);
+    console.error(`Pi Central: ${refused.reason}`);
+    return false;
+  });
+}
+
+/**
+ * Show a failure in whichever window exists, or in a fresh one.
+ *
+ * The page is minted (`failureDocument`) and then AUDITED (`failureDocumentProblems`) before it is loaded.
+ * The audit can only fail if this file changed in a way that dropped the CSP or a doctype, which is exactly
+ * the change that would otherwise ship invisibly — a `data:` document has no policy unless it carries one.
+ */
 function showFailure(title: string, detail: string): void {
   const window = running?.window ?? createWindow();
   const html = renderFailure(title, detail);
-  void window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  const problems = failureDocumentProblems(html);
+  if (problems.length > 0) {
+    // Reported to the terminal rather than shown, because the page that would show it is the broken one.
+    console.error(`Pi Central: refusing to display an unsafe failure page:\n  ${problems.join("\n  ")}`);
+  }
+  const document = failureDocument(html);
+  failureToken = document.token;
+  void window.loadURL(document.url);
   window.show();
 }
 
@@ -260,6 +390,22 @@ function start(): void {
 }
 
 function onAnnounced(child: ChildProcess, url: string, httpUrl: string): void {
+  /*
+   * The port is recorded BEFORE the load (issue #215).
+   *
+   * `hardenWindow`'s handlers allow exactly one origin, and it is this child's. Setting it after `loadURL`
+   * would be a race in which the first navigation is refused by the app's own gate — so the order here is
+   * load-bearing, not incidental. `announcedPort` also clears any failure token: the UI is about to be shown,
+   * so a failure page from a previous attempt must stop being a navigable target.
+   */
+  const port = Number.parseInt(new URL(httpUrl).port, 10);
+  if (!Number.isInteger(port) || port <= 0) {
+    showFailure("Pi Central could not parse the orchestrator's URL", `Expected an http://host:port URL, got ${httpUrl}`);
+    return;
+  }
+  announcedPort = port;
+  failureToken = undefined;
+
   const window = running?.window ?? createWindow();
   running = { child, url, httpUrl, window };
   void window.loadURL(httpUrl);
