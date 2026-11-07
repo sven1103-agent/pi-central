@@ -23,7 +23,7 @@ import {
   isReloadBlocked,
   noteProtocolAgreement,
   ownEntry,
-  reloadOnReturn,
+  recheckOnReturn,
   safeSessionStorage,
 } from "./update-check.ts";
 import logoIcon from "./assets/logo-icon.svg";
@@ -672,26 +672,26 @@ export function App() {
   /**
    * A window that comes back into view re-checks itself (issue #213).
    *
-   * A hidden or minimised window receives no snapshots, so the one-shot reload above never fires for
-   * it; the reader returns to a stale page and a banner instructing them to quit the app. Reloading
-   * here is safe for the same reason it is safe there, and it is gated on a recorded verdict: a focus
-   * event carries no evidence that the page is stale, and an unguarded reload-on-focus would throw
-   * away drafts on every tab switch.
+   * A hidden or minimised window receives no snapshots — the socket is throttled, and a dock click
+   * focuses rather than reloads — so it returns holding an old bundle with no verdict about it. The
+   * fix is to ASK: `list` makes the orchestrator broadcast a fresh snapshot, which re-runs the
+   * snapshot handler below and therefore `assessServedUi`/`assessProtocolSkew` with new evidence.
    *
-   * When it does fire, the socket is reopened by the reload rather than here: requesting a fresh
-   * snapshot and then reloading would fetch the transcript twice and render neither.
+   * The first version of this slice reloaded here whenever a mark was recorded, and that was wrong
+   * twice: a focus event is not evidence (so it lost drafts on every tab switch), and gating on the
+   * mark loops in the reverse-skew case #184 documents, because the marks are written *before* the
+   * reload they permit — a new page against an old orchestrator would reload on every focus, forever.
+   * Deciding here at all is the mistake; this asks, and one place decides.
    */
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
-      if (reloadOnReturn(updateMarks).action !== "reload") return;
-      // A verdict already on screen is the honest answer, and the reader has a button for it.
-      if (updateNotice !== undefined) return;
-      reloadForUpdate();
+      if (recheckOnReturn().action !== "request") return;
+      send({ kind: "list" });
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [updateMarks, reloadForUpdate, updateNotice]);
+  }, [send]);
   /*
     A focused row that is NOT live (issue #89 deadlock).
 

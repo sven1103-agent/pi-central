@@ -21,7 +21,7 @@ import {
   assessProtocolSkew,
   BLOCKED_RELOAD_MESSAGE,
   isReloadBlocked,
-  reloadOnReturn,
+  recheckOnReturn,
   assessServedUi,
   noteProtocolAgreement,
   type StorageLike,
@@ -124,34 +124,32 @@ test("a snapshot from a SKEWED orchestrator does not re-arm the mark", () => {
 // --- Returning to a hidden window (issue #213) -------------------------------------------------
 //
 // The reload-on-snapshot rule above covers a page that is *looking*. An installed window that was
-// minimised or hidden sees no snapshot while it is away, so it comes back stale. These assertions are
-// about the evidence required before reloading — because the cheap implementation ("reload when the
-// window is focused") passes the first test and fails the second, and only the second one matters to
-// someone who was typing.
+// minimised or hidden sees no snapshot while it is away, so it comes back stale with no fresh verdict.
+// The decision here is deliberately only "ask", not "reload":
+//
+//   - a focus event is not evidence, so a reload decided by one loses drafts on every tab switch;
+//   - a reload gated on the RECORDED marks loops in the reverse-skew case #184 documents, because those
+//     marks are written *before* the reload they permit, so the window would reload on every focus.
+//
+// Asking the orchestrator for a fresh snapshot puts the decision back where the evidence is.
 
-test("a page with no recorded verdict does not reload when it returns to view", () => {
-  // The falsifier for reload-on-focus: no mark means no evidence, and an unguarded reload loses the
-  // draft that made the reader switch tabs in the first place.
-  assert.deepEqual(reloadOnReturn(fakeStorage()), { action: "none" });
+test("a window returning to view asks for a fresh snapshot, and decides nothing itself", () => {
+  // The same answer whatever the marks say: this function has no storage parameter precisely so it
+  // cannot make the reload decision that its caller is not equipped to review.
+  assert.deepEqual(recheckOnReturn(), { action: "request" });
 });
 
-test("a page that recorded a stale verdict reloads when it returns to view", () => {
-  const served = fakeStorage({ [UPDATE_RELOAD_KEY]: "assets/index-NEW.js" });
-  assert.deepEqual(reloadOnReturn(served), { action: "reload" });
+test("the round trip the request starts is what decides, so one reload still comes from one verdict", () => {
+  // The end-to-end shape, asserted as the sequence the App performs: ask, receive, assess. The second
+  // verdict is a banner rather than a reload, which is the property reload-on-return broke — it would
+  // have reloaded again, because the mark only says "we once tried".
+  const storage = fakeStorage();
+  assert.deepEqual(recheckOnReturn(), { action: "request" });
+  assert.equal(assessServedUi("assets/index-OLD.js", install("assets/index-NEW.js"), storage).action, "reload");
 
-  // The protocol-skew mark is evidence of the same class, so it takes the same path.
-  const skewed = fakeStorage({ [PROTOCOL_RELOAD_KEY]: "protocol mismatch: …" });
-  assert.deepEqual(reloadOnReturn(skewed), { action: "reload" });
-});
-
-test("returning twice does not clear the mark, so the decision stays reload until the page is replaced", () => {
-  // Within one page's lifetime the answer must not be stateful: the effect can run twice (React
-  // StrictMode, two visibility events), and a decision that returned `none` the second time would
-  // make the reload depend on which event happened to fire first.
-  const storage = fakeStorage({ [UPDATE_RELOAD_KEY]: "assets/index-NEW.js" });
-  assert.equal(reloadOnReturn(storage).action, "reload");
-  assert.equal(reloadOnReturn(storage).action, "reload");
-  assert.equal(storage.map.get(UPDATE_RELOAD_KEY), "assets/index-NEW.js");
+  // After the reload: ask again, receive the same disagreement, and this time the mark is spent.
+  assert.deepEqual(recheckOnReturn(), { action: "request" });
+  assert.equal(assessServedUi("assets/index-OLD.js", install("assets/index-NEW.js"), storage).action, "banner");
 });
 
 test("unsent work blocks the reload, and whitespace alone does not", () => {

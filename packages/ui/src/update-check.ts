@@ -136,28 +136,35 @@ export function safeSessionStorage(): StorageLike {
 /** The prefix every protocol-skew message starts with — see `versionSkew` in `connection.ts`. */
 export const SKEW_PREFIX = "protocol mismatch:";
 
-/** One record of what a page returning to view decided, and why. */
-export type ReturnAction =
-  | { action: "reload" }
-  | { action: "none" }
-  /** A reload was warranted but would destroy work; the caller says so instead of doing it. */
-  | { action: "blocked"; message: string };
+/** One record of what a page returning to view did. */
+export type ReturnAction = { action: "request" } | { action: "none" };
 
 /**
- * Should this page reload itself because it just came back into view?
+ * Should this page ask the orchestrator to re-state itself, because it just came back into view?
  *
- * The evidence is the mark `assessServedUi`/`assessProtocolSkew` already wrote when they *knew* the
- * page was stale. Requiring it is the whole difference between this and a reload-on-focus loop: a
- * focus event proves nothing about staleness, and a page that reloads because it was focused loses
- * whatever the reader had typed.
+ * ## Why this asks, instead of reloading
  *
- * `storage` is `sessionStorage`, which the browser keeps across a `location.reload()` and drops for a
- * new tab. That is exactly the scope wanted: one stale window reloads once, and the mark is cleared
- * by the reloaded page's own `assessServedUi` when it proves agreement.
+ * The obvious implementation is "reload when the window is focused". It is wrong twice over:
+ *
+ *   1. A focus event carries **no evidence** that the page is stale, and an unguarded reload-on-focus
+ *      would throw away drafts on every tab switch.
+ *   2. Gating it on the recorded mark instead only moves the fault: the marks are written *before* the
+ *      reload that a mark now permits, so a window that returns to the reverse-skew case #184 documents
+ *      (a NEW page against an OLD orchestrator) would reload on every single focus, forever. The
+ *      one-shot guard that stops the snapshot path looping does not stop this one, because here the
+ *      decision is made by the page rather than by a fresh verdict.
+ *
+ * So a page that comes back into view **asks**, and the existing verdict machinery answers. `list`
+ * makes the orchestrator broadcast a fresh `snapshot`, which re-runs `assessServedUi` and
+ * `assessProtocolSkew` with new evidence — and their own one-shot marks decide whether that becomes a
+ * reload or a banner. There is exactly one place that decides to reload, and it is the one that has
+ * always had the evidence for it.
+ *
+ * Nothing is lost by asking: the round trip is one local message, the page already holds its state,
+ * and a window that is genuinely current gets a snapshot it would have received on any reconnect.
  */
-export function reloadOnReturn(storage: StorageLike): ReturnAction {
-  const stale = storage.getItem(UPDATE_RELOAD_KEY) !== null || storage.getItem(PROTOCOL_RELOAD_KEY) !== null;
-  return stale ? { action: "reload" } : { action: "none" };
+export function recheckOnReturn(): ReturnAction {
+  return { action: "request" };
 }
 
 /**
