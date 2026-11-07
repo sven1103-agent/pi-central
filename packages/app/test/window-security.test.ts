@@ -525,3 +525,49 @@ test("the failure page is refused when its own audit fails, not logged and loade
   const guarded = /refusing to display an unsafe failure page[\s\S]{0,400}?return;/.test(mainSource);
   assert.ok(guarded, "the refusal must return before the rendered page is loaded");
 });
+
+test("a child that exits before announcing is reported, not silently swallowed", () => {
+  /*
+   * The defect this pins, found by watching a real window do nothing.
+   *
+   * The child exits in ~87 ms when it refuses to start (the C1 sandbox refusal), which is the commonest failure
+   * there is. The `exit` handler read
+   *
+   *     clearTimeout(timeout);
+   *     if (!announced) return;   // "the timeout or the error handler already reported it"
+   *
+   * and that comment was false twice over: `clearTimeout` cancels the timeout that would have reported it, and
+   * the `error` handler fires only for a failed SPAWN, never for an exit. The reader got a blank window, a silent
+   * terminal, and no retry (the `return` also skipped `decideAfterExit`).
+   *
+   * ## Why this is measured, not grepped
+   *
+   * The first version of this test sliced the source from `if (!announced)` to the next `showFailure(`/`return;`
+   * and asserted what it found. Reverting the fix to `if (!announced) return;` did NOT fail it, because the slice
+   * still contained this branch's own docstring — which QUOTES both words. A source-shape test whose needles
+   * appear in the surrounding prose cannot distinguish code from comment, and a security-relevant guarantee that
+   * passes for the wrong reason is the failure mode this whole file exists to avoid.
+   *
+   * So the branch is measured the way `decideAfterExit` is tested: on the ORDER of statements, with comments
+   * removed first.
+   */
+  const code = mainSource
+    .split("\n")
+    .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+    .join("\n");
+  const exitHandler = code.slice(code.indexOf('child.on("exit"'));
+  const branchStart = exitHandler.indexOf("if (!announced)");
+  assert.ok(branchStart > -1, "the pre-announcement case must be handled explicitly");
+  // A `return` that ends the branch in ONE statement is the silent-swallow shape. Anything that reports first has
+  // more between the condition and the return.
+  const oneLiner = /if \(!announced\) return;/.test(exitHandler);
+  assert.equal(oneLiner, false, "a child that died before announcing must be REPORTED, not returned from");
+  // The report must come before the branch's `return`, and the retry decision must be taken in it.
+  const reportAt = exitHandler.indexOf("showFailure(", branchStart);
+  const returnAt = exitHandler.indexOf("return;", reportAt);
+  assert.ok(reportAt > branchStart, "the pre-announcement branch must call showFailure");
+  assert.ok(returnAt > reportAt, "the report must come before the branch returns");
+  const branch = exitHandler.slice(branchStart, returnAt);
+  assert.match(branch, /decideAfterExit\(/, "the pre-announcement path must still count as a failure");
+  assert.match(branch, /lastStderr/, "it must show what the child printed; that is the whole evidence");
+});

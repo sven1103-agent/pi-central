@@ -460,7 +460,38 @@ function start(): void {
     clearTimeout(timeout);
     if (quitting) return;
     running = undefined;
-    if (!announced) return; // the timeout or the error handler already reported it
+    if (!announced) {
+      /*
+       * The child died BEFORE it announced a URL (issue #215).
+       *
+       * This used to `return` with a comment saying "the timeout or the error handler already reported it", and
+       * neither had: `clearTimeout(timeout)` above cancels the timeout that would have, and the `error` handler
+       * only fires for a failed SPAWN, not for an exit. So a child that started and then died in 87 ms — which
+       * is what the C1 sandbox refusal does — produced no window change, no message, and no log line. The reader
+       * saw a window that had simply stopped, which is the exact failure this file's `showFailure` exists to
+       * prevent: an empty window is indistinguishable from a UI bug.
+       *
+       * It is reported here rather than left to the timeout because this is the common shape and it has BETTER
+       * evidence: the child has finished printing, so `lastStderr` holds its whole complaint ("this process is
+       * inside a sandbox, and Seatbelt does not nest (C1)"), where the timeout path can only say "it printed
+       * nothing within N seconds".
+       */
+      consecutiveFailures += 1;
+      const stopped = decideAfterExit(consecutiveFailures);
+      const detail =
+        `It started but exited after ${code === null ? "a signal" : `code ${code}`}` +
+        `${signal === null ? "" : ` (signal ${signal})`} before reporting a URL.` +
+        `\n\n${lastStderr.trim() === "" ? "It printed nothing at all." : `What it printed:\n\n${lastStderr.trim()}`}`;
+      showFailure("Pi Central's orchestrator could not start", detail);
+      // Still retried, because a transient cause (a port stolen mid-start) is worth one more attempt — but the
+      // reader is told what happened FIRST, so the window is never blank while the supervisor decides.
+      if (stopped.action === "restart") {
+        restartTimer = setTimeout(() => {
+          if (window !== undefined && !window.isDestroyed()) start();
+        }, stopped.delayMs);
+      }
+      return;
+    }
     consecutiveFailures += 1;
     const decision = decideAfterExit(consecutiveFailures);
     if (decision.action === "stop") {

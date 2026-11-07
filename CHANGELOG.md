@@ -32,6 +32,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- A child that exits before reporting a URL shows what it printed, instead of leaving the window blank and the terminal silent ([#215]).
 - A failure page failing its own CSP audit is replaced by a constant one, instead of being logged as refused and shown anyway ([#215]).
 - `Try again` on a failure page re-runs the launch, instead of reloading a document with no state and showing the same text again ([#215]).
 - A crashed orchestrator shows its failure in the window that is open, instead of opening a second one behind the reader ([#215]).
