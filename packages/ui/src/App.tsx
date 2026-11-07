@@ -13,13 +13,17 @@ import { PROTOCOL_VERSION, supportsDelete, supportsPlaces, supportsRetry, type C
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
 import { ConfirmDelete } from "./components/ConfirmDelete.tsx";
 import { StoppedSession } from "./components/StoppedSession.tsx";
+import { UpdateBanner } from "./components/UpdateBanner.tsx";
 import type { SessionControlCaps } from "./components/SessionControlBar.tsx";
 import {
+  BLOCKED_RELOAD_MESSAGE,
   SKEW_PREFIX,
   assessProtocolSkew,
   assessServedUi,
+  isReloadBlocked,
   noteProtocolAgreement,
   ownEntry,
+  reloadOnReturn,
   safeSessionStorage,
 } from "./update-check.ts";
 import logoIcon from "./assets/logo-icon.svg";
@@ -457,6 +461,16 @@ export function App() {
    */
   const [updateNotice, setUpdateNotice] = useState<string | undefined>(undefined);
 
+  /**
+   * Set when a reload is warranted but would discard unsent work (issue #213).
+   *
+   * Held separately from `updateNotice` because the two are different facts with different remedies:
+   * `updateNotice` says "the reload did not help", this says "the reload has not happened yet, on
+   * purpose". Collapsing them into one string would make the banner show a Reload button that the
+   * guard is about to refuse.
+   */
+  const [reloadBlocked, setReloadBlocked] = useState(false);
+
   // Which bundle THIS page was loaded from, computed once. `undefined` on a dev server, which
   // silences the comparison deliberately — see `ownEntry`.
   const pageEntry = useMemo(() => ownEntry(), []);
@@ -480,7 +494,13 @@ export function App() {
         if (event.kind === "snapshot") {
           const verdict = assessServedUi(pageEntry, event.install, updateMarks);
           if (verdict.action === "reload" && import.meta.env.PROD) {
-            location.reload();
+            /*
+             * The guard runs here too (issue #213), not only on the return-to-view path: a snapshot
+             * can arrive mid-sentence — the orchestrator was restarted while the reader was typing —
+             * and reloading then discards a draft that the reader would have no way to recover. The
+             * banner says why and waits.
+             */
+            reloadForUpdate();
             return;
           }
           if (verdict.action === "banner") setUpdateNotice(verdict.message);
@@ -498,7 +518,7 @@ export function App() {
             // Attempted once in dev too: a skew means the halves disagree about the WIRE, which
             // no amount of running old code can work around. The one-shot mark is what keeps the
             // dev reverse-skew (new files, old orchestrator) from looping into the banner.
-            location.reload();
+            reloadForUpdate();
             return;
           }
           if (verdict.action === "banner") setUpdateNotice(verdict.message);
@@ -622,6 +642,56 @@ export function App() {
   }, []);
 
   const focused = focusedSession(state);
+
+  /**
+   * What the composer is holding for the focused session, readable from an effect that must not
+   * re-subscribe on every keystroke (issue #213). A draft in the listener's dependency list would tear
+   * the listener down and rebuild it on every character typed.
+   */
+  const unsentWork = useRef({ draft: "", attachmentCount: 0 });
+  unsentWork.current = {
+    draft: focused ? drafts[focused.id] ?? "" : "",
+    attachmentCount: focused ? attachments[focused.id]?.length ?? 0 : 0,
+  };
+
+  /**
+   * Reloading for a stale page, with the one guard that matters (issue #213).
+   *
+   * The reload is the whole recovery, and it is destructive to exactly one thing: the composer, whose
+   * drafts and attachments exist nowhere but this page. Session state is not at risk — it lives in the
+   * orchestrator, and a reconnect re-fetches every transcript — so the guard is about unsent work only.
+   */
+  const reloadForUpdate = useCallback(() => {
+    if (isReloadBlocked(unsentWork.current)) {
+      setReloadBlocked(true);
+      return;
+    }
+    location.reload();
+  }, []);
+
+  /**
+   * A window that comes back into view re-checks itself (issue #213).
+   *
+   * A hidden or minimised window receives no snapshots, so the one-shot reload above never fires for
+   * it; the reader returns to a stale page and a banner instructing them to quit the app. Reloading
+   * here is safe for the same reason it is safe there, and it is gated on a recorded verdict: a focus
+   * event carries no evidence that the page is stale, and an unguarded reload-on-focus would throw
+   * away drafts on every tab switch.
+   *
+   * When it does fire, the socket is reopened by the reload rather than here: requesting a fresh
+   * snapshot and then reloading would fetch the transcript twice and render neither.
+   */
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (reloadOnReturn(updateMarks).action !== "reload") return;
+      // A verdict already on screen is the honest answer, and the reader has a button for it.
+      if (updateNotice !== undefined) return;
+      reloadForUpdate();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [updateMarks, reloadForUpdate, updateNotice]);
   /*
     A focused row that is NOT live (issue #89 deadlock).
 
@@ -1265,18 +1335,17 @@ export function App() {
       )}
 
       {/*
-        The stale-page banner sits above the error strip (issue #184): it names a condition about
-        the WINDOW, not about a session, and its Reload button is the one recovery action a
-        standalone PWA window does not otherwise have.
+        The stale-page banner sits above the error strip (issues #184, #213): it names a condition about
+        the WINDOW, not about a session, and its Reload button is the one recovery action a standalone
+        PWA window does not otherwise have. When a reload is warranted but would discard unsent work,
+        the same banner says so and withholds the button rather than offering something it will refuse.
       */}
-      {updateNotice !== undefined && (
-        <div className="direct-banner" role="alert">
-          <strong>Update available</strong>
-          <span>{updateNotice}</span>
-          <button type="button" className="btn" onClick={() => location.reload()}>
-            Reload now
-          </button>
-        </div>
+      {(updateNotice !== undefined || reloadBlocked) && (
+        <UpdateBanner
+          message={updateNotice ?? ""}
+          {...(reloadBlocked ? { blockedMessage: BLOCKED_RELOAD_MESSAGE } : {})}
+          onReload={reloadForUpdate}
+        />
       )}
 
       {state.errors.length > 0 && (

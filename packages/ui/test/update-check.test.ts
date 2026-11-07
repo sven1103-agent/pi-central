@@ -19,6 +19,9 @@ import {
   PROTOCOL_RELOAD_KEY,
   UPDATE_RELOAD_KEY,
   assessProtocolSkew,
+  BLOCKED_RELOAD_MESSAGE,
+  isReloadBlocked,
+  reloadOnReturn,
   assessServedUi,
   noteProtocolAgreement,
   type StorageLike,
@@ -116,4 +119,53 @@ test("a snapshot from a SKEWED orchestrator does not re-arm the mark", () => {
   const storage = fakeStorage({ [PROTOCOL_RELOAD_KEY]: "protocol mismatch: …" });
   noteProtocolAgreement(install("assets/index-X.js", 4), 5, storage);
   assert.equal(storage.map.get(PROTOCOL_RELOAD_KEY), "protocol mismatch: …");
+});
+
+// --- Returning to a hidden window (issue #213) -------------------------------------------------
+//
+// The reload-on-snapshot rule above covers a page that is *looking*. An installed window that was
+// minimised or hidden sees no snapshot while it is away, so it comes back stale. These assertions are
+// about the evidence required before reloading — because the cheap implementation ("reload when the
+// window is focused") passes the first test and fails the second, and only the second one matters to
+// someone who was typing.
+
+test("a page with no recorded verdict does not reload when it returns to view", () => {
+  // The falsifier for reload-on-focus: no mark means no evidence, and an unguarded reload loses the
+  // draft that made the reader switch tabs in the first place.
+  assert.deepEqual(reloadOnReturn(fakeStorage()), { action: "none" });
+});
+
+test("a page that recorded a stale verdict reloads when it returns to view", () => {
+  const served = fakeStorage({ [UPDATE_RELOAD_KEY]: "assets/index-NEW.js" });
+  assert.deepEqual(reloadOnReturn(served), { action: "reload" });
+
+  // The protocol-skew mark is evidence of the same class, so it takes the same path.
+  const skewed = fakeStorage({ [PROTOCOL_RELOAD_KEY]: "protocol mismatch: …" });
+  assert.deepEqual(reloadOnReturn(skewed), { action: "reload" });
+});
+
+test("returning twice does not clear the mark, so the decision stays reload until the page is replaced", () => {
+  // Within one page's lifetime the answer must not be stateful: the effect can run twice (React
+  // StrictMode, two visibility events), and a decision that returned `none` the second time would
+  // make the reload depend on which event happened to fire first.
+  const storage = fakeStorage({ [UPDATE_RELOAD_KEY]: "assets/index-NEW.js" });
+  assert.equal(reloadOnReturn(storage).action, "reload");
+  assert.equal(reloadOnReturn(storage).action, "reload");
+  assert.equal(storage.map.get(UPDATE_RELOAD_KEY), "assets/index-NEW.js");
+});
+
+test("unsent work blocks the reload, and whitespace alone does not", () => {
+  assert.equal(isReloadBlocked({ draft: "", attachmentCount: 0 }), false);
+  // A draft of spaces is not something anyone minds losing; refusing to reload for it would leave the
+  // reader on the old version for a keystroke they did not mean.
+  assert.equal(isReloadBlocked({ draft: "   \n ", attachmentCount: 0 }), false);
+  assert.equal(isReloadBlocked({ draft: "half a sentence", attachmentCount: 0 }), true);
+  // An attachment is content, not text: a pasted screenshot is megabytes that exist nowhere else.
+  assert.equal(isReloadBlocked({ draft: "", attachmentCount: 1 }), true);
+});
+
+test("the blocked message names what is holding the reload, and the way out", () => {
+  // One place for the sentence, so the banner cannot promise a reload the guard is refusing.
+  assert.match(BLOCKED_RELOAD_MESSAGE, /discard/);
+  assert.match(BLOCKED_RELOAD_MESSAGE, /Send or clear/);
 });

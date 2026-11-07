@@ -65,7 +65,10 @@ Three things are worth knowing about how to read that:
   for the life of the tab. Hard-reload.
 - **Installed as a PWA** (issue #119), the same applies and more so: the service worker never caches
   `index.html`, but a worker update lands on the next launch rather than mid-session, on purpose — see
-  the note in `public/sw.js` about `skipWaiting`.
+  the note in `public/sw.js` about `skipWaiting`. The page does reload itself when it comes back into
+  view and it knows it is stale (#213), which covers the dock-icon-click case #184 was filed for; a
+  window that was on screen the whole time still needs the banner's Reload button, because nothing told
+  it anything had changed.
 
 ## Pi Central now says so
 

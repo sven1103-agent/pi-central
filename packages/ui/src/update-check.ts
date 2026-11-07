@@ -27,6 +27,21 @@
  * Reload button and honest advice. Marks are cleared when a snapshot proves the halves agree, so a
  * LATER update in the same tab session can reload again.
  *
+ * ## Returning to a window that was stale while it was hidden (issue #213)
+ *
+ * The one-shot reload above fires when a *snapshot* arrives. An installed window that was hidden or
+ * minimised receives none while it is in the background — the socket is throttled, and the dock icon
+ * focuses rather than reloads — so the reader comes back to a stale page and a banner that says
+ * "quit and reopen". Two additions close that:
+ *
+ *   - `reloadOnReturn` reloads a page that comes back into view **with a stale verdict already
+ *     recorded**, at most once per target identity. It is deliberately not "reload on focus": a
+ *     focus event carries no evidence, and an unguarded reload-on-focus would destroy drafts on
+ *     every tab switch.
+ *   - `isReloadBlocked` reports whether reloading would throw away work the page holds — unsent text
+ *     or attached images — because the page is the only copy of those. Session state is not at risk
+ *     (it lives in the orchestrator, and a reconnect re-fetches every transcript); the composer is.
+ *
  * Everything here is pure apart from the injected storage, so the decision is tested without a
  * browser.
  */
@@ -86,8 +101,8 @@ export function assessServedUi(
       action: "banner",
       message:
         "Pi Central was updated while this window was open, and reloading once did not pick up the " +
-        "new UI. Quit the app (⌘Q) and reopen it; if the old version still appears after that, " +
-        "clear this site's data in the browser.",
+        "new UI. A reload button is below; if the old version still appears after pressing it, quit " +
+        "the app (⌘Q) and reopen it, and if that fails too, clear this site's data in the browser.",
     };
   }
   storage.setItem(UPDATE_RELOAD_KEY, served);
@@ -121,6 +136,50 @@ export function safeSessionStorage(): StorageLike {
 /** The prefix every protocol-skew message starts with — see `versionSkew` in `connection.ts`. */
 export const SKEW_PREFIX = "protocol mismatch:";
 
+/** One record of what a page returning to view decided, and why. */
+export type ReturnAction =
+  | { action: "reload" }
+  | { action: "none" }
+  /** A reload was warranted but would destroy work; the caller says so instead of doing it. */
+  | { action: "blocked"; message: string };
+
+/**
+ * Should this page reload itself because it just came back into view?
+ *
+ * The evidence is the mark `assessServedUi`/`assessProtocolSkew` already wrote when they *knew* the
+ * page was stale. Requiring it is the whole difference between this and a reload-on-focus loop: a
+ * focus event proves nothing about staleness, and a page that reloads because it was focused loses
+ * whatever the reader had typed.
+ *
+ * `storage` is `sessionStorage`, which the browser keeps across a `location.reload()` and drops for a
+ * new tab. That is exactly the scope wanted: one stale window reloads once, and the mark is cleared
+ * by the reloaded page's own `assessServedUi` when it proves agreement.
+ */
+export function reloadOnReturn(storage: StorageLike): ReturnAction {
+  const stale = storage.getItem(UPDATE_RELOAD_KEY) !== null || storage.getItem(PROTOCOL_RELOAD_KEY) !== null;
+  return stale ? { action: "reload" } : { action: "none" };
+}
+
+/**
+ * Is a reload right now the wrong thing to do?
+ *
+ * The page is the only copy of what the reader has typed or pasted: drafts are per-session React state
+ * and attachments are in-memory base64 (megabytes, deliberately never persisted). A reload throws both
+ * away, so a stale-page reload must wait for a composer that is empty rather than silently discarding
+ * a paragraph someone was writing into a long-running agent.
+ *
+ * This is not a hypothetical: the `banner` path exists precisely because the reload was already spent
+ * once, which is the state a reader is most likely to be typing in.
+ */
+export function isReloadBlocked(work: { draft: string; attachmentCount: number }): boolean {
+  return work.draft.trim().length > 0 || work.attachmentCount > 0;
+}
+
+/** The sentence a blocked return shows. One place, so the banner and the notice cannot disagree. */
+export const BLOCKED_RELOAD_MESSAGE =
+  "Pi Central was updated while this window was in the background, but reloading now would discard " +
+  "the message you are writing. Send or clear it and the new version will load itself.";
+
 /**
  * The same one-shot decision for a `hello` skew.
  *
@@ -135,8 +194,8 @@ export function assessProtocolSkew(message: string, storage: StorageLike): Updat
       action: "banner",
       message:
         `${message} This window already reloaded once and the halves still disagree, so the fix is ` +
-        `on the other side: update and restart the orchestrator, then reload. In an installed app, ` +
-        `⌘Q and reopen is the reload that always works.`,
+        `on the other side: update and restart the orchestrator, then press Reload. In an installed ` +
+        `app, ⌘Q and reopen is the reload that always works.`,
     };
   }
   storage.setItem(PROTOCOL_RELOAD_KEY, message);
