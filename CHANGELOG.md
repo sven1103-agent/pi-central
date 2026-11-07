@@ -15,11 +15,16 @@ They are kept because each one is the reason a constraint or an invariant test e
 - A window that returns to view asks for a fresh snapshot, so a stale page picks up an update without being quit and reopened ([#213]).
 - Saved work holds the reload back: unsent text or attachments turn the banner into a sentence instead of discarding them ([#213]).
 
+### Changed
+
+- `docs/STACK.md` no longer claims there is no Electron path; ADR-0013 states the shell as a launcher rather than a second artifact ([#212]).
+
 ### Fixed
 
 - The update banner's Reload button is the recovery it advertises, instead of sitting beside advice to quit the app ([#213]).
 - A reload is refused while the composer holds a draft, on the snapshot path too and not only on return ([#213]).
 
+[#212]: https://github.com/sven1103-agent/pi-central/issues/212
 [#213]: https://github.com/sven1103-agent/pi-central/issues/213
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
