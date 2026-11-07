@@ -141,7 +141,7 @@ gave it. The record is [ADR-0013](decisions/0013-application-shell.md).
 | A window returning to view re-checks, with a draft guard (#213) | ✅ PR #219 |
 | ADR-0013: the shell is a launcher, never the update target (#212) | ✅ this slice |
 | A returning window asks for install facts, not a discovery (#220) | open — 356 ms per focus today |
-| The shell runs the installed artifact as a supervised child (#214) | open |
+| The shell runs the installed artifact as a supervised child (#214) | ✅ this slice |
 | The renderer is locked to the loopback document (#215) | open |
 | Close hides, `⌘Q` keeps sessions, the next launch reattaches (#216) | open |
 | The shell applies an update: stop, install, verify, respawn, reload (#217) | open |
