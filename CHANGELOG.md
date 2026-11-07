@@ -24,7 +24,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The window can only display the loopback document it was opened for: navigation, redirects, `<webview>` and new windows are refused ([#215]).
 - An `http(s)` link clicked in the window opens in the reader's browser, and any other scheme is dropped rather than handed to the OS ([#215]).
 - Every web permission is refused, from the app's own origin included, so a permission Electron adds later is denied by default ([#215]).
-- The window's options and the shipped bundle are audited before the window opens, so a weakened `contextIsolation`, `sandbox` or `nodeIntegration` fails loudly ([#215]).
+- The window's options and its own assembled bundle are audited before the window opens, so a weakened `contextIsolation`, `sandbox` or `nodeIntegration` fails loudly ([#215]).
 
 ### Changed
 
@@ -32,6 +32,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- A failure page failing its own CSP audit is replaced by a constant one, instead of being logged as refused and shown anyway ([#215]).
+- `Try again` works on a failure page shown before any orchestrator announced a port, which is the first-run case ([#215]).
 - The update banner's Reload button is the recovery it advertises, instead of sitting beside advice to quit the app ([#213]).
 - A reload is refused while the composer holds a draft, on the snapshot path too and not only on return ([#213]).
 

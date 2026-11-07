@@ -16,19 +16,26 @@
  * ## What each criterion maps to
  *
  *   1. `webPreferences` is minimal and pinned → `windowWebPreferences` + `auditWindowOptions`.
- *   2. Navigation is refused off-origin → `navigationDecision`, with an allowed and a refused URL in one run.
+ *   2. Navigation is refused off-origin → `navigationDecision`, with an allowed and a refused URL in one run,
+ *      and the failure page reachable by token even before any port is announced.
  *   3. New windows are refused, `http(s)` handed to the browser → `windowOpenDecision` / `externalTarget`.
- *   4. Every web permission is denied by default → `permissionDecision`.
+ *   4. Every web permission is denied by default → `permissionDecision`, with the origin taken from
+ *      `requestOrigin` because no request shape carries `requestingOrigin`.
  *   5. The CSP is unchanged and still effective → asserted against the real listener in
- *      `window-csp-live.test.ts`, plus `failureDocumentProblems` for the shell's own page.
+ *      `window-csp-live.test.ts`, plus `failureDocumentProblems` for the shell's own page and
+ *      `FALLBACK_FAILURE_PAGE` for the page shown when that audit fails.
  *   6. `file://` is unreachable → `navigationDecision` refuses it, and `main.ts` never calls `loadFile`.
- *   7. No remote module → `auditWindowOptions` + `bundleProblems`.
+ *   7. No remote module → `auditWindowOptions` over the options, plus `bundleProblems` over the shell's OWN
+ *      assembled output. The first version of that scan read `bin/pi-central.js`, which is the orchestrator's
+ *      bundle and contains no window code at all — a guard that read the wrong artifact and reported clean.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   FAILURE_PAGE_CSP,
+  FALLBACK_FAILURE_PAGE,
   FORBIDDEN_MODULES,
   allowedOrigins,
   auditWindowOptions,
@@ -39,6 +46,7 @@ import {
   navigationDecision,
   originOf,
   permissionDecision,
+  requestOrigin,
   windowOpenDecision,
   windowWebPreferences,
 } from "../src/window-security.ts";
@@ -145,6 +153,25 @@ test("a data: URL is refused unless it is the failure page the shell just minted
   );
 });
 
+test("the failure page is reachable before any port is announced, and no origin is", () => {
+  /*
+   * The first-run case, and the one that made "Try again" a dead button. `showFailure` runs when the package is
+   * not found or a prerequisite is missing — at which point no orchestrator has announced a port, so
+   * `announcedPort` is `undefined`. The handler used to read
+   *
+   *     announcedPort === undefined ? "deny" : navigationDecision(...)
+   *
+   * which denies BEFORE consulting the token, so clicking "Try again" on the only page that offers it did
+   * nothing, and the terminal logged a refusal of the document the shell had just minted.
+   */
+  const document = failureDocument("<!doctype html><html><body>boom</body></html>");
+  assert.equal(navigationDecision(document.url, undefined, document.token), "allow", "Try again must work");
+  // The token is still the only document allowed, and an http origin is still refused while there is no port to
+  // trust — "no port yet" must not become "any port will do".
+  assert.equal(navigationDecision(`http://127.0.0.1:${PORT}/`, undefined), "deny", "no announced port, no origin");
+  assert.equal(navigationDecision("data:text/html,<script>alert(1)</script>", undefined, document.token), "deny");
+});
+
 test("`file:` is refused for every shape, so the renderer cannot reach the filesystem", () => {
   // Criterion 6. `loadFile` is never used for app content, and a `file:` navigation from the renderer would be
   // the reader's home directory in a window that claims to be a dashboard.
@@ -241,6 +268,29 @@ test("an unrecognised permission is refused, which is what stops a future one op
   // And with no origin at all, which is what an opaque-origin document reports.
   assert.equal(permissionDecision("camera", undefined).allowed, false);
   assert.match(permissionDecision("camera", undefined).reason, /unidentified origin/);
+  // An EMPTY origin is reported as unidentified too: `setPermissionCheckHandler` passes `""` for a check made
+  // without a document, and "camera to  (issue #215)" is a report of something that is not true.
+  assert.match(permissionDecision("camera", "").reason, /unidentified origin/);
+});
+
+test("a permission refusal names the real origin, from the field Electron actually sets", () => {
+  /*
+   * The defect this pins. `main.ts` read `details.requestingOrigin`, which no permission-request shape has — the
+   * base `PermissionRequest` carries `requestingUrl` and a `media` request adds `securityOrigin`. Reading a
+   * missing key yields `undefined`, so EVERY refusal was logged against "an unidentified origin": the report
+   * existed, named nothing, and looked exactly like a bug in the feature that had asked for the camera.
+   */
+  const origin = `http://127.0.0.1:${PORT}`;
+  // A media request's own field wins.
+  assert.equal(requestOrigin({ securityOrigin: origin, requestingUrl: "https://example.com/x" }), origin);
+  // Without it, the origin of the URL the frame last loaded.
+  assert.equal(requestOrigin({ requestingUrl: `${origin}/history?x=1` }), origin);
+  // Neither, or an opaque one, names nothing rather than naming something false.
+  assert.equal(requestOrigin({}), undefined);
+  assert.equal(requestOrigin({ requestingUrl: "data:text/html,x" }), undefined);
+  assert.equal(requestOrigin({ securityOrigin: "" }), undefined);
+  // And the message the reader sees therefore carries the origin, which is the point of passing it at all.
+  assert.match(permissionDecision("camera", requestOrigin({ securityOrigin: origin })).reason, /127\.0\.0\.1/);
 });
 
 // --- Criterion 5, shell half: the failure page carries a real policy ------------------------------
@@ -276,6 +326,22 @@ test("the audit rejects a failure page that lost its doctype, its policy, or gai
   );
 });
 
+test("the fallback page passes the same audit, so a refused report still leaves something to read", () => {
+  /*
+   * `showFailure` audits the rendered page and now REFUSES it rather than logging and loading anyway. Refusing
+   * alone would leave an empty window — which this module already names as indistinguishable from a UI bug — so
+   * the fallback must itself be a safe document. If it were not, the audit would be circular: the page shown
+   * when the audit fails would fail the audit.
+   */
+  assert.deepEqual(failureDocumentProblems(FALLBACK_FAILURE_PAGE), [], "the fallback must pass the audit");
+  // It interpolates NOTHING: no title, no detail, no child stderr. A template that did would move the trust
+  // boundary rather than narrow it.
+  assert.equal(/\$\{|\$\}/.test(FALLBACK_FAILURE_PAGE), false, "the fallback must have no interpolation");
+  assert.match(FALLBACK_FAILURE_PAGE, /<!doctype html>/i);
+  const minted = failureDocument(FALLBACK_FAILURE_PAGE);
+  assert.equal(navigationDecision(minted.url, PORT, minted.token), "allow", "and it must be loadable");
+});
+
 test("the failure document is minted per call, so a token from one failure does not outlive it", () => {
   const first = failureDocument("<html><body>one</body></html>");
   const second = failureDocument("<html><body>two</body></html>");
@@ -286,20 +352,36 @@ test("the failure document is minted per call, so a token from one failure does 
 
 // --- Criterion 7, bundle half -------------------------------------------------------------------
 
-test("the built main bundle references no remote module", () => {
-  // The options audit cannot see a transitive import; the assembled output can, which is why this reads it. The
-  // bundle is built by `npm run build:package` (CI's `package` job) and is legitimately absent in a fresh
-  // checkout, so absence is reported rather than failed — a skipped guarantee that looks like a passing one is
-  // exactly what this file's header warns about.
-  const path = new URL("../../../bin/pi-central.js", import.meta.url);
-  let bundle: string;
-  try {
-    bundle = readFileSync(path, "utf8");
-  } catch {
-    console.log(`skip: ${path.pathname} is not built (npm run build:package); no bundle to scan`);
-    return;
-  }
-  assert.deepEqual(bundleProblems(bundle), [], "the shipped bundle must not reference a remote module");
+test("the assembled shell bundle references no remote module", async () => {
+  /*
+   * The options audit cannot see a transitive import; the assembled output can, which is why this reads it.
+   *
+   * WHAT it reads is the whole point of this test. It used to read `bin/pi-central.js`, which
+   * `scripts/build-package.mjs` builds from `packages/orchestrator/src/server.ts` — the ORCHESTRATOR's bundle.
+   * That file contains no window code at all, so the scan reported "clean" for an artifact the shell never
+   * ships, and would have reported clean for a shell that imported a remote module on its first line. The shell
+   * is `private` and publishes nothing (`packaging-shape.test.ts`), so it has no bundle on disk: the honest
+   * equivalent is to assemble `main.ts` here, with `electron` external, using the esbuild the repo already has.
+   *
+   * Assembling rather than globbing the sources is what makes a TRANSITIVE import visible, which is the danger
+   * the criterion names.
+   */
+  const { build } = await import("esbuild");
+  const assembled = await build({
+    entryPoints: [fileURLToPath(new URL("../src/main.ts", import.meta.url))],
+    bundle: true,
+    write: false,
+    platform: "node",
+    target: "node22",
+    format: "esm",
+    // Electron is the runtime, not a dependency to inline — and its main export is a PATH STRING, so bundling it
+    // would put a binary path in the output rather than the window code this test is about.
+    external: ["electron"],
+    logLevel: "warning",
+  });
+  const bundle = assembled.outputFiles[0]?.text ?? "";
+  assert.ok(bundle.includes("hardenWindow"), "the assembly must contain the shell, or the scan is vacuous");
+  assert.deepEqual(bundleProblems(bundle), [], "the assembled shell must not reference a remote module");
   // The scan must be able to find something, or it is vacuous.
   assert.ok(bundleProblems(`require("${FORBIDDEN_MODULES[0]}")`).length > 0, "the scan must have teeth");
 });
@@ -331,9 +413,10 @@ test("every hardening hook is registered in main.ts, on the event or setter it n
 test("main.ts never loads a file or a URL it was not given by the child", () => {
   // Criterion 6's other half: `loadFile` is the one call that would put the filesystem in the window.
   assert.equal(/loadFile\s*\(/.test(mainSource), false, "loadFile must not be used for app content");
-  // And the only navigations are the announced http URL and the minted failure document.
+  // And the only navigations are the announced http URL and a minted failure document — the fallback is the same
+  // document with different content, so the target is `document.url` either way.
   const loads = [...mainSource.matchAll(/loadURL\(([^)]*)\)/g)].map((match) => match[1]!.trim());
-  assert.deepEqual(loads.sort(), ["document.url", "httpUrl"], `unexpected loadURL targets: ${loads.join(", ")}`);
+  assert.deepEqual(loads.sort(), ["document.url", "document.url", "httpUrl"], `unexpected loadURL targets: ${loads.join(", ")}`);
 });
 
 test("the window is created through the audited preferences, not an inline options object", () => {
@@ -342,4 +425,34 @@ test("the window is created through the audited preferences, not an inline optio
   assert.equal(creations, 1, "exactly one window is created, so exactly one place sets its preferences");
   assert.ok(mainSource.includes("windowWebPreferences()"), "the preferences must come from the audited source");
   assert.ok(mainSource.includes("hardenWindow(window)"), "the window must be hardened where it is created");
+});
+
+test("the permission handlers read the fields Electron actually sets", () => {
+  /*
+   * The request handler's `details` has no `requestingOrigin` — the base `PermissionRequest` carries
+   * `requestingUrl`, and a `media` request adds `securityOrigin`. Reading the missing key yields `undefined`,
+   * so every refusal was reported against "an unidentified origin". The CHECK handler is the opposite case: its
+   * third parameter really is `requestingOrigin` (see `setPermissionCheckHandler` in electron.d.ts), which is
+   * why the assertion below targets the request handler rather than the string.
+   */
+  assert.equal(
+    /details\s+as\s+\{[^}]*requestingOrigin/.test(mainSource),
+    false,
+    "the request handler must not invent a requestingOrigin on details; use requestOrigin(details)",
+  );
+  assert.ok(mainSource.includes("requestOrigin(details)"), "the request handler must derive the origin");
+  const decisions = [...mainSource.matchAll(/permissionDecision\(/g)].length;
+  assert.equal(decisions, 2, "both handlers must call permissionDecision, so both report what they refused");
+});
+
+test("the failure page is refused when its own audit fails, not logged and loaded anyway", () => {
+  /*
+   * The defect this pins, in one line: `showFailure` used to `console.error("refusing to display…")` and then
+   * fall through to `loadURL` of the page it had just refused. Enforcement that exists only in the terminal is
+   * indistinguishable from none, which is this file's whole subject.
+   */
+  assert.ok(mainSource.includes("failureDocument(FALLBACK_FAILURE_PAGE)"), "the refusal must show the fallback");
+  // The audit's result must gate the load: `return` between the report and the rendered page's mint.
+  const guarded = /refusing to display an unsafe failure page[\s\S]{0,400}?return;/.test(mainSource);
+  assert.ok(guarded, "the refusal must return before the rendered page is loaded");
 });

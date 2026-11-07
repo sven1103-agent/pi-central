@@ -115,9 +115,16 @@ export function failureDocument(html: string): FailureDocument {
  * A `file:` URL is NOT among them. `loadFile` is never used (criterion 6), and a `file:` navigation from the
  * renderer would put the reader's filesystem in a window that has a `webSecurity` policy about it.
  */
-export function navigationDecision(url: string, port: number, failureToken?: string): "allow" | "deny" {
+export function navigationDecision(url: string, port: number | undefined, failureToken?: string): "allow" | "deny" {
   const origin = originOf(url);
-  if (origin !== undefined) return allowedOrigins(port).includes(origin) ? "allow" : "deny";
+  if (origin !== undefined) {
+    // No announced port means no origin is allowed YET — not that every origin is. The failure page below is
+    // still checked, because that is the document the shell shows while it waits: refusing the token too would
+    // make "Try again" a dead button in the one case where it is the only recovery (no orchestrator announced,
+    // e.g. the package was not found).
+    if (port === undefined) return "deny";
+    return allowedOrigins(port).includes(origin) ? "allow" : "deny";
+  }
   if (failureToken !== undefined && failureToken.length >= 16) {
     // Decoded, because the token travels inside a percent-encoded document.
     let decoded: string;
@@ -167,6 +174,28 @@ export function externalTarget(url: string): string | undefined {
 }
 
 /**
+ * The origin behind a permission request, from whichever field Electron's shape carries it in.
+ *
+ * ## Why this is not `details.requestingOrigin`
+ *
+ * No permission-request shape has that field. The base `PermissionRequest` carries `requestingUrl` (the last
+ * URL the frame loaded), and a `media` request adds `securityOrigin`. Reading a field that does not exist is
+ * not a crash — it is `undefined`, so every refusal would be reported against "an unidentified origin", which
+ * is the one thing this function exists to avoid: a refusal that names nothing is indistinguishable from a bug
+ * in the feature that asked. The `check` handler is different and passes its origin positionally; `main.ts`
+ * hands that string to `permissionDecision` directly.
+ *
+ * `securityOrigin` first, because it is the origin of the request rather than of the document's last load — a
+ * page that navigated within the app has a `requestingUrl` that is not the frame's origin.
+ */
+export function requestOrigin(details: { securityOrigin?: string; requestingUrl?: string }): string | undefined {
+  const security = details.securityOrigin;
+  if (security !== undefined && security !== "") return security;
+  const url = details.requestingUrl;
+  return url === undefined ? undefined : originOf(url);
+}
+
+/**
  * Whether a web permission is granted.
  *
  * `false` for everything, including the permissions a future Electron version adds and including requests
@@ -176,7 +205,9 @@ export function externalTarget(url: string): string | undefined {
  * silently is indistinguishable from a bug in the feature that needed it) — not so they can change the answer.
  */
 export function permissionDecision(permission: string, origin: string | undefined): { allowed: false; reason: string } {
-  const who = origin === undefined ? "an unidentified origin" : origin;
+  // Empty is not an origin: `setPermissionCheckHandler` passes `""` for a check made without a document (a
+  // service worker), and printing `to  (issue #215)` would report a fact that is not true.
+  const who = origin === undefined || origin === "" ? "an unidentified origin" : origin;
   return { allowed: false, reason: `the window denies ${permission} to ${who} (issue #215)` };
 }
 
@@ -201,7 +232,8 @@ export function permissionDecision(permission: string, origin: string | undefine
  *     everything above.
  *   - `enableRemoteModule` is deliberately **absent**, not set to `false`: the module was removed in Electron
  *     14, and passing the key would be a claim that this app targets an Electron old enough to have it.
- *     `main.ts` asserts its absence at startup instead (criterion 7).
+ *     `auditWindowOptions` reports it if it ever appears, and `bundleProblems` scans the shell's assembled
+ *     output for its successor (criterion 7).
  *   - `spellcheck: false` — the renderer would otherwise send typed text to the OS spell-checker. The composer
  *     holds prompts to a coding agent, which is not prose worth sending anywhere.
  *   - No `preload`: nothing needs one yet, and this slice's rule is that a preload arrives with its own
@@ -238,11 +270,23 @@ export const FORBIDDEN_MODULES = ["@electron/remote", "electron/remote"] as cons
  * this app's own source mentioning it — `@electron/remote` installs itself from the renderer's side and widens
  * what page script can reach. So the check reads the built output, where a transitive import is visible.
  *
+ * ## What this is NOT allowed to read
+ *
+ * The first version of this scan read `bin/pi-central.js`, which is built from `packages/orchestrator/src/` —
+ * the *orchestrator's* bundle. It contains no window code at all (no `will-navigate`, no `windowWebPreferences`),
+ * so the scan could never have found a remote module in the shell and reported "clean" for a file the shell does
+ * not ship. A guard that reads the wrong artifact is worse than no guard, because it reads as coverage.
+ *
+ * So the input is the shell's OWN assembled output: `main.ts` bundled with `electron` external, built in-process
+ * by `window-security.test.ts` with the same esbuild the repository already uses for `bin/pi-central.js`. The
+ * shell is not published (ADR-0013 §1, `packaging-shape.test.ts`), so there is no shipped bundle on disk to
+ * read; the assembled text is the honest equivalent, and it follows the real import graph rather than a glob.
+ *
  * Returned as problems rather than a boolean so the failure names the string it found.
  */
 export function bundleProblems(bundle: string): string[] {
   return FORBIDDEN_MODULES.filter((module) => bundle.includes(module)).map(
-    (module) => `the built main bundle references ${module}, which gives the renderer a privileged channel`,
+    (module) => `the assembled shell bundle references ${module}, which gives the renderer a privileged channel`,
   );
 }
 
@@ -291,6 +335,29 @@ export function auditWindowOptions(preferences: Record<string, unknown>): string
 export const FAILURE_PAGE_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; " +
   "base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
+/**
+ * The page shown when the rendered failure page does not pass its own audit.
+ *
+ * ## Why a constant, and not "load nothing"
+ *
+ * `failureDocumentProblems` is a drift guard: it fails if `renderFailure` loses its doctype, loses its CSP meta
+ * tag, or gains a capability. The response this shell had — log the problem, then load the page anyway, under a
+ * message that said it was refusing — is the one shape that is worse than either alternative, because it reads
+ * as enforcement in the terminal and does nothing in the window.
+ *
+ * Loading nothing is not the alternative either: an empty window is indistinguishable from a UI bug, which is
+ * the reasoning that put a failure page here at all. So the fallback is a document with **nothing interpolated
+ * into it** — no title, no detail, no child stderr — carrying the same policy as the page it replaces. It is
+ * asserted to pass `failureDocumentProblems` in `window-security.test.ts`, so the audit can reject the rendered
+ * page without leaving the reader with nothing to read.
+ */
+export const FALLBACK_FAILURE_PAGE =
+  `<!doctype html><html><head><meta charset="utf-8"><title>Pi Central</title>` +
+  `<meta http-equiv="Content-Security-Policy" content="${FAILURE_PAGE_CSP}"></head><body>` +
+  `<h1>Pi Central could not render its report</h1>` +
+  `<p>The shell refused to display a report that did not pass its own safety check. ` +
+  `The terminal it was launched from has the reason.</p></body></html>`;
 
 /**
  * Why a failure page is safe to show, expressed as the check rather than as the claim.

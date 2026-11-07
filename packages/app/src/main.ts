@@ -34,13 +34,15 @@ import {
 import { resolvePackage, type PackageRoot } from "./package-root.ts";
 import {
   FAILURE_PAGE_CSP,
-  FORBIDDEN_MODULES,
+  FALLBACK_FAILURE_PAGE,
   auditWindowOptions,
+  bundleProblems,
   externalTarget,
   failureDocument,
   failureDocumentProblems,
   navigationDecision,
   permissionDecision,
+  requestOrigin,
   windowWebPreferences,
 } from "./window-security.ts";
 import {
@@ -218,14 +220,14 @@ function hardenWindow(window: BrowserWindow): void {
   const contents = window.webContents;
 
   contents.on("will-navigate", (event) => {
-    const decision = announcedPort === undefined ? "deny" : navigationDecision(event.url, announcedPort, failureToken);
+    const decision = navigationDecision(event.url, announcedPort, failureToken);
     if (decision === "allow") return;
     event.preventDefault();
     console.error(`Pi Central: refused a navigation to ${event.url}`);
   });
 
   contents.on("will-redirect", (event) => {
-    const decision = announcedPort === undefined ? "deny" : navigationDecision(event.url, announcedPort, failureToken);
+    const decision = navigationDecision(event.url, announcedPort, failureToken);
     if (decision === "allow") return;
     event.preventDefault();
     console.error(`Pi Central: refused a redirect to ${event.url}`);
@@ -249,10 +251,9 @@ function hardenWindow(window: BrowserWindow): void {
   });
 
   contents.session.setPermissionRequestHandler((_contents, permission, callback, details) => {
-    // `requestingOrigin` is on SOME request shapes (media, openExternal) and not on the base one, so it is read
-    // defensively: the answer is `false` either way, and a permission refused silently is the thing to avoid.
-    const origin = (details as { requestingOrigin?: string }).requestingOrigin;
-    const refused = permissionDecision(permission, origin);
+    // The origin comes from `requestOrigin`, not from an invented `requestingOrigin` field: no permission shape
+    // has that key, so reading it reported every refusal against "an unidentified origin".
+    const refused = permissionDecision(permission, requestOrigin(details));
     console.error(`Pi Central: ${refused.reason}`);
     callback(false);
   });
@@ -276,8 +277,14 @@ function showFailure(title: string, detail: string): void {
   const html = renderFailure(title, detail);
   const problems = failureDocumentProblems(html);
   if (problems.length > 0) {
-    // Reported to the terminal rather than shown, because the page that would show it is the broken one.
+    // The page is REFUSED, not merely reported (issue #215). This used to log "refusing to display" and then
+    // load the rendered page anyway, which is enforcement that exists only in the terminal.
     console.error(`Pi Central: refusing to display an unsafe failure page:\n  ${problems.join("\n  ")}`);
+    const document = failureDocument(FALLBACK_FAILURE_PAGE);
+    failureToken = document.token;
+    void window.loadURL(document.url);
+    window.show();
+    return;
   }
   const document = failureDocument(html);
   failureToken = document.token;
