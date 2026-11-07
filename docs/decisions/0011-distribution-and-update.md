@@ -128,6 +128,23 @@ the system and is deliberately the last slice:
 - Nothing is written into the user's **Pi** environment. That is principle 9, and it is unaffected
   here: updating Pi Central is not configuring Pi.
 
+## Amendment — a second surface, not a second artifact
+
+[ADR-0013](0013-application-shell.md) adds an optional Electron **shell**: a launcher that spawns the
+installed package and loads its loopback URL in a window. Nothing above changes, and this paragraph
+exists because "a desktop app" reads like a contradiction of §1 until it is stated that it is not one:
+
+- **The npm package remains the sole update unit.** One artifact, one version, one provenance chain,
+  and the shell never carries product code — so it cannot drift from the artifact that does.
+- **§4's detect/apply split is unchanged.** The shell supplies the process choreography §4 needed and
+did not have (stop the child, install, verify the version, respawn, reload). It supplies no new trust
+  model, and it does not move the "never automatic" or "verify before install" rules.
+- **No credential enters CI.** The shell is signed ad-hoc for local use; there is no Developer ID and no
+  notarization step, so the release workflow keeps the property that nothing in it is a stored secret.
+
+The rejected alternative is recorded there: an app that *absorbed* the orchestrator would be a second
+artifact with its own version, and it could not update itself unsigned.
+
 ## Consequences
 
 **Positive**
