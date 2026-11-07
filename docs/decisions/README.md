@@ -18,6 +18,7 @@ reader can tell whether a decision still holds.
 | [0010](0010-agent-credential-identity.md) | Agent credential identity: agent-owned secrets, delivered per session | Accepted |
 | [0011](0011-distribution-and-update.md) | Distribution by bundled npm artifact; update = detect freely, apply on request | Accepted (application pending #56) |
 | [0012](0012-directory-chooser.md) | A placed directory browser in the orchestrator, not a native OS panel | Accepted |
+| [0013](0013-application-shell.md) | An optional desktop shell that is a launcher, never the update target | Accepted |
 
 ## Format
 

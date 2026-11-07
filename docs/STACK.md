@@ -19,9 +19,18 @@ recorded in [ADR-0005](decisions/0005-typescript-stack.md),
 | Sanitization | DOMPurify + strict CSP | Mandatory: transcripts are untrusted |
 | File navigation | Plain `fs` at user UID | No sidecar; see [ADR-0007](decisions/0007-filesystem-access-model.md) |
 | Tests | `node --test` + `tsc --noEmit` | Matches `pi-metrics` conventions |
+| Desktop shell (optional) | Electron, launcher only | Not distributed, not the update target — [ADR-0013](decisions/0013-application-shell.md) |
 
 Deliberately absent: no ORM (persistence is JSON), no state-management library (React
-primitives suffice), no CSS framework, no bundler beyond Vite, no Electron/Tauri.
+primitives suffice), no CSS framework, no bundler beyond Vite, no framework on the
+orchestrator, no `electron-updater`.
+
+One amendment, recorded rather than silently contradicted: an **optional Electron shell** is
+[ADR-0013](decisions/0013-application-shell.md). It is a *launcher* over the installed npm package —
+it carries no product code, is not distributed, and is not the update target — so it does not add a
+second runtime to the stack above, but it does add a second runtime to the machine. The reason it is
+Electron and not Tauri is stated there: Electron keeps this page's "one runtime" property, and a
+Tauri shell would break it by adding Rust.
 
 ## Repository layout
 

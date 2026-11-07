@@ -119,6 +119,37 @@ explicit action, integrity-verified, refusing while sessions run (#56). The trus
 cannot be loaded from `node_modules`, and the product has had zero outbound network calls until now
 — are recorded there rather than re-derived per slice.
 
+## Increment 7 — A window you open from the dock
+
+**Goal:** Pi Central has a desktop surface — a dock icon, an application menu, a native folder dialog —
+without becoming a second distributable.
+
+Two closures of #184 were possible, and this increment takes the second only after the first ships.
+#213 gives a stale page the ability to reload itself when it returns to view, which needs no app and
+closes the reload half. What it cannot do is **restart the thing behind the page**: a browser tab has no
+way to stop an orchestrator, install a version, respawn it and reload, and "quit the app and reopen"
+stays an instruction. A shell can, and it brings the desktop surface with it.
+
+The constraint that decides the shape is that this machine has **no Apple Developer account**. An
+ad-hoc signature is free and sufficient to run; notarization is what is lost, and `electron-updater`
+refuses to update an unsigned app. So the shell is a **launcher over the installed npm package** and
+never the update target, and the npm artifact keeps every property [ADR-0011](decisions/0011-distribution-and-update.md)
+gave it. The record is [ADR-0013](decisions/0013-application-shell.md).
+
+| Slice | State |
+|---|---|
+| A window returning to view re-checks, with a draft guard (#213) | ✅ PR #219 |
+| ADR-0013: the shell is a launcher, never the update target (#212) | ✅ this slice |
+| A returning window asks for install facts, not a discovery (#220) | open — 356 ms per focus today |
+| The shell runs the installed artifact as a supervised child (#214) | open |
+| The renderer is locked to the loopback document (#215) | open |
+| Close hides, `⌘Q` keeps sessions, the next launch reattaches (#216) | open |
+| The shell applies an update: stop, install, verify, respawn, reload (#217) | open |
+| `npm run install-app` produces a locally signed app (#218) | open |
+
+Non-goals of the whole increment, stated once: a `.dmg`, notarization, `electron-updater`, a stored
+credential in CI, and x64.
+
 ## Out of scope
 
 Recorded in [ROADMAP.md](ROADMAP.md#explicitly-out-of-scope) rather than as issues, so that the
