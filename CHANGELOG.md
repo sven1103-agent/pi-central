@@ -33,7 +33,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 ### Fixed
 
 - A failure page failing its own CSP audit is replaced by a constant one, instead of being logged as refused and shown anyway ([#215]).
-- `Try again` works on a failure page shown before any orchestrator announced a port, which is the first-run case ([#215]).
+- `Try again` on a failure page re-runs the launch, instead of reloading a document with no state and showing the same text again ([#215]).
+- A crashed orchestrator shows its failure in the window that is open, instead of opening a second one behind the reader ([#215]).
 - The update banner's Reload button is the recovery it advertises, instead of sitting beside advice to quit the app ([#213]).
 - A reload is refused while the composer holds a draft, on the snapshot path too and not only on return ([#213]).
 

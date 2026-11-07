@@ -395,3 +395,28 @@ export function failureDocumentProblems(html: string): string[] {
   return problems;
 }
 
+
+/**
+ * What a navigation toward the currently-shown failure page means (issue #215).
+ *
+ * ## The defect this answers
+ *
+ * The failure page's only control is `<button onclick="window.location.reload()">Try again</button>`. A `data:`
+ * document holds no state, so reloading it re-renders the SAME baked-in HTML: the failure text is byte-identical
+ * however many times the button is pressed. The renderer cannot ask the main process to run the launch again —
+ * this slice deliberately ships no preload and no IPC — so the button was decorative. The navigation guard made
+ * that loud by cancelling the click; merely allowing the reload made it useless in a quieter way, which is worse
+ * because the terminal then shows no refusal at all.
+ *
+ * The signal is the reload itself. Chromium emits `will-navigate` carrying the page's own URL for a
+ * renderer-initiated `location.reload()`, so a navigation back to the failure document this shell minted IS the
+ * reader asking to try again. That is the entire detection, and it is the reason `automation` is refused for
+ * free: passing the check requires already being on that one page.
+ *
+ * An exact match, not a prefix or an `includes`. A page that merely CARRIES the token is not the page — the same
+ * distinction `navigationDecision` makes, and for the same reason.
+ */
+export function reloadDecision(url: string, shownFailureUrl: string | undefined): "retry" | "ignore" {
+  if (shownFailureUrl === undefined) return "ignore";
+  return url === shownFailureUrl ? "retry" : "ignore";
+}

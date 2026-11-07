@@ -46,6 +46,7 @@ import {
   navigationDecision,
   originOf,
   permissionDecision,
+  reloadDecision,
   requestOrigin,
   windowOpenDecision,
   windowWebPreferences,
@@ -326,6 +327,43 @@ test("the audit rejects a failure page that lost its doctype, its policy, or gai
   );
 });
 
+test("the failure page's Try again reloads into a real retry, not the same text again", () => {
+  /*
+   * The failure page's only control is `window.location.reload()`. A `data:` document holds no state, so
+   * reloading it re-renders the same baked-in HTML — the reader clicks and the identical failure text comes back.
+   * The renderer cannot ask the main process to try again (no preload, no IPC in this slice), so the reload ITSELF
+   * is the signal: Chromium emits `will-navigate` with the page's own URL for a renderer-initiated reload.
+   */
+  const document = failureDocument("<!doctype html><html><body>boom</body></html>");
+  assert.equal(reloadDecision(document.url, document.url), "retry", "a reload of the shown page is Try again");
+
+  // Everything else is ignored: not a retry, and not a navigation that somehow reached this decision.
+  assert.equal(reloadDecision(document.url, undefined), "ignore", "no failure page shown, nothing to retry");
+  const other = failureDocument("<!doctype html><html><body>other</body></html>");
+  assert.equal(reloadDecision(other.url, document.url), "ignore", "another failure page is not a reload of this one");
+  assert.equal(reloadDecision(`http://127.0.0.1:${PORT}/`, document.url), "ignore", "the UI is not a retry");
+  // Exact match, not a prefix or `includes`: passing requires already being on that one page.
+  assert.equal(reloadDecision(`${document.url}#x`, document.url), "ignore", "a URL merely starting with it is not it");
+});
+
+test("a retry is refused while one is running or while quitting", () => {
+  /*
+   * Source shape, because `retry()` cannot be executed here. Both guards are the C9 orphan/branch-point shapes
+   * this file already reasons about: a second orchestrator over the same session files, and one nothing owns
+   * because the app is on its way out. The renderer can fire the reload at ANY time, including mid-shutdown.
+   */
+  assert.ok(/function retry\(\)/.test(mainSource), "retry must exist for the reload to call");
+  const body = mainSource.slice(mainSource.indexOf("function retry()"));
+  const guarded = body.slice(0, body.indexOf("start();"));
+  assert.match(guarded, /isQuitting\(\)/, "a retry during shutdown would orphan an orchestrator");
+  assert.match(guarded, /running !== undefined/, "a retry while running would start a second orchestrator (C9)");
+  // And the reload path actually calls it, rather than only allowing the navigation.
+  assert.ok(
+    /reloadDecision\(event\.url, failureUrl\) === "retry"\) retry\(\)/.test(mainSource),
+    "the allowed reload must trigger the retry, or Try again stays decorative",
+  );
+});
+
 test("the fallback page passes the same audit, so a refused report still leaves something to read", () => {
   /*
    * `showFailure` audits the rendered page and now REFUSES it rather than logging and loading anyway. Refusing
@@ -425,6 +463,37 @@ test("the window is created through the audited preferences, not an inline optio
   assert.equal(creations, 1, "exactly one window is created, so exactly one place sets its preferences");
   assert.ok(mainSource.includes("windowWebPreferences()"), "the preferences must come from the audited source");
   assert.ok(mainSource.includes("hardenWindow(window)"), "the window must be hardened where it is created");
+});
+
+test("the window is not read out of the child's state, so a crash cannot build a second one", () => {
+  /*
+   * The defect this pins, found by re-reading the crash path rather than by a failing test. The child's `exit`
+   * handler did
+   *
+   *     const window = running?.window;
+   *     running = undefined;
+   *     ... showFailure(...)
+   *
+   * so `showFailure`'s own `running?.window ?? createWindow()` saw `undefined` and built a SECOND window while the
+   * first still showed the dashboard. The reader then has two windows, the failure page is in one they were not
+   * looking at, and the "one window, reused" premise this file states is false on the one path that matters most.
+   *
+   * `running` tracks a CHILD (and is cleared when it dies); the window outlives any one orchestrator, so holding
+   * it there made a lifetime shorter than the thing it held. The window now lives in its own binding.
+   */
+  assert.equal(
+    /running\?\.window/.test(mainSource),
+    false,
+    "the window outlives `running`; reading it from there builds a second window on the crash path",
+  );
+  assert.ok(/function appWindow\(\)/.test(mainSource), "there must be one accessor that creates the window once");
+  // The accessor is what `showFailure` uses, and it creates only when there is no usable window.
+  const accessor = mainSource.slice(mainSource.indexOf("function appWindow()"));
+  assert.match(
+    accessor.slice(0, accessor.indexOf("}") + 1),
+    /window === undefined \|\| window\.isDestroyed\(\)/,
+    "a destroyed window must be replaced, and a live one reused",
+  );
 });
 
 test("the permission handlers read the fields Electron actually sets", () => {

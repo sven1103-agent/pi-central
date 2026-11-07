@@ -42,6 +42,7 @@ import {
   failureDocumentProblems,
   navigationDecision,
   permissionDecision,
+  reloadDecision,
   requestOrigin,
   windowWebPreferences,
 } from "./window-security.ts";
@@ -54,19 +55,42 @@ import {
   planSpawn,
 } from "./orchestrator-process.ts";
 
-/** One launch's worth of state. Replaced wholesale on a restart so no stale port can survive it. */
+/**
+ * The one window, created on first use and reused for the life of the process.
+ *
+ * ## Why the window is not held on `Running`
+ *
+ * `Running` is cleared the moment the child exits, and `showFailure` is called *after* that — so reading the
+ * window out of `running` built a SECOND window on the crash path while the first still showed the dashboard,
+ * which contradicts this slice's "one window, reused" premise. The window outlives any one orchestrator (a
+ * restart reuses it, and a failure page stays until Try again succeeds), so it is held here, where nothing
+ * that tracks a child can clear it.
+ */
+let window: BrowserWindow | undefined;
+
+/** One orchestrator launch. Replaced wholesale on a restart, so no stale port can survive it. */
 interface Running {
   child: ChildProcess;
   url: string;
   httpUrl: string;
-  window: BrowserWindow;
+}
+
+/**
+ * Whether quitting is already under way.
+ *
+ * Read by `retry`, which the renderer can trigger at any time — including during the shutdown window between
+ * `before-quit` and the process actually ending. Spawning an orchestrator there would start something nothing
+ * owns, which is the orphan this file's exit handling exists to avoid.
+ */
+function isQuitting(): boolean {
+  return quitting;
 }
 
 /**
  * The port the child announced, which is the ONLY port the window may display (issue #215).
  *
  * Held separately from `Running` because it outlives a failure: when the orchestrator dies the window shows a
- * failure page, `running` becomes `undefined`, and the "Try again" button navigates back — a navigation that
+ * failure page, `running` becomes `undefined`, and the "Try again" button reloads that page — a navigation that
  * must still be refused unless it is the document the shell minted.
  */
 let announcedPort: number | undefined;
@@ -78,6 +102,15 @@ let announcedPort: number | undefined;
  * from the renderer too — so the exception is this one page, named by a random token, rather than the scheme.
  */
 let failureToken: string | undefined;
+
+/**
+ * The full URL of the failure page currently displayed, so a reload of it can be RECOGNISED.
+ *
+ * `failureToken` answers "is this the document we minted"; this answers "is this that document being reloaded
+ * again", which is the signal the failure page's "Try again" produces. The two are kept apart because they lead
+ * to different answers: a first load must be allowed, and a reload must be allowed *and* made to retry.
+ */
+let failureUrl: string | undefined;
 
 let running: Running | undefined;
 let consecutiveFailures = 0;
@@ -221,7 +254,13 @@ function hardenWindow(window: BrowserWindow): void {
 
   contents.on("will-navigate", (event) => {
     const decision = navigationDecision(event.url, announcedPort, failureToken);
-    if (decision === "allow") return;
+    if (decision === "allow") {
+      // A reload of the failure page we are showing IS the reader pressing "Try again" (see `reloadDecision`).
+      // Re-loading the same `data:` document would re-render the same text and look like nothing happened, so
+      // the decision to retry is taken here and the reload itself is left alone.
+      if (reloadDecision(event.url, failureUrl) === "retry") retry();
+      return;
+    }
     event.preventDefault();
     console.error(`Pi Central: refused a navigation to ${event.url}`);
   });
@@ -266,6 +305,46 @@ function hardenWindow(window: BrowserWindow): void {
 }
 
 /**
+ * The window to show something in, creating it on first use.
+ *
+ * The single accessor for the window, so "exactly one `new BrowserWindow`" stays true and a failure during startup
+ * cannot build a second one.
+ */
+function appWindow(): BrowserWindow {
+  if (window === undefined || window.isDestroyed()) window = createWindow();
+  return window;
+}
+
+/**
+ * Try the launch again, from whatever the reader is looking at (issue #215).
+ *
+ * Guarded rather than blind: a retry during shutdown would spawn an orchestrator nothing owns, which is the
+ * orphan this file's exit handling exists to prevent. A retry while one is already running would start a second
+ * over the same session files — C9's branch-point hazard, one process down.
+ */
+function retry(): void {
+  if (isQuitting()) {
+    console.error("Pi Central: not retrying, because the app is quitting");
+    return;
+  }
+  if (running !== undefined) {
+    console.error("Pi Central: not retrying, because an orchestrator is already running");
+    return;
+  }
+  console.log("Pi Central: trying again");
+  /*
+   * The failure token and URL are deliberately NOT cleared here.
+   *
+   * `start()` is asynchronous when it gets as far as spawning (it waits for the child to announce a port), and
+   * the old failure page stays on screen the whole time. Clearing the token now would make that page stop being
+   * reloadable mid-retry, so a reader who clicks "Try again" twice would get a REFUSAL of the page they are
+   * looking at. Whichever document replaces it clears them: `showFailure` mints a new one, `onAnnounced` clears
+   * both as the UI takes over.
+   */
+  start();
+}
+
+/**
  * Show a failure in whichever window exists, or in a fresh one.
  *
  * The page is minted (`failureDocument`) and then AUDITED (`failureDocumentProblems`) before it is loaded.
@@ -273,7 +352,7 @@ function hardenWindow(window: BrowserWindow): void {
  * the change that would otherwise ship invisibly — a `data:` document has no policy unless it carries one.
  */
 function showFailure(title: string, detail: string): void {
-  const window = running?.window ?? createWindow();
+  const target = appWindow();
   const html = renderFailure(title, detail);
   const problems = failureDocumentProblems(html);
   if (problems.length > 0) {
@@ -282,14 +361,16 @@ function showFailure(title: string, detail: string): void {
     console.error(`Pi Central: refusing to display an unsafe failure page:\n  ${problems.join("\n  ")}`);
     const document = failureDocument(FALLBACK_FAILURE_PAGE);
     failureToken = document.token;
-    void window.loadURL(document.url);
-    window.show();
+    failureUrl = document.url;
+    void target.loadURL(document.url);
+    target.show();
     return;
   }
   const document = failureDocument(html);
   failureToken = document.token;
-  void window.loadURL(document.url);
-  window.show();
+  failureUrl = document.url;
+  void target.loadURL(document.url);
+  target.show();
 }
 
 /**
@@ -378,7 +459,6 @@ function start(): void {
   child.on("exit", (code, signal) => {
     clearTimeout(timeout);
     if (quitting) return;
-    const window = running?.window;
     running = undefined;
     if (!announced) return; // the timeout or the error handler already reported it
     consecutiveFailures += 1;
@@ -412,10 +492,11 @@ function onAnnounced(child: ChildProcess, url: string, httpUrl: string): void {
   }
   announcedPort = port;
   failureToken = undefined;
+  failureUrl = undefined;
 
-  const window = running?.window ?? createWindow();
-  running = { child, url, httpUrl, window };
-  void window.loadURL(httpUrl);
+  const target = appWindow();
+  running = { child, url, httpUrl };
+  void target.loadURL(httpUrl);
   console.log(`Pi Central: orchestrator at ${url} (pid ${child.pid ?? "?"}), window loading ${httpUrl}`);
 }
 
@@ -435,19 +516,19 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    const window = running?.window;
-    if (window === undefined || window.isDestroyed()) return;
-    if (window.isMinimized()) window.restore();
-    window.focus();
+    const existing = window;
+    if (existing === undefined || existing.isDestroyed()) return;
+    if (existing.isMinimized()) existing.restore();
+    existing.focus();
   });
 
   app.whenReady().then(() => {
     start();
     app.on("activate", () => {
-      const window = running?.window;
-      if (window === undefined || window.isDestroyed()) return;
-      window.show();
-      window.focus();
+      const existing = window;
+      if (existing === undefined || existing.isDestroyed()) return;
+      existing.show();
+      existing.focus();
     });
   });
 
