@@ -688,6 +688,10 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
     case "places":
     case "placeListing":
     case "placeError":
+    // The installation facts (issue #220) are the same shape of no-op, and deliberately so: see the
+    // `installFacts` event's docstring. It carries no session data, so there is nothing here for it to replace —
+    // and folding it into this state would make it a second, narrower author of what a snapshot owns (C14).
+    case "installFacts":
       return state;
 
     case "error":

@@ -17,8 +17,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The orchestrator is always started on an ephemeral port, so a leftover process cannot stop a new window opening ([#214]).
 - The shell forwards `HOME` and the other process basics, so a session started from the app can run `pi` at all ([#214]).
 - `node_modules/.bin` is never used to resolve a tool or passed to a session, so `pi` is the installed one and every session can execute it ([#214]).
-- A window that returns to view asks for a fresh snapshot, so a stale page picks up an update without being quit and reopened ([#213]).
+- A window that returns to view asks the orchestrator whether it is stale, so a stale page picks up an update without being quit and reopened ([#213]).
 - Saved work holds the reload back: unsent text or attachments turn the banner into a sentence instead of discarding them ([#213]).
+- `install` states this installation's facts on its own, so the return-to-view re-check costs one file read instead of a walk of the session store ([#220]).
+- A window whose orchestrator predates `install` re-checks silently instead of filling the error strip once per focus ([#220]).
 
 ### Changed
 
@@ -32,6 +34,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 [#212]: https://github.com/sven1103-agent/pi-central/issues/212
 [#214]: https://github.com/sven1103-agent/pi-central/issues/214
 [#213]: https://github.com/sven1103-agent/pi-central/issues/213
+[#220]: https://github.com/sven1103-agent/pi-central/issues/220
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 

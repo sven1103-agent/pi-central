@@ -9,7 +9,7 @@
  * rather than inferring "streaming" from having seen a delta (C8).
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { PROTOCOL_VERSION, supportsDelete, supportsPlaces, supportsRetry, type Control, type HistoricalSession, type LiveSession, type ModelOption } from "@pi-central/protocol";
+import { PROTOCOL_VERSION, supportsDelete, supportsPlaces, supportsRetry, type Control, type HistoricalSession, type InstallFacts, type LiveSession, type ModelOption } from "@pi-central/protocol";
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
 import { ConfirmDelete } from "./components/ConfirmDelete.tsx";
 import { StoppedSession } from "./components/StoppedSession.tsx";
@@ -455,6 +455,15 @@ export function App() {
   const connectionRef = useRef<Connection | undefined>(undefined);
 
   /**
+   * The newest protocol version this page has heard from the orchestrator, or `undefined` before it says.
+   *
+   * The return-to-view re-check runs from a DOM listener that must not be re-registered on every snapshot, so it
+   * reads the version from here rather than from a dependency. `undefined` means "not reported yet", which
+   * `supportsInstall` treats as supported — the same convention `supportsRetry` documents.
+   */
+  const protocolRef = useRef<number | undefined>(undefined);
+
+  /**
    * The stale-page banner (issue #184). Set when the one-shot reload was already spent on this
    * exact disagreement, so reloading again would loop — the banner carries a real Reload button
    * and names the fix that works (restart the older half; ⌘Q in an installed app).
@@ -477,35 +486,89 @@ export function App() {
   // Storage that cannot throw (private mode, full quota): refusal degrades to per-tab memory.
   const updateMarks = useMemo(() => safeSessionStorage(), []);
 
+  /**
+   * What the composer is holding for the focused session, readable from an effect that must not
+   * re-subscribe on every keystroke (issue #213). A draft in the listener's dependency list would tear
+   * the listener down and rebuild it on every character typed.
+   *
+   * Read from `state.focusedId` rather than from `focusedSession(state)` because this must be declared above the
+   * connection effect that uses it, and the selector is defined further down: the key is the same one.
+   */
+  const unsentWork = useRef({ draft: "", attachmentCount: 0 });
+  unsentWork.current = {
+    draft: state.focusedId === undefined ? "" : drafts[state.focusedId] ?? "",
+    attachmentCount: state.focusedId === undefined ? 0 : attachments[state.focusedId]?.length ?? 0,
+  };
+
+  /**
+   * Reloading for a stale page, with the one guard that matters (issue #213).
+   *
+   * The reload is the whole recovery, and it is destructive to exactly one thing: the composer, whose
+   * drafts and attachments exist nowhere but this page. Session state is not at risk — it lives in the
+   * orchestrator, and a reconnect re-fetches every transcript — so the guard is about unsent work only.
+   */
+  const reloadForUpdate = useCallback(() => {
+    if (isReloadBlocked(unsentWork.current)) {
+      setReloadBlocked(true);
+      return;
+    }
+    location.reload();
+  }, []);
+
+  /**
+   * The ONE place a page decides whether the installation facts it just received mean it is stale.
+   *
+   * A snapshot and an `installFacts` answer carry the same `InstallFacts` (issue #220), and both must run
+   * the same sequence: `assessServedUi` then `noteProtocolAgreement`. Two handlers running it separately
+   * would be two chances to disagree about one page — precisely the defect #213 was corrected for — so the
+   * sequence lives here and both paths call it.
+   *
+   * Returns `true` when the caller should carry on with the event normally, `false` when this function has
+   * already taken the decision (reloaded, or set the banner) and the event must not be dispatched. An
+   * `installFacts` event never reaches the store anyway (it holds no session state); a snapshot that turns
+   * out to be stale must not, because the page is about to be replaced.
+   *
+   * A reload is NOT automatic in dev (`import.meta.env.PROD` false): a dev server legitimately serves a
+   * different UI than the orchestrator's disk, so there the verdict becomes the banner.
+   *
+   * The draft guard runs on this path too (issue #213), not only on return-to-view: these facts can arrive
+   * mid-sentence — the orchestrator was restarted while the reader was typing — and reloading then discards
+   * a draft the reader would have no way to recover. The banner says why and waits.
+   */
+  const assessInstall = useCallback(
+    (install: InstallFacts | undefined): boolean => {
+      const verdict = assessServedUi(pageEntry, install, updateMarks);
+      if (verdict.action === "reload" && import.meta.env.PROD) {
+        reloadForUpdate();
+        return false;
+      }
+      if (verdict.action === "banner") setUpdateNotice(verdict.message);
+      // A matching protocol re-arms the skew one-shot for this tab's next update.
+      noteProtocolAgreement(install, PROTOCOL_VERSION, updateMarks);
+      return true;
+    },
+    [pageEntry, updateMarks, reloadForUpdate],
+  );
+
   useEffect(() => {
     const connection = new Connection(socketUrl(), {
       onEvent: (event) => {
         /*
-         * Stale-page detection runs BEFORE the store (issue #184).
+         * Stale-page detection runs BEFORE the store (issue #184), and it runs for BOTH carriers of the facts
+         * (issue #220): a `snapshot` and an `installFacts` answer. Neither may decide for itself — `assessInstall`
+         * is the one place that assesses, so the two paths cannot disagree about one page.
          *
          * A snapshot reports which bundle the orchestrator is serving NOW; this page knows which
          * bundle it was loaded from. If they differ, the page in memory is the old release — the
          * PWA-update case, where clicking the dock icon focused a window that was never reloaded.
          * Reloading is safe here: sessions live in the orchestrator, and a reconnect re-fetches
-         * every transcript, so nothing the page holds is lost. In dev (`import.meta.env.PROD`
-         * false) the reload is NOT automatic — a dev server legitimately serves a different UI
-         * than the orchestrator's disk — and the verdict becomes the banner instead.
+         * every transcript, so nothing the page holds is lost.
          */
-        if (event.kind === "snapshot") {
-          const verdict = assessServedUi(pageEntry, event.install, updateMarks);
-          if (verdict.action === "reload" && import.meta.env.PROD) {
-            /*
-             * The guard runs here too (issue #213), not only on the return-to-view path: a snapshot
-             * can arrive mid-sentence — the orchestrator was restarted while the reader was typing —
-             * and reloading then discards a draft that the reader would have no way to recover. The
-             * banner says why and waits.
-             */
-            reloadForUpdate();
-            return;
-          }
-          if (verdict.action === "banner") setUpdateNotice(verdict.message);
-          // A matching protocol re-arms the skew one-shot for this tab's next update.
-          noteProtocolAgreement(event.install, PROTOCOL_VERSION, updateMarks);
+        if (event.kind === "snapshot" || event.kind === "installFacts") {
+          // Recorded even when the assessment is silent: the return-to-view re-check reads it to decide whether
+          // this peer can be asked at all, and the listener must not depend on a re-render to see it.
+          protocolRef.current = event.install?.protocol;
+          if (!assessInstall(event.install)) return;
         }
         /*
          * A `hello` skew is the same class of event with the same cure, and it is NOT routed to
@@ -644,50 +707,37 @@ export function App() {
   const focused = focusedSession(state);
 
   /**
-   * What the composer is holding for the focused session, readable from an effect that must not
-   * re-subscribe on every keystroke (issue #213). A draft in the listener's dependency list would tear
-   * the listener down and rebuild it on every character typed.
-   */
-  const unsentWork = useRef({ draft: "", attachmentCount: 0 });
-  unsentWork.current = {
-    draft: focused ? drafts[focused.id] ?? "" : "",
-    attachmentCount: focused ? attachments[focused.id]?.length ?? 0 : 0,
-  };
-
-  /**
-   * Reloading for a stale page, with the one guard that matters (issue #213).
-   *
-   * The reload is the whole recovery, and it is destructive to exactly one thing: the composer, whose
-   * drafts and attachments exist nowhere but this page. Session state is not at risk — it lives in the
-   * orchestrator, and a reconnect re-fetches every transcript — so the guard is about unsent work only.
-   */
-  const reloadForUpdate = useCallback(() => {
-    if (isReloadBlocked(unsentWork.current)) {
-      setReloadBlocked(true);
-      return;
-    }
-    location.reload();
-  }, []);
-
-  /**
-   * A window that comes back into view re-checks itself (issue #213).
+   * A window that comes back into view re-checks itself (issues #213, #220).
    *
    * A hidden or minimised window receives no snapshots — the socket is throttled, and a dock click
    * focuses rather than reloads — so it returns holding an old bundle with no verdict about it. The
-   * fix is to ASK: `list` makes the orchestrator broadcast a fresh snapshot, which re-runs the
-   * snapshot handler below and therefore `assessServedUi`/`assessProtocolSkew` with new evidence.
+   * fix is to ASK, and the existing verdict machinery answers: `assessInstall` re-runs
+   * `assessServedUi`/`assessProtocolSkew` with new evidence, and their own one-shot marks decide
+   * whether that becomes a reload or a banner.
    *
    * The first version of this slice reloaded here whenever a mark was recorded, and that was wrong
    * twice: a focus event is not evidence (so it lost drafts on every tab switch), and gating on the
    * mark loops in the reverse-skew case #184 documents, because the marks are written *before* the
    * reload they permit — a new page against an old orchestrator would reload on every focus, forever.
    * Deciding here at all is the mistake; this asks, and one place decides.
+   *
+   * What it asks CHANGED in #220: `list` used to be the question, and `list` re-runs `discover()` over
+   * the whole session store (329 ms measured per focus, growing with the store). Everything the verdict
+   * needs — the served bundle, the protocol version — comes from `install`, which reads one small file
+   * and a cached package walk. History is not part of the question, so it is no longer part of the cost.
    */
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
-      if (recheckOnReturn().action !== "request") return;
-      send({ kind: "list" });
+      const recheck = recheckOnReturn(protocolRef.current);
+      if (recheck.action !== "request") return;
+      /*
+       * An orchestrator that predates the control is not asked (issue #220). A refused send is an `error` event, and
+       * this runs on every focus — so the alternative to silence is a strip that fills with
+       * `bad control: unknown kind 'install'` for a page that is perfectly current. That decision is
+       * `recheckOnReturn`'s, so it cannot be forgotten here.
+       */
+      send(recheck.control);
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);

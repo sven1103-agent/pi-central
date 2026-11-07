@@ -36,7 +36,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PROTOCOL_VERSION, RETRY_SINCE_PROTOCOL, supportsRetry } from "../src/envelopes.ts";
+import {
+  PROTOCOL_VERSION,
+  INSTALL_FACTS_SINCE_PROTOCOL,
+  RETRY_SINCE_PROTOCOL,
+  supportsInstall,
+  supportsRetry,
+} from "../src/envelopes.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const envelopes = readFileSync(resolve(here, "..", "src", "envelopes.ts"), "utf8");
@@ -146,4 +152,24 @@ test("supportsRetry gates on the version that introduced it, not on equality", (
   // flicker for the common case.
   assert.equal(supportsRetry(undefined), true);
   assert.equal(RETRY_SINCE_PROTOCOL, 4);
+});
+
+test("supportsInstall gates on the version that introduced the control, not on equality", () => {
+  // The consequence of getting this wrong is specific and noisy: `install` is sent by a background re-check
+  // on every focus (issue #220), so asking a v8 orchestrator produces one `bad control: unknown kind
+  // 'install'` error event per alt-tab — for a page that is perfectly current.
+  assert.equal(supportsInstall(8), false, "v8 has no install control");
+  assert.equal(supportsInstall(INSTALL_FACTS_SINCE_PROTOCOL), true, "the version that introduced it");
+  assert.equal(supportsInstall(INSTALL_FACTS_SINCE_PROTOCOL + 1), true, "a later version still has it");
+  // Unknown is "the handshake has not finished", not "old" — the convention `supportsRetry` documents.
+  assert.equal(supportsInstall(undefined), true);
+  assert.equal(INSTALL_FACTS_SINCE_PROTOCOL, 9);
+});
+
+test("the cheap re-check's two kinds are in the pinned surface, so neither can slip in unbumped", () => {
+  // `install` is a CONTROL and `installFacts` an EVENT, and adding either is a wire change (v8 → v9): a v8
+  // orchestrator receiving the control answers `unknown kind`, and a v8 UI receiving the event would ignore
+  // it — which for a re-check means a stale page that never learns it is stale.
+  assert.ok(kindsOf("Control").includes("install"));
+  assert.ok(kindsOf("Event").includes("installFacts"));
 });
