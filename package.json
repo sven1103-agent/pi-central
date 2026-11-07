@@ -23,11 +23,12 @@
   "workspaces": [
     "packages/protocol",
     "packages/orchestrator",
-    "packages/ui"
+    "packages/ui",
+    "packages/app"
   ],
   "scripts": {
     "test": "node --test \"packages/*/test/**/*.test.ts\" \"packages/*/test/**/*.test.mjs\" \"scripts/**/*.test.mjs\"",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p packages/ui/tsconfig.json && tsc --noEmit -p packages/app/tsconfig.json",
     "smoke": "node packages/orchestrator/src/cli.ts",
     "server": "node packages/orchestrator/src/server.ts",
     "ui:dev": "npm run dev --workspace @pi-central/ui",
@@ -37,7 +38,8 @@
     "verify": "npm run typecheck && npm test && npm run check:docs && npm run check:version",
     "build:package": "node scripts/build-package.mjs",
     "pack": "npm run build:package && npm pack",
-    "serve:package": "node bin/pi-central.js"
+    "serve:package": "node bin/pi-central.js",
+    "app": "electron packages/app/src/main.ts"
   },
   "dependencies": {
     "ws": "^8.22.0"
