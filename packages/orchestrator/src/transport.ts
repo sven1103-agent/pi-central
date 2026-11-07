@@ -56,6 +56,18 @@ export interface TransportOptions {
    * wants: otherwise every transport test would depend on whether the UI happened to be built.
    */
   uiDir?: string | null;
+  /**
+   * Session discovery, replaceable so a test can COUNT it (issue #220).
+   *
+   * Injectable rather than mocked: #220's whole claim is that a window returning to view no longer runs
+   * discovery, and the only way to assert that is to count the calls. Node's `mock.module` would do it, but
+   * it is experimental and needs a flag this repository's test script does not pass — so the seam is a
+   * parameter, the same shape `static-ui.ts` uses for its packaged-layout test.
+   *
+   * It is a seam and nothing more: no production caller passes it, and the default is the real function, so
+   * there is no second discovery implementation to keep in step.
+   */
+  discoverSessions?: typeof discover;
 }
 
 export interface TransportAddress {
@@ -79,6 +91,7 @@ export interface TransportAddress {
  */
 const CONTROL_KINDS: Record<Control["kind"], true> = {
   list: true,
+  install: true,
   start: true,
   prompt: true,
   clearQueue: true,
@@ -129,12 +142,17 @@ export function parseControl(raw: string): Control | { error: string } {
 export class Transport {
   #supervisor: Supervisor;
   #config: Config;
-  #options: Required<TransportOptions>;
+  /**
+   * The resolved options, with the discovery seam kept OUT: it has its own field, because it is a function to
+   * call rather than a value to read, and folding it in here would make `Required<…>` promise a non-null one.
+   */
+  #options: Required<Omit<TransportOptions, "discoverSessions">>;
   #server: Server | undefined;
   #wss: WebSocketServer | undefined;
   #clients = new Set<WebSocket>();
   #address: TransportAddress | undefined;
   #install: InstallFacts | undefined;
+  #discover: typeof discover;
 
   constructor(supervisor: Supervisor, config: Config, options: TransportOptions = {}) {
     this.#supervisor = supervisor;
@@ -145,6 +163,7 @@ export class Transport {
       maxClients: options.maxClients ?? 8,
       uiDir: options.uiDir === undefined ? resolveUiDistDir() : options.uiDir,
     };
+    this.#discover = options.discoverSessions ?? discover;
   }
 
   get address(): TransportAddress | undefined {
@@ -265,7 +284,7 @@ export class Transport {
     let history: HistoricalSession[] = [];
     let historyTotal = 0;
     try {
-      const discovered = await discover(this.#config);
+      const discovered = await this.#discover(this.#config);
       history = discovered.sessions;
       historyTotal = discovered.total;
     } catch (error) {
@@ -338,7 +357,7 @@ export class Transport {
   async #dispatch(control: Control): Promise<void> {
     switch (control.kind) {
       case "list": {
-        const discovered = await discover(this.#config);
+        const discovered = await this.#discover(this.#config);
         this.#broadcast({ kind: "history", history: discovered.sessions, total: discovered.total });
         this.#broadcast({
           kind: "snapshot",
@@ -352,6 +371,23 @@ export class Transport {
           // than only when the socket happens to drop.
           install: this.#snapshotInstallFacts(),
         });
+        return;
+      }
+      case "install": {
+        /*
+         * The cheap question (issue #220).
+         *
+         * `install` states the facts about this installation and nothing else — deliberately no discovery, no
+         * supervisor listing, no transcript fetch. It exists because the alternative was `list`, which re-runs
+         * `discover()` over the whole store, and a page returning to view asks this on EVERY focus. Measured: a
+         * median of 329 ms of filesystem work per alt-tab, on 886 sessions, and it grows with the store.
+         *
+         * Broadcast rather than sent to the asker: the answer is a fact about the process, identical for every
+         * client, and a listener that happens to be watching the same installation benefits from the same answer.
+         * The alternative — echoing to one socket — would make the served-UI identity a per-client value, which
+         * it is not.
+         */
+        this.#broadcast({ kind: "installFacts", install: this.#snapshotInstallFacts() });
         return;
       }
       case "start": {
@@ -572,7 +608,7 @@ export class Transport {
 
         // Then re-describe the store, so both the rail and History drop the row from one authoritative answer
         // rather than each removing it locally and possibly disagreeing.
-        const after = await discover(this.#config);
+        const after = await this.#discover(this.#config);
         this.#broadcast({ kind: "history", history: after.sessions, total: after.total });
         this.#broadcast({
           kind: "snapshot",

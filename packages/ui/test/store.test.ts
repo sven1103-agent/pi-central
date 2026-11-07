@@ -879,3 +879,29 @@ test("a session event with no file changes no history entry", () => {
   state = reduce(state, { kind: "session", session: live({ id: "s1", name: "unmatched" }) });
   assert.equal(state.history[0]!.name, "old name", "nothing matched, nothing changed");
 });
+
+test("installFacts leaves session state untouched, because it carries none (issue #220)", () => {
+  /*
+   * The event exists so a returning window can ask a cheap question, and C14 makes a SNAPSHOT the thing that
+   * replaces what the client believed. This event is deliberately narrower: it is a fact about the process.
+   *
+   * The assertion is identity, not equality — the reducer returns the SAME object, so this event cannot cause a
+   * re-render (it arrives on every alt-tab) and cannot become a second, partial author of state a snapshot owns.
+   * Folding it in would be the tempting simplification, and it would let a message about the version of a folder
+   * overwrite what a client knows about its sessions.
+   */
+  let state = initialState();
+  state = reduce(state, { kind: "session", session: live({ id: "s1" }) });
+  state = reduce(state, {
+    kind: "snapshot",
+    live: [live({ id: "s1" })],
+    history: [],
+    historyTotal: 0,
+    home: "/Users/x",
+    install: { version: "1.0.0", sessionsRoot: "/s", workspaceRoot: "/w", agentRoot: "/a", agentRootManaged: true, protocol: 9 },
+  });
+  const facts = { version: "2.0.0", sessionsRoot: "/s2", workspaceRoot: "/w2", agentRoot: "/a2", agentRootManaged: false, protocol: 9 };
+  const next = reduce(state, { kind: "installFacts", install: facts });
+  assert.equal(next, state, "no state change, so no re-render on a per-focus message");
+  assert.equal(next.install?.version, "1.0.0", "the snapshot remains the authority on the facts the UI renders");
+});

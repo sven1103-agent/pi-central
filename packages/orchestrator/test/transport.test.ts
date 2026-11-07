@@ -1300,3 +1300,146 @@ test("a listing is abbreviated and names its own folder, so the crumb needs no p
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// --- The cheap re-check (issue #220) ------------------------------------------------------------
+//
+// A page returning to view re-checks itself (issue #213), and it used to do that by sending `list`,
+// which re-runs `discover()` over the whole session store — a median of 329 ms on this machine, over
+// 886 sessions, paid on every alt-tab and growing with the store. None of that work is in the answer
+// the re-check needs, so the question is `install` and these tests count the difference.
+//
+// The count is the assertion. A test that only checked "an `installFacts` event arrives" would pass
+// with `install` implemented as a `list` in disguise, which is exactly the regression to prevent.
+
+/**
+ * A transport whose discovery is a counter.
+ *
+ * The default `discover` reads the real session store, so a test asserting "no discovery happened"
+ * cannot use it — it would either read the developer's own sessions or refuse on `/nonexistent`. This
+ * replaces the function rather than the module: see `TransportOptions.discoverSessions`.
+ */
+function countingTransport(options: { uiDir?: string | null } = {}): {
+  transport: Transport;
+  discoveries: () => number;
+} {
+  let count = 0;
+  const transport = new Transport(new FakeSupervisor() as never, emptyConfig(), {
+    uiDir: options.uiDir === undefined ? null : options.uiDir,
+    discoverSessions: async () => {
+      count += 1;
+      return { sessions: [], total: 0, skipped: [] };
+    },
+  });
+  return { transport, discoveries: () => count };
+}
+
+test("a window returning to view does NOT trigger discovery (issue #220)", async () => {
+  // The acceptance criterion, as a count. `install` is what the UI sends on `visibilitychange`, and one
+  // send must cost zero discoveries — the connecting snapshot is the only one in this test.
+  const { transport, discoveries } = countingTransport();
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    const afterConnect = discoveries();
+    assert.equal(afterConnect, 1, "the connecting snapshot discovers once; that is not what this tests");
+
+    // Three focus events, as an alt-tab-happy reader produces.
+    for (let i = 0; i < 3; i += 1) {
+      client.send({ kind: "install" });
+      await client.next("installFacts");
+    }
+    assert.equal(
+      discoveries(),
+      afterConnect,
+      "a re-check must not walk the session store: that is the 329 ms per focus this slice removes",
+    );
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("`install` still answers with the facts the verdict needs, from the same source a snapshot uses (issue #220)", async () => {
+  // The other half: cheap is worthless if the answer is wrong. The served-UI identity is what a stale page
+  // compares against, and the protocol version is what gates the control — both must be present and must
+  // agree with the snapshot that preceded them.
+  const uiDir = mkdtempSync(join(tmpdir(), "pi-central-transport-install-"));
+  try {
+    writeFileSync(
+      join(uiDir, "index.html"),
+      '<!doctype html><script type="module" crossorigin src="/assets/index-DEADBEEF.js"></script>\n',
+    );
+    const { transport } = countingTransport({ uiDir });
+    const address = await transport.listen();
+    try {
+      const client = await TestClient.connect(address.url);
+      const snapshot = await client.next("snapshot");
+      client.send({ kind: "install" });
+      const answer = await client.next("installFacts");
+      assert.equal(answer.kind, "installFacts");
+      if (answer.kind !== "installFacts" || snapshot.kind !== "snapshot") return;
+
+      assert.equal(answer.install.ui?.entry, "assets/index-DEADBEEF.js");
+      assert.equal(answer.install.protocol, PROTOCOL_VERSION);
+      // Same source, not a second copy: a disagreement here would be two verdicts about one page.
+      assert.deepEqual(answer.install, snapshot.install);
+
+      // It carries NO session data (C14): this event replaces nothing, and a client that folded it into
+      // its state would otherwise be able to lose a transcript to a message about a version.
+      assert.deepEqual(Object.keys(answer).sort(), ["install", "kind"]);
+      client.close();
+    } finally {
+      await transport.close();
+    }
+  } finally {
+    rmSync(uiDir, { recursive: true, force: true });
+  }
+});
+
+test("`install` is broadcast, so every window sees the same facts about one process", async () => {
+  // Not an echo to the asker. The facts describe the PROCESS, so a second window watching the same
+  // installation must not miss an answer that the first one asked for — and the reconnect case (a window
+  // that was hidden while the orchestrator was replaced) is exactly a second observer.
+  const { transport } = countingTransport();
+  const address = await transport.listen();
+  try {
+    const asker = await TestClient.connect(address.url);
+    await asker.next("snapshot");
+    const watcher = await TestClient.connect(address.url);
+    await watcher.next("snapshot");
+
+    asker.send({ kind: "install" });
+    const [mine, theirs] = await Promise.all([asker.next("installFacts"), watcher.next("installFacts")]);
+    assert.equal(mine.kind, "installFacts");
+    assert.equal(theirs.kind, "installFacts");
+    assert.deepEqual(mine, theirs);
+    asker.close();
+    watcher.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("`list` still refreshes history and the rail, unchanged by this slice (issue #220)", async () => {
+  // The old path keeps working, and it is the ONLY path that discovers — so the split is asserted from
+  // both sides rather than assumed from the cheap one.
+  const { transport, discoveries } = countingTransport();
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    const before = discoveries();
+    client.send({ kind: "list" });
+    const snapshot = await client.next("snapshot");
+    assert.equal(snapshot.kind, "snapshot");
+    if (snapshot.kind !== "snapshot") return;
+    assert.equal(discoveries(), before + 1, "list is what re-runs discovery");
+    assert.deepEqual(snapshot.history, []);
+    assert.equal(snapshot.historyTotal, 0);
+    assert.ok(snapshot.install !== undefined, "and it still carries the facts, as it did before #220");
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});

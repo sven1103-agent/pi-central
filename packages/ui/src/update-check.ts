@@ -46,6 +46,7 @@
  * browser.
  */
 import type { InstallFacts } from "@pi-central/protocol";
+import { supportsInstall } from "@pi-central/protocol";
 
 /** `sessionStorage` keys for the one-shot marks. Tab-scoped on purpose: a new tab re-evaluates. */
 export const UPDATE_RELOAD_KEY = "pi-central.update-reload";
@@ -137,10 +138,11 @@ export function safeSessionStorage(): StorageLike {
 export const SKEW_PREFIX = "protocol mismatch:";
 
 /** One record of what a page returning to view did. */
-export type ReturnAction = { action: "request" } | { action: "none" };
+export type ReturnAction = { action: "request"; control: { kind: "install" } } | { action: "none" };
 
 /**
- * Should this page ask the orchestrator to re-state itself, because it just came back into view?
+ * Should this page ask the orchestrator to re-state itself, because it just came back into view — and with
+ * which control?
  *
  * ## Why this asks, instead of reloading
  *
@@ -154,17 +156,29 @@ export type ReturnAction = { action: "request" } | { action: "none" };
  *      one-shot guard that stops the snapshot path looping does not stop this one, because here the
  *      decision is made by the page rather than by a fresh verdict.
  *
- * So a page that comes back into view **asks**, and the existing verdict machinery answers. `list`
- * makes the orchestrator broadcast a fresh `snapshot`, which re-runs `assessServedUi` and
- * `assessProtocolSkew` with new evidence — and their own one-shot marks decide whether that becomes a
- * reload or a banner. There is exactly one place that decides to reload, and it is the one that has
- * always had the evidence for it.
+ * So a page that comes back into view **asks**, and the existing verdict machinery answers: the answer
+ * re-runs `assessServedUi` and `assessProtocolSkew` with new evidence, and their own one-shot marks decide
+ * whether that becomes a reload or a banner. There is exactly one place that decides to reload, and it is
+ * the one that has always had the evidence for it.
  *
- * Nothing is lost by asking: the round trip is one local message, the page already holds its state,
- * and a window that is genuinely current gets a snapshot it would have received on any reconnect.
+ * ## Why the question is `install` and not `list` (issue #220)
+ *
+ * `list` was the question, because a snapshot carries the installation facts. It also re-runs
+ * `discover()` over the whole session store: **329 ms median per focus** on this machine, over 886
+ * sessions, growing with the store — paid on every alt-tab, for history the verdict does not look at.
+ * `install` states the same facts from one small file read and a cached package walk, so the answer is
+ * identical and the cost is not.
+ *
+ * ## Why an old peer is not asked (issue #220)
+ *
+ * A refused control is an `error` event. This runs on every focus, so asking an orchestrator that predates
+ * `install` would fill the error strip with one `bad control: unknown kind 'install'` per alt-tab, for a
+ * page that is perfectly current. Silence is the right answer to a peer that cannot answer, which is what
+ * `supportsInstall` decides — the same shape as `supportsPlaces`.
  */
-export function recheckOnReturn(): ReturnAction {
-  return { action: "request" };
+export function recheckOnReturn(protocol: number | undefined): ReturnAction {
+  if (!supportsInstall(protocol)) return { action: "none" };
+  return { action: "request", control: { kind: "install" } };
 }
 
 /**

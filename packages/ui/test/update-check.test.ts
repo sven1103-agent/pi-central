@@ -26,6 +26,7 @@ import {
   noteProtocolAgreement,
   type StorageLike,
 } from "../src/update-check.ts";
+import { PROTOCOL_VERSION } from "@pi-central/protocol";
 
 /** A `sessionStorage` stand-in that records what the decision did with it. */
 function fakeStorage(initial: Record<string, string> = {}): StorageLike & { map: Map<string, string> } {
@@ -131,12 +132,37 @@ test("a snapshot from a SKEWED orchestrator does not re-arm the mark", () => {
 //   - a reload gated on the RECORDED marks loops in the reverse-skew case #184 documents, because those
 //     marks are written *before* the reload they permit, so the window would reload on every focus.
 //
-// Asking the orchestrator for a fresh snapshot puts the decision back where the evidence is.
+// Asking the orchestrator puts the decision back where the evidence is.
 
-test("a window returning to view asks for a fresh snapshot, and decides nothing itself", () => {
+// --- What the re-check asks (issue #220) ------------------------------------------------------
+//
+// `list` used to be the question, and it re-runs `discover()` over the whole session store: 329 ms median
+// per focus on a store of 886 sessions, growing with it. None of that work is in the answer, so the
+// question is now `install`. These assertions pin BOTH halves: that the control is `install`, and that a
+// peer which cannot answer it is not asked at all.
+
+test("a window returning to view asks for the installation facts, and decides nothing itself", () => {
   // The same answer whatever the marks say: this function has no storage parameter precisely so it
   // cannot make the reload decision that its caller is not equipped to review.
-  assert.deepEqual(recheckOnReturn(), { action: "request" });
+  assert.deepEqual(recheckOnReturn(PROTOCOL_VERSION), { action: "request", control: { kind: "install" } });
+});
+
+test("the re-check never asks for `list`, which is the expensive question it replaced", () => {
+  // The regression this guards: reverting to `list` restores a full discovery per focus, and nothing else in
+  // the suite would notice — the UI would work exactly as well, just 329 ms later each time.
+  const control = recheckOnReturn(PROTOCOL_VERSION);
+  assert.notDeepEqual(control, { action: "request", control: { kind: "list" } });
+  assert.equal(control.action === "request" ? control.control.kind : undefined, "install");
+});
+
+test("an orchestrator that predates the control is not asked, so no error strip per focus", () => {
+  // A refused send is an `error` event, and this runs on every alt-tab. Silence, not a fallback to `list`: the
+  // point of the slice is that a focus event should not cost a discovery, and a stale page on an old
+  // orchestrator is caught by the snapshot a reconnect delivers anyway.
+  assert.deepEqual(recheckOnReturn(PROTOCOL_VERSION - 1), { action: "none" });
+  assert.deepEqual(recheckOnReturn(1), { action: "none" });
+  // `undefined` is "not reported yet", not "old" — the convention `supportsRetry` documents.
+  assert.deepEqual(recheckOnReturn(undefined), { action: "request", control: { kind: "install" } });
 });
 
 test("the round trip the request starts is what decides, so one reload still comes from one verdict", () => {
@@ -144,12 +170,26 @@ test("the round trip the request starts is what decides, so one reload still com
   // verdict is a banner rather than a reload, which is the property reload-on-return broke — it would
   // have reloaded again, because the mark only says "we once tried".
   const storage = fakeStorage();
-  assert.deepEqual(recheckOnReturn(), { action: "request" });
+  assert.deepEqual(recheckOnReturn(PROTOCOL_VERSION), { action: "request", control: { kind: "install" } });
   assert.equal(assessServedUi("assets/index-OLD.js", install("assets/index-NEW.js"), storage).action, "reload");
 
   // After the reload: ask again, receive the same disagreement, and this time the mark is spent.
-  assert.deepEqual(recheckOnReturn(), { action: "request" });
+  assert.deepEqual(recheckOnReturn(PROTOCOL_VERSION), { action: "request", control: { kind: "install" } });
   assert.equal(assessServedUi("assets/index-OLD.js", install("assets/index-NEW.js"), storage).action, "banner");
+});
+
+test("the same verdict arrives through `installFacts` as through a snapshot", () => {
+  // The refactor's risk, stated in the issue: two handlers running the assessment sequence are two chances to
+  // disagree. The sequence is one function in App; what is assertable here is that the FACTS the two paths carry
+  // are the same shape, so neither can produce a verdict the other cannot.
+  const storage = fakeStorage();
+  const facts = install("assets/index-NEW.js");
+  assert.equal(assessServedUi("assets/index-OLD.js", facts, storage).action, "reload");
+  assert.equal(storage.map.get(UPDATE_RELOAD_KEY), "assets/index-NEW.js");
+  // And the protocol half of the same message still re-arms the skew mark.
+  const skewStorage = fakeStorage({ [PROTOCOL_RELOAD_KEY]: "protocol mismatch: …" });
+  noteProtocolAgreement(facts, facts.protocol, skewStorage);
+  assert.equal(skewStorage.map.has(PROTOCOL_RELOAD_KEY), false);
 });
 
 test("unsent work blocks the reload, and whitespace alone does not", () => {
@@ -166,4 +206,21 @@ test("the blocked message names what is holding the reload, and the way out", ()
   // One place for the sentence, so the banner cannot promise a reload the guard is refusing.
   assert.match(BLOCKED_RELOAD_MESSAGE, /discard/);
   assert.match(BLOCKED_RELOAD_MESSAGE, /Send or clear/);
+});
+
+test("an old peer is not asked, but a skew is still reported and still reloads once (issue #220)", () => {
+  /*
+   * The half a `supportsInstall` gate could plausibly break, so it is asserted rather than assumed. Refusing to
+   * ASK an old orchestrator must not be mistaken for refusing to REPORT one: the skew verdict comes from `hello`,
+   * which the connection consumes before any control is sent, so the gate only removes the per-focus question —
+   * not the warning, and not the one-shot reload that follows it.
+   */
+  assert.deepEqual(recheckOnReturn(PROTOCOL_VERSION - 1), { action: "none" }, "not asked");
+
+  const storage = fakeStorage();
+  const skew = "protocol mismatch: the orchestrator speaks v8 and this UI speaks v9. Reload the UI; if that fails, restart the orchestrator.";
+  assert.equal(assessProtocolSkew(skew, storage).action, "reload", "still reported, and still reloads once");
+  const second = assessProtocolSkew(skew, storage);
+  assert.equal(second.action, "banner", "and the second verdict is a banner, not a loop");
+  if (second.action === "banner") assert.match(second.message, /restart the orchestrator/);
 });

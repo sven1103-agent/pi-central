@@ -265,6 +265,25 @@ export type Control =
    * places themselves, which is the first thing the sheet needs and is not a directory listing.
    */
   | { kind: "listPlaces"; path?: string | undefined; includeHidden?: boolean }
+  /**
+   * State the facts about this installation (issue #220).
+   *
+   * ## Why this exists beside `list`, which also carries them
+   *
+   * A page that returns to view must re-check whether it is stale (issue #213), and it used to do that by
+   * sending `list` — which re-runs `discover()` over the whole session store. Measured on this machine: a
+   * median of 329 ms of filesystem work per focus event, on 886 sessions, growing with the store.
+   *
+   * That work is not needed to answer the question being asked. The served UI identity comes from reading
+   * `index.html` on disk, the protocol version is a constant, and the version comes from a package walk that
+   * is already cached per process. So the question gets its own narrow control, and the UI's re-check asks
+   * this instead of asking for everything.
+   *
+   * It is deliberately NOT a `list` flag: `list` is what refreshes history and the rail, and a flag would
+   * make one handler's behaviour depend on a boolean — the shape where the cheaper path eventually answers
+   * a question it was not asked.
+   */
+  | { kind: "install" }
   | { kind: "resume"; path: string; mode?: "sandboxed" | "direct" };
 
 /**
@@ -557,7 +576,19 @@ export type Event =
    * transcript: "this directory has no subdirectories" and "this directory could not be read" are opposite
    * facts, and rendering one as the other sends the reader to the wrong fix.
    */
-  | { kind: "placeError"; path: string | undefined; reason: FileErrorReason; code?: string | undefined; message: string };
+  | { kind: "placeError"; path: string | undefined; reason: FileErrorReason; code?: string | undefined; message: string }
+  /**
+   * Facts about this installation, in answer to `install` (issue #220).
+   *
+   * Carries the SAME `InstallFacts` a snapshot does, from the same code path, so the two cannot disagree about
+   * which bundle is being served or which protocol both halves speak.
+   *
+   * **It carries no session data, and it must stay that narrow.** C14 makes a snapshot authoritative and
+   * replacing; this event replaces nothing, because a client that folds it into its state would otherwise be
+   * able to lose a transcript to a message about the version of a folder. What it is for is the comparison the
+   * page cannot make alone: its own bundle against the one on disk now.
+   */
+  | { kind: "installFacts"; install: InstallFacts };
 
 /** One entry in a directory listing. Metadata only: a listing never reads file contents. */
 export interface FileEntry {
@@ -719,8 +750,16 @@ export interface PlaceListingInfo {
  * Four new KINDS, so `wire-surface.test.ts` catches this one — and the bump is not optional regardless: a v7
  * orchestrator receiving `listPlaces` would answer `bad control: unknown kind 'listPlaces'`, and the sheet would
  * silently offer no places at all, which looks exactly like a machine with no directories on it.
+ *
+ * v9 (issue #220): the `install` control and the `installFacts` event.
+ *
+ * Two new KINDS, so the fingerprint catches this one. The consequence of a missed bump is specific and would be
+ * nasty: the UI's return-to-view re-check asks `install` on every focus, so against a v8 orchestrator it would
+ * answer `bad control: unknown kind 'install'` and the error strip would fill up with one row per alt-tab. The UI
+ * gates the send on `supportsInstall` for exactly that reason, and the refusal is not the fallback — the silence
+ * is.
  */
-export const PROTOCOL_VERSION = 8 as const;
+export const PROTOCOL_VERSION = 9 as const;
 
 /**
  * The first protocol version that understands the `retry` control (issue #11).
@@ -761,6 +800,22 @@ export const PLACES_SINCE_PROTOCOL = 8;
 /** Whether a peer speaking `protocol` can list the chooser's places. */
 export function supportsPlaces(protocol: number | undefined): boolean {
   return protocol === undefined ? true : protocol >= PLACES_SINCE_PROTOCOL;
+}
+
+/**
+ * The first protocol version that understands the `install` control (issue #220).
+ *
+ * The same reasoning as `PLACES_SINCE_PROTOCOL`, with a consequence that would be worse: this control is sent by a
+ * background re-check on every focus, so an unsupported send does not fail one gesture — it produces an error event
+ * per alt-tab, and the reader would be looking at a strip full of `bad control: unknown kind 'install'` for a page
+ * that is perfectly current. Asking a peer that cannot answer is skipped instead.
+ */
+export const INSTALL_FACTS_SINCE_PROTOCOL = 9;
+
+/** Whether a peer speaking `protocol` can be asked to state its installation facts. */
+export function supportsInstall(protocol: number | undefined): boolean {
+  // `undefined` is "not reported yet", not "old" — the same convention `supportsRetry` documents.
+  return protocol === undefined ? true : protocol >= INSTALL_FACTS_SINCE_PROTOCOL;
 }
 
 /** Whether a peer speaking `protocol` can be asked to delete a session. */

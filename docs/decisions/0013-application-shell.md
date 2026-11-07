@@ -19,8 +19,9 @@ when its dock icon is clicked (#184). The stale-page check built for it works â€
 fingerprinted bundle the page was loaded from against the one the orchestrator reports serving, and
 reloads once â€” but a window that was **hidden** while the orchestrator was replaced receives no
 snapshot, so it came back holding an old bundle with no verdict about it and a banner advising "quit
-the app and reopen". #213 closed the reload half of that (ask for a fresh snapshot on return, hold the
-reload back if the composer has unsent work). What it cannot close is that **a browser tab has no way
+the app and reopen". #213 closed the reload half of that (ask on return whether the served bundle has
+changed, hold the reload back if the composer has unsent work; #220 made that question cost one file read
+rather than a walk of the session store). What it cannot close is that **a browser tab has no way
 to restart the thing behind it**, and "reopen the app" remains an instruction rather than an action.
 
 **The other is the missing desktop surface**, which is a product observation rather than a defect: no
