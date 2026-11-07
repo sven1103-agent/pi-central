@@ -176,6 +176,13 @@ export interface SpawnPlanInput {
   /** Resolved `pi` and `safehouse`, passed so the child does not have to re-find them. */
   pi: FoundExecutable;
   safehouse: FoundExecutable;
+  /**
+   * The shell's own environment, from which {@link INHERITED} names are forwarded.
+   *
+   * Required rather than defaulted to `process.env`, for the reason `LaunchSpec.env` is required in the
+   * orchestrator: an optional source means a caller that forgot it silently inherits everything.
+   */
+  sourceEnv: NodeJS.ProcessEnv;
   /** Extra options from the shell's own argv, forwarded verbatim after the port. */
   extraArgs?: readonly string[];
 }
@@ -195,9 +202,20 @@ export interface SpawnPlanInput {
  * variables a launcher added — and the orchestrator would then pass an unknown subset on. So the plan
  * carries an explicit allowlist, and `PATH` is the resolved one rather than the truncated launchd one.
  *
- * `PI_CENTRAL_NODE`, `PI_CENTRAL_PI` and `PI_CENTRAL_SAFEHOUSE` are how the shell tells the child where
- * its tools are without asking the child to repeat the login-shell lookup. They are read by
- * `config.ts`, which already resolves `safehouse` from `PI_CENTRAL_SAFEHOUSE`.
+ * ## `HOME` and friends: the allowlist that broke every session
+ *
+ * The first version of this function passed **only** PATH and the three `PI_CENTRAL_*` pointers, on the
+ * reasoning that the orchestrator builds each session's environment from an allowlist anyway (C11). That
+ * reasoning had the levels confused: `env.ts` reads its `PASSTHROUGH` list from **`process.env`** — the
+ * orchestrator's own environment — so a variable the shell never passed does not exist for any session
+ * either. The observed failure was a fresh clone of `pi` refusing to start, in every session:
+ *
+ *     HOME is not set; set HOME in the environment before running this script.
+ *
+ * So this allowlist is the outer of two, and it must carry the process basics the inner one expects to
+ * find: `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, the locale and terminal variables. What it must
+ * *not* carry is the unbounded set — every API token, every agent socket — which is the distinction C11
+ * actually draws (an allowlist, not a denylist).
  */
 export function planSpawn(input: SpawnPlanInput): SpawnPlan {
   const env: Record<string, string> = {
@@ -207,6 +225,17 @@ export function planSpawn(input: SpawnPlanInput): SpawnPlan {
     PI_CENTRAL_PI: input.pi.path,
     PI_CENTRAL_SAFEHOUSE: input.safehouse.path,
   };
+  // The process basics, forwarded from the shell's own environment. Every name here is one `env.ts`
+  // lists in `PASSTHROUGH`, which means the orchestrator cannot manufacture it — it can only pass on
+  // what it was given. `PATH` is the exception, composed below.
+  for (const name of INHERITED) {
+    const value = input.sourceEnv[name];
+    if (value !== undefined && value !== "") env[name] = value;
+  }
+  for (const [name, value] of Object.entries(input.sourceEnv)) {
+    if (!name.startsWith(OWN_PREFIX) || value === undefined || value === "") continue;
+    env[name] = value;
+  }
   // The resolved PATH, so the child can find anything else it shells out to (`git`, `gh`, …) without
   // repeating the login-shell lookup. Composed from the directories of the binaries we resolved plus
   // the standard set, which is enough for the tools the orchestrator itself runs.
@@ -214,6 +243,54 @@ export function planSpawn(input: SpawnPlanInput): SpawnPlan {
   const args = [input.pkg.bin, "--port", "0", ...(input.extraArgs ?? [])];
   return { command: input.node.path, args, cwd: input.pkg.root, env };
 }
+
+/**
+ * Variables the app forwards from its own environment to the orchestrator.
+ *
+ * Deliberately the same names as `env.ts`'s `PASSTHROUGH` minus the `PI_*` switches (which the shell does
+ * not set) and minus `PATH` (composed). Keeping the two lists in step matters: a name the orchestrator
+ * expects to read and the shell does not forward is a capability that silently disappears, which is
+ * exactly how `HOME` made every session fail.
+ *
+ * Absent on purpose, with the reason: every `*_TOKEN`, `*_KEY`, `*_SECRET` and `SSH_AUTH_SOCK`. The
+ * orchestrator injects an agent's own credentials per session from its own store (ADR-0010); the app is
+ * not a credential path, and C11's boundary starts at the outermost allowlist.
+ */
+export const INHERITED = [
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TMPDIR",
+  "LANG",
+  "LC_ALL",
+  "TERM",
+  "COLORTERM",
+  "EDITOR",
+  "VISUAL",
+  // Pi's own switches, which `env.ts` passes on to every session. Forwarded for the same reason as
+  // `HOME`: an app that dropped them would make `PI_OFFLINE=1` work in a terminal and not in the app.
+  "PI_OFFLINE",
+  "PI_SKIP_VERSION_CHECK",
+  "PI_TIMING",
+  "PI_CODING_AGENT_DIR",
+  "PI_CODING_AGENT_SESSION_DIR",
+  "PI_PACKAGE_DIR",
+  "PI_SUBAGENT_PI_BINARY",
+] as const;
+
+/**
+ * The prefix the app forwards wholesale: Pi Central's own configuration namespace.
+ *
+ * `PI_CENTRAL_WORKSPACE`, `PI_CENTRAL_STATE`, `PI_CENTRAL_PI`, `PI_CENTRAL_SAFEHOUSE`, `PI_CENTRAL_PACKAGE`
+ * and anything added later are names this product owns, so forwarding by prefix is still an allowlist —
+ * unlike forwarding `*_TOKEN`, where the space is unbounded and user-defined (C11).
+ *
+ * This matters more than it looks: a reader who set `PI_CENTRAL_WORKSPACE` in their shell must get the
+ * same workspace from the app, or the app silently uses a different default and their scratch sessions
+ * land somewhere they did not choose.
+ */
+export const OWN_PREFIX = "PI_CENTRAL_";
 
 /**
  * A `PATH` made of the directories the resolved binaries live in, with the standard set kept.

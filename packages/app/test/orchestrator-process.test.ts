@@ -17,6 +17,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  INHERITED,
   LineAccumulator,
   MAX_CONSECUTIVE_FAILURES,
   composePath,
@@ -29,6 +30,30 @@ import type { FoundExecutable } from "../src/executables.ts";
 
 function exe(name: string, path: string): FoundExecutable {
   return { name, path, source: "environment" };
+}
+
+/** A plausible shell environment: the process basics `env.ts` expects to find. */
+const SHELL_ENV = {
+  HOME: "/Users/someone",
+  USER: "someone",
+  LOGNAME: "someone",
+  SHELL: "/bin/zsh",
+  TMPDIR: "/var/folders/xx/T/",
+  LANG: "en_US.UTF-8",
+  // The two that must NOT be forwarded: the app is not a credential path (ADR-0010, C11).
+  SSH_AUTH_SOCK: "/private/tmp/com.apple.launchd.xyz/Listeners",
+  GITHUB_TOKEN: "ghp_secret",
+};
+
+function plan(overrides: Partial<Parameters<typeof planSpawn>[0]> = {}) {
+  return planSpawn({
+    node: exe("node", "/opt/homebrew/bin/node"),
+    pkg: { root: "/p", bin: "/p/bin/pi-central.js" },
+    pi: exe("pi", "/opt/homebrew/bin/pi"),
+    safehouse: exe("safehouse", "/opt/homebrew/bin/safehouse"),
+    sourceEnv: SHELL_ENV,
+    ...overrides,
+  });
 }
 
 test("the announcement the orchestrator prints is the one this parses", () => {
@@ -118,36 +143,66 @@ test("a small stderr is kept verbatim, with no marker", () => {
 test("the child is spawned with --port 0 and never a chosen port", () => {
   // Criterion 3 as an argv assertion: the shell does not pick a port, so `EADDRINUSE` is unreachable
   // from the app. The port that results is whatever the child announces.
-  const plan = planSpawn({
-    node: exe("node", "/opt/homebrew/bin/node"),
+  const spawned = plan({
     pkg: { root: "/opt/homebrew/lib/node_modules/pi-central", bin: "/opt/homebrew/lib/node_modules/pi-central/bin/pi-central.js" },
-    pi: exe("pi", "/opt/homebrew/bin/pi"),
-    safehouse: exe("safehouse", "/opt/homebrew/bin/safehouse"),
   });
-  assert.equal(plan.command, "/opt/homebrew/bin/node");
-  assert.deepEqual(plan.args, ["/opt/homebrew/lib/node_modules/pi-central/bin/pi-central.js", "--port", "0"]);
-  assert.equal(plan.cwd, "/opt/homebrew/lib/node_modules/pi-central");
+  assert.equal(spawned.command, "/opt/homebrew/bin/node");
+  assert.deepEqual(spawned.args, ["/opt/homebrew/lib/node_modules/pi-central/bin/pi-central.js", "--port", "0"]);
+  assert.equal(spawned.cwd, "/opt/homebrew/lib/node_modules/pi-central");
 });
 
 test("the child's environment is an allowlist, and PATH is the resolved one", () => {
-  // Criterion 7: `process.env` is never passed through. The assertion is on the SHAPE — a record built
-  // here — so a later `...process.env` in `planSpawn` fails this test rather than widening C11's channel.
-  const plan = planSpawn({
-    node: exe("node", "/opt/homebrew/bin/node"),
-    pkg: { root: "/p", bin: "/p/bin/pi-central.js" },
-    pi: exe("pi", "/opt/homebrew/bin/pi"),
-    safehouse: exe("safehouse", "/opt/homebrew/bin/safehouse"),
-  });
-  assert.deepEqual(Object.keys(plan.env).sort(), [
-    "PATH",
-    "PI_CENTRAL_LAUNCHED_BY",
-    "PI_CENTRAL_PI",
-    "PI_CENTRAL_SAFEHOUSE",
-  ]);
-  assert.equal(plan.env["PI_CENTRAL_PI"], "/opt/homebrew/bin/pi");
-  assert.equal(plan.env["PI_CENTRAL_SAFEHOUSE"], "/opt/homebrew/bin/safehouse");
-  assert.equal(plan.env["PATH"]?.startsWith("/opt/homebrew/bin"), true);
-  assert.equal(plan.env["PATH"]?.includes("/usr/bin"), true, "the standard set is appended, not replaced");
+  // Criterion 7: `process.env` is never passed through wholesale. But the first version of this test
+  // asserted the exact KEY SET, which is how the real defect got in: the set was correct and too small.
+  // `HOME` was missing, so `env.ts` could not read it, so `pi` refused to start in EVERY session with
+  // "HOME is not set". A test that pinned the shape could not see it, because the shape was what was
+  // wrong — so this now asserts about NAMES AND EXCLUSIONS, both of which a regression must break.
+  const spawned = plan();
+  assert.equal(spawned.env["PI_CENTRAL_PI"], "/opt/homebrew/bin/pi");
+  assert.equal(spawned.env["PI_CENTRAL_SAFEHOUSE"], "/opt/homebrew/bin/safehouse");
+  assert.equal(spawned.env["PATH"]?.startsWith("/opt/homebrew/bin"), true);
+  assert.equal(spawned.env["PATH"]?.includes("/usr/bin"), true, "the standard set is appended, not replaced");
+
+  // The process basics the orchestrator cannot manufacture for itself: it forwards its own environment
+  // to sessions, so a name absent here does not exist anywhere downstream.
+  for (const name of ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG"]) {
+    assert.equal(spawned.env[name], SHELL_ENV[name as keyof typeof SHELL_ENV], `${name} must be forwarded`);
+  }
+
+  // And the credential-shaped names are still excluded. This is the half that makes it an allowlist
+  // rather than an inheritance, and it is independent of the half above.
+  assert.equal(spawned.env["SSH_AUTH_SOCK"], undefined, "the app is not an ssh-agent path (C4a)");
+  assert.equal(spawned.env["GITHUB_TOKEN"], undefined, "the app is not a credential path (ADR-0010)");
+});
+
+test("a name the shell has unset is omitted rather than forwarded as an empty string", () => {
+  // `HOME=` (present, empty) is not the same as `HOME` absent, and passing the empty string through
+  // would make the orchestrator believe it has a home directory that is nowhere.
+  const spawned = plan({ sourceEnv: { ...SHELL_ENV, TERM: "" } });
+  assert.equal(spawned.env["TERM"], undefined);
+});
+
+test("the forwarded list is the one env.ts expects, name for name", () => {
+  // Pinned against the orchestrator rather than against a copy: the failure that got in — every session
+  // failing on a missing HOME — was a list in one package disagreeing with a list in another, with
+  // nothing comparing them.
+  const envSource = readFileSync(new URL("../../orchestrator/src/env.ts", import.meta.url), "utf8");
+  const passthrough = /export const PASSTHROUGH = \[([\s\S]*?)\] as const;/.exec(envSource);
+  assert.ok(passthrough, "env.ts still declares PASSTHROUGH");
+  const names = [...passthrough[1]!.matchAll(/"([A-Z_a-z]+)"/g)].map((m) => m[1]!);
+  for (const name of INHERITED) {
+    // `PATH` is composed rather than forwarded, so it is expected to be in PASSTHROUGH and not in
+    // INHERITED; every OTHER name the orchestrator reads must be forwarded by the shell.
+    assert.equal(names.includes(name), true, `${name} is forwarded but env.ts does not read it`);
+  }
+  const required = names.filter((name) => name !== "PATH" && !name.startsWith("PI_"));
+  for (const name of required) {
+    assert.equal(
+      (INHERITED as readonly string[]).includes(name),
+      true,
+      `env.ts reads ${name} from its own environment, so the shell must forward it or it disappears`,
+    );
+  }
 });
 
 test("the composed PATH dedupes, and keeps the node directory first", () => {

@@ -182,6 +182,10 @@ function start(): void {
     pkg: located.package,
     pi: environment.environment.pi,
     safehouse: environment.environment.safehouse,
+    // The shell's own environment — `HOME` above all. Forwarding is an allowlist inside `planSpawn`,
+    // and it is the OUTER of the two: a variable not passed here does not exist for any session either,
+    // because `env.ts` reads its own PASSTHROUGH list from what it was given.
+    sourceEnv: process.env,
   });
 
   lastStderr = "";

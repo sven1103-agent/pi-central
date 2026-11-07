@@ -15,6 +15,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - A desktop shell that launches the installed package and shows its UI, keeping no product code of its own ([#214]).
 - The shell finds `node`, `pi` and `safehouse` through the reader's login shell, so a launch from Finder sees what a terminal sees ([#214]).
 - The orchestrator is always started on an ephemeral port, so a leftover process cannot stop a new window opening ([#214]).
+- The shell forwards `HOME` and the other process basics, so a session started from the app can run `pi` at all ([#214]).
 - A window that returns to view asks for a fresh snapshot, so a stale page picks up an update without being quit and reopened ([#213]).
 - Saved work holds the reload back: unsent text or attachments turn the banner into a sentence instead of discarding them ([#213]).
 
