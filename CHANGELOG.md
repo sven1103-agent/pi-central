@@ -12,6 +12,9 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Added
 
+- A desktop shell that launches the installed package and shows its UI, keeping no product code of its own ([#214]).
+- The shell finds `node`, `pi` and `safehouse` through the reader's login shell, so a launch from Finder sees what a terminal sees ([#214]).
+- The orchestrator is always started on an ephemeral port, so a leftover process cannot stop a new window opening ([#214]).
 - A window that returns to view asks for a fresh snapshot, so a stale page picks up an update without being quit and reopened ([#213]).
 - Saved work holds the reload back: unsent text or attachments turn the banner into a sentence instead of discarding them ([#213]).
 
@@ -25,6 +28,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - A reload is refused while the composer holds a draft, on the snapshot path too and not only on return ([#213]).
 
 [#212]: https://github.com/sven1103-agent/pi-central/issues/212
+[#214]: https://github.com/sven1103-agent/pi-central/issues/214
 [#213]: https://github.com/sven1103-agent/pi-central/issues/213
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->

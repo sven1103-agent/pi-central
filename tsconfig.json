@@ -22,6 +22,7 @@
     "spikes/**/*.ts"
   ],
   "exclude": [
-    "packages/ui"
+    "packages/ui",
+    "packages/app"
   ]
 }

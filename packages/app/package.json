@@ -1,0 +1,13 @@
+{
+  "name": "@pi-central/app",
+  "version": "0.10.0",
+  "private": true,
+  "type": "module",
+  "description": "Pi Central desktop shell: a launcher over the installed npm package (ADR-0013).",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3"
+  }
+}
