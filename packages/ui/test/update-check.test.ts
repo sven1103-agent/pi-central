@@ -19,6 +19,9 @@ import {
   PROTOCOL_RELOAD_KEY,
   UPDATE_RELOAD_KEY,
   assessProtocolSkew,
+  BLOCKED_RELOAD_MESSAGE,
+  isReloadBlocked,
+  recheckOnReturn,
   assessServedUi,
   noteProtocolAgreement,
   type StorageLike,
@@ -116,4 +119,51 @@ test("a snapshot from a SKEWED orchestrator does not re-arm the mark", () => {
   const storage = fakeStorage({ [PROTOCOL_RELOAD_KEY]: "protocol mismatch: …" });
   noteProtocolAgreement(install("assets/index-X.js", 4), 5, storage);
   assert.equal(storage.map.get(PROTOCOL_RELOAD_KEY), "protocol mismatch: …");
+});
+
+// --- Returning to a hidden window (issue #213) -------------------------------------------------
+//
+// The reload-on-snapshot rule above covers a page that is *looking*. An installed window that was
+// minimised or hidden sees no snapshot while it is away, so it comes back stale with no fresh verdict.
+// The decision here is deliberately only "ask", not "reload":
+//
+//   - a focus event is not evidence, so a reload decided by one loses drafts on every tab switch;
+//   - a reload gated on the RECORDED marks loops in the reverse-skew case #184 documents, because those
+//     marks are written *before* the reload they permit, so the window would reload on every focus.
+//
+// Asking the orchestrator for a fresh snapshot puts the decision back where the evidence is.
+
+test("a window returning to view asks for a fresh snapshot, and decides nothing itself", () => {
+  // The same answer whatever the marks say: this function has no storage parameter precisely so it
+  // cannot make the reload decision that its caller is not equipped to review.
+  assert.deepEqual(recheckOnReturn(), { action: "request" });
+});
+
+test("the round trip the request starts is what decides, so one reload still comes from one verdict", () => {
+  // The end-to-end shape, asserted as the sequence the App performs: ask, receive, assess. The second
+  // verdict is a banner rather than a reload, which is the property reload-on-return broke — it would
+  // have reloaded again, because the mark only says "we once tried".
+  const storage = fakeStorage();
+  assert.deepEqual(recheckOnReturn(), { action: "request" });
+  assert.equal(assessServedUi("assets/index-OLD.js", install("assets/index-NEW.js"), storage).action, "reload");
+
+  // After the reload: ask again, receive the same disagreement, and this time the mark is spent.
+  assert.deepEqual(recheckOnReturn(), { action: "request" });
+  assert.equal(assessServedUi("assets/index-OLD.js", install("assets/index-NEW.js"), storage).action, "banner");
+});
+
+test("unsent work blocks the reload, and whitespace alone does not", () => {
+  assert.equal(isReloadBlocked({ draft: "", attachmentCount: 0 }), false);
+  // A draft of spaces is not something anyone minds losing; refusing to reload for it would leave the
+  // reader on the old version for a keystroke they did not mean.
+  assert.equal(isReloadBlocked({ draft: "   \n ", attachmentCount: 0 }), false);
+  assert.equal(isReloadBlocked({ draft: "half a sentence", attachmentCount: 0 }), true);
+  // An attachment is content, not text: a pasted screenshot is megabytes that exist nowhere else.
+  assert.equal(isReloadBlocked({ draft: "", attachmentCount: 1 }), true);
+});
+
+test("the blocked message names what is holding the reload, and the way out", () => {
+  // One place for the sentence, so the banner cannot promise a reload the guard is refusing.
+  assert.match(BLOCKED_RELOAD_MESSAGE, /discard/);
+  assert.match(BLOCKED_RELOAD_MESSAGE, /Send or clear/);
 });
