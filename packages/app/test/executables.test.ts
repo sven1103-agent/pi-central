@@ -24,6 +24,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   EXECUTABLE_HINTS,
+  isShimDirectory,
   resolveEnvironment,
   resolveExecutable,
   searchPath,
@@ -183,4 +184,62 @@ test("searchPath skips empty segments instead of resolving against the cwd", () 
   // `PATH=::/x` is a real thing (a trailing colon is common), and treating an empty segment as "the
   // current directory" is how a shell-injection-adjacent bug gets in. A shell does that; this must not.
   assert.equal(searchPath("node", "::/definitely/not/here"), undefined);
+});
+
+// --- `node_modules/.bin` is not a place to run an agent's tool from ------------------------------
+//
+// Reported from use: every session failed with `env: …/node_modules/.bin/pi: Operation not permitted`
+// (exit 126). The trigger is `npm run app`, which prepends the repo's `node_modules/.bin` to PATH — so
+// `pi` resolved to the dependency vendored in this project's devDependencies rather than the one the
+// reader installed, and that path then reached every session because Safehouse appends its dev paths to
+// the PATH it inherits. Two audiences, one variable.
+
+test("a shim directory is recognised wherever it appears", () => {
+  assert.equal(isShimDirectory("/Users/x/project/node_modules/.bin"), true);
+  assert.equal(isShimDirectory("node_modules/.bin"), true);
+  assert.equal(isShimDirectory("/opt/homebrew/bin"), false);
+  assert.equal(isShimDirectory("/Users/x/node_modules/.bin/../bin"), false, "the check is on the entry as written");
+});
+
+test("resolution skips the shim and takes the real binary further along PATH", (t) => {
+  // The exact shape `npm run app` produces: the shim first, Homebrew second.
+  const root = scratch(t);
+  fakeBinary(join(root, "repo", "node_modules", ".bin"), "pi");
+  const real = fakeBinary(join(root, "homebrew", "bin"), "pi");
+  const result = resolveExecutable(
+    "pi",
+    context({ PATH: `${join(root, "repo", "node_modules", ".bin")}:${join(root, "homebrew", "bin")}` }),
+    EXECUTABLE_HINTS.pi,
+  );
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.executable.path, real, "the shim must not be used even though it is first");
+});
+
+test("a name that resolves ONLY to a shim falls through to the login shell", (t) => {
+  // The important half. Accepting the shim when nothing else is available would reproduce the exit-126
+  // failure one directory later; asking the shell is what finds the globally installed tool.
+  const root = scratch(t);
+  fakeBinary(join(root, "repo", "node_modules", ".bin"), "pi");
+  const real = fakeBinary(join(root, "elsewhere", "bin"), "pi");
+  const result = resolveExecutable(
+    "pi",
+    context({ PATH: join(root, "repo", "node_modules", ".bin") }, { pi: real }),
+    EXECUTABLE_HINTS.pi,
+  );
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.executable.path, real);
+  assert.equal(result.executable.source, "login-shell");
+});
+
+test("shim-only and no login shell is a refusal, not the shim", (t) => {
+  const root = scratch(t);
+  fakeBinary(join(root, "repo", "node_modules", ".bin"), "pi");
+  const result = resolveExecutable(
+    "pi",
+    { env: { PATH: join(root, "repo", "node_modules", ".bin") }, shell: "/bin/zsh", runLoginShell: () => undefined },
+    EXECUTABLE_HINTS.pi,
+  );
+  assert.equal(result.ok, false, "a shim is not an answer");
 });

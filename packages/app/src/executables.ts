@@ -83,10 +83,17 @@ function isExecutableFile(path: string): boolean {
  * Written out rather than delegating to `which`, because the child's `PATH` is the thing being
  * computed: asking a subprocess to resolve a name against a `PATH` that does not exist yet is circular.
  */
-export function searchPath(name: string, path: string | undefined): string | undefined {
+export function searchPath(
+  name: string,
+  path: string | undefined,
+  options: { skipShims?: boolean } = {},
+): string | undefined {
   if (path === undefined || path === "") return undefined;
   for (const directory of path.split(":")) {
+    // Empty segments are skipped rather than resolved against the cwd. A shell treats a trailing colon
+    // as `$PWD`, which is a convenience for an interactive user and a hazard for a spawned child.
     if (directory === "") continue;
+    if (options.skipShims === true && isShimDirectory(directory)) continue;
     const candidate = `${directory}/${name}`;
     if (isExecutableFile(candidate)) return candidate;
   }
@@ -116,18 +123,43 @@ export function loginShellLookup(shell: string, command: string): string | undef
 }
 
 /**
+ * A `PATH` entry that must never be used to run an agent's tooling.
+ *
+ * `node_modules/.bin` is a **shim directory**: it holds symlinks npm creates for the dependencies of
+ * whatever project owns it. Two things are wrong with exec'ing through it here:
+ *
+ *   1. It is a *project's* `node_modules`, so following it runs that project's pinned version of a tool
+ *      rather than the one the reader installed globally — for `pi` that means the version vendored in
+ *      Pi Central's own devDependencies, which is not the `pi` a session is meant to use.
+ *   2. It is inside a directory a session is often **sandboxed away from**. Safehouse appends its own
+ *      paths to the `PATH` it inherits, so a `node_modules/.bin` in the orchestrator's `PATH` reaches
+ *      every session — which produced `env: .../node_modules/.bin/pi: Operation not permitted`
+ *      (exit 126) for every session started from a launch that had npm's `PATH` prepended.
+ *
+ * The observed trigger is `npm run app`, which prepends the repo's `node_modules/.bin`. The lesson is
+ * wider than that script: a developer's `PATH` and a session's `PATH` are different audiences.
+ */
+export function isShimDirectory(entry: string): boolean {
+  return entry.endsWith("/node_modules/.bin") || entry === "node_modules/.bin";
+}
+
+/**
  * Resolve one executable: the inherited `PATH` first, then the login shell.
  *
  * The order matters and is not arbitrary. `PATH` first because it is free (no subprocess), and when it
  * succeeds the app's view already agrees with the shell's. The login shell second, because it is the
  * only thing that can answer when `PATH` is the truncated launchd one.
+ *
+ * Shim directories are skipped, and a name that only resolves to a shim **falls through to the login
+ * shell** rather than being accepted: see {@link isShimDirectory}. That fall-through is what makes this
+ * correct under `npm run`, where `node_modules/.bin` comes first and would otherwise win.
  */
 export function resolveExecutable(
   name: string,
   context: LookupContext,
   hint: string,
 ): ExecutableResult {
-  const fromPath = searchPath(name, context.env["PATH"]);
+  const fromPath = searchPath(name, context.env["PATH"], { skipShims: true });
   if (fromPath !== undefined) {
     return { ok: true, executable: { name, path: fromPath, source: "environment" } };
   }

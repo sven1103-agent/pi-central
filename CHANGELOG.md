@@ -16,6 +16,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The shell finds `node`, `pi` and `safehouse` through the reader's login shell, so a launch from Finder sees what a terminal sees ([#214]).
 - The orchestrator is always started on an ephemeral port, so a leftover process cannot stop a new window opening ([#214]).
 - The shell forwards `HOME` and the other process basics, so a session started from the app can run `pi` at all ([#214]).
+- `node_modules/.bin` is never used to resolve a tool or passed to a session, so `pi` is the installed one and every session can execute it ([#214]).
 - A window that returns to view asks for a fresh snapshot, so a stale page picks up an update without being quit and reopened ([#213]).
 - Saved work holds the reload back: unsent text or attachments turn the banner into a sentence instead of discarding them ([#213]).
 

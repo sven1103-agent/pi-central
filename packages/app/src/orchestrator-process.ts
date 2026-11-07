@@ -31,6 +31,7 @@
  * means the shell works unchanged if the orchestrator ever binds something other than what was asked.
  */
 import type { FoundExecutable } from "./executables.ts";
+import { isShimDirectory } from "./executables.ts";
 
 /** How long a child gets to announce a URL before it is killed and reported. */
 export const URL_TIMEOUT_MS = 10_000;
@@ -298,6 +299,17 @@ export const OWN_PREFIX = "PI_CENTRAL_";
  * Ordering is by proximity to what the orchestrator actually needs: the directory `node` came from
  * first (so a version manager's shims win over a system copy), then the tools', then the defaults. The
  * defaults are appended rather than replaced, because a system `git` is better than none.
+ *
+ * ## Shim directories are excluded, and that is a fix rather than tidiness
+ *
+ * Safehouse *appends* its own dev paths to the `PATH` it inherits, so whatever this composes reaches
+ * every session. A `node_modules/.bin` in it is a directory a session is usually sandboxed away from, and
+ * the failure it produced was every session dying at startup with
+ *
+ *     env: /…/node_modules/.bin/pi: Operation not permitted        (exit 126)
+ *
+ * — the `pi` on the *session's* `PATH` was the repo-local dev shim, not the one the app resolved. Two
+ * audiences, one variable: a developer's `PATH` and a session's must not be the same value.
  */
 export function composePath(executables: readonly FoundExecutable[]): string {
   const seen = new Set<string>();
@@ -305,6 +317,9 @@ export function composePath(executables: readonly FoundExecutable[]): string {
   for (const executable of executables) {
     const directory = executable.path.slice(0, executable.path.lastIndexOf("/"));
     if (directory === "" || seen.has(directory)) continue;
+    // A resolved executable should never BE in a shim directory (resolution skips them), but composing
+    // is also called with paths from other sources, and the cost of the check is one string comparison.
+    if (isShimDirectory(directory)) continue;
     seen.add(directory);
     directories.push(directory);
   }

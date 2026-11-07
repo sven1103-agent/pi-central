@@ -70,6 +70,9 @@ async function startSessionWithAppEnvironment(): Promise<{
   if (!env.ok) throw new Error("unreachable");
 
   const scratch = mkdtempSync(join(tmpdir(), "pi-central-app-env-"));
+  // The PATH `npm run app` produces: this repo's `node_modules/.bin` first. Without it the shim bug this
+  // test was extended for is unreachable, and the test would pass on a fix that does not work.
+  const repoShim = fileURLToPath(new URL("../../../node_modules/.bin", import.meta.url));
   const spawned = planSpawn({
     node: env.environment.node,
     pkg: { root: fileURLToPath(new URL("../../..", import.meta.url)), bin: BUNDLE },
@@ -77,6 +80,7 @@ async function startSessionWithAppEnvironment(): Promise<{
     safehouse: env.environment.safehouse,
     sourceEnv: {
       ...process.env,
+      PATH: `${repoShim}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
       // Redirected so this test cannot write into the reader's real session store. This ALSO asserts
       // that the `PI_CENTRAL_*` namespace is forwarded — the first version of the forwarding list
       // dropped it, so this override never arrived and the test wrote to the real workspace while
@@ -184,4 +188,37 @@ test("a session started with the app's environment gets past the environment che
     `the orchestrator failed before it could spawn pi, so this test proves nothing about the ` +
       `environment it would have given it:\n${transcript}`,
   );
+});
+
+test("a session's PATH contains no shim directory, so pi can be executed inside the sandbox", { skip: skipReason() }, async (t) => {
+  /*
+   * The reported failure, asserted directly: `env: …/node_modules/.bin/pi: Operation not permitted`
+   * (exit 126). The orchestrator was started with `npm run app`'s PATH, which put this repo's
+   * `node_modules/.bin` first; `pi` resolved to that shim, and Safehouse appended the same directory to
+   * every session's PATH, where the sandbox denies it.
+   *
+   * The assertion is on the composed PATH rather than on an attempt to exec `pi`, because the exec only
+   * fails on a machine where the workspace happens to be outside the granted tree — and a test that
+   * depends on the sandbox's specific geometry would report the machine, not the code.
+   */
+  const env = resolveEnvironment({
+    env: { ...process.env, PATH: `${fileURLToPath(new URL("../../../node_modules/.bin", import.meta.url))}:${process.env["PATH"] ?? "/usr/bin:/bin"}` },
+    shell: process.env["SHELL"] ?? "/bin/zsh",
+    runLoginShell: loginShellLookup,
+  });
+  assert.equal(env.ok, true);
+  if (!env.ok) return;
+  // Resolution must have escaped the shim.
+  assert.equal(env.environment.pi.path.includes("node_modules/.bin"), false, `pi resolved to a shim: ${env.environment.pi.path}`);
+
+  const spawned = planSpawn({
+    node: env.environment.node,
+    pkg: { root: fileURLToPath(new URL("../../..", import.meta.url)), bin: BUNDLE },
+    pi: env.environment.pi,
+    safehouse: env.environment.safehouse,
+    sourceEnv: process.env,
+  });
+  for (const entry of spawned.env["PATH"]!.split(":")) {
+    assert.equal(entry.endsWith("/node_modules/.bin"), false, `the session PATH carries a shim: ${entry}`);
+  }
 });

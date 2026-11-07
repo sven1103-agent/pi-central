@@ -222,3 +222,16 @@ test("the composed PATH dedupes, and keeps the node directory first", () => {
     "/sbin",
   ]);
 });
+
+test("the session's PATH carries no shim directory", () => {
+  // The second half of the exit-126 fix. Safehouse APPENDS its dev paths to the PATH it inherits, so
+  // anything composed here reaches every session — and `node_modules/.bin` is a directory sessions are
+  // usually sandboxed away from. A resolved executable is never in a shim (resolution skips them), so
+  // this passes only because `composePath` also refuses to ADD one.
+  const path = composePath([
+    exe("node", "/Users/x/project/node_modules/.bin/node"),
+    exe("pi", "/opt/homebrew/bin/pi"),
+  ]);
+  assert.equal(path.includes("node_modules/.bin"), false);
+  assert.equal(path.startsWith("/opt/homebrew/bin"), true);
+});
