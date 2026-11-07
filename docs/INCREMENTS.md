@@ -141,7 +141,7 @@ gave it. The record is [ADR-0013](decisions/0013-application-shell.md).
 | A window returning to view re-checks, with a draft guard (#213) | ✅ PR #219 |
 | ADR-0013: the shell is a launcher, never the update target (#212) | ✅ this slice |
 | A returning window asks for install facts, not a discovery (#220) | open — 356 ms per focus today |
-| The shell runs the installed artifact as a supervised child (#214) | open |
+| The shell runs the installed artifact as a supervised child (#214) | ✅ this slice |
 | The renderer is locked to the loopback document (#215) | open |
 | Close hides, `⌘Q` keeps sessions, the next launch reattaches (#216) | open |
 | The shell applies an update: stop, install, verify, respawn, reload (#217) | open |
@@ -149,6 +149,39 @@ gave it. The record is [ADR-0013](decisions/0013-application-shell.md).
 
 Non-goals of the whole increment, stated once: a `.dmg`, notarization, `electron-updater`, a stored
 credential in CI, and x64.
+
+## Increment 8 — Configurable: the paths a reader chooses
+
+**Goal:** every setting Pi Central reads can be seen, changed and explained from the app — and on a
+machine where the defaults do not work, the app says so instead of failing.
+
+Increment 7 produced three live failures in a row, and none was a coding slip: `HOME is not set`, then
+`env: …/node_modules/.bin/pi: Operation not permitted`. Each was **an environment question disguised as a
+bug**, each was found by the reader rather than by the build, and each was diagnosable only from a
+terminal log. The honest reading is that the app had no surface for the question it was being asked.
+
+Measured gap, at the time this increment was opened: every knob is an environment variable read once by
+`config.ts`, and there is **no configuration file anywhere**. A GUI launch has no environment, so the dock
+icon is unusable for anyone whose `pi`, `safehouse`, agent root or sessions root differs from the default —
+which is most people with a version manager or a non-default Homebrew prefix.
+
+The record will be an ADR for the precedence rule (file, environment, flag, default) and for what the file
+may **not** do: widen the sandbox, carry credentials, or touch the reader's Pi environment.
+
+| Slice | State |
+|---|---|
+| A configuration file with stated precedence, validated once (#223) | open — the decision, first |
+| `--check-config`: every path, its value and its source (#224) | open |
+| Settings gains a Configuration section (#225) | open |
+| First run opens a setup panel that names the fix (#226) | open — absorbs #54 |
+| A configuration change states what it invalidates (#227) | open |
+| Credential findings become guided repairs (#228) | open |
+| Safehouse options and the composed policy become visible (#229) | open |
+
+Non-goals of the whole increment, stated once: writing into a reader's Pi environment (principle 9), any
+configuration value that can widen the sandbox past `FORBIDDEN_ENABLE`, and hot-reloading a policy into a
+running process — Pi Central cannot change a Seatbelt profile of a live `safehouse` invocation, so
+"restart" is the honest answer and the slices say so.
 
 ## Out of scope
 
