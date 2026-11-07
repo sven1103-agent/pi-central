@@ -12,7 +12,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Added
 
-- A stale page reloads itself when it returns to view, at most once per target bundle ([#213]).
+- A window that returns to view asks for a fresh snapshot, so a stale page picks up an update without being quit and reopened ([#213]).
 - Saved work holds the reload back: unsent text or attachments turn the banner into a sentence instead of discarding them ([#213]).
 
 ### Fixed
