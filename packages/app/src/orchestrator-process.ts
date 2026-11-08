@@ -129,7 +129,7 @@ export function decideAfterExit(failures: number): ExitDecision {
       action: "stop",
       reason:
         `Pi Central's orchestrator failed to start ${failures} times in a row, so it will not be ` +
-        `started again automatically. The log below has what it printed; Restart tries once more.`,
+        `started again automatically. The log below has what it printed; "Try again" retries once.`,
     };
   }
   const delayMs = [0, 500, 1500][failures] ?? 1500;

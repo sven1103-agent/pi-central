@@ -121,7 +121,11 @@ test("the first failure restarts immediately, then with backoff, then stops", ()
   assert.equal(stop.action, "stop");
   if (stop.action !== "stop") return;
   assert.match(stop.reason, /3 times in a row/);
-  assert.match(stop.reason, /Restart tries once more/);
+  // The message must name the control that is actually on the page. It said "Restart tries once more" while the
+  // failure page's only button reads "Try again", so the one sentence explaining what to do next named something
+  // the reader could not find. `renderFailure` in `main.ts` renders `Try again`.
+  assert.match(stop.reason, /"Try again" retries once/);
+  assert.equal(/Restart tries/.test(stop.reason), false, "there is no Restart control on the failure page");
 });
 
 test("the kept stderr is the END, and starts at a line boundary", () => {

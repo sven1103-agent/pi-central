@@ -21,7 +21,7 @@
  * the window equivalent to a browser tab; #215 asserts them properly, and they are stated here so this
  * slice does not open a window that is already worse than the tab it replaces.
  */
-import { BrowserWindow, app } from "electron";
+import { BrowserWindow, app, shell } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -33,6 +33,20 @@ import {
 } from "./executables.ts";
 import { resolvePackage, type PackageRoot } from "./package-root.ts";
 import {
+  FAILURE_PAGE_CSP,
+  FALLBACK_FAILURE_PAGE,
+  auditWindowOptions,
+  bundleProblems,
+  externalTarget,
+  failureDocument,
+  failureDocumentProblems,
+  navigationDecision,
+  permissionDecision,
+  reloadDecision,
+  requestOrigin,
+  windowWebPreferences,
+} from "./window-security.ts";
+import {
   LineAccumulator,
   URL_TIMEOUT_MS,
   decideAfterExit,
@@ -41,13 +55,62 @@ import {
   planSpawn,
 } from "./orchestrator-process.ts";
 
-/** One launch's worth of state. Replaced wholesale on a restart so no stale port can survive it. */
+/**
+ * The one window, created on first use and reused for the life of the process.
+ *
+ * ## Why the window is not held on `Running`
+ *
+ * `Running` is cleared the moment the child exits, and `showFailure` is called *after* that — so reading the
+ * window out of `running` built a SECOND window on the crash path while the first still showed the dashboard,
+ * which contradicts this slice's "one window, reused" premise. The window outlives any one orchestrator (a
+ * restart reuses it, and a failure page stays until Try again succeeds), so it is held here, where nothing
+ * that tracks a child can clear it.
+ */
+let window: BrowserWindow | undefined;
+
+/** One orchestrator launch. Replaced wholesale on a restart, so no stale port can survive it. */
 interface Running {
   child: ChildProcess;
   url: string;
   httpUrl: string;
-  window: BrowserWindow;
 }
+
+/**
+ * Whether quitting is already under way.
+ *
+ * Read by `retry`, which the renderer can trigger at any time — including during the shutdown window between
+ * `before-quit` and the process actually ending. Spawning an orchestrator there would start something nothing
+ * owns, which is the orphan this file's exit handling exists to avoid.
+ */
+function isQuitting(): boolean {
+  return quitting;
+}
+
+/**
+ * The port the child announced, which is the ONLY port the window may display (issue #215).
+ *
+ * Held separately from `Running` because it outlives a failure: when the orchestrator dies the window shows a
+ * failure page, `running` becomes `undefined`, and the "Try again" button reloads that page — a navigation that
+ * must still be refused unless it is the document the shell minted.
+ */
+let announcedPort: number | undefined;
+
+/**
+ * The token of the failure page currently displayed, if any (issue #215).
+ *
+ * A `data:` URL is the only document the shell shows that is not the loopback UI, and `data:` is reachable
+ * from the renderer too — so the exception is this one page, named by a random token, rather than the scheme.
+ */
+let failureToken: string | undefined;
+
+/**
+ * The full URL of the failure page currently displayed, so a reload of it can be RECOGNISED.
+ *
+ * `failureToken` answers "is this the document we minted"; this answers "is this that document being reloaded
+ * again", which is the signal the failure page's "Try again" produces. The two are kept apart because they lead
+ * to different answers: a first load must be allowed, and a reload must be allowed *and* made to retry.
+ */
+let failureUrl: string | undefined;
 
 let running: Running | undefined;
 let consecutiveFailures = 0;
@@ -100,6 +163,7 @@ function renderFailure(title: string, detail: string): string {
   const escape = (text: string): string =>
     text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escape(title)}</title>
+<meta http-equiv="Content-Security-Policy" content="${FAILURE_PAGE_CSP}">
 <style>
   :root { color-scheme: dark; }
   body { margin: 0; padding: 32px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -126,6 +190,18 @@ function renderFailure(title: string, detail: string): string {
  * either.
  */
 function createWindow(): BrowserWindow {
+  const preferences = windowWebPreferences();
+  /*
+   * The options are AUDITED before the window exists (issue #215, criterion 1).
+   *
+   * `windowWebPreferences` is frozen data, so this cannot fail from the inside — but it fails loudly if a later
+   * change to that function weakens a setting, which is the change that would otherwise be invisible: an
+   * Electron window with `nodeIntegration: true` looks and behaves identically until something exploits it.
+   */
+  const problems = auditWindowOptions({ ...preferences });
+  if (problems.length > 0) {
+    throw new Error(`refusing to open an insecure window:\n  ${problems.join("\n  ")}`);
+  }
   const window = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -134,25 +210,167 @@ function createWindow(): BrowserWindow {
     title: "Pi Central",
     backgroundColor: "#0e1116",
     show: false,
-    webPreferences: {
-      // The window is a browser tab, and is kept equivalent to one. #215 asserts these properly; they
-      // are set here so this slice cannot create a window that is already worse than the tab it replaces.
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-    },
+    // The window is a browser tab, and is kept equivalent to one (issue #215, ADR-0006, C11). The settings
+    // live in `window-security.ts` as data so they are asserted rather than merely written down here.
+    webPreferences: { ...preferences },
   });
   window.once("ready-to-show", () => window.show());
+  hardenWindow(window);
   return window;
 }
 
-/** Show a failure in whichever window exists, or in a fresh one. */
+/**
+ * Lock the window to the loopback document, and to no capability beyond displaying it (issue #215).
+ *
+ * ## Why every hook is here rather than "the renderer is ours"
+ *
+ * The renderer displays **model output** — transcripts, tool results, file contents, and markdown rendered
+ * from all three. ADR-0006 makes that inert in a browser tab through the CSP and DOMPurify, and those still
+ * apply. What a browser tab also has, and a dock window does not, is an address bar: in the tab, a navigation
+ * the reader did not ask for is visible; here it would silently replace the dashboard with something else.
+ *
+ * Five hooks, each closing one route out:
+ *
+ *   - `will-navigate` — a link click or a `location.href` assignment in the top frame.
+ *   - `will-redirect` — a server-side redirect, which fires AFTER `will-navigate` and would otherwise be a
+ *     navigation nobody asked for. Registering only `will-navigate` is the classic gap.
+ *   - `will-attach-webview` — a `<webview>` is a second renderer with its own preferences; prevented at the
+ *     attach point as well as by `webviewTag: false`, because the option is a default and this is a gate.
+ *   - `setWindowOpenHandler` — `window.open` and `target="_blank"`. Denied; an `http(s)` URL the reader
+ *     actually clicked is handed to their browser instead of vanishing.
+ *   - `setPermissionRequestHandler` / `setPermissionCheckHandler` — every web permission, refused, including
+ *     from the allowed origin. Both are registered: the request handler covers an API asking, the check
+ *     handler covers a query made without a prompt (Electron's docs say the pair is what makes handling
+ *     complete, and a permission granted through the unimplemented half would never be visible here).
+ *
+ * ## What this does NOT do, stated rather than implied
+ *
+ * It does not stop the *renderer* from being compromised by a bug in the app's own code. It stops the window
+ * from becoming a browser for somewhere else, which is the privilege a dock icon would otherwise grant
+ * quietly. C5 applies: the loopback origin is hygiene, and the real boundary is the orchestrator's logic.
+ */
+function hardenWindow(window: BrowserWindow): void {
+  const contents = window.webContents;
+
+  contents.on("will-navigate", (event) => {
+    const decision = navigationDecision(event.url, announcedPort, failureToken);
+    if (decision === "allow") {
+      // A reload of the failure page we are showing IS the reader pressing "Try again" (see `reloadDecision`).
+      // Re-loading the same `data:` document would re-render the same text and look like nothing happened, so
+      // the decision to retry is taken here and the reload itself is left alone.
+      if (reloadDecision(event.url, failureUrl) === "retry") retry();
+      return;
+    }
+    event.preventDefault();
+    console.error(`Pi Central: refused a navigation to ${event.url}`);
+  });
+
+  contents.on("will-redirect", (event) => {
+    const decision = navigationDecision(event.url, announcedPort, failureToken);
+    if (decision === "allow") return;
+    event.preventDefault();
+    console.error(`Pi Central: refused a redirect to ${event.url}`);
+  });
+
+  contents.on("will-attach-webview", (event) => {
+    event.preventDefault();
+    console.error("Pi Central: refused to attach a <webview>; the window is one document");
+  });
+
+  contents.setWindowOpenHandler(({ url }) => {
+    const external = externalTarget(url);
+    if (external !== undefined) {
+      // The reader clicked a link whose intent is to leave. Their browser is where that belongs; the app is
+      // not. `void` because a failed open is the OS's business, not a reason to break the handler.
+      void shell.openExternal(external);
+      return { action: "deny" };
+    }
+    console.error(`Pi Central: refused to open a window for ${url}`);
+    return { action: "deny" };
+  });
+
+  contents.session.setPermissionRequestHandler((_contents, permission, callback, details) => {
+    // The origin comes from `requestOrigin`, not from an invented `requestingOrigin` field: no permission shape
+    // has that key, so reading it reported every refusal against "an unidentified origin".
+    const refused = permissionDecision(permission, requestOrigin(details));
+    console.error(`Pi Central: ${refused.reason}`);
+    callback(false);
+  });
+
+  contents.session.setPermissionCheckHandler((_contents, permission, requestingOrigin) => {
+    const refused = permissionDecision(permission, requestingOrigin);
+    console.error(`Pi Central: ${refused.reason}`);
+    return false;
+  });
+}
+
+/**
+ * The window to show something in, creating it on first use.
+ *
+ * The single accessor for the window, so "exactly one `new BrowserWindow`" stays true and a failure during startup
+ * cannot build a second one.
+ */
+function appWindow(): BrowserWindow {
+  if (window === undefined || window.isDestroyed()) window = createWindow();
+  return window;
+}
+
+/**
+ * Try the launch again, from whatever the reader is looking at (issue #215).
+ *
+ * Guarded rather than blind: a retry during shutdown would spawn an orchestrator nothing owns, which is the
+ * orphan this file's exit handling exists to prevent. A retry while one is already running would start a second
+ * over the same session files — C9's branch-point hazard, one process down.
+ */
+function retry(): void {
+  if (isQuitting()) {
+    console.error("Pi Central: not retrying, because the app is quitting");
+    return;
+  }
+  if (running !== undefined) {
+    console.error("Pi Central: not retrying, because an orchestrator is already running");
+    return;
+  }
+  console.log("Pi Central: trying again");
+  /*
+   * The failure token and URL are deliberately NOT cleared here.
+   *
+   * `start()` is asynchronous when it gets as far as spawning (it waits for the child to announce a port), and
+   * the old failure page stays on screen the whole time. Clearing the token now would make that page stop being
+   * reloadable mid-retry, so a reader who clicks "Try again" twice would get a REFUSAL of the page they are
+   * looking at. Whichever document replaces it clears them: `showFailure` mints a new one, `onAnnounced` clears
+   * both as the UI takes over.
+   */
+  start();
+}
+
+/**
+ * Show a failure in whichever window exists, or in a fresh one.
+ *
+ * The page is minted (`failureDocument`) and then AUDITED (`failureDocumentProblems`) before it is loaded.
+ * The audit can only fail if this file changed in a way that dropped the CSP or a doctype, which is exactly
+ * the change that would otherwise ship invisibly — a `data:` document has no policy unless it carries one.
+ */
 function showFailure(title: string, detail: string): void {
-  const window = running?.window ?? createWindow();
+  const target = appWindow();
   const html = renderFailure(title, detail);
-  void window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-  window.show();
+  const problems = failureDocumentProblems(html);
+  if (problems.length > 0) {
+    // The page is REFUSED, not merely reported (issue #215). This used to log "refusing to display" and then
+    // load the rendered page anyway, which is enforcement that exists only in the terminal.
+    console.error(`Pi Central: refusing to display an unsafe failure page:\n  ${problems.join("\n  ")}`);
+    const document = failureDocument(FALLBACK_FAILURE_PAGE);
+    failureToken = document.token;
+    failureUrl = document.url;
+    void target.loadURL(document.url);
+    target.show();
+    return;
+  }
+  const document = failureDocument(html);
+  failureToken = document.token;
+  failureUrl = document.url;
+  void target.loadURL(document.url);
+  target.show();
 }
 
 /**
@@ -241,9 +459,39 @@ function start(): void {
   child.on("exit", (code, signal) => {
     clearTimeout(timeout);
     if (quitting) return;
-    const window = running?.window;
     running = undefined;
-    if (!announced) return; // the timeout or the error handler already reported it
+    if (!announced) {
+      /*
+       * The child died BEFORE it announced a URL (issue #215).
+       *
+       * This used to `return` with a comment saying "the timeout or the error handler already reported it", and
+       * neither had: `clearTimeout(timeout)` above cancels the timeout that would have, and the `error` handler
+       * only fires for a failed SPAWN, not for an exit. So a child that started and then died in 87 ms — which
+       * is what the C1 sandbox refusal does — produced no window change, no message, and no log line. The reader
+       * saw a window that had simply stopped, which is the exact failure this file's `showFailure` exists to
+       * prevent: an empty window is indistinguishable from a UI bug.
+       *
+       * It is reported here rather than left to the timeout because this is the common shape and it has BETTER
+       * evidence: the child has finished printing, so `lastStderr` holds its whole complaint ("this process is
+       * inside a sandbox, and Seatbelt does not nest (C1)"), where the timeout path can only say "it printed
+       * nothing within N seconds".
+       */
+      consecutiveFailures += 1;
+      const stopped = decideAfterExit(consecutiveFailures);
+      const detail =
+        `It started but exited after ${code === null ? "a signal" : `code ${code}`}` +
+        `${signal === null ? "" : ` (signal ${signal})`} before reporting a URL.` +
+        `\n\n${lastStderr.trim() === "" ? "It printed nothing at all." : `What it printed:\n\n${lastStderr.trim()}`}`;
+      showFailure("Pi Central's orchestrator could not start", detail);
+      // Still retried, because a transient cause (a port stolen mid-start) is worth one more attempt — but the
+      // reader is told what happened FIRST, so the window is never blank while the supervisor decides.
+      if (stopped.action === "restart") {
+        restartTimer = setTimeout(() => {
+          if (window !== undefined && !window.isDestroyed()) start();
+        }, stopped.delayMs);
+      }
+      return;
+    }
     consecutiveFailures += 1;
     const decision = decideAfterExit(consecutiveFailures);
     if (decision.action === "stop") {
@@ -260,9 +508,26 @@ function start(): void {
 }
 
 function onAnnounced(child: ChildProcess, url: string, httpUrl: string): void {
-  const window = running?.window ?? createWindow();
-  running = { child, url, httpUrl, window };
-  void window.loadURL(httpUrl);
+  /*
+   * The port is recorded BEFORE the load (issue #215).
+   *
+   * `hardenWindow`'s handlers allow exactly one origin, and it is this child's. Setting it after `loadURL`
+   * would be a race in which the first navigation is refused by the app's own gate — so the order here is
+   * load-bearing, not incidental. `announcedPort` also clears any failure token: the UI is about to be shown,
+   * so a failure page from a previous attempt must stop being a navigable target.
+   */
+  const port = Number.parseInt(new URL(httpUrl).port, 10);
+  if (!Number.isInteger(port) || port <= 0) {
+    showFailure("Pi Central could not parse the orchestrator's URL", `Expected an http://host:port URL, got ${httpUrl}`);
+    return;
+  }
+  announcedPort = port;
+  failureToken = undefined;
+  failureUrl = undefined;
+
+  const target = appWindow();
+  running = { child, url, httpUrl };
+  void target.loadURL(httpUrl);
   console.log(`Pi Central: orchestrator at ${url} (pid ${child.pid ?? "?"}), window loading ${httpUrl}`);
 }
 
@@ -282,19 +547,19 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    const window = running?.window;
-    if (window === undefined || window.isDestroyed()) return;
-    if (window.isMinimized()) window.restore();
-    window.focus();
+    const existing = window;
+    if (existing === undefined || existing.isDestroyed()) return;
+    if (existing.isMinimized()) existing.restore();
+    existing.focus();
   });
 
   app.whenReady().then(() => {
     start();
     app.on("activate", () => {
-      const window = running?.window;
-      if (window === undefined || window.isDestroyed()) return;
-      window.show();
-      window.focus();
+      const existing = window;
+      if (existing === undefined || existing.isDestroyed()) return;
+      existing.show();
+      existing.focus();
     });
   });
 
