@@ -57,6 +57,7 @@ const {
   chooseAnswer,
   decideAttach,
   decideStop,
+  identityHolds,
   probeCommand,
   readRuntimeRecord,
   rememberedMarks,
@@ -268,8 +269,20 @@ const port = Number.parseInt(new URL(first.url).port, 10);
   } else if (!serving.ok) {
     check(1, "the orchestrator is untouched by a window close (same PID, still serving)", "the orchestrator stopped answering");
   } else {
-    const samePid = before.status === "present" && after.status === "present" && before.marks === after.marks;
-    check(1, "the orchestrator is untouched by a window close (same PID, still serving)", samePid || `pid ${first.pid} changed start time or vanished`);
+    /*
+     * Identity is compared with the PRODUCT's rule (`identityHolds`), not with `===`.
+     *
+     * The first version of this script compared the two readings exactly and reported a failure here on a healthy
+     * orchestrator. The readings are `now - etime`, and `etime` is truncated to whole seconds — so two probes taken
+     * 300 ms apart can legitimately differ by a full second while describing the same process. The tolerance exists for
+     * exactly that, and a checker that re-implements a rule without its tolerance invents a defect.
+     */
+    const samePid = before.status === "present" && after.status === "present" && identityHolds({ startedAt: before.marks }, after);
+    check(
+      1,
+      "the orchestrator is untouched by a window close (same PID, still serving)",
+      samePid || `pid ${first.pid} changed start time or vanished (${JSON.stringify(before.marks)} -> ${JSON.stringify(after.marks)})`,
+    );
   }
 }
 
