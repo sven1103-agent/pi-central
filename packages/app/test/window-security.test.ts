@@ -451,10 +451,19 @@ test("every hardening hook is registered in main.ts, on the event or setter it n
 test("main.ts never loads a file or a URL it was not given by the child", () => {
   // Criterion 6's other half: `loadFile` is the one call that would put the filesystem in the window.
   assert.equal(/loadFile\s*\(/.test(mainSource), false, "loadFile must not be used for app content");
-  // And the only navigations are the announced http URL and a minted failure document — the fallback is the same
-  // document with different content, so the target is `document.url` either way.
+  /*
+   * And the only navigations are the announced http URL, a minted failure document (the fallback is the same document
+   * with different content, so the target is `document.url` either way), and — since #216 — `current.httpUrl`: the URL
+   * of an orchestrator a previous launch started.
+   *
+   * That third one is not a hole, and it is worth saying why it is in this list. It is derived from a port in
+   * `runtime.json` (`urlsFor`), and that port is only used after `decideAttach` has established that the PID belongs to
+   * the recorded process (start time compared) AND that the port is serving this app's own UI (the markers in
+   * `UI_MARKERS`). A URL that failed either check produces a spawn, never a load — so what reaches this call has been
+   * verified more thoroughly than the announced one, which is merely trusted.
+   */
   const loads = [...mainSource.matchAll(/loadURL\(([^)]*)\)/g)].map((match) => match[1]!.trim());
-  assert.deepEqual(loads.sort(), ["document.url", "document.url", "httpUrl"], `unexpected loadURL targets: ${loads.join(", ")}`);
+  assert.deepEqual(loads.sort(), ["current.httpUrl", "document.url", "document.url", "httpUrl"], `unexpected loadURL targets: ${loads.join(", ")}`);
 });
 
 test("the window is created through the audited preferences, not an inline options object", () => {

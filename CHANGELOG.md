@@ -25,6 +25,12 @@ They are kept because each one is the reason a constraint or an invariant test e
 - An `http(s)` link clicked in the window opens in the reader's browser, and any other scheme is dropped rather than handed to the OS ([#215]).
 - Every web permission is refused, from the app's own origin included, so a permission Electron adds later is denied by default ([#215]).
 - The window's options and its own assembled bundle are audited before the window opens, so a weakened `contextIsolation`, `sandbox` or `nodeIntegration` fails loudly ([#215]).
+- Closing the window hides it on macOS, and the dock icon reopens it with the orchestrator still running ([#216]).
+- `⌘Q` with live sessions asks first, naming them from the orchestrator's own list ([#216]).
+- `Keep sessions running` quits the app and leaves a detached orchestrator serving, with nothing sent to it ([#216]).
+- The next launch adopts a still-running orchestrator instead of starting a second over the same session files ([#216]).
+- A recorded orchestrator is adopted only when its PID's start time and its port's UI both agree, so a stale record or a recycled PID starts a fresh one ([#216]).
+- `runtime.json` is written atomically under the app's data directory and removed on a clean quit, so a `kill -9` leaves a hint rather than an authority ([#216]).
 
 ### Changed
 
@@ -38,12 +44,16 @@ They are kept because each one is the reason a constraint or an invariant test e
 - A crashed orchestrator shows its failure in the window that is open, instead of opening a second one behind the reader ([#215]).
 - The update banner's Reload button is the recovery it advertises, instead of sitting beside advice to quit the app ([#213]).
 - A reload is refused while the composer holds a draft, on the snapshot path too and not only on return ([#213]).
+- Quitting no longer stops every session as a side effect: the signal is sent only for the answer that says so ([#216]).
+- A probe that is not allowed to read a process's start time is no longer read as "the process is gone", which started a second orchestrator beside a live one ([#216]).
+- The orchestrator survives its output pipe closing, so quitting the app with sessions kept no longer kills it at the next log line ([#216]).
 
 [#212]: https://github.com/sven1103-agent/pi-central/issues/212
 [#214]: https://github.com/sven1103-agent/pi-central/issues/214
 [#213]: https://github.com/sven1103-agent/pi-central/issues/213
 [#220]: https://github.com/sven1103-agent/pi-central/issues/220
 [#215]: https://github.com/sven1103-agent/pi-central/issues/215
+[#216]: https://github.com/sven1103-agent/pi-central/issues/216
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 

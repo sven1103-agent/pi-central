@@ -496,3 +496,41 @@ still reads as protection.
 close `~/.ssh` only because `ssh -F <agentRoot>/ssh/config` **replaces** the per-user config, proven
 by authenticating and signing with `HOME` pointed at an empty directory. Without that measurement,
 the change would have been a hardening claim and a capability regression at once.
+
+## C16 — "Is this the process I recorded?" cannot be answered by `kill -0`
+
+Reattaching to a live orchestrator (issue #216) needs one fact: whether the PID in `runtime.json` still
+belongs to the process that wrote it. Three ways to ask, and only one of them is usable.
+
+| Question | Call | Answer for a live process |
+|---|---|---|
+| May I signal it? | `process.kill(pid, 0)` | `EPERM` on macOS for a process the caller may not signal — **and the same code for a PID that does not exist** |
+| Does it exist and when did it start? | `/bin/ps -o etime= -p <pid>` | elapsed time, or exit 1 with **nothing** printed |
+| Same, but I may not look | same | exit 1, and `ps: … Operation not permitted` on the stream |
+
+**Measured under an agent harness on this machine:** `process.kill(1, 0)` returned `EPERM`, `/bin/ps`
+could not be spawned at all (`spawnSync` reported `EPERM`), and `/bin/sh -c 'ps …'` ran normally while
+`ps` itself failed inside it. So the outcome depends on who is asking, not only on the process asked about.
+
+### Consequences
+
+- **`kill(pid, 0)` must not be used as a liveness test.** Its two failure modes are one errno, and the
+  reading that follows from confusing them is "the process is gone" — which starts a second orchestrator
+  over session files a live one holds, the branch point C9 describes.
+- **A probe needs three outcomes, not two.** Present (with the start time), absent (a `ps` that looked and
+  found nothing — it prints nothing at all), and **unknown** (`spawn` failed, or the tool complained about
+  permission). `unknown` must never be treated as `absent`, and the record must survive it so the next
+  launch can still adopt.
+- **The complaint has to reach the classifier**, so the probe merges stderr (`2>&1`) and reads it. A
+  `2>/dev/null` version of the same command was written first and made `EPERM` indistinguishable from a
+  dead PID — the defect C15b/C15c describe in a new place: the check ran, the answer was discarded.
+- **A process that outlives its parent must not write to the parent's pipe.** On macOS an orphan survives the exit of
+  its parent, but a `console.log` into a pipe whose read end went with the parent raises `EPIPE` — and with no `stream`
+  `error` listener Node treats that as an **unhandled error and exits the process**, code 1, at the first line of
+  whatever it was about to say. Measured: a child whose parent read one line and exited died within one write interval,
+  while the same child with an `error` listener kept running. This is why `server.ts` installs one
+  (`tolerateClosedStream`): a detached orchestrator whose first SIGTERM-handler log line killed it would orphan every
+  session, which is the opposite of what detaching is for.
+- **Identity is a start time, not a PID.** PIDs are recycled, and a record survives `kill -9`. The recorded
+  value is `Date.now() - etime` so that the writing side and the checking side are one measurement rather
+  than two, compared within a tolerance of seconds.

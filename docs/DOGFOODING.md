@@ -196,6 +196,51 @@ and **Settings → About** prints the same value for the tab you have open. If t
 tab is running a different build from the one on disk — which is exactly the situation above, stated
 before you go looking for it. Both come from issue #114.
 
+## Verifying what quitting means (issue #216)
+
+Criteria 4 and 8 are `verified/manual`: they need two live sessions and a real `⌘Q`, which no test in this
+repository can drive. The steps are here so the evidence is reproducible rather than a claim in a PR body.
+
+**What to paste back.** The startup log of the *second* launch, which is what proves the distinction:
+
+- After `⌘Q` → **Keep sessions running**, the log must say the orchestrator was **adopted** —
+  `Pi Central: the recorded orchestrator (pid N, port N) is running and serving Pi Central's UI, so this window loads
+  it instead of starting a second orchestrator` — and it must **not** print `reopened N sessions from the last run`,
+  because nothing was restarted. The rail comes back with the same session rows and the same `startedAt`.
+- After `⌘Q` → **Stop them and quit**, the next launch prints the orchestrator banner followed by
+  `reopened 2 sessions from the last run`. That line is #185's restoration, and it is the proof that stopping the
+  shell did not lose the work: the sessions came back from `open-sessions.json` by file, in their recorded
+  directories and modes.
+
+The pair is the whole criterion. Either line alone is ambiguous; the two together say that keeping and stopping are
+actually different, which is what this slice is for.
+
+**The steps.**
+
+1. Start the app from a terminal, so its log is visible: `npm run app`. Start two sessions in two different
+   directories from the UI, and leave unsent text in one composer — that is the work the dialog exists to protect.
+2. Close the window with `⌘W`. The window disappears and **the dock icon stays**. Click the dock icon: the window
+   comes back with both sessions in the state you left them, and the terminal shows `Pi Central: reopening the
+   window`. Nothing was restarted — that is criterion 1, and the terminal will not print an orchestrator banner.
+3. Press `⌘Q`. The dialog names **2** sessions and lists them with their directories. `Cancel` leaves everything
+   running and the log says `quit cancelled; nothing was stopped`.
+4. `⌘Q` again, and choose **Keep sessions running**. The app exits, and the log says
+   `leaving the orchestrator running (pid N); the next launch will reattach to it`. Start the app again: it adopts
+   the same PID (the log names it) and the sessions are still `idle`/`streaming` rather than reopened.
+5. `⌘Q` and choose **Stop them and quit**. Start again: the orchestrator banner appears, then
+   `reopened 2 sessions from the last run`.
+
+**The two failures these steps catch that the automated tests cannot.**
+
+- **A child that dies with its parent.** Step 4's second launch would print a fresh orchestrator banner and
+  `reopened 2 sessions`, i.e. it would look exactly like step 5 — plausible, and wrong. `detach-live.test.ts`
+  asserts the mechanism (its own process group, so the app's group can be signalled without touching it), which is
+  what makes this step's outcome possible; it cannot assert that Electron's `⌘Q` reaches the detach branch.
+- **A shell restart that quietly loses the sessions.** If a future slice adds a “restore is slow” flag to the spawn
+  argv, step 5 prints no `reopened` line and every session comes back missing. `lifecycle-wiring.test.ts` asserts
+  the argv carries no such flag and that `restoreOpenSessions()` is unconditional; this step is what proves the
+  assembled program still does it.
+
 ## Known rough edges
 
 These are filed rather than worked around, because they are the difference between "possible" and
