@@ -229,7 +229,10 @@ what happened — not a defect.
 4. `⌘Q` → **Stop them and quit**. Reopen. Now it **must** print `reopened 2 sessions from the last run`.
 
 Steps 3 and 4 together are the whole slice: 3 proves *adopt*, 4 proves *restore*. Either alone is ambiguous, because a
-shell that always restarting looks identical to one that always restores.
+shell that always restarts looks identical to one that always restores.
+
+The script already covers criterion 8's mechanism (a seeded `open-sessions.json` is reopened, and each entry keeps its
+mode); what step 4 adds is that it happens for **your** sessions after a real quit.
 
 ## Known rough edges
 

@@ -41,7 +41,7 @@
  * `open-sessions.json` (two clicks; `docs/DOGFOODING.md` has the script).
  */
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -425,6 +425,133 @@ step("criterion 2 — Stop them and quit: both gone, no orphan");
     `exit ${JSON.stringify(outcome)}, port still answers: ${after.ok}`,
   );
   console.log(`          exit: ${JSON.stringify(outcome)}`);
+}
+
+step("criterion 8 — a shell restart reopens the sessions rather than losing them");
+{
+  /*
+   * ## What the criterion asks, and how much of it is provable here
+   *
+   * Criterion 8: *"the shell must not pass any flag that suppresses restoration; a restart re-opens the sessions from
+   * `open-sessions.json`."* Two halves, and only one of them needs a click.
+   *
+   *   - **The flag half** is `lifecycle-wiring.test.ts`: the spawn argv contains no restore-suppressing flag, and
+   *     `restoreOpenSessions()` is unconditional in the entry point.
+   *   - **The restoration half** is this step, and it needs no Electron at all: seed `open-sessions.json`, start the
+   *     orchestrator, and read its banner.
+   *
+   * ## Why the set is SEEDED rather than produced by starting sessions
+   *
+   * A session is remembered once Pi reports its transcript file (`supervisor.#refreshState`), which needs a `pi` process
+   * — and safehouse cannot nest (C1), so inside a sandbox that never happens and the file stays absent. Seeding turns an
+   * environmental limit into a checkable one: the thing under test is that the *entry point acts on the file*, which is
+   * independent of how the file got written.
+   *
+   * The seeded session then fails to spawn here for the same C1 reason, and that is fine — it is itself the assertion. A
+   * session that cannot start must still be reported as REOPENED (it was known and attempted) and must still be listed
+   * afterwards, so the next launch tries again. A restoration that only worked when sessions started cleanly would
+   * shrink the rail one launch after any bad start.
+   */
+  const seedRoot = join(workspace, "seed-sessions");
+  const seedWorkspace = join(workspace, "seed-ws");
+  const sessionDir = join(seedRoot, `--${seedWorkspace.replace(/^\/+/, "").replace(/\//g, "-")}--`);
+  const sessionFile = join(sessionDir, "2026-01-01T00-00-00-000Z_verify216.jsonl");
+  mkdirSync(sessionDir, { recursive: true });
+  mkdirSync(seedWorkspace, { recursive: true });
+  // The header Pi writes first: a session is identified by this line, and `sessionAt` refuses a file without it.
+  writeFileSync(
+    sessionFile,
+    `${JSON.stringify({ type: "session", version: 3, id: "verify216", cwd: seedWorkspace })}\n`,
+    "utf8",
+  );
+  const seededState = join(workspace, "seed-state");
+  mkdirSync(seededState, { recursive: true });
+  writeFileSync(
+    join(seededState, "open-sessions.json"),
+    `${JSON.stringify({ version: 1, sessions: [{ sessionFile, mode: "direct" }] })}\n`,
+    "utf8",
+  );
+
+  const seeded = spawn(
+    process.execPath,
+    [BUNDLE, "--port", "0", "--no-ui", "--direct", "--allow-unsandboxed-host"],
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+      env: {
+        ...process.env,
+        PI_CENTRAL_STATE: seededState,
+        PI_CENTRAL_WORKSPACE: seedWorkspace,
+        PI_SESSIONS_DIR: seedRoot,
+      },
+    },
+  );
+  seeded.unref();
+  if (seeded.pid !== undefined) processes.push(seeded.pid);
+
+  const banner = await new Promise((resolveBanner, reject) => {
+    let out = "";
+    let err = "";
+    seeded.stdout.setEncoding("utf8");
+    seeded.stderr.setEncoding("utf8");
+    seeded.stderr.on("data", (chunk) => {
+      err += chunk;
+    });
+    const timer = setTimeout(() => reject(new Error(`no banner within 30 s\n${out}\n${err}`)), 30_000);
+    seeded.stdout.on("data", (chunk) => {
+      out += chunk;
+      // The restore summary is printed AFTER the banner, so the whole startup block is what is waited for.
+      if (!/Press Ctrl-C to stop/.test(out)) return;
+      clearTimeout(timer);
+      resolveBanner(out);
+    });
+  });
+  await new Promise((r) => setTimeout(r, 1000));
+
+  check(
+    8,
+    "a restart reopens the session named in open-sessions.json",
+    /reopened 1 session from the last run/.test(banner),
+    `the banner did not report a reopen: ${banner.split("\n").filter((l) => /reopen|could not|forgot/.test(l)).join(" | ") || "(no restore line at all)"}`,
+  );
+  // The line that would mean the opposite: an entry silently dropped because its file is no longer accepted.
+  check(
+    8,
+    "the entry is not forgotten, so a session that cannot start is retried next launch",
+    /forgot a session whose file no longer exists/.test(banner) === false,
+    "the orchestrator forgot the seeded session, so its file was rejected",
+  );
+
+  // Stop it as the shell would, then read what the set looks like afterwards: the shape of each entry is what a restore
+  // depends on, and the file surviving the stop is what lets the next launch retry.
+  seeded.kill("SIGTERM");
+  await new Promise((resolveExit) => {
+    seeded.on("exit", () => resolveExit(undefined));
+    setTimeout(() => resolveExit(undefined), 10_000);
+  });
+  const recordPath = join(seededState, "open-sessions.json");
+  const survived = existsSync(recordPath) ? JSON.parse(readFileSync(recordPath, "utf8")) : undefined;
+
+  /*
+   * One check here, and a note about what it does NOT prove.
+   *
+   * The "stopping does not forget" half of `forget: false` cannot be tested with a seeded set: a seeded session that
+   * fails to spawn is never in the supervisor's live set, so `stopAll` has nothing to forget and the file is left alone
+   * whether or not the flag is right. Verified by falsifying it — flipping `server.ts` to `forget: true` left this
+   * whole step passing, which is exactly what a toothless check looks like. The real assertion lives where a session is
+   * genuinely live: `packages/orchestrator/test/open-sessions.test.ts` ("shutdown must not forget", followed by "an
+   * explicit stop forgets"), using a real `Supervisor` with no Electron and no sandbox.
+   *
+   * What this script can and does assert is the outcome the criterion is about — the restart reopened it — plus the
+   * entry's shape, so a restore cannot quietly widen a sandbox.
+   */
+  const entry = survived?.sessions?.[0];
+  check(
+    8,
+    "each entry names its session file and its mode, so a restore cannot widen the sandbox",
+    typeof entry?.sessionFile === "string" && (entry?.mode === "direct" || entry?.mode === "sandboxed"),
+    JSON.stringify(entry),
+  );
 }
 
 // ---------------------------------------------------------------------------------------------------------------
