@@ -636,6 +636,61 @@ export const STOP_CHOICES: readonly StopChoice[] = [
 /** The choice a dismissal or Return selects. Named rather than a literal `0` in `main.ts`. */
 export const DEFAULT_STOP_CHOICE: StopChoice["id"] = "detach";
 
+/**
+ * The whole `dialog.showMessageBox` argument, as data.
+ *
+ * ## Why this is a function and not four lines in `main.ts`
+ *
+ * A dialog is the one surface where the wording, the order and the default *are* the behaviour, and `main.ts` cannot be
+ * loaded by a test. Leaving the object inline meant criterion 3 could only be checked by a person clicking three
+ * buttons — which is exactly the kind of claim that silently rots when a label is reworded or `cancelId` is dropped.
+ *
+ * So the object is built here, asserted in `runtime-record.test.ts`, and `main.ts` does nothing but hand it to Electron.
+ * What a test can then say is the thing that matters: the buttons are these three, in this order, Keep is the default,
+ * and Escape (which reaches `cancelId`) keeps the sessions.
+ *
+ * `noLink` is set because macOS otherwise rewrites the button titles; `type: "question"` puts the app icon on it. Neither
+ * is cosmetic drift — a dialog whose buttons do not say what the code decided is the failure this prevents.
+ */
+export function stopDialog(sessions: readonly SessionSummary[]): {
+  type: "question";
+  buttons: string[];
+  defaultId: number;
+  cancelId: number;
+  message: string;
+  detail: string;
+  noLink: true;
+} {
+  const { message, detail } = stopQuestion(sessions);
+  return {
+    type: "question",
+    buttons: STOP_CHOICES.map((choice) => choice.label),
+    defaultId: choiceIndex(DEFAULT_STOP_CHOICE),
+    /*
+     * `Escape` maps to Cancel, NOT to the default.
+     *
+     * The two happen to differ here, and the difference is deliberate: Return means "the default", which keeps the
+     * sessions, while Escape means "get me out of this", which must also keep them. Both are safe, and both must be safe
+     * for different reasons — an implementation that pointed `cancelId` at `Stop` would make a dismissal stop work.
+     */
+    cancelId: choiceIndex("cancel"),
+    message,
+    detail: `${detail}\n\n${STOP_CHOICES.map((choice) => `${choice.label}: ${choice.detail}`).join("\n")}`,
+    noLink: true,
+  };
+}
+
+/**
+ * Which choice a `dialog.showMessageBox` response index means.
+ *
+ * Exists so `main.ts` and the verification script agree on the mapping, and so an index out of range resolves to the
+ * default rather than to `undefined`. A dialog response the shell does not recognise must keep the sessions — the same
+ * direction as a dialog that could not be shown.
+ */
+export function chooseAnswer(response: number): StopChoice["id"] {
+  return STOP_CHOICES[response]?.id ?? DEFAULT_STOP_CHOICE;
+}
+
 /** The index `dialog.showMessageBox` needs for its `cancelId`/`defaultId`, derived from the list above. */
 export function choiceIndex(id: StopChoice["id"]): number {
   const index = STOP_CHOICES.findIndex((choice) => choice.id === id);

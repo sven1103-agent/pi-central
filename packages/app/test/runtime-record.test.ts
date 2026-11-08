@@ -45,6 +45,7 @@ import {
   rememberedMarks,
   removeRuntimeRecord,
   runtimeRecordPath,
+  stopDialog,
   stopQuestion,
   urlsFor,
   writeRuntimeRecord,
@@ -432,4 +433,51 @@ test("the three answers are the slice's words, and Keep is first and default", (
   assert.equal(choiceIndex("detach"), 0);
   assert.equal(choiceIndex("stop"), 1);
   assert.equal(choiceIndex("cancel"), 2);
+});
+
+// -----------------------------------------------------------------------------------------------------------
+// Criterion 3 — the dialog Electron is actually handed, not a description of it.
+// -----------------------------------------------------------------------------------------------------------
+
+const TWO_LIVE: SessionSummary[] = [
+  { name: "fix the parser", cwd: "/Users/x/git/parser", state: "streaming" },
+  { name: "notes", cwd: "/Users/x/notes", state: "idle" },
+];
+
+test("the dialog handed to Electron has the three answers, Keep first, and Keep as the default", () => {
+  const dialog = stopDialog(TWO_LIVE);
+  assert.equal(dialog.type, "question");
+  assert.deepEqual(dialog.buttons, ["Keep sessions running", "Stop them and quit", "Cancel"]);
+  assert.equal(dialog.defaultId, 0, "Return keeps the sessions");
+  assert.equal(dialog.buttons[dialog.defaultId], "Keep sessions running");
+  assert.equal(dialog.noLink, true, "macOS must not rewrite the button titles");
+});
+
+test("Escape keeps the sessions, because `cancelId` is Cancel and not the default", () => {
+  // The one mistake this dialog must not make: a dismissal that stops work. Asserted as an identity on the BUTTON, so a
+  // reordering of the array cannot silently move what Escape selects.
+  const dialog = stopDialog(TWO_LIVE);
+  assert.equal(dialog.buttons[dialog.cancelId], "Cancel");
+  assert.notEqual(dialog.cancelId, dialog.defaultId, "dismissing and pressing Return are different buttons");
+});
+
+test("the dialog names every live session with its directory, and the count agrees with the list", () => {
+  const dialog = stopDialog(TWO_LIVE);
+  assert.match(dialog.message, /2 sessions are still running/);
+  for (const session of TWO_LIVE) {
+    assert.equal(dialog.detail.includes(session.name), true, `${session.name} is named`);
+    assert.equal(dialog.detail.includes(session.cwd), true, `${session.cwd} is named`);
+  }
+  // The count is derived from the list, so it cannot disagree with it — the defect criterion 3 is about.
+  assert.match(stopDialog(TWO_LIVE.slice(0, 1)).message, /^1 session is still running/);
+  assert.match(stopDialog([...TWO_LIVE, { name: "third", cwd: "/c", state: "starting" }]).message, /3 sessions are still running/);
+});
+
+test("every choice explains its consequence, so the destructive one is not the shortest word", () => {
+  const dialog = stopDialog(TWO_LIVE);
+  for (const choice of STOP_CHOICES) {
+    assert.equal(dialog.detail.includes(`${choice.label}: ${choice.detail}`), true, `${choice.label} carries its consequence`);
+  }
+  // And "Keep" is described in terms of what the reader gets, not as "the safe option".
+  assert.match(dialog.detail, /Keep sessions running: They keep writing to their session files/);
 });

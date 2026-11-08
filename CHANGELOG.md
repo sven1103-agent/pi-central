@@ -31,6 +31,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The next launch adopts a still-running orchestrator instead of starting a second over the same session files ([#216]).
 - A recorded orchestrator is adopted only when its PID's start time and its port's UI both agree, so a stale record or a recycled PID starts a fresh one ([#216]).
 - `runtime.json` is written atomically under the app's data directory and removed on a clean quit, so a `kill -9` leaves a hint rather than an authority ([#216]).
+- `npm run verify:lifecycle` checks the quit-and-reattach sequence against a real orchestrator, one line per criterion ([#216]).
 
 ### Changed
 

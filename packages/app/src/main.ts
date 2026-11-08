@@ -59,7 +59,6 @@ import {
 import {
   DEFAULT_STOP_CHOICE,
   PROBE_TIMEOUT_MS,
-  STOP_CHOICES,
   choiceIndex,
   connectionRefused,
   decideAttach,
@@ -68,11 +67,13 @@ import {
   readRuntimeRecord,
   rememberedMarks,
   removeRuntimeRecord,
-  stopQuestion,
+  chooseAnswer,
+  stopDialog,
   urlsFor,
   writeRuntimeRecord,
   type ProbeAnswer,
   type RuntimeRecord,
+  type SessionSummary,
 } from "./runtime-record.ts";
 import { askLiveSessions, type SocketLike } from "./live-sessions.ts";
 
@@ -970,11 +971,9 @@ async function decideAndQuit(): Promise<void> {
     return;
   }
 
-  const { message, detail } = stopQuestion(decision.sessions);
-  const answerIndex = await showStopQuestion(message, detail);
-  const choice = STOP_CHOICES[answerIndex] ?? STOP_CHOICES[0];
+  const choice = chooseAnswer(await showStopQuestion(decision.sessions));
 
-  if (choice?.id === "cancel") {
+  if (choice === "cancel") {
     // The app stays open, and a later `⌘Q` must ask again — so the gate is reset rather than left set.
     quitting = false;
     console.log("Pi Central: quit cancelled; nothing was stopped");
@@ -985,7 +984,7 @@ async function decideAndQuit(): Promise<void> {
    * `quitDecided`'s companion field rather than by two code paths, so "keep sessions running" cannot accidentally
    * inherit the stop that the other branch performs.
    */
-  detachOnQuit = choice?.id === "detach";
+  detachOnQuit = choice === "detach";
   quitting = true;
   quitDecided = true;
   app.quit();
@@ -994,30 +993,19 @@ async function decideAndQuit(): Promise<void> {
 /**
  * Ask the question, and return the index of the answer.
  *
- * Order and default come from `STOP_CHOICES` and `DEFAULT_STOP_CHOICE`, not from here: the wording and the
- * default are the interface, so they live where a test can read them (`runtime-record.test.ts`). `cancelId` is the
- * same index as the default for a separate reason — a dismissal is `Escape`, and `Escape` must mean "do not stop
- * anything", which is the default's meaning. Making dismissal mean `Stop` is the one mistake this dialog must not
- * make.
+ * The dialog's contents — buttons, order, default, `cancelId`, both sentences — come from `stopDialog`, so they are
+ * asserted by `runtime-record.test.ts` rather than existing only inside a click. This function is the part that cannot be
+ * tested without Electron: it hands the object over and reads the reply.
  */
-async function showStopQuestion(message: string, detail: string): Promise<number> {
+async function showStopQuestion(sessions: readonly SessionSummary[]): Promise<number> {
   try {
-    const { response } = await dialog.showMessageBox({
-      type: "question",
-      buttons: STOP_CHOICES.map((choice) => choice.label),
-      defaultId: choiceIndex(DEFAULT_STOP_CHOICE),
-      // `Escape` maps to Cancel, so a reader who dismisses the dialog keeps their sessions.
-      cancelId: choiceIndex("cancel"),
-      message,
-      detail: `${detail}\n\n${STOP_CHOICES.map((choice) => `${choice.label}: ${choice.detail}`).join("\n")}`,
-      noLink: true,
-    });
+    const { response } = await dialog.showMessageBox(stopDialog(sessions));
     return response;
   } catch (error) {
     /*
-     * A dialog that cannot be shown must not stop sessions. Falling through to `Keep sessions running` is the
-     * safe direction and the one `defaultId` already names; the alternative would be a quit that stops work because
-     * a window could not be drawn.
+     * A dialog that cannot be shown must not stop sessions. Falling through to `Keep sessions running` is the safe
+     * direction and the one `defaultId` already names; the alternative would be a quit that stops work because a window
+     * could not be drawn.
      */
     console.error(`Pi Central: could not ask about the running sessions (${(error as Error).message}); keeping them`);
     return choiceIndex(DEFAULT_STOP_CHOICE);
