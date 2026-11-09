@@ -48,6 +48,11 @@ They are kept because each one is the reason a constraint or an invariant test e
 - An update outcome is a dialog that returns to the dashboard, instead of a failure page that took the window and could not be left ([#217]).
 - Checking for updates and finding a newer version no longer does nothing, which is what the update guard made it do ([#217]).
 
+- `npm run install-app` builds `~/Applications/Pi Central.app`, ad-hoc or self-signed, on a machine with no Developer ID ([#218]).
+- A self-signed code-signing identity is used when one exists, so macOS privacy grants survive a rebuild ([#218]).
+- The build refuses a `.dmg`, notarization, publishing or an auto-updater, and refuses a bundle that carries product code ([#218]).
+- `docs/APP-SHELL.md` states the certificate steps, the Gatekeeper position and how to uninstall ([#218]).
+
 ### Changed
 
 - `docs/STACK.md` no longer claims there is no Electron path; ADR-0013 states the shell as a launcher rather than a second artifact ([#212]).
@@ -71,6 +76,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 [#215]: https://github.com/sven1103-agent/pi-central/issues/215
 [#216]: https://github.com/sven1103-agent/pi-central/issues/216
 [#217]: https://github.com/sven1103-agent/pi-central/issues/217
+[#218]: https://github.com/sven1103-agent/pi-central/issues/218
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 

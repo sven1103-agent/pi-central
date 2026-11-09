@@ -145,7 +145,7 @@ gave it. The record is [ADR-0013](decisions/0013-application-shell.md).
 | The renderer is locked to the loopback document (#215) | ✅ this slice |
 | Close hides, `⌘Q` keeps sessions, the next launch reattaches (#216) | ✅ this slice |
 | The shell applies an update: stop, install, verify, respawn, reload (#217) | ✅ this slice |
-| `npm run install-app` produces a locally signed app (#218) | open |
+| `npm run install-app` produces a locally signed app (#218) | ✅ this slice |
 
 Non-goals of the whole increment, stated once: a `.dmg`, notarization, `electron-updater`, a stored
 credential in CI, and x64.

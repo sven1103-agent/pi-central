@@ -126,6 +126,29 @@ prove which process a record names. Where the host forbids the probe (C16), the 
 anyway, keeping the record for the next attempt. There is no third option — the shell holds no authority to
 stop a process it did not start, and it does not choose ports (ADR-0013 §4), so it cannot take over.
 
+## Amendment — the build, and what it refuses
+
+Issue #218 made §6 concrete: `npm run install-app` builds, signs and installs `~/Applications/Pi Central.app` locally, with
+no Developer ID. Three of its properties are decisions rather than mechanics.
+
+**The build refuses three things, at build time.** A `dmg` target, a `notarize` step, and a `publish` config are each a
+build failure (`configProblems`), and so is a `files` glob that would put `bin/` or `dist/` in the bundle. The reason is
+that each of them fails *later and worse*: a `.dmg` cannot be notarized without the account, and the discovery is a release
+pipeline that cannot complete. §6 said "the build fails loudly if any of those is added"; this is the mechanism.
+
+**Signing is this project's job, and the order is explicit.** `electron-builder` is used for packaging only (`identity:
+null`), because signing before the artifact audit would let an identity be applied to a bundle this project then refuses.
+The nested bundles are signed innermost-first — Electron ships five frameworks and five helper apps, and a packaged app
+renames the helpers after its product, so they are **discovered** from `Contents/Frameworks` rather than listed. `--deep` is
+used to verify and never to sign.
+
+**The TCC consequence is stated, not hidden.** An ad-hoc signature's cdhash is derived from the contents, so every rebuild
+changes the app's code identity and macOS asks for Documents/Desktop/Downloads again — verified in this repository by
+signing the same file with different contents. A free self-signed certificate fixes it, and §6 fact 3 said so; what this
+slice adds is that the build uses `PI_CENTRAL_SIGN_IDENTITY` (or a detected identity) when present and, when it must fall
+back to ad-hoc, prints the consequence and the fix. Silent ad-hoc signing is what turns a known limitation into a
+reported defect.
+
 ## Consequences
 
 **Positive**
