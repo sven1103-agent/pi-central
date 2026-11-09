@@ -57,7 +57,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - `pi` that is a shell alias is resolved to the real binary, and the app says the alias was skipped rather than reporting it missing ([#218]).
 - `install-app` says where the app went, because it is in `~/Applications` and not `/Applications` ([#218]).
 - The app writes its diagnostics to `~/Library/Logs/Pi Central/main.log`, and the menu reveals it, so a Finder launch is diagnosable without a terminal ([#218]).
-- `⌘Q` can name the live sessions in the packaged app: `ws` is resolved without `import.meta`, which a CommonJS bundle strips ([#218]).
+- `⌘Q` can name the live sessions in the packaged app: `ws` is resolved with the module-scope `require`, which Electron patches to read inside `app.asar` ([#218]).
 - `install-app` refuses to overwrite a bundle it did not create, so it can no longer delete a Safari web app that shares the path ([#218]).
 - An install copies to a staging path and renames, so a failed copy leaves the previous installation intact ([#218]).
 - `npm run app` is a separate app with its own state, so a development run cannot adopt or delete the installed one's runtime record ([#218]).

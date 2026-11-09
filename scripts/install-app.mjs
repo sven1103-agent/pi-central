@@ -124,8 +124,17 @@ mkdirSync(buildDir, { recursive: true });
       // CommonJS, because Electron's entry loader treats a `.js` file in a directory with no `"type": "module"` as
       // CommonJS and a bundle with top-level `await` would otherwise be rejected.
       format: "cjs",
-      // `electron` is provided by the runtime. Everything else is bundled, so the app carries no `node_modules`.
-      external: ["electron"],
+      /*
+       * `electron` is provided by the runtime.
+       *
+       * `ws` is external TOO, and that is what makes the socket work in the packaged app (issue #218). The shell opens one
+       * WebSocket, to ask which sessions are live for the quit dialog, and it resolves it with a bare `require("ws")`:
+       * Electron patches `require` so it reads inside `app.asar`, which is where the packaged copy sits. Bundling `ws`
+       * instead would work too, but the resolution has to survive THREE environments — a CommonJS asar bundle, an
+       * unbundled ESM dev run, and a test — and leaving it external is the only shape where the same call is valid in
+       * each. `bundle-resolution.test.ts` asserts the emitted call.
+       */
+      external: ["electron", "ws"],
       logLevel: "warning",
     });
   } catch (error) {
@@ -143,8 +152,17 @@ const bundledManifest = {
   version: rootManifest.version,
   description: appManifest.description,
   main: "main.js",
-  // No `dependencies`: everything the shell needs is bundled, and a dependency list would make electron-builder try to
-  // install into the app (and could carry product code, which criterion 5 forbids).
+  /*
+   * ONE dependency: `ws`, and it is not a product dependency.
+   *
+   * The shell opens a single WebSocket to ask the orchestrator which sessions are live for the quit dialog, and `ws` is
+   * left external so that one `require("ws")` works in the packaged asar, in an unbundled dev run, and in a test. That
+   * means it has to be ON DISK beside `main.js`, which is what a `dependencies` entry gets electron-builder to do.
+   *
+   * Everything else is bundled into `main.js`, and no other package may be added here: the `files` globs are audited
+   * (`configProblems`) precisely so product code cannot arrive this way.
+   */
+  dependencies: { ws: appManifest.dependencies?.ws ?? "^8.22.0" },
 };
 writeFileSync(join(buildDir, "package.json"), `${JSON.stringify(bundledManifest, null, 2)}\n`, "utf8");
 

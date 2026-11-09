@@ -140,8 +140,17 @@ test("the resolution has three independent routes, so one failing does not silen
    */
   const source = readFileSync(MAIN, "utf8");
   const resolver = source.slice(source.indexOf("function resolveWs"), source.indexOf("function socketClient"));
-  assert.match(resolver, /globalThis as \{ require\?/, "route 1: the CommonJS require, which the bundle has");
-  assert.match(resolver, /createRequire\(anchor\)/, "route 2: createRequire from a real path");
+  /*
+   * Route 1 is the MODULE-SCOPE `require`, not `globalThis.require`. The difference is not stylistic and it cost a
+   * release: in a real `.cjs` FILE `typeof globalThis.require === "undefined"` while `typeof require === "function"`,
+   * because `require` is a module-scope binding. Measured both ways, against the packaged asar:
+   *
+   *     module-scope require  -> function
+   *     globalThis.require    -> undefined      <- the bug
+   */
+  assert.match(resolver, /typeof require === "function" \? \(?require/, "route 1: the module-scope require");
+  assert.equal(resolver.includes("globalThis as { require?"), false, "and NOT globalThis.require, which is undefined in a .cjs file");
+  assert.match(resolver, /createRequire\(entry\)/, "route 2: createRequire from a real path");
   assert.match(resolver, /createRequire\(join\(process\.cwd\(\)/, "route 3: the working directory as a last resort");
 });
 
@@ -154,4 +163,69 @@ test("a resolution failure is LOGGED, because its consequence is silent", () => 
   const source = readFileSync(MAIN, "utf8");
   assert.match(source, /could not resolve `ws`/);
   assert.match(source, /quit dialog will not be able to name sessions/, "and it names the consequence");
+});
+
+test("the resolver works in a real `.cjs` FILE, where `globalThis.require` does not exist", async (t) => {
+  /*
+   * The test that would have caught the second failed fix, and the reason the first version of this file did not.
+   *
+   * `globalThis.require` is `undefined` in a `.cjs` FILE and **defined** under `node -e`, because `-e` evaluates in the
+   * main module's scope. So a probe written with `new Function` inside a `-e` snippet — which is what was used to
+   * validate the second attempt — reports success for a route that cannot work in the shipped bundle. Measured both ways:
+   *
+   *     node -e  'typeof globalThis.require'  -> function
+   *     node check.cjs                        -> undefined
+   *
+   * This test writes a `.cjs` file and runs it, so the harness matches the artifact.
+   */
+  const directory = mkdtempSync(join(tmpdir(), "pi-central-cjs-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const { mkdirSync, cpSync } = await import("node:fs");
+  const { execFileSync } = await import("node:child_process");
+
+  // The shape the packaged app has: `ws` beside the entry file.
+  mkdirSync(join(directory, "node_modules"), { recursive: true });
+  cpSync(join(ROOT, "node_modules", "ws"), join(directory, "node_modules", "ws"), { recursive: true });
+
+  const { text } = await buildBundle(t);
+  const start = text.indexOf("function resolveWs");
+  const end = text.indexOf("function socketClient");
+  assert.ok(start !== -1 && end > start, "the resolver is in the bundle");
+
+  // Both routes, side by side, run from a file.
+  const probe = join(directory, "probe.cjs");
+  writeFileSync(
+    probe,
+    [
+      'const { join } = require("node:path");',
+      'const { createRequire } = require("node:module");',
+      "const accept = (loaded) => {",
+      '  const c = typeof loaded === "function" ? loaded : loaded?.WebSocket ?? loaded?.default;',
+      '  return typeof c === "function" ? c : undefined;',
+      "};",
+      "const moduleScope = () => {",
+      '  const r = typeof require === "function" ? require : undefined;',
+      '  try { return accept(r("ws")); } catch { return undefined; }',
+      "};",
+      "const globalScope = () => {",
+      "  const r = globalThis.require;",
+      '  try { return accept(r("ws")); } catch { return undefined; }',
+      "};",
+      // The bundle's own resolver, evaluated in this file's scope so `typeof require` is the real one.
+      text.slice(start, end),
+      'console.log(JSON.stringify({',
+      "  globalThisRequire: typeof globalThis.require,",
+      "  moduleScope: typeof moduleScope(),",
+      "  globalScope: typeof globalScope(),",
+      "  bundle: typeof resolveWs(),",
+      "}));",
+    ].join("\n"),
+  );
+
+  const result = JSON.parse(execFileSync(process.execPath, [probe], { encoding: "utf8" }).trim()) as Record<string, string>;
+  // The premise: in a FILE, `globalThis.require` does not exist. Without this the rest proves nothing.
+  assert.equal(result["globalThisRequire"], "undefined", "a .cjs file has no globalThis.require");
+  assert.equal(result["moduleScope"], "function", "the module-scope require works");
+  assert.equal(result["globalScope"], "undefined", "and the globalThis route cannot");
+  assert.equal(result["bundle"], "function", "so the bundle's own resolver must use the module-scope one");
 });

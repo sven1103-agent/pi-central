@@ -1813,34 +1813,37 @@ type WebSocketConstructor = new (url: string) => WebSocketLike;
 let socketConstructor: WebSocketConstructor | undefined;
 
 /**
- * Resolve `ws`, from wherever this build can find it.
+ * Resolve `ws`, in a CommonJS bundle that Electron loads from inside `app.asar`.
  *
- * ## The defect this replaces, which made `⌘Q` blind
+ * ## Two failed fixes before this one, and what each taught
  *
- * The first version was `createRequire(import.meta.url)("ws")`. That is correct in an ES module and **silently broken in
- * the packaged app**, which is bundled to CommonJS: esbuild emits `var import_meta = {}` for `import.meta`, so
- * `import.meta.url` is `undefined` and `createRequire(undefined)` throws
- * *"The argument 'filename' must be a file URL object, file URL string, or absolute path string"*.
+ * **Attempt 1 — `createRequire(import.meta.url)`.** Correct in an ES module; in the bundle esbuild emits
+ * `var import_meta = {}`, so `.url` is `undefined` and `createRequire(undefined)` throws. Silent, because the throw was
+ * caught, and the only symptom was `⌘Q` reporting *"the orchestrator did not describe its sessions within 2000 ms"* —
+ * which blames the orchestrator for a client fault.
  *
- * The throw was caught — that is what the fallback below is for — so the app started and looked healthy. What it lost was
- * the socket: `askLiveSessions` never got a client, every `⌘Q` waited its full 2000 ms and then reported
- * *"the orchestrator did not describe its sessions within 2000 ms"* from the log. **So the quit dialog never appeared and
- * the stop ran blind**, which is why "⌘Q leaves the window open" survived the fix for the looping exit handler: there was
- * a second, independent fault in front of it.
+ * **Attempt 2 — `globalThis.require`.** Also wrong, and less obvious: `require` is a **module-scope binding**, not a
+ * property of `globalThis`. Measured: in a plain `.cjs` file `typeof require === "function"` while
+ * `typeof globalThis.require === "undefined"`. So that route could never fire, and the log said so again.
  *
- * Found in the app's own log — the diagnostic added for exactly this class of problem.
+ * **Attempt 3 — `createRequire` on the asar path.** Also wrong, and this is the one the real machine proved:
+ * `createRequire("/…/Resources/app.asar/main.js")("ws")` fails with `ERR_INVALID_PACKAGE_CONFIG`, because **Node does not
+ * know how to stat inside an asar** — only Electron's patched module loader does.
  *
- * ## The order, and why `require` is first
+ * ## What actually works
  *
- *  1. **`require`**, when it exists. In the packaged bundle that is the real CommonJS `require`, resolved relative to the
- *     bundle inside `app.asar` — where `node_modules/ws` is packed beside it.
- *  2. **`createRequire` from a real path**, for an ES-module build (`npm run app` runs the TypeScript directly). The path
- *     comes from `process.argv[1]`, which is the entry script in both a dev run and a bundle, and never from
- *     `import.meta.url`.
- *  3. **A bare `require` of the package name from the app's own resolution**, which covers a checkout where `ws` is a
- *     hoisted workspace dependency.
+ * `require("ws")` **as a bare call**, with `ws` marked `external` in the esbuild invocation. Three facts combine:
  *
- * Each attempt is independent, because a missing `ws` costs one dialog — not the app.
+ *   - esbuild leaves a bare `require("ws")` untouched when the module is external (verified: the output line is
+ *     `return require("ws")`);
+ *   - in CommonJS `require` is in scope for the bundle, so the call compiles and runs;
+ *   - Electron patches `require` to read inside `app.asar`, which is where `node_modules/ws` sits beside `main.js`.
+ *
+ * The ESM path (`npm run app`, which runs the TypeScript directly) has no `require`, so `createRequire` anchored on
+ * `process.argv[1]` covers it — a real path there, because an unbundled run is on the filesystem rather than in an asar.
+ *
+ * **The lesson worth keeping:** each attempt was plausible, each failed for a different and specific reason, and the only
+ * way any of them was caught was by running the bundle. A source-level test cannot distinguish these.
  */
 function resolveWs(): WebSocketConstructor | undefined {
   const accept = (loaded: unknown): WebSocketConstructor | undefined => {
@@ -1853,32 +1856,41 @@ function resolveWs(): WebSocketConstructor | undefined {
     return typeof candidate === "function" ? (candidate as WebSocketConstructor) : undefined;
   };
 
-  // 1. CommonJS: the packaged bundle. `require` is a real function there, and it resolves inside `app.asar`.
-  const nativeRequire = (globalThis as { require?: (id: string) => unknown }).require;
-  if (typeof nativeRequire === "function") {
+  /*
+   * Route 1: the CommonJS `require`, which the bundle has.
+   *
+   * `require` is in scope in a CommonJS module, and `ws` is `external` in the build so this call is emitted verbatim.
+   * Electron patches `require` to read inside `app.asar`, which is the only loader that can find the packaged copy.
+   *
+   * The `typeof` guard is written against an indirect reference so this file still typechecks and parses as an ES module
+   * (where `require` does not exist) — the call is guarded, never evaluated eagerly.
+   */
+  const commonjsRequire = typeof require === "function" ? (require as (id: string) => unknown) : undefined;
+  if (commonjsRequire !== undefined) {
     try {
-      const accepted = accept(nativeRequire("ws"));
+      const accepted = accept(commonjsRequire("ws"));
       if (accepted !== undefined) return accepted;
     } catch {
-      // Not resolvable from here; try the next route.
+      // Not resolvable from here; try the ESM route.
     }
   }
 
-  // 2. ESM: a real path for `createRequire`. `process.argv[1]` is the entry script in both shapes, and unlike
-  //    `import.meta.url` it survives being bundled to CommonJS.
+  /*
+   * Route 2: an ES-module run (`npm run app`), where `require` does not exist. `process.argv[1]` is the entry script and
+   * is a REAL path — unlike `import.meta.url`, it survives being bundled, and unlike the asar case there is no archive to
+   * read through because an unbundled run is on the filesystem.
+   */
   const entry = process.argv[1];
   if (entry !== undefined && entry !== "") {
-    for (const anchor of [entry, join(dirname(entry), "noop.js")]) {
-      try {
-        const accepted = accept(createRequire(anchor)("ws"));
-        if (accepted !== undefined) return accepted;
-      } catch {
-        // Try the next anchor.
-      }
+    try {
+      const accepted = accept(createRequire(entry)("ws"));
+      if (accepted !== undefined) return accepted;
+    } catch {
+      // Try the working directory.
     }
   }
 
-  // 3. Last resort: let the runtime resolve the bare name from the current working directory.
+  // Route 3: last resort, resolve from where the app was started.
   try {
     const accepted = accept(createRequire(join(process.cwd(), "noop.js"))("ws"));
     if (accepted !== undefined) return accepted;
@@ -1894,7 +1906,8 @@ function socketClient(): WebSocketConstructor | undefined {
   if (socketConstructor === undefined) {
     /*
      * Logged once, and loudly, because the consequence is silent: `⌘Q` will wait its full timeout and report that the
-     * orchestrator did not answer. Without this line, that message looks like the orchestrator's fault.
+     * orchestrator did not answer. Without this line, that message looks like the orchestrator's fault — which is exactly
+     * how two wrong fixes survived.
      */
     console.error(
       "Pi Central: could not resolve `ws`, so asking the orchestrator which sessions are live will time out. " +

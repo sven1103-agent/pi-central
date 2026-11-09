@@ -58,7 +58,12 @@ export function buildConfig(paths) {
      */
     electronDist: paths.electronDist,
     directories: { output: paths.output },
-    files: ["main.js", "package.json"],
+    /*
+     * `main.js` and the manifest, plus `node_modules/ws` — the ONE external dependency, needed at runtime because the
+     * socket is resolved with a bare `require("ws")` (issue #218). Excluding `node_modules` entirely would ship a bundle
+     * whose quit dialog can never name a session.
+     */
+    files: ["main.js", "package.json", "node_modules/ws/**"],
     mac: {
       // The only allowed target: this produces the `.app` and nothing else.
       target: "dir",
