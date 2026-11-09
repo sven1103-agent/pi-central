@@ -29,6 +29,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   loginShellLookup,
+  diagnoseLoginShellLookup,
   resolveEnvironment,
   type Environment,
   type MissingExecutable,
@@ -510,6 +511,8 @@ async function launch(): Promise<void> {
     env: process.env,
     shell: userShell(),
     runLoginShell: loginShellLookup,
+    // The diagnosis is what turns "the login shell did not report it either" into a sentence that names the cause.
+    diagnoseLoginShell: diagnoseLoginShellLookup,
   });
   if (!environment.ok) {
     showFailure(missingTitle(environment.missing), missingDetail(environment.missing));
@@ -891,7 +894,7 @@ function installationOwner(): { mayUpdate: boolean; refusal: string; owner: stri
   if (!located.ok) {
     return { mayUpdate: false, refusal: located.message, owner: "undetermined" };
   }
-  const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup });
+  const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup, diagnoseLoginShell: diagnoseLoginShellLookup });
   const evidence = readOwnerEvidence({
     packageRoot: located.package.root,
     nodePath: environment.ok ? environment.environment.node.path : undefined,
@@ -1108,7 +1111,7 @@ function updateEnvironment(): UpdateEnvironment {
   return {
     readLatestVersion: () => {
       const { command, args } = latestVersionCommand();
-      const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup });
+      const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup, diagnoseLoginShell: diagnoseLoginShellLookup });
       const npm = npmBesideNode(environment.ok ? environment.environment.node.path : undefined);
       return runCommand(npm?.path ?? command, args, 30_000);
     },
@@ -1121,7 +1124,7 @@ function updateEnvironment(): UpdateEnvironment {
        * and with a version manager in play the two can differ — a login shell's `npm` would install into a prefix
        * belonging to a Node this app is not running, and the verification would then read the wrong tree.
        */
-      const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup });
+      const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup, diagnoseLoginShell: diagnoseLoginShellLookup });
       const npm = npmBesideNode(environment.ok ? environment.environment.node.path : undefined);
       return runCommand(npm?.path ?? command, args, INSTALL_TIMEOUT_MS);
     },
@@ -1147,7 +1150,7 @@ function updateEnvironment(): UpdateEnvironment {
       announcedPort = undefined;
       const located = locatePackage();
       if (!located.ok) throw new Error(located.message);
-      const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup });
+      const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup, diagnoseLoginShell: diagnoseLoginShellLookup });
       if (!environment.ok) throw new Error(missingDetail(environment.missing));
       const port = await spawnOrchestrator(located.package, environment.environment);
       if (port === undefined) throw new Error("the new orchestrator did not report a port");

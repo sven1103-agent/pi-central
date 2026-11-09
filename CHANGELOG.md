@@ -52,6 +52,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 - A self-signed code-signing identity is used when one exists, so macOS privacy grants survive a rebuild ([#218]).
 - The build refuses a `.dmg`, notarization, publishing or an auto-updater, and refuses a bundle that carries product code ([#218]).
 - `docs/APP-SHELL.md` states the certificate steps, the Gatekeeper position and how to uninstall ([#218]).
+- A missing `pi` or `safehouse` reports why the login shell could not resolve it, quoting what the shell printed, instead of only saying it did not ([#218]).
+- `install-app` says where the app went, because it is in `~/Applications` and not `/Applications` ([#218]).
 
 ### Changed
 

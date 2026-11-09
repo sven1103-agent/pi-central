@@ -24,6 +24,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   EXECUTABLE_HINTS,
+  diagnoseLoginShellLookup,
   isShimDirectory,
   resolveEnvironment,
   resolveExecutable,
@@ -242,4 +243,128 @@ test("shim-only and no login shell is a refusal, not the shim", (t) => {
     EXECUTABLE_HINTS.pi,
   );
   assert.equal(result.ok, false, "a shim is not an answer");
+});
+
+// -----------------------------------------------------------------------------------------------------------
+// Why the login shell did not answer — reported from a real app launch.
+// -----------------------------------------------------------------------------------------------------------
+
+test("the diagnosis carries the reason and what the shell printed", (t) => {
+  /*
+   * Reported from a Finder launch:
+   *
+   *   "Pi Central could not find `pi`. It is not on this app's PATH (/usr/bin:/bin:/usr/sbin:/sbin) and the
+   *    login shell did not report it either."
+   *
+   * — while `pi` was at /opt/homebrew/bin/pi and worked in the reader's terminal. "Did not report it" was true
+   * and useless: four causes hide behind it, with four different fixes.
+   *
+   * The first case is the one that produces it in practice: a chatty shell startup file whose LAST line is a banner,
+   * because a plugin manager printed after `command -v` had already answered.
+   */
+  const root = scratch(t);
+  const shell = join(root, "fake-shell");
+  // A shell that prints a banner last, then exits 0 with no path anywhere.
+  writeFileSync(shell, '#!/bin/sh\necho "/opt/homebrew/bin/pi"\necho "Welcome to zsh! p10k loaded"\nexit 0\n');
+  chmodSync(shell, 0o755);
+
+  const diagnosis = diagnoseLoginShellLookup(shell, "pi");
+  assert.equal(diagnosis.path, undefined, "a banner is not a path");
+  assert.notEqual(diagnosis.note, undefined, "the reason is reported, not swallowed");
+  assert.match(diagnosis.note ?? "", /not an absolute path/, "and it says WHICH problem it was");
+  // The banner is quoted, because seeing it is what tells the reader their shell startup is the cause.
+  assert.match(diagnosis.note ?? "", /Welcome to zsh/, "the shell's own output is quoted");
+});
+
+test("a non-zero exit is reported with its status and stderr", (t) => {
+  const root = scratch(t);
+  const shell = join(root, "broken-shell");
+  // A `.zshrc` that aborts the shell — a real failure mode, and indistinguishable from "not installed" without this.
+  writeFileSync(shell, '#!/bin/sh\necho "compinit: initialization aborted" >&2\nexit 1\n');
+  chmodSync(shell, 0o755);
+
+  const diagnosis = diagnoseLoginShellLookup(shell, "pi");
+  assert.equal(diagnosis.path, undefined);
+  assert.match(diagnosis.note ?? "", /exit 1/, "the exit status is named");
+  assert.match(diagnosis.note ?? "", /compinit/, "and stderr is quoted, because that is the diagnosis");
+});
+
+test("a shell that answers properly is not annotated", (t) => {
+  // The control: a working lookup must stay silent, or the message grows a paragraph for the happy path.
+  const root = scratch(t);
+  const shell = join(root, "good-shell");
+  const pi = join(root, "pi");
+  writeFileSync(pi, "#!/bin/sh\n");
+  writeFileSync(shell, `#!/bin/sh\necho "a banner"\necho "${pi}"\nexit 0\n`);
+  chmodSync(shell, 0o755);
+
+  const diagnosis = diagnoseLoginShellLookup(shell, "pi");
+  assert.equal(diagnosis.path, pi, "the last absolute line is the answer, after the banner");
+  assert.equal(diagnosis.note, undefined, "and nothing is added to the message");
+});
+
+test("a shell that cannot be started says so, rather than reporting a wrong answer", () => {
+  const diagnosis = diagnoseLoginShellLookup("/nonexistent/shell", "pi");
+  assert.equal(diagnosis.path, undefined);
+  assert.match(diagnosis.note ?? "", /could not be started/);
+});
+
+test("the failure message carries the diagnosis, not just the absence", () => {
+  /*
+   * The sentence the reader saw, and what it must become. `resolveExecutable` takes the note through
+   * `diagnoseLoginShell` and puts it in the message — this is the assertion that the wiring exists, because a note that
+   * is computed and never shown fixes nothing.
+   */
+  const context: LookupContext = {
+    env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+    shell: "/bin/zsh",
+    runLoginShell: () => undefined,
+    diagnoseLoginShell: () => ({ path: undefined, note: "/bin/zsh printed \"Welcome to zsh!\", which is not an absolute path; exit 0" }),
+  };
+  const resolution = resolveExecutable("pi", context, EXECUTABLE_HINTS.pi);
+  assert.equal(resolution.ok, false);
+  if (resolution.ok) return;
+  assert.match(resolution.missing.message, /Welcome to zsh/, "what the shell printed is in the message");
+  assert.match(resolution.missing.message, /not an absolute path/, "and so is the reason");
+  // Still names the binary and still gives the fix, which the original message did right.
+  assert.match(resolution.missing.message, /`pi`/);
+  assert.match(resolution.missing.message, /docs\/AGENT-SETUP\.md/);
+});
+
+test("a path the shell reports but the app cannot use is its own sentence", (t) => {
+  /*
+   * The fourth cause: the shell KNOWS where it is, and the app may not execute or read it. That is a different problem
+   * from "not found", and saying "did not report it" about this case is simply false.
+   *
+   * The reported path is one this test invents under a scratch directory, because a real path like
+   * `/opt/homebrew/bin/pi` EXISTS on a machine where the bug happens — and then the lookup succeeds and there is nothing
+   * to assert. The point is a path that is absolute and unusable.
+   */
+  const root = scratch(t);
+  const missing = join(root, "does-not-exist", "pi");
+  const context: LookupContext = {
+    env: { PATH: "/usr/bin:/bin" },
+    shell: "/bin/zsh",
+    runLoginShell: () => missing,
+    diagnoseLoginShell: () => ({ path: missing }),
+  };
+  const resolution = resolveExecutable("pi", context, EXECUTABLE_HINTS.pi);
+  assert.equal(resolution.ok, false);
+  if (resolution.ok) return;
+  assert.equal(resolution.missing.message.includes(missing), true, "the message names the path the shell reported");
+  assert.match(resolution.missing.message, /not an executable file/);
+});
+
+test("without the optional diagnosis, the message is exactly what it was", () => {
+  // Backwards compatibility for every caller and test that does not supply the hook: the note is absent, not "undefined".
+  const context: LookupContext = {
+    env: { PATH: "/usr/bin:/bin" },
+    shell: "/bin/zsh",
+    runLoginShell: () => undefined,
+  };
+  const resolution = resolveExecutable("pi", context, EXECUTABLE_HINTS.pi);
+  assert.equal(resolution.ok, false);
+  if (resolution.ok) return;
+  assert.match(resolution.missing.message, /asking your login shell did not resolve it\./);
+  assert.equal(resolution.missing.message.includes("undefined"), false);
 });

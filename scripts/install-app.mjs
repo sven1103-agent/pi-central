@@ -315,7 +315,23 @@ step(`installed ${destination}`);
 console.log("");
 console.log(`  version:  ${rootManifest.version}  (Electron ${electronVersion}, arm64)`);
 console.log(`  identity: ${signing.kind === "identity" ? signing.identity : "ad-hoc"}`);
-console.log(`  run it:   open "${destination}"`);
+console.log("");
+/*
+ * Said explicitly, because the first thing a reader does is look in /Applications and not find it.
+ *
+ * `~/Applications` is the standard per-user location — it is where macOS puts an app "for me only", it needs no admin
+ * rights, and Launchpad indexes it. What it is *not* is the folder a reader opens first, and it is not in the Finder
+ * sidebar by default, so "I installed it and I cannot find it" is the expected reaction unless this says so.
+ */
+console.log(`  It is in your HOME folder's Applications, not the system one:`);
+console.log(`    ~/Applications/Pi Central.app     (not /Applications)`);
+console.log("");
+console.log(`  open it:  open "${destination}"`);
+console.log(`  reveal:   open -R "${destination}"   (shows it in Finder)`);
+console.log(`  keep it:  drag it from that Finder window to the dock`);
+console.log("");
+console.log("  If Spotlight does not find it yet, give it a moment to index, or drag it to the dock now —");
+console.log("  Spotlight does not index every folder under ~ immediately.");
 console.log("");
 console.log("  Gatekeeper will refuse this app if it is moved to another machine, because it is not notarized.");
 console.log("  That is expected: notarization needs a Developer ID this project does not have. On THIS machine it");
