@@ -41,7 +41,8 @@
     "serve:package": "node bin/pi-central.js",
     "app": "PI_CENTRAL_DEV=1 electron packages/app/src/main.ts",
     "verify:lifecycle": "node scripts/verify-lifecycle-216.mjs",
-    "install-app": "node scripts/install-app.mjs"
+    "install-app": "node scripts/install-app.mjs",
+    "build:icon": "node scripts/build-icon.mjs"
   },
   "dependencies": {
     "ws": "^8.22.0"

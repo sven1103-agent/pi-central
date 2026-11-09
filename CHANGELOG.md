@@ -61,6 +61,9 @@ They are kept because each one is the reason a constraint or an invariant test e
 - `install-app` refuses to overwrite a bundle it did not create, so it can no longer delete a Safari web app that shares the path ([#218]).
 - An install copies to a staging path and renames, so a failed copy leaves the previous installation intact ([#218]).
 - `npm run app` is a separate app with its own state, so a development run cannot adopt or delete the installed one's runtime record ([#218]).
+- The app carries Pi Central's own icon in the dock, ⌘-Tab, the About panel, Finder and Launchpad, and a build without one is refused ([#239]).
+- `npm run build:icon` assembles the app icon from the brand mark, and `install-app` runs it so a redrawn logo reaches the bundle ([#239]).
+- A development run sets the dock icon itself, since it launches Electron's bundle and had been showing Electron's logo ([#239]).
 
 ### Changed
 
@@ -86,6 +89,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 [#216]: https://github.com/sven1103-agent/pi-central/issues/216
 [#217]: https://github.com/sven1103-agent/pi-central/issues/217
 [#218]: https://github.com/sven1103-agent/pi-central/issues/218
+[#239]: https://github.com/sven1103-agent/pi-central/issues/239
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 

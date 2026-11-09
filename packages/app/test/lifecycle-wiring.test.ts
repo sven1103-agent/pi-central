@@ -267,3 +267,34 @@ test("stopping a child that has already exited resolves immediately instead of w
   const guard = stop.slice(stop.indexOf("exitCode !== null"), stop.indexOf("exitCode !== null") + 120);
   assert.match(guard, /return undefined/);
 });
+
+test("the app applies its own icon and its own About facts before the first window exists", () => {
+  /*
+   * Issue #239, and the reason this is a source assertion rather than a rendering one: `main.ts` imports `electron`,
+   * whose package export is a path to a binary, so it cannot be loaded by `node --test` at all. What is left is the
+   * join, and the defect being prevented is a join — a function that exists but is never called, which is exactly what
+   * "the dock still shows Electron's logo" looks like from here.
+   *
+   * Both are called in `whenReady` **before** `start()`: the dock tile and the About facts are per-process state, and a
+   * window that appears before them shows the frameworks's answers for a moment (and keeps them, for About, if the panel
+   * is opened from the menu that `buildMenu` registers).
+   */
+  const ready = MAIN.slice(MAIN.indexOf("app.whenReady()"), MAIN.indexOf('app.on("activate"'));
+  const icon = ready.indexOf("applyDockIcon()");
+  const about = ready.indexOf("applyAboutPanel()");
+  const start = ready.indexOf("start();");
+  assert.notEqual(icon, -1, "the dock icon is applied on a development run");
+  assert.notEqual(about, -1, "the About panel is told which app and which version it is");
+  assert.notEqual(start, -1);
+  assert.ok(icon < start, "the icon comes before the first window, not after it");
+  assert.ok(about < start, "…and so do the About facts");
+
+  const code = codeOnly(MAIN);
+  // Both are defined and do what they say. `setIcon` and `setAboutPanelOptions` are the two Electron calls that matter;
+  // a helper that only logs would satisfy the ordering above while changing nothing on screen.
+  assert.match(code, /app\.dock\?\.setIcon\(image\)/, "the dock icon is actually set");
+  assert.match(code, /app\.setAboutPanelOptions\(/, "the About panel is actually configured");
+  // And the version is the installed package's, not Electron's — the panel is where a reader answers "which version?".
+  const aboutBody = balancedBlock(code, code.indexOf("function applyAboutPanel"), "applyAboutPanel");
+  assert.match(aboutBody, /applicationVersion: readRunningVersion\(\)/, "the installed package's version, not Electron's");
+});

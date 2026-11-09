@@ -11,7 +11,7 @@ with `npm`, then shows that process's loopback UI in a window.
 
 | | |
 |---|---|
-| ✅ A dock icon, a window that hides on close, `⌘Q` that asks before stopping your sessions | |
+| ✅ A dock icon **with Pi Central's mark** — not Electron's — a window that hides on close, `⌘Q` that asks before stopping your sessions | |
 | ✅ Sessions that outlive the app, reattached on the next launch | |
 | ✅ An app that can apply Pi Central updates when npm installed it somewhere writable | |
 | ❌ **No self-update** for the app bundle itself — bumping Electron means re-running `install-app` | |
@@ -33,6 +33,42 @@ open ~/Applications/Pi Central.app
 The script refuses to run on anything but macOS arm64, and fails loudly rather than producing a half-signed bundle. It
 also audits the artifact after building: if the bundle ever starts carrying product code, or an identifier, or a version
 that disagrees with the package, the build stops before installing.
+
+## The icon
+
+The bundle carries Pi Central's mark in `Contents/Resources/icon.icns`, so the dock, ⌘-Tab, the About panel, Finder and
+Launchpad all show it. It is built from the one source of the artwork — `packages/ui/src/assets/logo-icon.svg`, the same
+file the tab icon and the PWA icons come from — and it is *assembled*, not drawn:
+
+```bash
+npm run build:icon     # packages/app/build/icon.png + icon.icns
+```
+
+`npm run install-app` runs that itself, so a redrawn logo reaches the bundle without anyone remembering a second command.
+
+**The icon started out as Electron's, and the build said nothing.** `electron-builder` treats *no icon configured* as a
+warning and copies the framework's, so the first bundle carried `electron.icns` byte-for-byte — the app launched, the
+version was right, and the picture was wrong everywhere. Its absence is now a build-time refusal, and the built bundle's
+icon is compared against the Electron distribution this build was given, so "we shipped Electron's icon" cannot happen
+silently again.
+
+Two things worth knowing if you touch this:
+
+- **The container is written byte by byte**, not by `iconutil`. On macOS 26.7.2 `iconutil -c icns` reports
+  `Invalid Iconset.` for a complete, correctly named set — including one it had just extracted itself from Electron's own
+  valid `.icns`. `sips` produces the PNGs and the container is 20 lines of Node; the run ends by reading it back through
+  `sips`, so a malformed file fails there rather than in the dock.
+- **The mark fills the canvas — do not add a margin.** The first version inset the drawing to 824 of 1024 px, on the
+  belief that this was "the macOS content box". Measured on the result: the dock showed a light rounded plate with a
+  **grey margin between the plate and the green circle**, because macOS 26 draws the tile and the plate itself and
+  expects the artwork to fill it — so the inset landed a second time, inside the system's. Electron's own icon, the
+  reference that was available all along, has an opaque box of 922/1024 px. The native macOS 26 form is an `Assets.car`
+  built by Icon Composer, which needs Xcode 26 and `icontool`; `xcrun --find icontool` reports *"not a developer tool"*
+  on a Command Line Tools machine, so the `.icns` path is what this project can produce.
+
+A development run (`npm run app`) has no bundle of ours — it launches Electron out of `node_modules` — so the shell sets
+the dock icon from the generated PNG itself. In a packaged launch it deliberately does **not**, because the bundle is
+authoritative and overriding the tile from the same file could only make Finder and the dock disagree.
 
 ## Running a development build
 
@@ -205,4 +241,4 @@ Three claims cannot be checked by a test, and they are the ones to verify by han
 1. **The app starts from Finder** on a machine with no Developer ID.
 2. **A grant survives a rebuild** — grant Documents access, rebuild, relaunch, and it is still there (with a
    self-signed identity; with ad-hoc it will not be, by design).
-3. **It appears in Launchpad and the dock**, and `rm -rf` removes it completely.
+3. **It appears in Launchpad and the dock** — with Pi Central's mark, not Electron's — and `rm -rf` removes it completely.

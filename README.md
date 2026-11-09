@@ -191,7 +191,7 @@ workspaces and the agent root, and how to verify the install.
 
 | Document | What it covers |
 |---|---|
-| [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) | The Seatbelt nesting limit and its consequences (C1–C15c) |
+| [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) | The Seatbelt nesting limit and its consequences (C1–C18) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, trust boundaries, lifecycle |
 | [docs/SANDBOX.md](docs/SANDBOX.md) | How Safehouse is invoked per session, and what the policy denies |
 | [docs/AGENT-SETUP.md](docs/AGENT-SETUP.md) | Creating the agent identity a session runs as: SSH key, gitconfig, signing, `gh` |

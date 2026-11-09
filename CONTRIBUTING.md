@@ -32,7 +32,7 @@ one line per change, with the issue it addresses, and the reasoning in the commi
 
 Read, in this order:
 
-1. [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) — the hard limits (C1–C14). Most "obvious"
+1. [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) — the hard limits (C1–C18). Most "obvious"
    designs are ruled out here.
 2. [docs/decisions/](docs/decisions/) — why the architecture looks the way it does.
 3. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — components and trust boundaries.

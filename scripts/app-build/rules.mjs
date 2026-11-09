@@ -43,7 +43,7 @@ export const FORBIDDEN_DEPENDENCIES = ["electron-updater", "electron-download", 
  * runs against is the SAME value the build uses. The first version asserted against a copy of it, reconstructed by
  * string-substituting the script's source — which tested the reconstruction, not the build.
  *
- * @param {{ electronVersion: string, electronDist: string, output: string }} paths
+ * @param {{ electronVersion: string, electronDist: string, output: string, iconPath: string }} paths
  * @returns {Record<string, unknown>}
  */
 export function buildConfig(paths) {
@@ -68,6 +68,19 @@ export function buildConfig(paths) {
       // The only allowed target: this produces the `.app` and nothing else.
       target: "dir",
       category: "public.app-category.developer-tools",
+      /*
+       * The product mark, as a `.icns` (issue #239).
+       *
+       * Without this key electron-builder falls back to the framework's icon **silently**: the dock, ⌘-Tab, About and
+       * Finder all showed Electron's logo, and nothing in the build said so. `configProblems` refuses a configuration
+       * without it for that reason.
+       *
+       * `.icns` rather than `.png` on purpose. Given a PNG, electron-builder converts it with a helper it downloads from
+       * `electron-userland/electron-builder-binaries` — a network dependency this build deliberately does not have (the
+       * same reason `electronDist` is set). Given an `.icns` it copies it, which is also why `npm run build:icon`
+       * assembles the container itself.
+       */
+      icon: paths.iconPath,
       // Signing is done by this script, innermost-first, after auditing the bundle. Letting electron-builder sign would
       // put an identity on the tree before the audit could refuse it.
       identity: null,
@@ -140,6 +153,29 @@ export function configProblems(config) {
   if (targets.length === 0) {
     // Absent means electron-builder's default, which is `dmg` + `zip` — the exact thing being forbidden.
     problems.push('mac.target is not set, so electron-builder would default to "dmg"; set it to "dir"');
+  }
+
+  /*
+   * The icon, checked twice because the two failures are different (issue #239).
+   *
+   * A MISSING icon is not an error to electron-builder: it copies the framework's, and the only symptom is Electron's
+   * logo in the dock. So its absence has to be a build-time refusal here, or it is invisible.
+   *
+   * A PNG icon is refused separately, because it does *not* fail: electron-builder downloads a converter toolset on first
+   * use. The build's contract is that it needs no network beyond `npm install`, and a silent download is how that
+   * contract erodes.
+   */
+  const icon = mac["icon"] ?? config["icon"];
+  if (typeof icon !== "string" || icon.trim() === "") {
+    problems.push(
+      "mac.icon is not set, so the app would advertise Electron's own icon in the dock, ⌘-Tab, About and Finder " +
+        "(run: npm run build:icon)",
+    );
+  } else if (!icon.endsWith(".icns")) {
+    problems.push(
+      `mac.icon is "${icon}" rather than a .icns, and electron-builder would download its converter toolset to make one ` +
+        "— the build must not need the network (run: npm run build:icon)",
+    );
   }
 
   return problems;
@@ -356,6 +392,45 @@ export function bundleProblems(resources) {
  * The `Info.plist` identity the built app must carry, so "which app is this?" has one answer.
  * @typedef {{ id: string, version: string }} BundleIdentity
  */
+
+/**
+ * What the built bundle's icon must be, checked on the ARTIFACT (issue #239).
+ *
+ * ## Why a hash and not the config
+ *
+ * `configProblems` already refuses a configuration with no icon, so the interesting failure is the one that gets past
+ * it: electron-builder accepts a configured `.icns`, fails to find it, and falls back to the framework's — and a bundle
+ * carrying Electron's icon is byte-for-byte a bundle carrying Electron's icon, whichever way it got there. Measured on
+ * the first real build: `Contents/Resources/electron.icns` had the same SHA-256 as the Electron distribution's.
+ *
+ * So the check is on the file the `Info.plist` actually names, against the Electron icon this build was given. That
+ * catches all three ways to end up with the wrong logo — an absent key, the framework's fallback, and a misconfigured
+ * path — with one comparison that cannot be argued with.
+ *
+ * @param {{ iconFile?: string | undefined, iconSha?: string | undefined }} bundle
+ * @param {string} electronSha
+ * @returns {string[]}
+ */
+export function iconProblems(bundle, electronSha) {
+  const problems = [];
+  if (bundle.iconFile === undefined || bundle.iconFile === "") {
+    problems.push(
+      "the bundle's Info.plist names no CFBundleIconFile, so macOS shows the generic application icon",
+    );
+    return problems;
+  }
+  if (bundle.iconSha === undefined) {
+    problems.push(`the bundle names ${bundle.iconFile} but that file is not in Contents/Resources`);
+    return problems;
+  }
+  if (bundle.iconSha === electronSha) {
+    problems.push(
+      `the bundle's icon (${bundle.iconFile}) is Electron's own, so the dock, ⌘-Tab, About and Finder would all ` +
+        "advertise Electron rather than Pi Central — check mac.icon and re-run npm run build:icon",
+    );
+  }
+  return problems;
+}
 
 /**
  * Whether the bundle's own identity agrees with the app package's version (criterion 6).

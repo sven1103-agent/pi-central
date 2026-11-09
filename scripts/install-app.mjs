@@ -33,6 +33,7 @@
  * failed signature would produce an app that does not start, which is the failure criterion 1 names.
  */
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -44,6 +45,7 @@ import {
   destinationDecision,
   configProblems,
   gatekeeperAdviceProblems,
+  iconProblems,
   identityProblems,
   installPath,
   requiresAdmin,
@@ -59,6 +61,8 @@ setDirectoryLister((path) => readdirSync(path));
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const APP_ROOT = join(ROOT, "packages", "app");
 const ELECTRON_DIST = join(ROOT, "node_modules", "electron", "dist");
+/** The product mark, assembled by `npm run build:icon` (issue #239). */
+const APP_ICON = join(APP_ROOT, "build", "icon.icns");
 
 /** One line of progress. Deliberately terse: this runs under `npm run`, which already echoes the command. */
 const step = (text) => console.log(`install-app: ${text}`);
@@ -174,7 +178,22 @@ const config = buildConfig({
   electronVersion,
   electronDist: ELECTRON_DIST,
   output: join(APP_ROOT, "dist-app-out"),
+  iconPath: APP_ICON,
 });
+/*
+ * Regenerated rather than merely required, so the icon in a bundle is always the mark as it is drawn today.
+ *
+ * The script is idempotent and needs no network: `rsvg-convert` when present, the committed PNG otherwise, and the
+ * container written byte by byte from `sips` output (`build-icon.mjs` says why `iconutil` is not used). Regenerating is
+ * the difference between a bundle that carries the current artwork and one that carries whatever was committed last —
+ * and a redrawn logo that only reaches the app after someone remembers is the same class of defect as the icon that was
+ * Electron's for a whole increment.
+ */
+step("building the app icon from the brand mark");
+const iconResult = spawnSync(process.execPath, [join(ROOT, "scripts", "build-icon.mjs")], { stdio: "inherit" });
+if (iconResult.status !== 0) fail("could not build the app icon; nothing was installed");
+if (!existsSync(APP_ICON)) fail(`the icon build reported success but produced no file at ${APP_ICON}`);
+
 const problems = configProblems(config);
 if (problems.length > 0) {
   fail(`refusing to build with this configuration:\n  ${problems.join("\n  ")}`);
@@ -243,6 +262,25 @@ const identityIssues = identityProblems(
   rootManifest.version,
 );
 if (identityIssues.length > 0) fail(`refusing to install this bundle:\n  ${identityIssues.join("\n  ")}`);
+
+/*
+ * The icon, on the artifact (issue #239).
+ *
+ * A bundle whose icon is Electron's is not broken in any way a test would otherwise notice: it launches, the version is
+ * right, and the picture is simply wrong everywhere. The comparison is against the Electron distribution this build was
+ * given, so "we shipped Electron's icon" is stated once instead of three near-misses.
+ */
+const iconFile = typeof infoPlist["CFBundleIconFile"] === "string" ? infoPlist["CFBundleIconFile"] : undefined;
+const iconPath = iconFile === undefined ? undefined : join(resourcesDir, iconFile);
+const iconIssues = iconProblems(
+  {
+    iconFile,
+    iconSha: iconPath !== undefined && existsSync(iconPath) ? sha256(iconPath) : undefined,
+  },
+  sha256(join(ELECTRON_DIST, "Electron.app", "Contents", "Resources", "electron.icns")),
+);
+if (iconIssues.length > 0) fail(`refusing to install this bundle:\n  ${iconIssues.join("\n  ")}`);
+step(`icon: ${iconFile} (not Electron's)`);
 
 // ---------------------------------------------------------------------------------------------------------------
 // 6. Sign, innermost first.
@@ -411,6 +449,11 @@ function readPlist(path) {
   } catch {
     return {};
   }
+}
+
+/** The SHA-256 of a file, for comparing an icon against the framework's own. */
+function sha256(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
 /** The code-signing identities this machine has, as names. Empty when there are none — which is the common case. */

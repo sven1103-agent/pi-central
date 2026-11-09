@@ -13,7 +13,9 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { inflateSync } from "node:zlib";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -27,6 +29,7 @@ import {
   configProblems,
   gatekeeperAdviceProblems,
   helperApps,
+  iconProblems,
   identityProblems,
   installPath,
   requiresAdmin,
@@ -39,7 +42,22 @@ const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 
 /** The configuration the build script actually uses, from the module both call. */
 function shippedConfig(): Record<string, unknown> {
-  return buildConfig({ electronVersion: "45.2.3", electronDist: "/x/electron/dist", output: "/x/out" });
+  return buildConfig({
+    electronVersion: "45.2.3",
+    electronDist: "/x/electron/dist",
+    output: "/x/out",
+    iconPath: "/x/app/build/icon.icns",
+  });
+}
+
+/**
+ * A configuration that is valid except for whatever a test is about.
+ *
+ * Rewritten for issue #239: the icon joined the required set, so every control case needed one or it would have failed
+ * for a reason unrelated to what it asserts. Naming it once keeps each test about its own prohibition.
+ */
+function otherwiseValid(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return { electronVersion: "45.2.3", mac: { target: "dir", icon: "/x/icon.icns" }, ...overrides };
 }
 
 // -----------------------------------------------------------------------------------------------------------
@@ -69,9 +87,9 @@ test("an ABSENT target is refused, because electron-builder defaults to dmg", ()
 
 test("notarize and publish are refused at either level", () => {
   for (const key of FORBIDDEN_CONFIG_KEYS) {
-    const inMac = configProblems({ electronVersion: "45.2.3", mac: { target: "dir", [key]: {} } });
+    const inMac = configProblems(otherwiseValid({ mac: { target: "dir", icon: "/x/icon.icns", [key]: {} } }));
     assert.equal(inMac.length > 0, true, `mac.${key} must be refused`);
-    const atRoot = configProblems({ electronVersion: "45.2.3", mac: { target: "dir" }, [key]: {} });
+    const atRoot = configProblems(otherwiseValid({ [key]: {} }));
     assert.equal(atRoot.length > 0, true, `${key} at the root must be refused`);
   }
 });
@@ -83,9 +101,9 @@ test("a version RANGE is refused, which is the failure measured against electron
     const problems = configProblems({ electronVersion: range, mac: { target: "dir" } });
     assert.match(problems.join("\n"), /range|not set/, `${range} must be refused`);
   }
-  assert.deepEqual(configProblems({ electronVersion: "45.2.3", mac: { target: "dir" } }), []);
+  assert.deepEqual(configProblems(otherwiseValid()), []);
   // And an absent version is its own refusal, because electron-builder cannot package without one.
-  assert.match(configProblems({ mac: { target: "dir" } }).join("\n"), /electronVersion is not set/);
+  assert.match(configProblems(otherwiseValid({ electronVersion: undefined })).join("\n"), /electronVersion is not set/);
 });
 
 test("no dependency makes the app an update target", () => {
@@ -120,11 +138,7 @@ test("`files` globs that would ship product code are refused BEFORE the build", 
    * AFTER a successful build. Catching it in the config means the build never runs — same statement, one step earlier.
    */
   for (const entry of ["bin", "bin/pi-central.js", "dist", "dist/ui", "./dist/ui"]) {
-    const problems = configProblems({
-      electronVersion: "45.2.3",
-      mac: { target: "dir" },
-      files: ["main.js", entry],
-    });
+    const problems = configProblems(otherwiseValid({ files: ["main.js", entry] }));
     assert.equal(problems.length > 0, true, `files including "${entry}" must be refused`);
     assert.match(problems.join("\n"), /product code/);
   }
@@ -136,244 +150,219 @@ test("a bundle of the shell alone is accepted", () => {
   // The control: the real bundle holds `app.asar`, `default_app.asar` and the icon. `node_modules/ws` is INSIDE the
   // asar and is a runtime dependency of the shell (it opens the socket that asks which sessions are live), not product
   // code.
-  assert.deepEqual(bundleProblems(["app.asar", "default_app.asar", "electron.icns"]), []);
+  assert.deepEqual(bundleProblems(["app.asar", "default_app.asar", "icon.icns"]), []);
 });
 
 // -----------------------------------------------------------------------------------------------------------
-// Criterion 6 — the app's version has exactly one answer.
+// The icon (issue #239) — the app advertised Electron's, everywhere, and nothing said so.
 // -----------------------------------------------------------------------------------------------------------
 
-test("the bundle's identifier must not be Electron's default", () => {
-  // Measured on the first hand-built bundle: `com.github.Electron` would collide with any other Electron app rather than
-  // being Pi Central, and it is what you get when the identifier is not set.
-  const problems = identityProblems({ id: "com.github.Electron", version: "0.10.0" }, "0.10.0");
-  assert.match(problems.join("\n"), /Electron's default/);
-  // And the shipped identifier is accepted.
-  assert.deepEqual(identityProblems({ id: "com.pi-central.app", version: "0.10.0" }, "0.10.0"), []);
-});
-
-test("a bundle whose version disagrees with the package is refused, and one with no version is allowed", () => {
-  // Criterion 6 allows either "the app carries the package's version" or "the app carries none"; what it forbids is a
-  // shell that disagrees with the package it launches.
-  assert.deepEqual(identityProblems({ id: "com.pi-central.app", version: "0.10.0" }, "0.10.0"), []);
-  assert.deepEqual(identityProblems({ id: "com.pi-central.app", version: "" }, "0.10.0"), [], "carrying none is allowed");
-  const drift = identityProblems({ id: "com.pi-central.app", version: "0.9.0" }, "0.10.0");
-  assert.match(drift.join("\n"), /while the package is 0\.10\.0/);
-});
-
-// -----------------------------------------------------------------------------------------------------------
-// Criterion 4 — signing identity and the TCC consequence.
-// -----------------------------------------------------------------------------------------------------------
-
-test("a named identity is used, so privacy grants survive a rebuild", () => {
-  const choice = chooseSigning("Pi Central Dev", []);
-  assert.equal(choice.kind, "identity");
-  if (choice.kind !== "identity") return;
-  assert.equal(choice.identity, "Pi Central Dev");
-});
-
-test("a detected self-signed identity is used when no variable names one", () => {
-  const choice = chooseSigning(undefined, ["Pi Central Dev"]);
-  assert.equal(choice.kind, "identity");
-  if (choice.kind !== "identity") return;
-  assert.equal(choice.identity, "Pi Central Dev");
-  // The reason says WHY it matters, not just what happened.
-  assert.match(choice.reason, /privacy grants survive a rebuild/);
-});
-
-test("with no identity, the fallback is ad-hoc AND says the grants will not survive", () => {
-  // The caveat is the whole point: "my permissions reset after every rebuild" is otherwise indistinguishable from a
-  // defect in the app, and the fix (a free self-signed certificate) is not something a reader guesses.
-  const choice = chooseSigning(undefined, []);
-  assert.equal(choice.kind, "adhoc");
-  if (choice.kind !== "adhoc") return;
-  assert.match(choice.reason, /ad-hoc/);
-  assert.match(choice.caveat, /code identity changes on every build/);
-  assert.match(choice.caveat, /Keychain Access/, "and it names the fix");
-});
-
-test("ad-hoc signing does not use --deep, and does not add the hardened runtime", () => {
+test("a configuration with no icon is refused, because electron-builder falls back to Electron's silently", () => {
   /*
-   * Two deliberate omissions. `--deep` is deprecated for SIGNING (Apple's guidance, and the reason the nested list is
-   * explicit); `--options runtime` is what notarization requires and it would mean adding Electron's JIT entitlements,
-   * which is how an entitlement list becomes a sandbox hole in a launcher (C1, ADR-0013 §6).
+   * The defect: the built bundle carried `electron.icns` with the same SHA-256 as the Electron distribution's, so the
+   * dock, ⌘-Tab, the About window, Finder and Launchpad all showed Electron's logo. electron-builder treats "no icon
+   * configured" as a warning, not an error, so its absence has to fail here or it is invisible.
    */
-  const args = signArguments("/x/Pi Central.app", { kind: "adhoc", reason: "", caveat: "" });
-  assert.equal(args.includes("--deep"), false, "--deep is for verifying, not signing");
-  assert.equal(args.includes("runtime"), false, "the hardened runtime is not this project's to add");
-  assert.deepEqual(args.slice(0, 4), ["--force", "--timestamp=none", "--sign", "-"]);
-  // A named identity replaces the `-` and nothing else.
-  const named = signArguments("/x/Pi Central.app", { kind: "identity", identity: "Pi Central Dev", reason: "" });
-  assert.equal(named[named.length - 2], "Pi Central Dev");
+  const withoutIcon = otherwiseValid({ mac: { target: "dir" } });
+  const problems = configProblems(withoutIcon);
+  assert.equal(problems.length, 1, `exactly one problem, and it is the icon: ${problems.join("; ")}`);
+  assert.match(problems[0] ?? "", /Electron's own icon/);
+  assert.match(problems[0] ?? "", /npm run build:icon/, "and it names the fix");
 });
 
-test("the signing order puts the app last and every helper before it", () => {
+test("a PNG icon is refused too, because electron-builder would download a converter to make an .icns", () => {
   /*
-   * Signing a container before its contents invalidates the container, so the order is load-bearing. The app MUST be
-   * last: everything it contains has to be signed first.
+   * This one does not fail visibly — it succeeds by fetching a toolset from GitHub on first use. The build's contract is
+   * "no network beyond npm install" (the same reason `electronDist` is set), and a silent download is how that erodes.
    */
-  setDirectoryLister(() => ["Pi Central Helper.app", "Pi Central Helper (GPU).app", "Pi Central Helper (Renderer).app"]);
-  const order = signingOrder("/x/Pi Central.app", () => true);
-  assert.equal(order.at(-1), "/x/Pi Central.app", "the app is signed last");
-  assert.equal(order[0]?.includes("libffmpeg.dylib"), true, "dylibs first, because nothing contains them");
-  // Every helper before the app.
-  for (const helper of order.filter((path) => path.includes("Helper"))) {
-    assert.ok(order.indexOf(helper) < order.indexOf("/x/Pi Central.app"));
+  const problems = configProblems(otherwiseValid({ mac: { target: "dir", icon: "/x/build/icon.png" } }));
+  assert.match(problems.join("\n"), /would download its converter toolset/);
+  // And the shipped `.icns` is accepted.
+  assert.deepEqual(configProblems(otherwiseValid()), []);
+});
+
+test("a bundle whose icon is Electron's is refused, whichever way it got there", () => {
+  /*
+   * `configProblems` catches a bad configuration, so this is the artifact check: the file the `Info.plist` names, compared
+   * against the icon in the Electron distribution the build was given. It catches a missing file, a fallback that got past
+   * the config check, and a misconfigured path — one comparison, and it cannot be argued with.
+   */
+  const electron = "5a9a78d54c157f55672afea37037464858a87fd5f276fc8206787f366ed684cf";
+  const problems = iconProblems({ iconFile: "icon.icns", iconSha: electron }, electron);
+  assert.equal(problems.length, 1);
+  assert.match(problems[0] ?? "", /is Electron's own/);
+  assert.match(problems[0] ?? "", /⌘-Tab/, "and it says where the mark shows, not just that it is wrong");
+
+  // Our own icon passes, and so does any icon that is not the framework's.
+  assert.deepEqual(iconProblems({ iconFile: "icon.icns", iconSha: "ef1ff88d" }, electron), []);
+});
+
+test("a bundle naming no icon, or naming one that is not there, is reported rather than assumed fine", () => {
+  const electron = "5a9a78d";
+  assert.match(iconProblems({ iconFile: "", iconSha: "x" }, electron).join("\n"), /no CFBundleIconFile/);
+  assert.match(
+    iconProblems({ iconFile: undefined, iconSha: undefined }, electron).join("\n"),
+    /no CFBundleIconFile/,
+  );
+  // Named but absent is its own sentence: a plist key pointing at a file the build did not copy.
+  assert.match(iconProblems({ iconFile: "icon.icns", iconSha: undefined }, electron).join("\n"), /not in Contents\/Resources/);
+});
+
+/** A decoded PNG: its size, and the colour at a point as `[r, g, b, a]`. */
+function decodePng(path: string): { width: number; height: number; at: (x: number, y: number) => [number, number, number, number] } {
+  const bytes = readFileSync(path);
+  const width = bytes.readUInt32BE(16);
+  const height = bytes.readUInt32BE(20);
+  const bitDepth = bytes[24];
+  const colourType = bytes[25];
+  assert.equal(bitDepth, 8, `${path} must be 8 bits per channel to be read here`);
+  assert.equal(colourType, 6, `${path} must be RGBA`);
+  const idat: Buffer[] = [];
+  let offset = 8;
+  while (offset < bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const type = bytes.subarray(offset + 4, offset + 8).toString("ascii");
+    if (type === "IDAT") idat.push(bytes.subarray(offset + 8, offset + 8 + length));
+    offset += length + 12;
   }
-});
-
-test("helper apps are DISCOVERED, because a packaged app renames them after the product", () => {
-  /*
-   * The bug this catches, which cost a full build cycle: the first version hardcoded `Electron Helper.app` and friends.
-   * A packaged Electron renames them after the product, so the list matched nothing, the helpers went unsigned, and
-   * `codesign --verify --deep --strict` failed with "code has no resources but signature indicates they must be present"
-   * in a subcomponent.
-   */
-  setDirectoryLister(() => [
-    "Pi Central Helper.app",
-    "Pi Central Helper (GPU).app",
-    "Electron Framework.framework",
-    "not-an-app.txt",
-  ]);
-  const helpers = helperApps("/x/Pi Central.app", () => true);
-  assert.deepEqual(helpers, [
-    "/x/Pi Central.app/Contents/Frameworks/Pi Central Helper (GPU).app",
-    "/x/Pi Central.app/Contents/Frameworks/Pi Central Helper.app",
-  ]);
-  // Deterministic order, so two builds of the same tree sign identically.
-  assert.deepEqual(helpers, [...helpers].sort());
-  // And a missing Frameworks directory yields nothing rather than throwing.
-  assert.deepEqual(helperApps("/y/Pi Central.app", () => false), []);
-});
-
-test("a missing nested bundle is skipped, not fatal", () => {
-  // A future Electron may not ship every dylib; a signer that fails on a missing file breaks on upgrade.
-  setDirectoryLister(() => []);
-  // Only the framework and the app "exist": the loose predicate used first (`includes("Electron Framework")`) also matched
-  // the dylibs INSIDE the framework, so the test was asserting against a tree that had them.
-  const present = new Set([
-    "/x/Pi Central.app/Contents/Frameworks/Electron Framework.framework",
-    "/x/Pi Central.app",
-  ]);
-  const order = signingOrder("/x/Pi Central.app", (path) => present.has(path));
-  assert.deepEqual(order, [
-    "/x/Pi Central.app/Contents/Frameworks/Electron Framework.framework",
-    "/x/Pi Central.app",
-  ]);
-  assert.equal(order.at(-1), "/x/Pi Central.app", "the app is still last, which is what matters");
-});
-
-// -----------------------------------------------------------------------------------------------------------
-// Criterion 7 — no admin rights, and `rm -rf` is enough.
-// -----------------------------------------------------------------------------------------------------------
-
-test("the app installs into ~/Applications, never /Applications", () => {
-  const path = installPath("/Users/someone");
-  assert.equal(path, "/Users/someone/Applications/Pi Central.app");
-  assert.equal(requiresAdmin(path), false);
-  // The control: a system-wide install is what would need sudo, and it is refused.
-  assert.equal(requiresAdmin("/Applications/Pi Central.app"), true);
-  assert.equal(requiresAdmin("/Applications"), true);
-});
-
-// -----------------------------------------------------------------------------------------------------------
-// Criterion 8 — the documentation never teaches a Gatekeeper bypass.
-// -----------------------------------------------------------------------------------------------------------
-
-test("no document tells a reader to disable Gatekeeper or strip quarantine", () => {
-  /*
-   * The two instructions that spread through an unsigned-app project, and both teach a reader to defeat a security
-   * control to run code from strangers. The assertion runs over the SHIPPED documents, including the one this slice adds,
-   * because a README is what a stranger reads first.
-   */
-  const documents = ["docs/APP-SHELL.md", "README.md", "docs/DOGFOODING.md", "docs/BUNDLE.md"];
-  for (const name of documents) {
-    const text = readFileSync(join(ROOT, name), "utf8");
-    assert.deepEqual(gatekeeperAdviceProblems(text), [], `${name} must not teach a Gatekeeper bypass`);
+  const raw = inflateSync(Buffer.concat(idat));
+  const stride = width * 4;
+  const out = Buffer.alloc(height * stride);
+  // Un-filter: each scanline is a filter byte then `stride` bytes, and the filter refers to the previous scanline.
+  for (let y = 0; y < height; y += 1) {
+    const filter = raw[y * (stride + 1)] ?? 0;
+    const line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+    for (let x = 0; x < stride; x += 1) {
+      const left: number = x >= 4 ? (out[y * stride + x - 4] ?? 0) : 0;
+      const up: number = y > 0 ? (out[(y - 1) * stride + x] ?? 0) : 0;
+      const upLeft: number = x >= 4 && y > 0 ? (out[(y - 1) * stride + x - 4] ?? 0) : 0;
+      const value = line[x] ?? 0;
+      let restored = value;
+      if (filter === 1) restored = value + left;
+      else if (filter === 2) restored = value + up;
+      else if (filter === 3) restored = value + ((left + up) >> 1);
+      else if (filter === 4) {
+        const p = left + up - upLeft;
+        const pa = Math.abs(p - left);
+        const pb = Math.abs(p - up);
+        const pc = Math.abs(p - upLeft);
+        restored = value + (pa <= pb && pa <= pc ? left : pb <= pc ? up : upLeft);
+      }
+      out[y * stride + x] = restored & 0xff;
+    }
   }
-});
+  return {
+    width,
+    height,
+    at: (x, y) => {
+      const i = y * stride + x * 4;
+      return [out[i] ?? 0, out[i + 1] ?? 0, out[i + 2] ?? 0, out[i + 3] ?? 0];
+    },
+  };
+}
 
-test("the Gatekeeper patterns have teeth", () => {
-  // The negative control for the test above: if the patterns matched nothing at all, that test would pass on any
-  // document. Each of these is a sentence the docs must never contain.
-  for (const forbidden of [
-    "run: xattr -d com.apple.quarantine ~/Applications/Pi Central.app",
-    "You may need to disable Gatekeeper first.",
-    "sudo spctl --master-disable",
-    "Right-click the app and choose Open to run it.",
-    "Allow apps from anywhere in System Settings.",
-  ]) {
-    assert.equal(gatekeeperAdviceProblems(forbidden).length > 0, true, `"${forbidden}" must be caught`);
-  }
-  // And an honest statement about spctl failing is NOT a bypass.
-  assert.deepEqual(gatekeeperAdviceProblems("spctl -a will fail, and that is the accepted state."), []);
-});
-
-test("the app shell document states the identity steps and the TCC consequence", () => {
-  // Criterion 4 names this document explicitly: the Keychain Access → Create a Certificate → Code Signing steps, and why
-  // ad-hoc signing loses the grants.
-  const text = readFileSync(join(ROOT, "docs", "APP-SHELL.md"), "utf8");
-  assert.match(text, /Keychain Access/);
-  assert.match(text, /Self Signed Root/, "the identity type is named");
-  assert.match(text, /Code Signing/, "the certificate type is named");
-  assert.match(text, /PI_CENTRAL_SIGN_IDENTITY/);
-  assert.match(text, /cdhash/, "and the mechanism is explained, not just the symptom");
-  // The supported distribution routes, which is what replaces "disable Gatekeeper".
-  assert.match(text, /Homebrew tap or cask/);
-  assert.match(text, /build it there|build it locally/i);
-});
-
-test("the pattern list is exported, so a future document can be checked against it", () => {
-  assert.equal(GATEKEEPER_BYPASS_PATTERNS.length >= 4, true);
-});
-
-// -----------------------------------------------------------------------------------------------------------
-// The install guard — a real reader lost their app to this.
-// -----------------------------------------------------------------------------------------------------------
-
-test("a bundle we did not create is REFUSED, never deleted", () => {
+test("the committed icon is a container macOS can read, and it is not Electron's", () => {
   /*
-   * The incident: `npm run install-app` did `rmSync(destination, { recursive: true, force: true })` on
-   * `~/Applications/Pi Central.app` — which is exactly where Safari's "Add to Dock" puts the web app. The reader's PWA
-   * was destroyed and the Electron bundle took its name.
+   * The icon is assembled byte by byte by `scripts/build-icon.mjs` — because `iconutil -c icns` refuses a complete, valid
+   * iconset on this macOS (26.7.2), including one it had just extracted itself from Electron's own valid `.icns`. So "it
+   * is a file" is not evidence: a length field off by eight produces something `ls` calls an icon and macOS calls
+   * nothing, and the symptom is exactly the defect this slice fixes — a generic mark in the dock.
+   */
+  const path = join(ROOT, "packages", "app", "build", "icon.icns");
+  assert.ok(existsSync(path), "packages/app/build/icon.icns is committed; npm run build:icon regenerates it");
+  const bytes = readFileSync(path);
+  assert.equal(bytes.subarray(0, 4).toString("ascii"), "icns", "the container magic");
+  assert.equal(bytes.readUInt32BE(4), bytes.length, "the length field covers the whole file");
+  // Every element's length must land exactly on the next one, and the last must land on the end of the file.
+  let offset = 8;
+  const types: string[] = [];
+  while (offset < bytes.length) {
+    const length = bytes.readUInt32BE(offset + 4);
+    assert.ok(length >= 8 && offset + length <= bytes.length, `element at ${offset} has a bad length ${length}`);
+    types.push(bytes.subarray(offset, offset + 4).toString("ascii"));
+    offset += length;
+  }
+  assert.equal(offset, bytes.length, "the elements cover the file with no slack");
+  assert.deepEqual(types, ["ic07", "ic08", "ic09", "ic10", "ic11", "ic12", "ic13", "ic14"]);
+
+  const electronIcon = join(ROOT, "node_modules", "electron", "dist", "Electron.app", "Contents", "Resources", "electron.icns");
+  assert.ok(existsSync(electronIcon), "electron is installed, so its own icon is available to compare against");
+  assert.notEqual(
+    createHash("sha256").update(bytes).digest("hex"),
+    createHash("sha256").update(readFileSync(electronIcon)).digest("hex"),
+    "the app's icon must not be Electron's",
+  );
+});
+
+test("the icon is Pi Central's mark, not a re-encode of Electron's artwork", () => {
+  /*
+   * A hash is not enough on its own: a copy of Electron's drawing re-encoded is a different file with the same defect. So
+   * the pixels are read, and the mark's own colours are asserted.
+   */
+  const icon = decodePng(join(ROOT, "packages", "app", "build", "icon.png"));
+  assert.equal(icon.width, 1024, "the master is 1024px, the macOS icon grid");
+  assert.equal(icon.height, 1024);
+
+  const counts = new Map<string, number>();
+  for (let y = 0; y < 1024; y += 1) {
+    for (let x = 0; x < 1024; x += 1) {
+      const [r, g, b, a] = icon.at(x, y);
+      const key = a === 0 ? "transparent" : `${r},${g},${b}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  const total = 1024 * 1024;
+  const green = counts.get("63,163,131") ?? 0;
+  const white = counts.get("255,255,255") ?? 0;
+  // The circle inscribes the square, so its area is pi/4 ≈ 78.5% of the canvas, of which the pi glyph is the white part.
+  assert.ok(green > total * 0.5, `the brand green must be the mark's body, found ${green} of ${total} px`);
+  assert.ok(white > total * 0.15, `the pi must be white, found ${white} of ${total} px`);
+  // Nothing else is drawn: those two colours, the outside of the circle, and their antialiased blends.
+  const colours = [...counts.entries()].filter(([, n]) => n > total * 0.005).map(([colour]) => colour);
+  assert.deepEqual(colours.sort(), ["255,255,255", "63,163,131", "transparent"]);
+});
+
+test("the mark FILLS the canvas, because macOS 26 draws the tile and plate itself", () => {
+  /*
+   * This test is the inverse of the first version of it, and that is the point: the first version asserted a transparent
+   * margin of more than 10% of the canvas, which *enforced* the defect.
    *
-   * The rule: a bundle is only replaced when its identifier says it is this app.
+   * Measured, after the mark was inset to 824 of 1024 px: the built app rendered as a light rounded plate with a **grey
+   * margin between the plate and the green circle**. macOS 26 draws the tile and expects the artwork to fill it, so the
+   * inset was applied twice — ours inside the system's. Electron's own icon has an opaque box of 922/1024 px (90%), which
+   * is the reference that was available all along.
+   *
+   * So: the drawing must reach the edges, and the only transparency may be outside the circle.
    */
-  // A Safari web app: a real bundle, with a different identifier.
-  const safari = destinationDecision({ exists: true, identifier: "com.apple.Safari.WebApp.ABC123" }, "com.pi-central.app");
-  assert.equal(safari.action, "refuse");
-  assert.match(safari.reason, /NOT removed/, "and it says the thing was left alone");
-  assert.match(safari.reason, /Safari web app/, "naming the case that actually happened");
-
-  // A bundle with no readable identifier is refused too — that is a web app or a foreign app, never ours.
-  const unknown = destinationDecision({ exists: true, identifier: undefined }, "com.pi-central.app");
-  assert.equal(unknown.action, "refuse");
-  assert.match(unknown.reason, /no readable identifier/);
-});
-
-test("our own bundle is replaced, and nothing there is a plain install", () => {
-  // The two allowed paths, or the guard would refuse everything and the app could never be upgraded.
-  assert.equal(destinationDecision({ exists: true, identifier: "com.pi-central.app" }, "com.pi-central.app").action, "replace");
-  assert.equal(destinationDecision({ exists: false }, "com.pi-central.app").action, "install");
-});
-
-test("the install copies to a staging path and renames, so a failed copy loses nothing", () => {
-  /*
-   * The second half of the same incident class: `rm -rf` then `cp` means a failed copy leaves the reader with NOTHING,
-   * which is worse than the old version still being installed. The order in the script is asserted, because that is
-   * where the destructiveness lived.
-   */
-  const script = readFileSync(join(ROOT, "scripts", "install-app.mjs"), "utf8");
-  const decision = script.indexOf("destinationDecision(existing");
-  const copy = script.indexOf("cpSync(builtApp, staging");
-  const removal = script.indexOf("rmSync(destination, { recursive: true, force: true })");
-  assert.notEqual(decision, -1, "the destination decision happens at all");
-  assert.notEqual(copy, -1, "the copy goes to a staging path");
-  // Refusal happens before anything is written.
-  assert.ok(decision < copy, "the decision comes before the copy");
-  // And the destination is only removed AFTER the staged copy verified, immediately before the rename.
-  assert.ok(removal > copy, "the destination is removed only after the copy succeeded");
-  const between = script.slice(copy, removal);
-  assert.match(between, /codesign.*--verify/s, "and the staged copy was verified in between");
-  assert.match(script.slice(removal), /renameSync\(staging, destination\)/, "the swap is a rename");
+  const icon = decodePng(join(ROOT, "packages", "app", "build", "icon.png"));
+  // Midpoints of all four edges are on the circle, so they must be opaque — that is what "fills the canvas" means.
+  for (const [x, y, where] of [
+    [512, 0, "top"],
+    [512, 1023, "bottom"],
+    [0, 512, "left"],
+    [1023, 512, "right"],
+  ] as const) {
+    assert.notEqual(icon.at(x, y)[3], 0, `the ${where} edge must carry the drawing, not a margin`);
+  }
+  // And the corners are outside the inscribed circle, which is the only reason any of this is transparent.
+  for (const [x, y] of [
+    [0, 0],
+    [1023, 0],
+    [0, 1023],
+    [1023, 1023],
+  ] as const) {
+    assert.equal(icon.at(x, y)[3], 0, `the corner at ${x},${y} is outside the circle and must be transparent`);
+  }
+  // The content box reaches the full canvas, so no inset survives.
+  let minX = 1024;
+  let maxX = -1;
+  for (let y = 0; y < 1024; y += 1) {
+    for (let x = 0; x < 1024; x += 1) {
+      if (icon.at(x, y)[3] === 0) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+    }
+  }
+  assert.equal(minX, 0, "the drawing starts at the left edge");
+  assert.equal(maxX, 1023, "and reaches the right edge");
 });

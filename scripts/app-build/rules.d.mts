@@ -27,6 +27,7 @@ export function buildConfig(paths: {
   electronVersion: string;
   electronDist: string;
   output: string;
+  iconPath: string;
 }): Record<string, unknown>;
 
 export function configProblems(config: Record<string, unknown>): string[];
@@ -44,6 +45,11 @@ export function setDirectoryLister(fn: (path: string) => string[]): void;
 export function bundleProblems(resources: readonly string[]): string[];
 
 export function identityProblems(identity: BundleIdentity, expectedVersion: string): string[];
+
+export function iconProblems(
+  bundle: { iconFile?: string | undefined; iconSha?: string | undefined },
+  electronSha: string,
+): string[];
 
 export function gatekeeperAdviceProblems(document: string): string[];
 
