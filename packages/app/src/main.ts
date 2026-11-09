@@ -21,10 +21,10 @@
  * the window equivalent to a browser tab; #215 asserts them properly, and they are stated here so this
  * slice does not open a window that is already worse than the tab it replaces.
  */
-import { BrowserWindow, app, dialog, shell } from "electron";
+import { BrowserWindow, Menu, app, dialog, shell } from "electron";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -76,6 +76,23 @@ import {
   type SessionSummary,
 } from "./runtime-record.ts";
 import { askLiveSessions, type SocketLike } from "./live-sessions.ts";
+import {
+  INSTALL_TIMEOUT_MS,
+  STOP_HARD_DEADLINE_MS,
+  STOP_TERM_GRACE_MS,
+  UPDATE_PHASES,
+  assessAvailableVersion,
+  childIsDown,
+  chooseUpdateAnswer,
+  crashRecovery,
+  installCommand,
+  latestVersionCommand,
+  parseLatestVersion,
+  updateDialog,
+  updateFailurePage,
+  type UpdatePhase,
+} from "./update-decide.ts";
+import { applyUpdate, checkLatestVersion, type CommandResult, type UpdateEnvironment } from "./updater.ts";
 
 /**
  * The name macOS shows, and therefore the directory the runtime record lives in.
@@ -134,6 +151,21 @@ const STOP_GRACE_MS = 5000;
 
 /** Set while a launch is being decided, so a double `Try again` cannot run two decisions at once. */
 let launching = false;
+
+/**
+ * Resolvers waiting for the next spawn to announce a port (issue #217).
+ *
+ * `spawnOrchestrator` returns a promise, and this is how `onAnnounced` — which is called from a stream listener and
+ * so cannot return a value — hands it the number. A list rather than a single slot because a restart can be in
+ * flight while an update waits; each waiter is resolved with whatever this child reported.
+ */
+const announceResolvers: ((port: number | undefined) => void)[] = [];
+
+/** The phase of an update in progress, or `idle`. Only one update may be in flight at a time. */
+let updatePhase: UpdatePhase = "idle";
+
+/** Set while an update is running, so a second menu invocation cannot start a second install. */
+let updating = false;
 
 /**
  * Whether the answered question was "Keep sessions running".
@@ -627,8 +659,14 @@ function expectsNewProcess(): boolean {
   return process.argv.includes("--restart-orchestrator");
 }
 
-/** Spawn a fresh orchestrator, watch it, and load what it announces. */
-function spawnOrchestrator(pkg: PackageRoot, environment: Environment): void {
+/**
+ * Spawn a fresh orchestrator, watch it, and load what it announces.
+ *
+ * Returns the port it announced, so the update path (#217, criterion 7) can prove the respawned child is a NEW
+ * process rather than the old URL wearing a new label. Resolves with `undefined` when the child never announces —
+ * the failure page has already been shown by then, and the update path treats it as a failed respawn.
+ */
+function spawnOrchestrator(pkg: PackageRoot, environment: Environment): Promise<number | undefined> {
   const plan = planSpawn({
     node: environment.node,
     pkg,
@@ -667,6 +705,10 @@ function spawnOrchestrator(pkg: PackageRoot, environment: Environment): void {
   const lines = new LineAccumulator();
   const pid = child.pid;
   let announced = false;
+  /** Resolved when this child announces a port. The update path needs the number, not just the URL. */
+  const announcedPortPromise = new Promise<number | undefined>((resolve) => {
+    announceResolvers.push(resolve);
+  });
   const timeout = setTimeout(() => {
     if (announced) return;
     // Criterion 4: a child that never reports a URL is killed and reported, not waited on. The window
@@ -693,6 +735,8 @@ function spawnOrchestrator(pkg: PackageRoot, environment: Environment): void {
       clearTimeout(timeout);
       consecutiveFailures = 0;
       onAnnounced(child, pid, parsed.url, parsed.httpUrl);
+      const announcedPort = Number.parseInt(new URL(parsed.httpUrl).port, 10);
+      for (const resolve of announceResolvers.splice(0)) resolve(announcedPort);
     }
   });
 
@@ -757,6 +801,16 @@ function spawnOrchestrator(pkg: PackageRoot, environment: Environment): void {
       if (window !== undefined && !window.isDestroyed()) start();
     }, decision.delayMs);
   });
+
+  /*
+   * A child that exits without announcing resolves the promise with `undefined`: the update path must not wait for a
+   * port that is never coming, and `assessRespawnedPort` treats it as a failed respawn.
+   */
+  child.on("exit", () => {
+    for (const resolve of announceResolvers.splice(0)) resolve(undefined);
+  });
+
+  return announcedPortPromise;
 }
 
 function onAnnounced(child: ChildProcess | undefined, pid: number | undefined, url: string, httpUrl: string): void {
@@ -815,6 +869,331 @@ function onAnnounced(child: ChildProcess | undefined, pid: number | undefined, u
   }
 }
 
+// -----------------------------------------------------------------------------------------------------------
+// Applying an update (issue #217, ADR-0011 §4).
+//
+// The decisions live in `update-decide.ts` and the sequence in `updater.ts`; both are tested with no Electron. What is
+// here is only the wiring: real subprocesses, the real stop, the real spawn, and the two menu items.
+// -----------------------------------------------------------------------------------------------------------
+
+/** Where the update journal lives: beside `runtime.json`, in the app's own data directory (never the Pi tree). */
+function updateJournalPath(): string {
+  return join(app.getPath("userData"), "update-state.json");
+}
+
+/**
+ * Persist the update phase.
+ *
+ * Written for the same reason `runtime.json` is: an update spans a window in which the app can die with no child
+ * running, and the one interval that matters is **after** the install verified and **before** a child is back — the
+ * package on disk is the new version while the sessions that were open are not yet running. `crashRecovery` reads this
+ * to decide whether the next launch must ignore `runtime.json` and start a new process.
+ *
+ * Failures are reported, not thrown: a journal that cannot be written costs the crash-recovery hint, not the update.
+ */
+function persistUpdatePhase(phase: UpdatePhase, installed: boolean): void {
+  updatePhase = phase;
+  const path = updateJournalPath();
+  const temporary = `${path}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify({ phase, installed, at: Date.now() }, null, 2)}\n`, "utf8");
+    renameSync(temporary, path);
+  } catch (error) {
+    console.error(`Pi Central: could not record the update phase: ${(error as Error).message}`);
+  }
+}
+
+/** Read the journal, tolerating absence and corruption — both mean "no update was in progress". */
+function readUpdateJournal(): { phase: UpdatePhase; installed: boolean } {
+  try {
+    const parsed = JSON.parse(readFileSync(updateJournalPath(), "utf8")) as { phase?: unknown; installed?: unknown };
+    const phase = (UPDATE_PHASES as readonly string[]).includes(String(parsed.phase)) ? (parsed.phase as UpdatePhase) : "idle";
+    return { phase, installed: parsed.installed === true };
+  } catch {
+    return { phase: "idle", installed: false };
+  }
+}
+
+/** Clear the journal, after a completed update or a failure that left things consistent. */
+function clearUpdateJournal(): void {
+  updatePhase = "idle";
+  try {
+    rmSync(updateJournalPath(), { force: true });
+  } catch {
+    // A journal left behind reads as "an update was in progress"; `crashRecovery` then starts the installed version,
+    // which is the same thing it would do anyway.
+  }
+}
+
+/**
+ * Run one command to completion and collect its output.
+ *
+ * `stdio` is piped and both streams are kept, because `npm` prints its diagnosis on stderr and the failure page
+ * shows it verbatim. The timeout is a bound on the whole call, so a wedged npm cannot leave the app in
+ * `installing` for ever.
+ *
+ * No `env` is passed: npm inherits this process's environment, which is the behaviour a reader expects from a shell
+ * command, and injecting one is how the update path would become a way to hand the app's environment somewhere
+ * (C11's rule, one level out).
+ */
+function runCommand(command: string, args: string[], timeoutMs: number): Promise<CommandResult> {
+  return new Promise((resolveResult) => {
+    let settled = false;
+    const finish = (result: CommandResult): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolveResult(result);
+    };
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout = keepTail(stdout, chunk);
+    });
+    child.stderr?.on("data", (chunk: string) => {
+      stderr = keepTail(stderr, chunk);
+    });
+    const timer = setTimeout(() => {
+      // The timeout is a `SIGKILL`: `npm` has no useful partial state to flush, and a `SIGTERM` it ignores would leave
+      // the app waiting on the thing this is meant to bound.
+      child.kill("SIGKILL");
+      finish({ code: null, signal: "SIGKILL", stdout, stderr: `${stderr}\n(timed out after ${timeoutMs} ms)` });
+    }, timeoutMs);
+    child.on("error", (error) => finish({ code: null, signal: null, stdout, stderr: `${stderr}\n${error.message}` }));
+    child.on("exit", (code, signal) => finish({ code, signal, stdout, stderr }));
+  });
+}
+
+/** Stop the running orchestrator: `SIGTERM`, then `SIGKILL` after the grace period (criterion 5). */
+async function stopForUpdate(): Promise<Awaited<ReturnType<UpdateEnvironment["stopChild"]>>> {
+  const current = running;
+  if (current === undefined) return { stopped: true, signal: "SIGTERM", waitedMs: 0 };
+  const started = Date.now();
+  const exited = new Promise<void>((resolveExit) => {
+    if (current.child === undefined) {
+      // An adopted orchestrator has no handle, so its disappearance is observed through the probe (C16).
+      const deadline = Date.now() + STOP_HARD_DEADLINE_MS;
+      const poll = (): void => {
+        if (probeProcess(current.pid).status === "absent" || Date.now() >= deadline) {
+          resolveExit();
+          return;
+        }
+        setTimeout(poll, 100);
+      };
+      poll();
+      return;
+    }
+    current.child.once("exit", () => resolveExit());
+  });
+
+  current.child?.kill("SIGTERM");
+  if (current.child === undefined) {
+    try {
+      process.kill(current.pid, "SIGTERM");
+    } catch (error) {
+      return { stopped: false, reason: `could not signal it: ${(error as Error).message}` };
+    }
+  }
+
+  const escalated = await Promise.race([
+    exited.then(() => "exited" as const),
+    new Promise<"grace">((resolveGrace) => setTimeout(() => resolveGrace("grace"), STOP_TERM_GRACE_MS)),
+  ]);
+  if (escalated === "exited") return { stopped: true, signal: "SIGTERM", waitedMs: Date.now() - started };
+
+  // `SIGKILL`, on the group when there is one, because a session is a process tree.
+  if (current.child !== undefined) {
+    try {
+      process.kill(-current.pid, "SIGKILL");
+    } catch {
+      current.child.kill("SIGKILL");
+    }
+  } else {
+    try {
+      process.kill(current.pid, "SIGKILL");
+    } catch {
+      // Already gone.
+    }
+  }
+  const hardDeadline = Date.now() + (STOP_HARD_DEADLINE_MS - STOP_TERM_GRACE_MS);
+  while (Date.now() < hardDeadline) {
+    if (probeProcess(current.pid).status === "absent") {
+      return { stopped: true, signal: "SIGKILL", waitedMs: Date.now() - started };
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  /*
+   * Still there. Whether the probe could answer at all is the difference between "it survived SIGKILL" and "this host
+   * will not tell me" (C16), and both must refuse the update — installing over a process that may be alive is the one
+   * thing criterion 5 forbids.
+   */
+  return { stopped: false, reason: `it was still there ${STOP_HARD_DEADLINE_MS} ms after SIGTERM and SIGKILL` };
+}
+
+/** The real `UpdateEnvironment`, wired to this app's processes and files. */
+function updateEnvironment(): UpdateEnvironment {
+  return {
+    readLatestVersion: () => {
+      const { command, args } = latestVersionCommand();
+      return runCommand(command, args, 30_000);
+    },
+    runInstall: (version) => {
+      const { command, args } = installCommand(version);
+      return runCommand(command, args, INSTALL_TIMEOUT_MS);
+    },
+    readInstalledVersion: async () => {
+      // Read back from the artifact, never from npm's output: the manifest is what the next launch will run.
+      const located = locatePackage();
+      return located.ok ? located.package.version : undefined;
+    },
+    readCurrentVersion: async () => {
+      // Criterion 2: the version of the package this app launches, resolved the same way the spawn resolves it.
+      const located = locatePackage();
+      return located.ok ? located.package.version : "unknown";
+    },
+    stopChild: () => stopForUpdate(),
+    respawn: async (forceNew) => {
+      /*
+       * `forceNew` is already expressed by having stopped the child: the adoption path (#216) cannot reach a dead PID.
+       * What it rules out is the *record* naming the old process, which `removeRuntimeRecord` does before a respawn that
+       * follows an install — otherwise the next launch would adopt a PID whose code has been replaced.
+       */
+      if (forceNew) removeRuntimeRecord(app.getPath("userData"));
+      running = undefined;
+      announcedPort = undefined;
+      const located = locatePackage();
+      if (!located.ok) throw new Error(located.message);
+      const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup });
+      if (!environment.ok) throw new Error(missingDetail(environment.missing));
+      const port = await spawnOrchestrator(located.package, environment.environment);
+      if (port === undefined) throw new Error("the new orchestrator did not report a port");
+      return { port };
+    },
+    onPhase: (phase, detail) => {
+      console.log(`Pi Central: update ${phase} — ${detail}`);
+    },
+    persistPhase: (phase, installed) => persistUpdatePhase(phase, installed),
+  };
+}
+
+/**
+ * Menu → Check for Updates…: asks npm what `latest` is, and installs nothing (criterion 1).
+ *
+ * Its own action, because ADR-0011 §4 separates detection from application. When a newer version exists the reader is
+ * offered the update here — the same dialog `applyUpdateFromMenu` would show — so the two menu items differ only in
+ * whether they look first.
+ */
+async function checkForUpdateFromMenu(): Promise<void> {
+  if (updating) return;
+  updating = true;
+  try {
+    const check = await checkLatestVersion(updateEnvironment());
+    console.log(`Pi Central: ${check.verdict.action === "install" ? check.verdict.reason : check.verdict.reason}`);
+    if (check.verdict.action !== "install") {
+      dialog.showMessageBoxSync({
+        type: "info",
+        message: "Pi Central is up to date",
+        detail: `Running ${check.current}; the latest release is ${check.latest ?? "unknown"}.`,
+        buttons: ["OK"],
+        noLink: true,
+      });
+      return;
+    }
+    await applyUpdateFromMenu(check.verdict.version);
+  } catch (error) {
+    showFailure("Pi Central could not check for updates", (error as Error).message);
+  } finally {
+    updating = false;
+  }
+}
+
+/**
+ * Menu → Update Pi Central…: stop, install, verify, respawn (the choreography #56 needed).
+ *
+ * The confirmation names the live sessions first, and **Cancel** installs nothing (criterion 4). That list is the
+ * orchestrator's own, asked the same way `⌘Q` asks (#216).
+ */
+async function applyUpdateFromMenu(knownVersion?: string): Promise<void> {
+  if (updating) return;
+  updating = true;
+  try {
+    const env = updateEnvironment();
+    const from = await env.readCurrentVersion();
+    let to = knownVersion;
+    if (to === undefined) {
+      const latest = await env.readLatestVersion();
+      const verdict = assessAvailableVersion(from, parseLatestVersion(latest.stdout) ?? latest.stdout);
+      if (verdict.action === "refuse") {
+        showFailure("There is no update to apply", verdict.reason);
+        return;
+      }
+      to = verdict.version;
+    }
+
+    const current = running;
+    const answer = current === undefined ? { sessions: [], note: undefined } : await askLiveSessions(connectSocket, current.url);
+    if (answer.note !== undefined) console.error(`Pi Central: ${answer.note}`);
+    const { response } = await dialog.showMessageBox(
+      updateDialog(from, to, answer.sessions.map((session) => ({ name: session.name, cwd: session.cwd }))),
+    );
+    if (chooseUpdateAnswer(response) === "cancel") {
+      console.log("Pi Central: update cancelled; nothing was stopped and nothing was installed");
+      return;
+    }
+
+    const result = await applyUpdate(env, {
+      hasChild: current !== undefined,
+      previous: current === undefined ? undefined : { port: Number.parseInt(new URL(current.httpUrl).port, 10), spawnedByUs: current.child !== undefined },
+    });
+
+    if (result.ok) {
+      clearUpdateJournal();
+      console.log(`Pi Central: updated ${result.from} → ${result.to} (pid ${running?.pid ?? "?"}, port ${result.port})`);
+      const target = window;
+      if (target !== undefined && !target.isDestroyed()) target.reload();
+      return;
+    }
+
+    // A failure that left the previous version running is consistent, so the journal is cleared; one that left the disk
+    // in an unknown state keeps it, so the next launch does not adopt a process whose code was replaced.
+    if (result.failure.kind !== "version-mismatch") clearUpdateJournal();
+    const page = updateFailurePage(result.failure, result.runningVersion);
+    showFailure(page.title, page.detail);
+  } finally {
+    updating = false;
+  }
+}
+
+/** The menu, which is the only way to reach the update path (criterion 1). */
+function buildMenu(): void {
+  const template = [
+    {
+      // The app menu, which macOS requires to be first and to contain Quit — so `⌘Q` keeps working (#216).
+      label: app.name,
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        { label: "Check for Updates…", click: () => void checkForUpdateFromMenu() },
+        { label: "Update Pi Central…", click: () => void applyUpdateFromMenu() },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        // `role: "quit"` is what makes this `⌘Q` and what routes it through `before-quit`, which is the whole of #216.
+        { role: "quit" },
+      ],
+    },
+    { role: "editMenu" },
+    { role: "viewMenu" },
+    { role: "windowMenu" },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template as unknown as Parameters<typeof Menu.buildFromTemplate>[0]));
+}
+
 function missingTitle(missing: MissingExecutable): string {
   return `Pi Central needs \`${missing.name}\`, and could not find it`;
 }
@@ -857,6 +1236,25 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
+    // The menu is the only route to the update path (issue #217, criterion 1). Built once, before the first launch, so
+    // a reader can reach it even when the orchestrator failed to start.
+    buildMenu();
+    /*
+     * An update interrupted by a crash (issue #217). `crashRecovery` decides whether the next launch must ignore the
+     * runtime record — because the recorded process is the OLD version executing files that have been replaced — and
+     * the journal is cleared either way, since this launch is the recovery.
+     */
+    const journal = readUpdateJournal();
+    if (journal.phase !== "idle") {
+      const recovery = crashRecovery({
+        phase: journal.phase,
+        previous: undefined,
+        installed: journal.installed,
+      });
+      console.log(`Pi Central: ${recovery.reason}`);
+      if (recovery.forceNew) removeRuntimeRecord(app.getPath("userData"));
+      clearUpdateJournal();
+    }
     start();
     app.on("activate", () => {
       /*

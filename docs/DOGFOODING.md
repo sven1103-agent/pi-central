@@ -234,6 +234,35 @@ shell that always restarts looks identical to one that always restores.
 The script already covers criterion 8's mechanism (a seeded `open-sessions.json` is reopened, and each entry keeps its
 mode); what step 4 adds is that it happens for **your** sessions after a real quit.
 
+## Applying a real update from the app (issue #217)
+
+The automated tests drive the whole sequence with a stubbed installer, and `update-live.test.ts` runs a **real**
+`npm install --global` into a temporary prefix. Neither can prove the thing the slice exists for, so this is the
+one manual pass:
+
+1. Publish or install an older version than the checkout: `npm install -g pi-central@<older>`.
+2. `npm run app`, start two sessions, then **Pi Central → Check for Updates…**. It must say *up to date* (the
+   checkout's version is not published), which is itself the check.
+3. Install the current checkout globally: `npm install -g .` Then **Check for Updates…** again — it should report
+   the version it found.
+4. **Update Pi Central…**. The dialog must name the two live sessions and state that they will be restarted, with
+   **Cancel** as the default. Cancel: nothing is stopped.
+5. Do it again and confirm. Paste back:
+   - the version before (`pi-central --version`),
+   - the version after,
+   - the line `Pi Central: update respawning — starting <v>`, and
+   - what npm printed (visible in the terminal, or in the failure panel if it failed).
+
+The claim being made is that the app replaced its own binary while two sessions were open and came back on the new
+version. That is exactly the claim that must not rest on a mock.
+
+**The two failures worth provoking once**, because they are the ones a real npm produces and a stub cannot:
+
+- Point the update at a version that does not exist (`npm view` a typo'd tag) and confirm the app reports the
+  install failure with npm's message, rather than a blank window.
+- Run it as a user whose global prefix is not writable — on this machine `/opt/homebrew/lib/node_modules` is
+  owner-only, so a plain non-sudo `npm install -g` gives `EACCES`, and the panel should say so in one sentence.
+
 ## Known rough edges
 
 These are filed rather than worked around, because they are the difference between "possible" and

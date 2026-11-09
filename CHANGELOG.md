@@ -35,6 +35,13 @@ They are kept because each one is the reason a constraint or an invariant test e
 - `npm run verify:lifecycle` checks the quit-and-reattach sequence against a real orchestrator, one line per criterion ([#216]).
 - The lifecycle verifier compares process identity with the app's own tolerance, so a healthy orchestrator is no longer reported as having vanished ([#216]).
 
+- The app can apply a Pi Central update itself: stop, install, verify the version, respawn, reload ([#217]).
+- An update is only applied from a menu action, and the check action installs nothing ([#217]).
+- The installed version is read from the package and verified against the one requested, so an install that lands something else fails instead of reporting success ([#217]).
+- A child that cannot be stopped abandons the update, so files a live process is executing are never replaced ([#217]).
+- A failed install respawns the previous version and shows npm's own output in a copyable panel ([#217]).
+- The update journal recovers from a crash mid-update, starting the installed version rather than adopting the old one ([#217]).
+
 ### Changed
 
 - `docs/STACK.md` no longer claims there is no Electron path; ADR-0013 states the shell as a launcher rather than a second artifact ([#212]).
@@ -57,6 +64,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 [#220]: https://github.com/sven1103-agent/pi-central/issues/220
 [#215]: https://github.com/sven1103-agent/pi-central/issues/215
 [#216]: https://github.com/sven1103-agent/pi-central/issues/216
+[#217]: https://github.com/sven1103-agent/pi-central/issues/217
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
