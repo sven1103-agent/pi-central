@@ -22,7 +22,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { candidateRoots, findPackageRoot, resolvePackage } from "../src/package-root.ts";
+import { candidateRoots, findPackageInside, findPackageRoot, resolvePackage } from "../src/package-root.ts";
 
 /** A scratch tree, removed when the test ends. */
 function scratch(t: { after: (fn: () => void) => void }): string {
@@ -126,4 +126,93 @@ test("candidate roots name the prefixes a reader might have used", () => {
   // With no npm prefix configured, the Homebrew paths are still named rather than omitted: this
   // machine's documented install is Homebrew, and a message that guesses is worse than one that lists.
   assert.equal(candidateRoots({ HOME: "/Users/someone" }).includes("/opt/homebrew/lib/node_modules"), true);
+});
+
+// -----------------------------------------------------------------------------------------------------------
+// The global-install case, which was broken from #214 until it was reported from a running app.
+// -----------------------------------------------------------------------------------------------------------
+
+test("a global install is found from its `node_modules` DIRECTORY, not only from inside it", (t) => {
+  /*
+   * The defect, reported with a screenshot: "Pi Central could not find its own package", listing
+   * `/opt/homebrew/lib/node_modules` among the locations checked — while the package sat one directory below it.
+   *
+   * `findPackageRoot` walks UP. `locatePackage` handed it a `node_modules` directory, where the package is a CHILD,
+   * so a global install was never found. It went unnoticed because the app only worked when it lived inside the
+   * package itself (the developer's case), and it failed the first time it was launched over a separate install.
+   *
+   * The two assertions that matter: the walk-up still does NOT find it (so the bug is real and not merely a
+   * preference), and `resolvePackage` DOES, because it now looks inside first.
+   */
+  const root = scratch(t);
+  const modules = join(root, "lib", "node_modules");
+  const bin = writeInstall(join(modules, "pi-central"));
+
+  assert.equal(findPackageRoot(modules), undefined, "walking up from node_modules cannot find a child");
+  const resolved = resolvePackage({ from: modules });
+  assert.equal(resolved.ok, true, "but resolvePackage must, because that is the shape locatePackage passes");
+  if (!resolved.ok) return;
+  assert.equal(resolved.package.root, join(modules, "pi-central"));
+  assert.equal(resolved.package.bin, bin);
+});
+
+test("every candidate root locatePackage probes resolves a real install in that layout", (t) => {
+  // The same defect from the other side: the message that says "locations checked: …" must be true. For each
+  // candidate, a package placed in that layout must be found by the call `locatePackage` makes.
+  const root = scratch(t);
+  const prefix = join(root, "prefix");
+  const modules = join(prefix, "lib", "node_modules");
+  writeInstall(join(modules, "pi-central"), "pi-central", "9.9.9");
+  const resolved = resolvePackage({ from: modules });
+  assert.equal(resolved.ok, true);
+  if (!resolved.ok) return;
+  assert.equal(resolved.package.version, "9.9.9");
+});
+
+test("inside-then-up: a checkout still resolves, and a node_modules dir prefers its own child", (t) => {
+  /*
+   * The ordering, which is the part a later "simplification" could get wrong. `findPackageInside` is tried first
+   * because a `node_modules` directory holding our package is a statement about where the package is, while walking
+   * up from it would find an unrelated manifest higher in the prefix.
+   *
+   * Both shapes are asserted, because a fix that only worked for one would have passed the test above.
+   */
+  const root = scratch(t);
+  // A checkout-shaped tree: the package root itself, with a nested directory.
+  const checkout = join(root, "pi-central-dev");
+  writeInstall(checkout);
+  assert.equal(findPackageRoot(join(checkout, "packages", "app"))?.root, checkout);
+  assert.equal(findPackageInside(join(checkout, "packages", "app")), undefined, "a checkout is not a node_modules dir");
+  assert.equal(resolvePackage({ from: join(checkout, "packages", "app") })?.ok !== false, true);
+
+  // A node_modules-shaped tree with a decoy manifest ABOVE it: the child must win.
+  const modules = join(root, "prefix", "lib", "node_modules");
+  writeInstall(join(modules, "pi-central"), "pi-central", "1.0.0");
+  writeManifest(join(root, "prefix", "lib"), "not-pi-central", "2.0.0");
+  const resolved = resolvePackage({ from: modules });
+  assert.equal(resolved.ok, true);
+  if (!resolved.ok) return;
+  assert.equal(resolved.package.version, "1.0.0", "the child is our package, so it wins over anything above");
+});
+
+test("a node_modules directory holding a DIFFERENT package is not taken", (t) => {
+  // `findPackageInside` matches by name, like the walk-up does. A `node_modules` full of other packages must not
+  // resolve to one of them.
+  const root = scratch(t);
+  const modules = join(root, "lib", "node_modules");
+  writeInstall(join(modules, "some-other-tool"), "some-other-tool");
+  assert.equal(findPackageInside(modules), undefined);
+  assert.equal(resolvePackage({ from: modules }).ok, false);
+});
+
+test("a node_modules child with no `bin/` is reported as incomplete, not as missing", (t) => {
+  // The two sentences have opposite fixes, and the inside-lookup must not collapse them.
+  const root = scratch(t);
+  const modules = join(root, "lib", "node_modules");
+  writeManifest(join(modules, "pi-central"), "pi-central", "1.2.3");
+  const resolved = resolvePackage({ from: modules });
+  assert.equal(resolved.ok, false);
+  if (resolved.ok) return;
+  assert.equal(resolved.reason, "incomplete");
+  assert.match(resolved.message, /entry point is missing/);
 });

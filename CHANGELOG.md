@@ -44,6 +44,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - An update is refused, naming the right command, when Pi Central is managed by Homebrew, a node version manager, a linked working copy, or a prefix this user cannot write ([#217]).
 - The updater uses the `npm` beside the Node it launches, so it cannot install into a different prefix than the one it verifies ([#217]).
 - A linked working copy is reported as one, and the refusal names the directory the link points at ([#217]).
+- A global install is found from its `node_modules` directory, instead of the app reporting that it could not find its own package ([#217]).
 
 ### Changed
 
