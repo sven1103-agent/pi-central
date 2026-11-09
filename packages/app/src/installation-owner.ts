@@ -63,7 +63,7 @@ export type InstallationOwner =
   /** An npm global prefix owned by this user — the one case the app may replace. */
   | { kind: "npm-global"; reason: string; prefix: string }
   /** A linked working copy: installing would replace the link and orphan the checkout. */
-  | { kind: "linked"; reason: string }
+  | { kind: "linked"; reason: string; target?: string | undefined }
   /** Present, but not writable by this user. */
   | { kind: "not-writable"; reason: string }
   /** Nothing recognisable was found at the path. */
@@ -100,10 +100,16 @@ export interface OwnerEvidence {
  * on the strength of the `opt` segment alone. That is the wrong direction to be wrong in: refusing a self-managed
  * install is recoverable, while a reader following `brew upgrade` for a package Homebrew has never heard of is not.
  *
- * The real signals are `Cellar` (where Homebrew unpacks a version) and `keg`; a formula's `opt` symlink is only
- * meaningful *inside* a Homebrew root, which is what `HOMEBREW_ROOTS` covers.
+ * The real signals are `Cellar` (where Homebrew unpacks a version) and `<root>/opt/<name>` (a keg symlink, covered by
+ * `HOMEBREW_ROOTS` below, because `opt` on its own is POSIX).
+ *
+ * **`keg` was in this list too, and it is not a directory name.** A keg is Homebrew's word for one versioned directory
+ * inside `Cellar` — there is no `…/keg/…` in the layout (`ls /opt/homebrew` has `Cellar` and `opt`, not `keg`). Listing
+ * it meant any directory that happened to be called `keg` anywhere on disk was classified as a Homebrew install, which
+ * is how a test that built its tree under `…/keg/…` caught it. A segment list is only as good as the assertion behind
+ * it that the segment exists.
  */
-const CELLAR_SEGMENTS = ["Cellar", "keg"] as const;
+const CELLAR_SEGMENTS = ["Cellar"] as const;
 
 /**
  * Homebrew roots, for the `opt/<formula>` form.
@@ -182,6 +188,7 @@ export function decideOwner(evidence: OwnerEvidence): InstallationOwner {
     return {
       kind: "linked",
       reason: `${root} is a symlink${target}, so it is a linked working copy rather than an installed package`,
+      ...(evidence.packageRootLinkTarget === undefined ? {} : { target: evidence.packageRootLinkTarget }),
     };
   }
 
@@ -249,11 +256,17 @@ export function ownerRefusal(owner: InstallationOwner): { kind: string; message:
           `This app will not guess which Node version your shell is using.`,
       };
     case "linked":
+      /*
+       * The target is named in the message, not only in `reason`, because it is the one fact that identifies WHICH
+       * threads this reader is holding: someone with two checkouts needs to know which one this app is running, and a
+       * symlink whose target they forgot is the state that makes `npm unlink` feel like a gamble.
+       */
       return {
         kind: "linked",
         message:
-          `This Pi Central is a linked working copy, not an installed package. Updating it would replace the link and ` +
-          `leave the directory it points at untouched.\n\n` +
+          `This Pi Central is a linked working copy, not an installed package` +
+          (owner.target === undefined ? "" : ` — the link points at ${owner.target}`) +
+          `. Updating it would replace the link and leave that directory untouched.\n\n` +
           `To move to a released version:  npm unlink -g pi-central && npm install -g pi-central@latest\n` +
           `To keep working from the checkout:  git pull && npm install && npm run build:package`,
       };
