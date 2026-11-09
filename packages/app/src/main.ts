@@ -1812,19 +1812,94 @@ type WebSocketConstructor = new (url: string) => WebSocketLike;
 
 let socketConstructor: WebSocketConstructor | undefined;
 
-function socketClient(): WebSocketConstructor | undefined {
-  if (socketConstructor !== undefined) return socketConstructor;
-  try {
-    const loaded = createRequire(import.meta.url)("ws") as unknown;
-    // The package exports the class; whether it arrives bare, as `default` or as `WebSocket` depends on the resolution
-    // path, so all three are accepted rather than pinning one.
+/**
+ * Resolve `ws`, from wherever this build can find it.
+ *
+ * ## The defect this replaces, which made `⌘Q` blind
+ *
+ * The first version was `createRequire(import.meta.url)("ws")`. That is correct in an ES module and **silently broken in
+ * the packaged app**, which is bundled to CommonJS: esbuild emits `var import_meta = {}` for `import.meta`, so
+ * `import.meta.url` is `undefined` and `createRequire(undefined)` throws
+ * *"The argument 'filename' must be a file URL object, file URL string, or absolute path string"*.
+ *
+ * The throw was caught — that is what the fallback below is for — so the app started and looked healthy. What it lost was
+ * the socket: `askLiveSessions` never got a client, every `⌘Q` waited its full 2000 ms and then reported
+ * *"the orchestrator did not describe its sessions within 2000 ms"* from the log. **So the quit dialog never appeared and
+ * the stop ran blind**, which is why "⌘Q leaves the window open" survived the fix for the looping exit handler: there was
+ * a second, independent fault in front of it.
+ *
+ * Found in the app's own log — the diagnostic added for exactly this class of problem.
+ *
+ * ## The order, and why `require` is first
+ *
+ *  1. **`require`**, when it exists. In the packaged bundle that is the real CommonJS `require`, resolved relative to the
+ *     bundle inside `app.asar` — where `node_modules/ws` is packed beside it.
+ *  2. **`createRequire` from a real path**, for an ES-module build (`npm run app` runs the TypeScript directly). The path
+ *     comes from `process.argv[1]`, which is the entry script in both a dev run and a bundle, and never from
+ *     `import.meta.url`.
+ *  3. **A bare `require` of the package name from the app's own resolution**, which covers a checkout where `ws` is a
+ *     hoisted workspace dependency.
+ *
+ * Each attempt is independent, because a missing `ws` costs one dialog — not the app.
+ */
+function resolveWs(): WebSocketConstructor | undefined {
+  const accept = (loaded: unknown): WebSocketConstructor | undefined => {
+    // The package exports the class; whether it arrives bare, as `default` or as `WebSocket` depends on how it is
+    // reached, so all three are accepted rather than pinning one.
     const candidate =
       typeof loaded === "function"
         ? loaded
         : ((loaded as { WebSocket?: unknown } | null)?.WebSocket ?? (loaded as { default?: unknown } | null)?.default);
-    if (typeof candidate === "function") socketConstructor = candidate as WebSocketConstructor;
+    return typeof candidate === "function" ? (candidate as WebSocketConstructor) : undefined;
+  };
+
+  // 1. CommonJS: the packaged bundle. `require` is a real function there, and it resolves inside `app.asar`.
+  const nativeRequire = (globalThis as { require?: (id: string) => unknown }).require;
+  if (typeof nativeRequire === "function") {
+    try {
+      const accepted = accept(nativeRequire("ws"));
+      if (accepted !== undefined) return accepted;
+    } catch {
+      // Not resolvable from here; try the next route.
+    }
+  }
+
+  // 2. ESM: a real path for `createRequire`. `process.argv[1]` is the entry script in both shapes, and unlike
+  //    `import.meta.url` it survives being bundled to CommonJS.
+  const entry = process.argv[1];
+  if (entry !== undefined && entry !== "") {
+    for (const anchor of [entry, join(dirname(entry), "noop.js")]) {
+      try {
+        const accepted = accept(createRequire(anchor)("ws"));
+        if (accepted !== undefined) return accepted;
+      } catch {
+        // Try the next anchor.
+      }
+    }
+  }
+
+  // 3. Last resort: let the runtime resolve the bare name from the current working directory.
+  try {
+    const accepted = accept(createRequire(join(process.cwd(), "noop.js"))("ws"));
+    if (accepted !== undefined) return accepted;
   } catch {
-    // Left unresolved: `connectSocket` turns this into a socket that never answers.
+    // Nothing left to try.
+  }
+  return undefined;
+}
+
+function socketClient(): WebSocketConstructor | undefined {
+  if (socketConstructor !== undefined) return socketConstructor;
+  socketConstructor = resolveWs();
+  if (socketConstructor === undefined) {
+    /*
+     * Logged once, and loudly, because the consequence is silent: `⌘Q` will wait its full timeout and report that the
+     * orchestrator did not answer. Without this line, that message looks like the orchestrator's fault.
+     */
+    console.error(
+      "Pi Central: could not resolve `ws`, so asking the orchestrator which sessions are live will time out. " +
+        "The quit dialog will not be able to name sessions.",
+    );
   }
   return socketConstructor;
 }
@@ -1838,7 +1913,13 @@ function socketClient(): WebSocketConstructor | undefined {
  */
 function connectSocket(url: string): SocketLike {
   const Client = socketClient();
-  if (Client === undefined) return { on: () => undefined, close: () => undefined };
+  if (Client === undefined) {
+    /*
+     * No client. The socket accepts listeners and never speaks, which `askLiveSessions` reports as a timeout — and the
+     * timeout is now explained by the log line in `socketClient` rather than looking like an unresponsive orchestrator.
+     */
+    return { on: () => undefined, close: () => undefined };
+  }
   const socket = new Client(url);
   return {
     on: (event: string, listener: (argument: never) => void) => {
