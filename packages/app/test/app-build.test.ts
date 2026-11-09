@@ -261,7 +261,7 @@ function decodePng(path: string): { width: number; height: number; at: (x: numbe
   };
 }
 
-test("the committed icon is a container macOS can read, and it is not Electron's", () => {
+test("the committed icon is a container macOS can read, and it is not Electron's", (t) => {
   /*
    * The icon is assembled byte by byte by `scripts/build-icon.mjs` — because `iconutil -c icns` refuses a complete, valid
    * iconset on this macOS (26.7.2), including one it had just extracted itself from Electron's own valid `.icns`. So "it
@@ -285,8 +285,22 @@ test("the committed icon is a container macOS can read, and it is not Electron's
   assert.equal(offset, bytes.length, "the elements cover the file with no slack");
   assert.deepEqual(types, ["ic07", "ic08", "ic09", "ic10", "ic11", "ic12", "ic13", "ic14"]);
 
+  /*
+   * The comparison against the framework's icon needs Electron's **macOS** distribution, which only exists on a macOS
+   * checkout: `node_modules/electron/dist` is the host platform's build, so CI (ubuntu) has a Linux binary and no
+   * `Electron.app`. This was the first version's mistake — it asserted `existsSync(electronIcon)` and failed on CI for a
+   * reason unrelated to the icon. The skip is named, per the convention `spawn-live.test.ts` states, so a run that did
+   * not make the comparison says so instead of looking green.
+   *
+   * The container assertions above still run everywhere, and they are the ones that catch a hand-written `.icns` being
+   * malformed. The `app-icon.test.ts` colour assertions are the ones that catch the artwork being Electron's, and they
+   * need no external file.
+   */
   const electronIcon = join(ROOT, "node_modules", "electron", "dist", "Electron.app", "Contents", "Resources", "electron.icns");
-  assert.ok(existsSync(electronIcon), "electron is installed, so its own icon is available to compare against");
+  if (!existsSync(electronIcon)) {
+    t.diagnostic("Electron's macOS icon is not unpacked here (not a macOS checkout); the framework comparison is skipped");
+    return;
+  }
   assert.notEqual(
     createHash("sha256").update(bytes).digest("hex"),
     createHash("sha256").update(readFileSync(electronIcon)).digest("hex"),
