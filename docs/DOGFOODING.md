@@ -256,6 +256,20 @@ one manual pass:
 The claim being made is that the app replaced its own binary while two sessions were open and came back on the new
 version. That is exactly the claim that must not rest on a mock.
 
+**Check the refusal first, because this machine will hit it.** `npm run app` from a checkout that was
+`npm install -g`'d into `/opt/homebrew/lib/node_modules` should refuse to update and say the directory is not
+writable. That is correct, not a defect: `npm prefix -g` is `/opt/homebrew` because node is a Homebrew formula, the
+tree is owner-only, and `pi-central` is not a formula — so no package manager actually owns it and this app may not
+replace it either. To exercise the update path for real, install into a prefix you own:
+
+```bash
+npm install -g --prefix ~/.npm-global .    # then put ~/.npm-global/bin on PATH
+npm run app
+```
+
+The owner check is what makes that distinction, and `installation-owner.test.ts` covers the four shapes it refuses
+(Homebrew, version manager, linked working copy, read-only prefix).
+
 **The two failures worth provoking once**, because they are the ones a real npm produces and a stub cannot:
 
 - Point the update at a version that does not exist (`npm view` a typo'd tag) and confirm the app reports the

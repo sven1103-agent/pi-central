@@ -65,7 +65,7 @@ export interface CommandResult {
 export interface UpdateEnvironment {
   /** Ask npm which version `latest` names. One request, package name only (ADR-0011 §4). */
   readLatestVersion(): Promise<CommandResult>;
-  /** Run `npm install -g pi-central@<version>`. */
+  /** Run `npm install -g pi-central@<version>`, through the npm this app resolved. */
   runInstall(version: string): Promise<CommandResult>;
   /** Read `version` from the installed `package.json`. `undefined` when it cannot be read at all. */
   readInstalledVersion(): Promise<string | undefined>;

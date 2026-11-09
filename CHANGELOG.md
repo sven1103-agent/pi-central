@@ -41,6 +41,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 - A child that cannot be stopped abandons the update, so files a live process is executing are never replaced ([#217]).
 - A failed install respawns the previous version and shows npm's own output in a copyable panel ([#217]).
 - The update journal recovers from a crash mid-update, starting the installed version rather than adopting the old one ([#217]).
+- An update is refused, naming the right command, when Pi Central is managed by Homebrew, a node version manager, a linked working copy, or a prefix this user cannot write ([#217]).
+- The updater uses the `npm` beside the Node it launches, so it cannot install into a different prefix than the one it verifies ([#217]).
 
 ### Changed
 

@@ -184,6 +184,14 @@ export function parseLatestVersion(stdout: string): string | undefined {
 
 /** Why an update did not happen. `undefined` means it did. */
 export type UpdateFailure =
+  /**
+   * This installation is not the app's to replace (issue #217).
+   *
+   * Homebrew, a version manager, a linked working copy, or a prefix this user cannot write: in every one of those an
+   * `npm install` is the wrong action, and the message names the command that is right. Checked BEFORE anything is
+   * stopped, so a reader whose install is managed elsewhere loses nothing by asking.
+   */
+  | { kind: "not-ours"; reason: string; owner: string }
   | { kind: "stopped-impossible"; reason: string }
   | { kind: "install-failed"; reason: string; output: string }
   | { kind: "version-mismatch"; reason: string; requested: string; installed: string };
@@ -424,6 +432,16 @@ export function chooseUpdateAnswer(response: number): "install" | "cancel" {
  */
 export function updateFailurePage(failure: UpdateFailure, runningVersion: string): { title: string; detail: string } {
   switch (failure.kind) {
+    case "not-ours":
+      /*
+       * The sentence is already complete — it names the manager and the command — so this only gives it a title. Adding
+       * "nothing was changed" is still worth saying: the reader asked for an update and needs to know why they did not
+       * get one, and that their installation is intact.
+       */
+      return {
+        title: "This Pi Central is managed elsewhere, so it was not updated here",
+        detail: `${failure.reason}\n\nNothing was changed, and the running version is still ${runningVersion}.`,
+      };
     case "stopped-impossible":
       return {
         title: "Pi Central could not be stopped, so the update was not applied",

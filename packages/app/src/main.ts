@@ -24,7 +24,7 @@
 import { BrowserWindow, Menu, app, dialog, shell } from "electron";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, lstatSync, readFileSync, readlinkSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -93,6 +93,7 @@ import {
   type UpdatePhase,
 } from "./update-decide.ts";
 import { applyUpdate, checkLatestVersion, type CommandResult, type UpdateEnvironment } from "./updater.ts";
+import { decideOwner, findBrew, maySelfUpdate, npmBesideNode, ownerRefusal, readOwnerEvidence } from "./installation-owner.ts";
 
 /**
  * The name macOS shows, and therefore the directory the runtime record lives in.
@@ -876,6 +877,74 @@ function onAnnounced(child: ChildProcess | undefined, pid: number | undefined, u
 // here is only the wiring: real subprocesses, the real stop, the real spawn, and the two menu items.
 // -----------------------------------------------------------------------------------------------------------
 
+/**
+ * How this installation is managed, and therefore whether this app may replace it (issue #217).
+ *
+ * Probed from the filesystem, not inferred from the version: `npm prefix -g` is `/opt/homebrew` on a Homebrew Node, the
+ * package may be a symlink, and the target directory may not be writable — all measured (see `installation-owner.ts`).
+ * The `node` used is the one this app already resolved, so `npm` is taken from ITS directory rather than from a login
+ * shell that may find a version manager's copy and install into a different prefix.
+ */
+function installationOwner(): { mayUpdate: boolean; refusal: string; owner: string } {
+  const located = locatePackage();
+  if (!located.ok) {
+    return { mayUpdate: false, refusal: located.message, owner: "undetermined" };
+  }
+  const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup });
+  const evidence = readOwnerEvidence({
+    packageRoot: located.package.root,
+    nodePath: environment.ok ? environment.environment.node.path : undefined,
+    npmPrefix: readNpmGlobalPrefix(environment.ok ? environment.environment.node.path : undefined),
+    env: process.env,
+    lstat: (path) => lstatSync(path),
+    readlink: (path) => readlinkSync(path),
+    isWritable: (path) => isWritableDirectory(path),
+    // `brew` is a secondary signal; the Cellar and keg path checks do not need it, which matters because a GUI launch
+    // has no `brew` on PATH.
+    findBrewFormula: (root) => (isHomebrewNamed(root) ? PACKAGE_NAME_FOR_BREW : undefined),
+  });
+  const owner = decideOwner(evidence);
+  const refusal = ownerRefusal(owner);
+  if (maySelfUpdate(owner)) return { mayUpdate: true, refusal: "", owner: owner.kind };
+  console.log(`Pi Central: this installation is not self-updatable — ${owner.reason}`);
+  return { mayUpdate: false, refusal: refusal.message, owner: refusal.kind };
+}
+
+/** The npm package's name, for the `brew` formula lookup. A formula would carry the same name in practice. */
+const PACKAGE_NAME_FOR_BREW = "pi-central";
+
+/** Whether `brew` knows a formula whose name matches the package root's directory. Cheap and failure-tolerant. */
+function isHomebrewNamed(root: string): boolean {
+  const brew = findBrew(process.env, (path) => existsSync(path));
+  if (brew === undefined) return false;
+  const name = root.split("/").filter((part) => part !== "").at(-1) ?? "";
+  if (name === "") return false;
+  const probe = spawnSync(brew, ["list", "--formula", name], { encoding: "utf8", timeout: 4000 });
+  return probe.status === 0;
+}
+
+/** `npm prefix -g`, read through the npm beside the node this app launches. */
+function readNpmGlobalPrefix(nodePath: string | undefined): string | undefined {
+  const npm = npmBesideNode(nodePath);
+  if (npm === undefined) return undefined;
+  const probe = spawnSync(npm.path, ["prefix", "-g"], { encoding: "utf8", timeout: 8000 });
+  if (probe.status !== 0) return undefined;
+  const prefix = probe.stdout.trim();
+  return prefix === "" ? undefined : prefix;
+}
+
+/** Whether this user can write to a directory. `undefined` when it cannot be determined, which refuses the update. */
+function isWritableDirectory(path: string): boolean | undefined {
+  try {
+    // `fs.accessSync` is the honest test: it asks the OS whether THIS user may create a file, which is the question.
+    accessSync(path, constants.W_OK);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    return false;
+  }
+}
+
 /** Where the update journal lives: beside `runtime.json`, in the app's own data directory (never the Pi tree). */
 function updateJournalPath(): string {
   return join(app.getPath("userData"), "update-state.json");
@@ -1038,11 +1107,22 @@ function updateEnvironment(): UpdateEnvironment {
   return {
     readLatestVersion: () => {
       const { command, args } = latestVersionCommand();
-      return runCommand(command, args, 30_000);
+      const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup });
+      const npm = npmBesideNode(environment.ok ? environment.environment.node.path : undefined);
+      return runCommand(npm?.path ?? command, args, 30_000);
     },
     runInstall: (version) => {
       const { command, args } = installCommand(version);
-      return runCommand(command, args, INSTALL_TIMEOUT_MS);
+      /*
+       * The npm beside the node this app launches, not whatever `PATH` finds.
+       *
+       * Measured: `/opt/homebrew/bin/npm` is a symlink into the same Cellar directory the resolved `node` comes from,
+       * and with a version manager in play the two can differ — a login shell's `npm` would install into a prefix
+       * belonging to a Node this app is not running, and the verification would then read the wrong tree.
+       */
+      const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup });
+      const npm = npmBesideNode(environment.ok ? environment.environment.node.path : undefined);
+      return runCommand(npm?.path ?? command, args, INSTALL_TIMEOUT_MS);
     },
     readInstalledVersion: async () => {
       // Read back from the artifact, never from npm's output: the manifest is what the next launch will run.
@@ -1090,6 +1170,10 @@ async function checkForUpdateFromMenu(): Promise<void> {
   if (updating) return;
   updating = true;
   try {
+    /*
+     * Checking is offered even when the installation is managed elsewhere — the reader is entitled to know a newer
+     * version exists, and the refusal names the command that installs it. Only APPLYING is gated.
+     */
     const check = await checkLatestVersion(updateEnvironment());
     console.log(`Pi Central: ${check.verdict.action === "install" ? check.verdict.reason : check.verdict.reason}`);
     if (check.verdict.action !== "install") {
@@ -1120,6 +1204,23 @@ async function applyUpdateFromMenu(knownVersion?: string): Promise<void> {
   if (updating) return;
   updating = true;
   try {
+    /*
+     * Who owns this installation, BEFORE anything is stopped (issue #217).
+     *
+     * An npm install is only correct for an npm global install under a writable prefix. Homebrew, a version manager, a
+     * linked working copy or a read-only prefix all mean the same thing here: this app must not replace it, and the
+     * failure names the command that does. Refusing first also means a reader whose install is managed elsewhere loses
+     * nothing by asking — no child is stopped, no session restarted.
+     */
+    const ownership = installationOwner();
+    if (!ownership.mayUpdate) {
+      showFailure(
+        "Pi Central was not installed by npm in a place this app can update",
+        `${ownership.refusal}\n\nNothing was changed.`,
+      );
+      return;
+    }
+
     const env = updateEnvironment();
     const from = await env.readCurrentVersion();
     let to = knownVersion;
