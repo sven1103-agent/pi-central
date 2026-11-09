@@ -79,6 +79,34 @@ export function findPackageRoot(from: string): PackageRoot | undefined {
   }
 }
 
+/**
+ * Find a package named `pi-central` **inside** `directory`, one level down.
+ *
+ * ## The bug this fixes, which shipped in #214 and broke every global install
+ *
+ * `findPackageRoot` walks *up* — it answers "which package am I inside of?". That is the right question for a
+ * directory within a checkout, and the wrong one for a `node_modules` directory, where the package is a **child**.
+ * `locatePackage` was handing it `/opt/homebrew/lib/node_modules`, so a global install was never found: the window
+ * said "Pi Central is not installed" while the package sat one directory below the path being searched, and it
+ * listed that very path among "locations checked".
+ *
+ * It went unnoticed because the app only ever worked when *the app itself* lived inside the package — the
+ * developer's case, where the walk-up found it. The failure appeared the first time it was launched as an
+ * installed `.app` over a separate global install, which is the case the shell exists for.
+ *
+ * So both shapes are tried, inside-then-up, and `resolvePackage` decides between them. Trying the child FIRST is
+ * deliberate: a `node_modules` directory that contains our package is a statement about where the package is,
+ * while walking up from it would find some unrelated manifest higher in the prefix.
+ */
+export function findPackageInside(directory: string): PackageRoot | undefined {
+  const candidate = join(directory, PACKAGE_NAME);
+  const manifest = join(candidate, "package.json");
+  if (!existsSync(manifest)) return undefined;
+  const parsed = readManifest(manifest);
+  if (parsed?.name !== PACKAGE_NAME || typeof parsed.version !== "string") return undefined;
+  return { manifest, root: candidate, version: parsed.version, bin: join(candidate, "bin", "pi-central.js") };
+}
+
 /** How resolution failed, in the two shapes that need different sentences. */
 export type PackageLookup =
   | { ok: true; package: PackageRoot }
@@ -108,7 +136,7 @@ export function resolvePackage(options: { override?: string | undefined; from?: 
         "Set PI_CENTRAL_PACKAGE to the directory that holds pi-central's package.json.",
     };
   }
-  const found = findPackageRoot(start);
+  const found = findPackageInside(start) ?? findPackageRoot(start);
   if (found === undefined) {
     return {
       ok: false,

@@ -145,6 +145,60 @@ did not have (stop the child, install, verify the version, respawn, reload). It 
 The rejected alternative is recorded there: an app that *absorbed* the orchestrator would be a second
 artifact with its own version, and it could not update itself unsigned.
 
+## Amendment — the shell is where an update can be applied, and #56 must say so
+
+Issue #217 built the process choreography §4 needed and did not have: stop the child, wait for it, install,
+verify the version, spawn again, reload the window. It lives in the **shell** (`packages/app/src/updater.ts`),
+because applying an update means replacing the files a running process is executing, and only the program that
+owns that process can stop it first.
+
+Three things follow, and this record states them so #56 is not left with a second, disagreeing implementation:
+
+- **The application path is the shell's.** #56 keeps everything §4 gave it — the trust model, the "never
+  automatic" rule, and the requirement to verify before installing — and its own apply step should defer to this
+  one rather than growing a parallel path. An orchestrator that installs over itself is the specific thing this
+  design makes impossible.
+- **Detection is unchanged and still #55's.** #217 does not implement §4's detection contract (opt-in, cached, one
+  request, silently fails). The menu's "Check for Updates…" is an **explicit, user-initiated** `npm view` for a
+  dist-tag, carrying the package name only — the same single request §4 permits, issued because a person asked
+  rather than on a schedule.
+- **The verification is the manifest, not npm's exit code.** §4's "verify before install" is extended here to
+  "verify *after* install as well": `npm install -g pi-central@<v>` exiting 0 is not evidence that `<v>` is on
+  disk (a stale global prefix, a shim, or a lifecycle script all produce that), so the installed `package.json`
+  is read back and compared. A mismatch is a failed update, and the running version is left alone.
+
+### The app may only replace an installation it owns
+
+`npm install --global` is not "the app updates itself" — it is "the app updates *an* npm global install", and that is
+one of several shapes Pi Central can be installed in. Measured on the development machine, which is the awkward one:
+
+| fact | value |
+|---|---|
+| `npm prefix -g` | `/opt/homebrew` (node is a Homebrew formula) |
+| `lib/node_modules` writable by the user | **no** — a plain `npm install -g` is `EACCES` |
+| `pi-central` is a Homebrew formula | **no** — `brew list` does not know it |
+| where `pi-central` actually lives | `…/lib/node_modules/pi-central`, a real directory npm wrote inside a Homebrew tree |
+
+So on this machine the correct behaviour is to **refuse**, and the first version of the update path did not. It also
+missed three neighbouring shapes: a linked working copy (`npm link`, `npm install -g .`) is a **symlink**, so an
+install replaces the link and orphans the checkout; a version-manager prefix (`~/.nvm`, `~/.volta`, `~/.asdf`, `fnm`)
+is usually writable, so the update would "succeed" into a Node the app is not running; and `npm` is resolved from the
+**node beside the app's node**, because a login shell's npm can install into a different prefix than the one the
+verification then reads.
+
+The rule that follows, and the reason it is a decision rather than a check: **an installation the app does not own is
+not the app's to replace.** Every other owner is refused *before* anything is stopped, with the command that does
+apply (`brew upgrade`, `npm install -g`, `npm unlink -g && npm install -g`). Refusing costs the reader one dialog;
+installing over a package manager's files costs them a broken machine, or a working copy they can no longer build.
+
+The owner is decided from paths and managers, never from the version string — see `installation-owner.ts` for the
+order and the reason each signal outranks the next (Homebrew ahead of writability, because `sudo` cannot upgrade a
+formula; version-manager ahead of writability, because writing `~/.nvm` is the wrong success).
+
+**What this slice does not do:** roll back to a previous version, delta updates, or a download server. There is no
+partial state worth preserving, so the design avoids needing a rollback by never replacing the package until the
+child is confirmed dead, and never calling the update a success until the manifest agrees.
+
 ## Consequences
 
 **Positive**
