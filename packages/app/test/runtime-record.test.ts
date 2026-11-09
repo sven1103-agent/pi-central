@@ -45,6 +45,8 @@ import {
   rememberedMarks,
   removeRuntimeRecord,
   runtimeRecordPath,
+  MAX_ROW_PATH,
+  shorten,
   stopDialog,
   stopQuestion,
   urlsFor,
@@ -473,11 +475,46 @@ test("the dialog names every live session with its directory, and the count agre
   assert.match(stopDialog([...TWO_LIVE, { name: "third", cwd: "/c", state: "starting" }]).message, /3 sessions are still running/);
 });
 
-test("every choice explains its consequence, so the destructive one is not the shortest word", () => {
+test("the dialog does not restate its own buttons", () => {
+  /*
+   * The verbosity this pins, reported from a real run at seven sessions: the detail named each button, the per-choice
+   * descriptions named them again, and the list of sessions was pushed out of view. A dialog that repeats what is
+   * directly below it is a dialog the reader stops reading.
+   *
+   * So the assertion is inverted from the first version of this test, which required the repetition. What stays is
+   * `StopChoice.detail` — the wording has one home, and it is asserted there.
+   */
   const dialog = stopDialog(TWO_LIVE);
   for (const choice of STOP_CHOICES) {
-    assert.equal(dialog.detail.includes(`${choice.label}: ${choice.detail}`), true, `${choice.label} carries its consequence`);
+    assert.equal(
+      dialog.detail.includes(`${choice.label}: ${choice.detail}`),
+      false,
+      `the dialog must not repeat "${choice.label}" — the button already says it`,
+    );
+    assert.equal(choice.detail.length > 0, true, `${choice.label} still documents its consequence, for the tests and the log`);
   }
-  // And "Keep" is described in terms of what the reader gets, not as "the safe option".
-  assert.match(dialog.detail, /Keep sessions running: They keep writing to their session files/);
+});
+
+test("the dialog is three blocks: what is running, the list, and one sentence of context", () => {
+  // A stated budget rather than a taste: at seven sessions the text has to stay scannable, so the prose is bounded and
+  // the list is what grows.
+  const many = Array.from({ length: 7 }, (_, index) => ({
+    name: `session ${index + 1}`,
+    cwd: `/Users/someone/.local/share/pi-central/workspaces/s${index + 1}`,
+    state: "idle",
+  }));
+  const dialog = stopDialog(many);
+  const proseLines = dialog.detail.split("\n").filter((line) => !line.startsWith("•"));
+  assert.equal(proseLines.filter((line) => line.trim() !== "").length, 1, "exactly one sentence of prose, before the list");
+  assert.equal(dialog.detail.split("\n").filter((line) => line.startsWith("•")).length, 7, "and every session is listed");
+});
+
+test("a long directory is shortened from the front, keeping the project name", () => {
+  // The leaf names the project; `/Users/someone/…` is the same on every row and carries no information.
+  assert.equal(shorten("/Users/sven1103/git/idea-factory/pi-central-dev"), "/Users/sven1103/git/idea-factory/pi-central-dev");
+  const long = shorten("/Users/sven1103/.local/share/pi-central/workspaces/some-really-long-session-name-here");
+  assert.ok(long.length <= MAX_ROW_PATH, `${long.length} > ${MAX_ROW_PATH}`);
+  assert.equal(long.startsWith("…"), true, "shortened at the front");
+  assert.equal(long.endsWith("some-really-long-session-name-here"), true, "and the leaf survives");
+  assert.equal(long.includes("//"), false, "and it does not begin mid-segment");
 });

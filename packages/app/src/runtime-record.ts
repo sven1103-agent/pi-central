@@ -675,7 +675,14 @@ export function stopDialog(sessions: readonly SessionSummary[]): {
      */
     cancelId: choiceIndex("cancel"),
     message,
-    detail: `${detail}\n\n${STOP_CHOICES.map((choice) => `${choice.label}: ${choice.detail}`).join("\n")}`,
+    /*
+     * The per-choice descriptions are deliberately NOT appended here.
+     *
+     * They were, and the dialog became a wall of text that repeated each button label immediately above the button —
+     * at seven sessions the list was pushed out of view entirely. The labels say what each button does; `StopChoice.detail`
+     * remains, and is asserted, so the wording has one home and the dialog has one job.
+     */
+    detail,
     noLink: true,
   };
 }
@@ -704,12 +711,45 @@ export function stopQuestion(sessions: readonly SessionSummary[]): { message: st
   const count = sessions.length;
   const noun = count === 1 ? "session is" : "sessions are";
   const heading = `${count === 1 ? "1" : String(count)} ${noun} still running.`;
-  const rows = sessions.map((session) => `• ${session.name} — ${session.cwd}`);
+  /*
+   * The list, in a form a reader can scan.
+   *
+   * The directory is the part that disambiguates — several sessions can share a name — so it is not dropped. An
+   * unreadably long path is shortened at the FRONT, because the leaf directory is what identifies a project while
+   * `/Users/someone/…` is the same for every row.
+   */
+  const rows = sessions.map((session) => `• ${session.name} — ${shorten(session.cwd)}`);
   return {
     message: `${heading} Quit anyway?`,
-    detail:
-      `Quitting the app does not have to stop them; they are owned by the orchestrator, not by this window.\n\n` +
-      `${rows.join("\n")}\n\n` +
-      `Choose "Keep sessions running" to leave them working, or "Stop them and quit" to end them cleanly first.`,
+    /*
+     * Three lines, and the third is the only sentence that is not already visible somewhere else.
+     *
+     * An earlier version restated all three button labels here, so the dialog said "Choose Keep sessions running… or
+     * Stop them and quit…" directly above two buttons with those exact labels, and then the per-choice descriptions
+     * (`stopDialog` appends them) said it a third time. A dialog that repeats its own buttons is a dialog the reader
+     * stops reading — and at seven sessions the repetition pushed the list itself off the top of the text.
+     *
+     * What is left is what the buttons cannot say: that the window is not the thing keeping the sessions alive.
+     */
+    detail: `Quitting the app does not stop them — they are owned by the orchestrator, not by this window.\n\n${rows.join("\n")}`,
   };
 }
+
+/**
+ * A path shortened from the front, for a dialog row.
+ *
+ * Front, not back: the leaf is what names the project. `…/git/pi-central-dev` is recognisable at a glance, while
+ * `/Users/sven1103/git/idea-fa…` is a row that has to be read twice. `MAX_ROW_PATH` is generous enough that an ordinary
+ * path is untouched.
+ */
+export function shorten(path: string, max = MAX_ROW_PATH): string {
+  if (path.length <= max) return path;
+  const keep = max - 1;
+  const tail = path.slice(path.length - keep);
+  // Cut on a separator where there is one, so the result does not begin mid-segment.
+  const boundary = tail.indexOf("/");
+  return `…${boundary === -1 ? tail : tail.slice(boundary)}`;
+}
+
+/** How much of a session's directory one dialog row shows. */
+export const MAX_ROW_PATH = 52;
