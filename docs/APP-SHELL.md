@@ -34,6 +34,33 @@ The script refuses to run on anything but macOS arm64, and fails loudly rather t
 also audits the artifact after building: if the bundle ever starts carrying product code, or an identifier, or a version
 that disagrees with the package, the build stops before installing.
 
+## Running a development build
+
+`npm run app` runs the shell from the checkout, and it is **isolated by construction** — it cannot touch the installed
+app:
+
+| | installed app | `npm run app` |
+|---|---|---|
+| app name | `Pi Central` | `Pi Central (dev)` |
+| state (`userData`) | `~/Library/Application Support/Pi Central` | `…/Pi Central (dev)` |
+| orchestrator state | `~/.config/pi-central` | `~/Library/Application Support/pi-central-dev` |
+| runtime record | shared | **its own** |
+
+That separation exists because the absence of it caused two destructive incidents:
+
+- `npm run install-app` **deleted a Safari PWA**, because "Add to Dock" writes the web app to
+  `~/Applications/Pi Central.app` — the same path this script installed to. The script now refuses to touch a bundle
+  whose `CFBundleIdentifier` is not `com.pi-central.app`, and it copies to a staging path and renames, so a failed copy
+  leaves the previous installation intact.
+- `npm run app` shared `userData` with the installed app, so a dev run could adopt the stable installation's
+  orchestrator and **remove its `runtime.json` on quit**.
+
+What is deliberately *shared* is your Pi installation (`~/.pi`) and your agent root (`~/.agent`). A dev build has to test
+the real thing, and `resolveAgentRoot` treats `~/.agent` as external and read-only, so redirecting the state root does
+not create a second credential store.
+
+**The dev window says so**: its title is `Pi Central (dev)`, and the terminal prints which state directory it is using.
+
 ## Keeping your privacy grants across rebuilds
 
 **This is the part that gets skipped, and then gets reported as a bug.** macOS keys privacy permissions (Documents,

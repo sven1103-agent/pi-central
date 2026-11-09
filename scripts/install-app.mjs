@@ -33,7 +33,7 @@
  * failed signature would produce an app that does not start, which is the failure criterion 1 names.
  */
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,6 +41,7 @@ import {
   buildConfig,
   bundleProblems,
   chooseSigning,
+  destinationDecision,
   configProblems,
   gatekeeperAdviceProblems,
   identityProblems,
@@ -275,41 +276,61 @@ const destination = installPath(homedir());
 if (requiresAdmin(destination)) {
   fail(`${destination} needs admin rights, and this app must install without them (criterion 7)`);
 }
-step(`installing into ${destination}`);
-spawnSync("mkdir", ["-p", dirname(destination)], { stdio: "ignore" });
-// Replaced wholesale: a merge would leave files from the previous version behind, which is how a bundle accumulates an
-// identity that no longer matches its signature.
-try {
-  rmSync(destination, { recursive: true, force: true });
-} catch (error) {
-  /*
-   * Reported as what it is. `EPERM` here is a permission on the destination, not a build failure — and the reader needs
-   * to know the app IS built and signed, and that only the copy failed, or they will go looking for a build problem.
-   */
-  fail(
-    `the app was built and signed, but could not be installed: ${error.message}\n` +
-      `  The finished bundle is at ${builtApp}\n` +
-      `  Move it into place yourself, or check permissions on ${dirname(destination)}.`,
-  );
-}
-try {
-  cpSync(builtApp, destination, { recursive: true, verbatimSymlinks: true });
-} catch (error) {
-  fail(`the app was built and signed, but could not be copied into place: ${error.message}\n  It is at ${builtApp}`);
+
+/*
+ * DECIDED BEFORE ANYTHING IS DELETED, because the first version deleted first and destroyed a reader's app.
+ *
+ * `~/Applications/Pi Central.app` is also where Safari's "Add to Dock" puts the web app, so a blanket `rm -rf` removed a
+ * PWA and put this bundle in its place. The destination is now inspected, and only a bundle carrying OUR identifier may
+ * be replaced.
+ */
+const existing = existsSync(destination) ? { exists: true, identifier: readIdentifier(destination) } : { exists: false };
+const decision = destinationDecision(existing, config.appId);
+step(decision.reason);
+if (decision.action === "refuse") {
+  fail(`refusing to install: ${decision.reason}\n  The built app is at ${builtApp} and was left alone.`);
 }
 
 /*
- * The copy is verified too. `cp` preserves the code but not necessarily the extended attributes a signature lives in
- * depending on the filesystem, and an app that does not verify after installation is an app that will not start.
+ * Copied to a temporary sibling and renamed into place, rather than `rm -rf` then `cp`.
+ *
+ * The old order left the reader with NOTHING if the copy failed — strictly worse than the previous version still being
+ * installed. A rename is atomic on the same filesystem, so the destination is either the old bundle or the new one.
  */
-const installed = spawnSync("codesign", ["--verify", "--deep", "--strict", destination], { stdio: "pipe", encoding: "utf8" });
-if (installed.status !== 0) {
-  fail(`the installed app does not verify:\n${installed.stderr || installed.stdout}`);
+const staging = `${destination}.installing`;
+step(`installing into ${destination}`);
+spawnSync("mkdir", ["-p", dirname(destination)], { stdio: "ignore" });
+try {
+  rmSync(staging, { recursive: true, force: true });
+  cpSync(builtApp, staging, { recursive: true, verbatimSymlinks: true });
+} catch (error) {
+  rmSync(staging, { recursive: true, force: true });
+  fail(
+    `the app was built and signed, but could not be copied into place: ${error.message}\n` +
+      `  The existing installation was left untouched, and the built app is at ${builtApp}`,
+  );
 }
 
-// ---------------------------------------------------------------------------------------------------------------
-// 8. What the reader should know.
-// ---------------------------------------------------------------------------------------------------------------
+/*
+ * Verified BEFORE it replaces anything: a copy that does not verify is a bundle that will not start, and swapping it in
+ * would trade a working installation for a broken one.
+ */
+const stagedVerify = spawnSync("codesign", ["--verify", "--deep", "--strict", staging], { stdio: "pipe", encoding: "utf8" });
+if (stagedVerify.status !== 0) {
+  rmSync(staging, { recursive: true, force: true });
+  fail(`the copied app does not verify, so nothing was installed:\n${stagedVerify.stderr || stagedVerify.stdout}`);
+}
+
+try {
+  if (decision.action === "replace") rmSync(destination, { recursive: true, force: true });
+  renameSync(staging, destination);
+} catch (error) {
+  rmSync(staging, { recursive: true, force: true });
+  fail(
+    `the app was built, signed and verified, but could not be moved into place: ${error.message}\n` +
+      `  A previous installation, if there was one, is still at ${destination}.`,
+  );
+}
 
 step(`installed ${destination}`);
 console.log("");
@@ -354,6 +375,13 @@ function walk(root, prefix = "") {
     if (entry.isDirectory()) out.push(...walk(join(root, entry.name), relative));
   }
   return out;
+}
+
+/** The `CFBundleIdentifier` of a bundle, or `undefined` when it cannot be read. */
+function readIdentifier(bundle) {
+  const plist = readPlist(join(bundle, "Contents", "Info.plist"));
+  const id = plist["CFBundleIdentifier"];
+  return typeof id === "string" && id !== "" ? id : undefined;
 }
 
 /** `Info.plist` as an object. `plutil -convert json` because parsing XML by hand is a bug waiting to happen. */

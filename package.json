@@ -39,7 +39,7 @@
     "build:package": "node scripts/build-package.mjs",
     "pack": "npm run build:package && npm pack",
     "serve:package": "node bin/pi-central.js",
-    "app": "electron packages/app/src/main.ts",
+    "app": "PI_CENTRAL_DEV=1 electron packages/app/src/main.ts",
     "verify:lifecycle": "node scripts/verify-lifecycle-216.mjs",
     "install-app": "node scripts/install-app.mjs"
   },

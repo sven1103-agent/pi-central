@@ -104,7 +104,51 @@ import { updateNotice, wantsRetry, type UpdateNotice } from "./update-notice.ts"
  * it Electron derives the data directory from the package name (`@pi-central/app`), and `~/Library/Application
  * Support/Pi Central` — the path this slice names — would be somewhere else.
  */
-app.setName("Pi Central");
+/*
+ * A development run is a DIFFERENT app, and it must be impossible for it to touch the installed one.
+ *
+ * ## The collision this prevents, measured twice
+ *
+ * Two destructive collisions happened while building this shell, both from a shared identity:
+ *
+ *   1. `npm run install-app` deleted a Safari PWA, because both target `~/Applications/Pi Central.app`.
+ *   2. `npm run app` shares `userData` with the installed app, so a dev run reads and **removes** the stable
+ *      installation's `runtime.json` on quit — and can adopt (or be adopted by) its orchestrator. Two builds of one
+ *      product, one lock, and no way to tell which is on screen.
+ *
+ * ## What is isolated, and what is deliberately shared
+ *
+ * `PI_CENTRAL_DEV=1` (set by `npm run app`) changes the app's NAME, which is what `app.getPath("userData")` derives
+ * from — so the record, the update journal and the window title are the dev run's alone. It also points
+ * `PI_CENTRAL_STATE` and `PI_CENTRAL_WORKSPACE` at a separate tree, so the policy fragments, the managed agent root and
+ * any scratch session cannot land in the stable installation's directories.
+ *
+ * What stays SHARED is the reader's own Pi installation (`~/.pi`) and their agent root (`~/.agent`): a dev build must
+ * test the real thing, and `resolveAgentRoot` treats `~/.agent` as external and read-only, so pointing the state root
+ * elsewhere does not create a second credential store. Copying those would make the dev app test a fiction.
+ *
+ * This must run before any `getPath("userData")`, which is why it is here rather than in `whenReady`.
+ */
+const development = process.env["PI_CENTRAL_DEV"] === "1";
+if (development) {
+  /*
+   * A distinct name, and therefore a distinct `userData` directory. `Pi Central (dev)` also gives the window a title
+   * that cannot be mistaken for the installed app's — the other half of "no way to tell which is on screen".
+   */
+  app.setName("Pi Central (dev)");
+  /*
+   * The orchestrator's state, redirected unless the caller already chose one.
+   *
+   * NOT the workspace: scratch sessions in a separate tree would be a dev-only fiction that behaves differently from the
+   * product, and they are already per-session directories under the reader's own home.
+   */
+  if (process.env["PI_CENTRAL_STATE"] === undefined) {
+    process.env["PI_CENTRAL_STATE"] = join(app.getPath("appData"), "pi-central-dev");
+  }
+  console.log(`Pi Central: development run — state is ${process.env["PI_CENTRAL_STATE"]}, userData is ${app.getPath("userData")}`);
+} else {
+  app.setName("Pi Central");
+}
 
 /**
  * The one window, created on first use and reused for the life of the process.
