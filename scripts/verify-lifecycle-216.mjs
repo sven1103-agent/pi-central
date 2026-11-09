@@ -293,24 +293,39 @@ if (sessions.live === 0 && sessions.total > 0) {
   console.log("  (a session that fails here is usually the sandbox refusing to nest — C1. Run this from a plain terminal.)");
 }
 
-step("criterion 3 — ⌘Q names the live sessions, and Keep is the default");
+step("criterion 3 — ⌘Q states how many are live, and Keep is the default");
 {
   const answer = await askLiveSessions(connect, first.url, 5000);
   const decision = decideStop(answer.sessions);
   if (decision.action !== "ask") {
-    check(3, "the dialog names the live sessions", undefined,
-      `no session reached a live state (${answer.note ?? "all failed"}), so there is nothing to name. This needs a plain\n          terminal: Seatbelt does not nest (C1), so sessions started from inside a sandbox fail.`);
+    check(3, "the dialog states the count of live sessions", undefined,
+      `no session reached a live state (${answer.note ?? "all failed"}), so there is nothing to count. This needs a plain\n          terminal: Seatbelt does not nest (C1), so sessions started from inside a sandbox fail.`);
   } else {
     const dialog = stopDialog(decision.sessions);
-    const named = decision.sessions.every((s) => dialog.detail.includes(s.name) && dialog.detail.includes(s.cwd));
-    check(3, "the dialog names every live session with its directory, and the count matches", named && dialog.message.startsWith(String(decision.sessions.length)), JSON.stringify(dialog).slice(0, 240));
+    /*
+     * The count, derived from the live list — that is the whole of criterion 3's anti-invention property now that the
+     * rows are gone by design (reported: the rail already lists them, so a list in the dialog was noise).
+     */
+    const expected = `${decision.sessions.length} session${decision.sessions.length === 1 ? " is" : "s are"} still running`;
+    check(
+      3,
+      "the count is the number of live sessions the orchestrator reported",
+      dialog.message.startsWith(expected) ? true : `"${dialog.message}" does not start with "${expected}"`,
+      dialog.message,
+    );
+    check(3, "the dialog shows no rows, because the rail behind it already lists them",
+      dialog.detail.includes("•") === false ? true : `the dialog still lists sessions: ${dialog.detail.slice(0, 160)}`,
+      dialog.detail,
+    );
     check(3, "Keep is first and the default; Escape is Cancel",
       dialog.defaultId === 0 && dialog.buttons[0] === "Keep sessions running" && dialog.buttons[dialog.cancelId] === "Cancel",
       `default=${dialog.defaultId} cancel=${dialog.cancelId}`);
     console.log(`          "${dialog.message}"`);
-    for (const line of dialog.detail.split("\n").filter((l) => l.startsWith("•"))) console.log(`            ${line}`);
-    // And the answer the app takes: `detach` is what a dismissal and a Return both mean.
-    check(3, "Return and Escape both keep the sessions", chooseAnswer(dialog.defaultId) === "detach" && chooseAnswer(dialog.cancelId) === "cancel");
+    console.log(`          "${dialog.detail}"`);
+    // And the answer the app takes: `detach` is what Return means, `cancel` what a dismissal means.
+    check(3, "Return keeps the sessions, and a dismissal does not stop them",
+      chooseAnswer(dialog.defaultId) === "detach" && chooseAnswer(dialog.cancelId) === "cancel",
+      `default=${chooseAnswer(dialog.defaultId)} cancel=${chooseAnswer(dialog.cancelId)}`);
   }
 }
 

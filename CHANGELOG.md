@@ -27,7 +27,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The window's options and its own assembled bundle are audited before the window opens, so a weakened `contextIsolation`, `sandbox` or `nodeIntegration` fails loudly ([#215]).
 - Closing the window hides it on macOS, and the dock icon reopens it with the orchestrator still running ([#216]).
 - `⌘Q` with live sessions asks first, naming them from the orchestrator's own list ([#216]).
-- The quit question states what is running and stops restating its own buttons ([#216]).
+- The quit question states how many sessions are running, instead of listing what the rail already shows ([#216]).
 - `Keep sessions running` quits the app and leaves a detached orchestrator serving, with nothing sent to it ([#216]).
 - The next launch adopts a still-running orchestrator instead of starting a second over the same session files ([#216]).
 - A recorded orchestrator is adopted only when its PID's start time and its port's UI both agree, so a stale record or a recycled PID starts a fresh one ([#216]).

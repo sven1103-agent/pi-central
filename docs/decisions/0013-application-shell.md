@@ -105,6 +105,22 @@ app's process group, so a signal aimed at that group (`kill -TERM -<pgid>`, a lo
 reaches every session under it. Measured while writing the test for it: a child survives its parent's ordinary
 **exit** either way on macOS, so "survives the parent" is not evidence for the flag — the group is.
 
+**And the question states a count, not a list** — an amendment to #216's criterion 3, which asked for the session names
+and directories. The first implementation did list them, and a report from real use at seven sessions rejected it: *"the
+list is not useful — just show that X sessions are still running."* The reason holds, and is visible in the screenshot
+that produced it: **the rail is behind the dialog**, showing the same sessions with their state and activity, so a list
+in the modal duplicates the app's own primary surface and pushes out the sentence the modal exists to say.
+
+The property criterion 3 was protecting survives, because it was never about the rows: the number is **derived from the
+supervisor's list** and never counted by the shell. `stopDialog` is still built from that list, and
+`runtime-record.test.ts` feeds lists of 1, 2 and 7 and reads 1, 2 and 7 back, which a shell that invented or cached a
+tally cannot do.
+
+What is lost is seeing *which* sessions are at stake without dismissing the dialog. That is a real trade rather than a
+free win, and it is acceptable only because both answers are non-destructive by default: `Keep` is the default, `Cancel`
+is the dismissal, and the rail answers "which ones" without quitting anything. If the question ever becomes "stop these
+specific ones", the list has to come back — with the rail's own rows, not a second rendering of them.
+
 **A consequence worth stating, because it is a limit rather than a design choice:** the shell cannot always
 prove which process a record names. Where the host forbids the probe (C16), the launch says so and spawns
 anyway, keeping the record for the next attempt. There is no third option — the shell holds no authority to

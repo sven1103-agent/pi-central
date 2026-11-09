@@ -45,8 +45,6 @@ import {
   rememberedMarks,
   removeRuntimeRecord,
   runtimeRecordPath,
-  MAX_ROW_PATH,
-  shorten,
   stopDialog,
   stopQuestion,
   urlsFor,
@@ -414,14 +412,15 @@ test("every live state is asked about, and only the two not-running states are n
   }
 });
 
-test("the question names the count and the sessions, with their directories", () => {
+test("the question states the count, in the singular or plural that matches it", () => {
   const { message, detail } = stopQuestion([
     { name: "fix the parser", cwd: "/Users/x/git/parser", state: "streaming" },
     { name: "notes", cwd: "/Users/x/notes", state: "idle" },
   ]);
-  assert.match(message, /2 sessions are still running/);
-  assert.equal(detail.includes("• fix the parser — /Users/x/git/parser"), true);
-  assert.equal(detail.includes("• notes — /Users/x/notes"), true);
+  assert.match(message, /^2 sessions are still running\. Quit anyway\?$/);
+  // The rows are gone by design (see stopDialog); what replaced them is one sentence of context.
+  assert.equal(detail.includes("•"), false);
+  assert.match(detail, /owned by the orchestrator, not by this window/);
   // Singular, because "1 sessions are still running" is the wording a hurried implementation ships.
   assert.match(stopQuestion([{ name: "only", cwd: "/c", state: "idle" }]).message, /^1 session is still running/);
 });
@@ -463,26 +462,52 @@ test("Escape keeps the sessions, because `cancelId` is Cancel and not the defaul
   assert.notEqual(dialog.cancelId, dialog.defaultId, "dismissing and pressing Return are different buttons");
 });
 
-test("the dialog names every live session with its directory, and the count agrees with the list", () => {
-  const dialog = stopDialog(TWO_LIVE);
-  assert.match(dialog.message, /2 sessions are still running/);
-  for (const session of TWO_LIVE) {
-    assert.equal(dialog.detail.includes(session.name), true, `${session.name} is named`);
-    assert.equal(dialog.detail.includes(session.cwd), true, `${session.cwd} is named`);
+test("the count is DERIVED from the list, which is the property criterion 3 was protecting", () => {
+  /*
+   * Criterion 3 asked for the sessions to be listed by name, and a real run at seven sessions showed why that is wrong:
+   * the rail behind the dialog already lists them, better. The dialog now states only how many.
+   *
+   * What must NOT be lost with the rows is the guarantee underneath them: the number comes from the supervisor's list
+   * and is never counted by the shell. That is asserted by feeding lists of known size and reading the sentence — a shell
+   * that invented a tally, or cached one, cannot produce four different correct answers from four lists.
+   */
+  const many = Array.from({ length: 7 }, (_, index) => ({ name: `s${index + 1}`, cwd: `/c/${index + 1}`, state: "idle" }));
+  for (const [list, expected] of [
+    [many, /^7 sessions are still running/],
+    [many.slice(0, 2), /^2 sessions are still running/],
+    [many.slice(0, 1), /^1 session is still running/],
+  ] as const) {
+    assert.match(stopDialog(list).message, expected, `a list of ${list.length} must say ${String(expected)}`);
   }
-  // The count is derived from the list, so it cannot disagree with it — the defect criterion 3 is about.
-  assert.match(stopDialog(TWO_LIVE.slice(0, 1)).message, /^1 session is still running/);
-  assert.match(stopDialog([...TWO_LIVE, { name: "third", cwd: "/c", state: "starting" }]).message, /3 sessions are still running/);
+  // And the singular is not "1 sessions", which is the wording a hurried implementation ships.
+  assert.match(stopDialog(many.slice(0, 1)).message, /^1 session is still running/);
+});
+
+test("the dialog states the count and no rows, because the rail already shows them", () => {
+  /*
+   * The reported problem, pinned. At seven sessions the listed rows filled the dialog while the rail behind it showed the
+   * same seven — a modal duplicating the app's primary surface, and hiding the sentence the dialog exists to say.
+   *
+   * A `•` is the shape a row takes, so its absence is the assertion rather than a byte count.
+   */
+  const many = Array.from({ length: 7 }, (_, index) => ({ name: `session ${index + 1}`, cwd: `/c/${index + 1}`, state: "idle" }));
+  const dialog = stopDialog(many);
+  assert.equal(dialog.detail.includes("•"), false, "no session rows in the dialog");
+  for (const session of many) {
+    assert.equal(dialog.detail.includes(session.name), false, `${session.name} must not be named in the dialog`);
+    assert.equal(dialog.detail.includes(session.cwd), false, `${session.cwd} must not be printed in the dialog`);
+  }
+  // What it says instead, and it is the one thing the buttons cannot: the window is not what owns the sessions.
+  assert.equal(
+    dialog.detail,
+    "Quitting the app does not stop them — they are owned by the orchestrator, not by this window.",
+  );
 });
 
 test("the dialog does not restate its own buttons", () => {
   /*
-   * The verbosity this pins, reported from a real run at seven sessions: the detail named each button, the per-choice
-   * descriptions named them again, and the list of sessions was pushed out of view. A dialog that repeats what is
-   * directly below it is a dialog the reader stops reading.
-   *
-   * So the assertion is inverted from the first version of this test, which required the repetition. What stays is
-   * `StopChoice.detail` — the wording has one home, and it is asserted there.
+   * Reported from the same run: the detail named each button, and the per-choice descriptions named them again, directly
+   * above three buttons with those labels. A dialog that repeats what is below it is one the reader stops reading.
    */
   const dialog = stopDialog(TWO_LIVE);
   for (const choice of STOP_CHOICES) {
@@ -495,26 +520,3 @@ test("the dialog does not restate its own buttons", () => {
   }
 });
 
-test("the dialog is three blocks: what is running, the list, and one sentence of context", () => {
-  // A stated budget rather than a taste: at seven sessions the text has to stay scannable, so the prose is bounded and
-  // the list is what grows.
-  const many = Array.from({ length: 7 }, (_, index) => ({
-    name: `session ${index + 1}`,
-    cwd: `/Users/someone/.local/share/pi-central/workspaces/s${index + 1}`,
-    state: "idle",
-  }));
-  const dialog = stopDialog(many);
-  const proseLines = dialog.detail.split("\n").filter((line) => !line.startsWith("•"));
-  assert.equal(proseLines.filter((line) => line.trim() !== "").length, 1, "exactly one sentence of prose, before the list");
-  assert.equal(dialog.detail.split("\n").filter((line) => line.startsWith("•")).length, 7, "and every session is listed");
-});
-
-test("a long directory is shortened from the front, keeping the project name", () => {
-  // The leaf names the project; `/Users/someone/…` is the same on every row and carries no information.
-  assert.equal(shorten("/Users/sven1103/git/idea-factory/pi-central-dev"), "/Users/sven1103/git/idea-factory/pi-central-dev");
-  const long = shorten("/Users/sven1103/.local/share/pi-central/workspaces/some-really-long-session-name-here");
-  assert.ok(long.length <= MAX_ROW_PATH, `${long.length} > ${MAX_ROW_PATH}`);
-  assert.equal(long.startsWith("…"), true, "shortened at the front");
-  assert.equal(long.endsWith("some-really-long-session-name-here"), true, "and the leaf survives");
-  assert.equal(long.includes("//"), false, "and it does not begin mid-segment");
-});

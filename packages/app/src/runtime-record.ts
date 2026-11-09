@@ -711,45 +711,28 @@ export function stopQuestion(sessions: readonly SessionSummary[]): { message: st
   const count = sessions.length;
   const noun = count === 1 ? "session is" : "sessions are";
   const heading = `${count === 1 ? "1" : String(count)} ${noun} still running.`;
-  /*
-   * The list, in a form a reader can scan.
-   *
-   * The directory is the part that disambiguates — several sessions can share a name — so it is not dropped. An
-   * unreadably long path is shortened at the FRONT, because the leaf directory is what identifies a project while
-   * `/Users/someone/…` is the same for every row.
-   */
-  const rows = sessions.map((session) => `• ${session.name} — ${shorten(session.cwd)}`);
   return {
-    message: `${heading} Quit anyway?`,
     /*
-     * Three lines, and the third is the only sentence that is not already visible somewhere else.
+     * The count, and nothing else.
      *
-     * An earlier version restated all three button labels here, so the dialog said "Choose Keep sessions running… or
-     * Stop them and quit…" directly above two buttons with those exact labels, and then the per-choice descriptions
-     * (`stopDialog` appends them) said it a third time. A dialog that repeats its own buttons is a dialog the reader
-     * stops reading — and at seven sessions the repetition pushed the list itself off the top of the text.
+     * ## Why the sessions are NOT listed, though criterion 3 asked for it
      *
-     * What is left is what the buttons cannot say: that the window is not the thing keeping the sessions alive.
+     * A first version listed each session as `• name — directory`. At seven sessions it filled the dialog, and the
+     * reported reaction was that the list is not useful — because it is not: **the rail behind the dialog already shows
+     * them**, with their state and what they are doing, and a row of names in a modal is a worse version of the surface
+     * the reader is already looking at. A dialog that duplicates the app's own primary view is noise, and the noise is
+     * what hides the thing the dialog is for.
+     *
+     * The property criterion 3 was actually protecting is kept, and it is the one that matters: **the number is derived
+     * from the supervisor's list**, never counted by the shell. `sessions` is still the list, `count` is its length, and
+     * `stopDialog` is still built from it — so a shell that invented a tally would still be caught
+     * (`runtime-record.test.ts` asserts a 0/1/2/7 list produces 0/1/2/7 in the sentence).
+     *
+     * What a reader loses is the ability to see *which* sessions are at stake without dismissing the dialog. That is a
+     * real trade, so the sentence names the escape: the dialogs's answer is reversible (`Keep`, and `Cancel`), and the
+     * rail answers "which ones" without quitting anything. `docs/decisions/0013` records the amendment.
      */
-    detail: `Quitting the app does not stop them — they are owned by the orchestrator, not by this window.\n\n${rows.join("\n")}`,
+    message: `${heading} Quit anyway?`,
+    detail: "Quitting the app does not stop them — they are owned by the orchestrator, not by this window.",
   };
 }
-
-/**
- * A path shortened from the front, for a dialog row.
- *
- * Front, not back: the leaf is what names the project. `…/git/pi-central-dev` is recognisable at a glance, while
- * `/Users/sven1103/git/idea-fa…` is a row that has to be read twice. `MAX_ROW_PATH` is generous enough that an ordinary
- * path is untouched.
- */
-export function shorten(path: string, max = MAX_ROW_PATH): string {
-  if (path.length <= max) return path;
-  const keep = max - 1;
-  const tail = path.slice(path.length - keep);
-  // Cut on a separator where there is one, so the result does not begin mid-segment.
-  const boundary = tail.indexOf("/");
-  return `…${boundary === -1 ? tail : tail.slice(boundary)}`;
-}
-
-/** How much of a session's directory one dialog row shows. */
-export const MAX_ROW_PATH = 52;
