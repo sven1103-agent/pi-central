@@ -125,6 +125,21 @@ You get the π mark in the dock and a window with no tab bar or address field.
 not running the installed app says `disconnected` and nothing else. A window that claimed to work
 offline would open onto a blank dashboard.
 
+### Or as a native app, from this checkout
+
+There is also an optional desktop shell — a real `.app` in `~/Applications`, which can apply Pi Central
+updates itself and keeps your sessions running when you quit:
+
+```bash
+npm install
+npm run install-app
+```
+
+It needs no Apple Developer account and no admin rights. It is a launcher, not a second copy of Pi
+Central: it starts the npm-installed package and shows its UI, so the npm package stays the only thing
+that is updated. See [docs/APP-SHELL.md](docs/APP-SHELL.md) for the signing identity that keeps macOS
+privacy grants across rebuilds, and for what Gatekeeper will and will not do.
+
 ## What works, and what does not
 
 Stated plainly, because a dashboard that overstates itself is worse than one that does less.

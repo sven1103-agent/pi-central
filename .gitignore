@@ -45,3 +45,8 @@ grype.json
 grype.sarif
 grype.raw.sarif
 dependency-vulnerability-report.md
+
+# Desktop app build output (issue #218). The bundled shell and the packaged .app are artifacts of
+# `npm run install-app`; the app itself is installed to ~/Applications and is never committed.
+packages/app/dist-app/
+packages/app/dist-app-out/

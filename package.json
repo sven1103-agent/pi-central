@@ -40,7 +40,8 @@
     "pack": "npm run build:package && npm pack",
     "serve:package": "node bin/pi-central.js",
     "app": "electron packages/app/src/main.ts",
-    "verify:lifecycle": "node scripts/verify-lifecycle-216.mjs"
+    "verify:lifecycle": "node scripts/verify-lifecycle-216.mjs",
+    "install-app": "node scripts/install-app.mjs"
   },
   "dependencies": {
     "ws": "^8.22.0"
@@ -48,6 +49,7 @@
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.4.0",
     "@types/node": "^22.10.2",
+    "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
     "typescript": "^5.7.2"
   }
