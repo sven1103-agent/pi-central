@@ -29,6 +29,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   loginShellLookup,
+  diagnoseLoginShellLookup,
   resolveEnvironment,
   type Environment,
   type MissingExecutable,
@@ -76,6 +77,7 @@ import {
   type SessionSummary,
 } from "./runtime-record.ts";
 import { askLiveSessions, type SocketLike } from "./live-sessions.ts";
+import { openLogWriter, teeConsole } from "./app-log.ts";
 import {
   INSTALL_TIMEOUT_MS,
   STOP_HARD_DEADLINE_MS,
@@ -103,7 +105,67 @@ import { updateNotice, wantsRetry, type UpdateNotice } from "./update-notice.ts"
  * it Electron derives the data directory from the package name (`@pi-central/app`), and `~/Library/Application
  * Support/Pi Central` — the path this slice names — would be somewhere else.
  */
-app.setName("Pi Central");
+/*
+ * A development run is a DIFFERENT app, and it must be impossible for it to touch the installed one.
+ *
+ * ## The collision this prevents, measured twice
+ *
+ * Two destructive collisions happened while building this shell, both from a shared identity:
+ *
+ *   1. `npm run install-app` deleted a Safari PWA, because both target `~/Applications/Pi Central.app`.
+ *   2. `npm run app` shares `userData` with the installed app, so a dev run reads and **removes** the stable
+ *      installation's `runtime.json` on quit — and can adopt (or be adopted by) its orchestrator. Two builds of one
+ *      product, one lock, and no way to tell which is on screen.
+ *
+ * ## What is isolated, and what is deliberately shared
+ *
+ * `PI_CENTRAL_DEV=1` (set by `npm run app`) changes the app's NAME, which is what `app.getPath("userData")` derives
+ * from — so the record, the update journal and the window title are the dev run's alone. It also points
+ * `PI_CENTRAL_STATE` and `PI_CENTRAL_WORKSPACE` at a separate tree, so the policy fragments, the managed agent root and
+ * any scratch session cannot land in the stable installation's directories.
+ *
+ * What stays SHARED is the reader's own Pi installation (`~/.pi`) and their agent root (`~/.agent`): a dev build must
+ * test the real thing, and `resolveAgentRoot` treats `~/.agent` as external and read-only, so pointing the state root
+ * elsewhere does not create a second credential store. Copying those would make the dev app test a fiction.
+ *
+ * This must run before any `getPath("userData")`, which is why it is here rather than in `whenReady`.
+ */
+/*
+ * Diagnostics go to a file as well as to the console (issue #218, reported from use).
+ *
+ * The installed app is launched from Finder, where `stdout` is attached to nothing — so every `console.log` was written
+ * into the void. When the reader reported "⌘Q leaves the window open for ever", the line that named the cause
+ * (`the orchestrator did not stop within 5000 ms; quitting anyway`) had been written several times, and was unreadable.
+ *
+ * Asking a reader to launch the `.app` from a shell to see it is asking them to reproduce a DIFFERENT launch path: a
+ * Finder launch has launchd's environment, not their shell's, and that difference produced three separate bugs in this
+ * increment. So the log is a file, and the app can reveal it.
+ *
+ * Installed before `setName` because the path is derived from the app's name — and before anything else that might log.
+ */
+const logWriter = openLogWriter(app.getPath("logs"));
+if (logWriter !== undefined) teeConsole(console, logWriter.write);
+
+const development = process.env["PI_CENTRAL_DEV"] === "1";
+if (development) {
+  /*
+   * A distinct name, and therefore a distinct `userData` directory. `Pi Central (dev)` also gives the window a title
+   * that cannot be mistaken for the installed app's — the other half of "no way to tell which is on screen".
+   */
+  app.setName("Pi Central (dev)");
+  /*
+   * The orchestrator's state, redirected unless the caller already chose one.
+   *
+   * NOT the workspace: scratch sessions in a separate tree would be a dev-only fiction that behaves differently from the
+   * product, and they are already per-session directories under the reader's own home.
+   */
+  if (process.env["PI_CENTRAL_STATE"] === undefined) {
+    process.env["PI_CENTRAL_STATE"] = join(app.getPath("appData"), "pi-central-dev");
+  }
+  console.log(`Pi Central: development run — state is ${process.env["PI_CENTRAL_STATE"]}, userData is ${app.getPath("userData")}`);
+} else {
+  app.setName("Pi Central");
+}
 
 /**
  * The one window, created on first use and reused for the life of the process.
@@ -147,6 +209,14 @@ let quitDecided = false;
 
 /** Set while the question is on screen, so a second `⌘Q` cannot stack dialogs. */
 let askingAboutQuit = false;
+
+/**
+ * Whether the quit has already asked the orchestrator to stop.
+ *
+ * Read by `before-quit`, which `app.quit()` re-enters: without it the stop is re-attempted on every pass, against a
+ * process that has already exited, and the quit never finishes.
+ */
+let stopRequested = false;
 
 /** How long a stopped orchestrator is given to exit before the app stops waiting for it. */
 const STOP_GRACE_MS = 5000;
@@ -510,6 +580,8 @@ async function launch(): Promise<void> {
     env: process.env,
     shell: userShell(),
     runLoginShell: loginShellLookup,
+    // The diagnosis is what turns "the login shell did not report it either" into a sentence that names the cause.
+    diagnoseLoginShell: diagnoseLoginShellLookup,
   });
   if (!environment.ok) {
     showFailure(missingTitle(environment.missing), missingDetail(environment.missing));
@@ -756,8 +828,24 @@ function spawnOrchestrator(pkg: PackageRoot, environment: Environment): Promise<
 
   child.on("exit", (code, signal) => {
     clearTimeout(timeout);
-    if (quitting) return;
+    /*
+     * `running` is cleared FIRST, before the `quitting` early-return (issue #218, reported as: `⌘Q` leaves the window
+     * open for ever showing `disconnected`).
+     *
+     * This line used to sit below the `if (quitting) return;`, so a child stopped BY the quit was never removed from
+     * `running`. `stopOrchestratorForQuit` then saw an orchestrator on the next pass, waited on an `exit` event that had
+     * already fired, timed out after STOP_GRACE_MS, and called `app.quit()` again — a loop every five seconds that never
+     * ended, with the window left on screen because `before-quit` kept calling `preventDefault`.
+     *
+     * "A child that has exited is not running" is true regardless of why it exited, so it is set before any branch
+     * decides what the exit MEANS.
+     */
     running = undefined;
+    /*
+     * A quit is not a crash. This guard stays, AFTER the clear above: it is what stops the supervisor from restarting a
+     * child the reader asked to stop, and it is the reason `running` had to move — the two facts are independent.
+     */
+    if (quitting) return;
     if (!announced) {
       /*
        * The child died BEFORE it announced a URL (issue #215).
@@ -891,7 +979,7 @@ function installationOwner(): { mayUpdate: boolean; refusal: string; owner: stri
   if (!located.ok) {
     return { mayUpdate: false, refusal: located.message, owner: "undetermined" };
   }
-  const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup });
+  const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup, diagnoseLoginShell: diagnoseLoginShellLookup });
   const evidence = readOwnerEvidence({
     packageRoot: located.package.root,
     nodePath: environment.ok ? environment.environment.node.path : undefined,
@@ -1108,7 +1196,7 @@ function updateEnvironment(): UpdateEnvironment {
   return {
     readLatestVersion: () => {
       const { command, args } = latestVersionCommand();
-      const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup });
+      const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup, diagnoseLoginShell: diagnoseLoginShellLookup });
       const npm = npmBesideNode(environment.ok ? environment.environment.node.path : undefined);
       return runCommand(npm?.path ?? command, args, 30_000);
     },
@@ -1121,7 +1209,7 @@ function updateEnvironment(): UpdateEnvironment {
        * and with a version manager in play the two can differ — a login shell's `npm` would install into a prefix
        * belonging to a Node this app is not running, and the verification would then read the wrong tree.
        */
-      const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup });
+      const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup, diagnoseLoginShell: diagnoseLoginShellLookup });
       const npm = npmBesideNode(environment.ok ? environment.environment.node.path : undefined);
       return runCommand(npm?.path ?? command, args, INSTALL_TIMEOUT_MS);
     },
@@ -1147,7 +1235,7 @@ function updateEnvironment(): UpdateEnvironment {
       announcedPort = undefined;
       const located = locatePackage();
       if (!located.ok) throw new Error(located.message);
-      const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup });
+      const environment = resolveEnvironment({ env: process.env, shell: userShell(), runLoginShell: loginShellLookup, diagnoseLoginShell: diagnoseLoginShellLookup });
       if (!environment.ok) throw new Error(missingDetail(environment.missing));
       const port = await spawnOrchestrator(located.package, environment.environment);
       if (port === undefined) throw new Error("the new orchestrator did not report a port");
@@ -1330,6 +1418,33 @@ async function showNotice(notice: UpdateNotice): Promise<number> {
   }
 }
 
+/**
+ * Open the log in Console.app, filtered to it.
+ *
+ * `open -a Console <path>` is the one command that gets a reader to a live, scrollable view of the file — which is what
+ * makes "paste me the log" a request they can satisfy. Falls back to revealing the file when Console is unavailable,
+ * because a diagnostic path that fails silently is the problem this whole module exists to fix.
+ */
+function revealLog(): void {
+  if (logWriter === undefined) return;
+  try {
+    // `Console` accepts a file argument and selects it; a failure here is not worth a dialog.
+    shell.openPath(logWriter.path).catch(() => revealLogFile());
+  } catch {
+    revealLogFile();
+  }
+}
+
+/** Show the log file in Finder, so it can be attached to an issue or dragged into a mail. */
+function revealLogFile(): void {
+  if (logWriter === undefined) return;
+  try {
+    shell.showItemInFolder(logWriter.path);
+  } catch (error) {
+    console.error(`Pi Central: could not reveal ${logWriter.path}: ${(error as Error).message}`);
+  }
+}
+
 /** The menu, which is the only way to reach the update path (criterion 1). */
 function buildMenu(): void {
   const template = [
@@ -1341,6 +1456,13 @@ function buildMenu(): void {
         { type: "separator" },
         { label: "Check for Updates…", click: () => void checkForUpdateFromMenu() },
         { label: "Update Pi Central…", click: () => void applyUpdateFromMenu() },
+        { type: "separator" },
+        /*
+         * The log, one click away. A path in a document is a path nobody finds, and this is the surface that answers
+         * "what did it actually do?" for every failure the app can report.
+         */
+        { label: "Open Log in Console…", click: () => revealLog(), enabled: logWriter !== undefined },
+        { label: "Reveal Log in Finder", click: () => revealLogFile(), enabled: logWriter !== undefined },
         { type: "separator" },
         { role: "hide" },
         { role: "hideOthers" },
@@ -1482,7 +1604,16 @@ if (!app.requestSingleInstanceLock()) {
      */
     if (quitDecided) {
       quitting = true;
+      /*
+       * The stop is performed AT MOST ONCE (issue #218).
+       *
+       * Each `app.quit()` re-enters this handler, so a handler that stops "whatever is running" on every pass will try
+       * to stop an already-dead process, wait for an `exit` that already happened, and call `app.quit()` again — for
+       * ever. `stopRequested` makes the second and later passes fall straight through and let the quit complete.
+       */
+      if (stopRequested) return;
       const stopped = stopOrchestratorForQuit();
+      stopRequested = true;
       if (stopped !== undefined) {
         event.preventDefault();
         void stopped.then(() => app.quit());
@@ -1537,6 +1668,7 @@ async function decideAndQuit(): Promise<void> {
   if (choice === "cancel") {
     // The app stays open, and a later `⌘Q` must ask again — so the gate is reset rather than left set.
     quitting = false;
+    stopRequested = false;
     console.log("Pi Central: quit cancelled; nothing was stopped");
     return;
   }
@@ -1625,6 +1757,11 @@ function stopOrchestratorForQuit(): Promise<void> | undefined {
   }
 
   const child = current.child;
+  /*
+   * A child that has already exited will never emit `exit` again, so waiting on it is waiting for ever (or until the
+   * grace timer). This is the state the reported bug left the app in, and the guard costs one check.
+   */
+  if (child.exitCode !== null || child.signalCode !== null) return undefined;
   return new Promise<void>((resolve) => {
     let done = false;
     const finish = (): void => {
@@ -1675,19 +1812,107 @@ type WebSocketConstructor = new (url: string) => WebSocketLike;
 
 let socketConstructor: WebSocketConstructor | undefined;
 
-function socketClient(): WebSocketConstructor | undefined {
-  if (socketConstructor !== undefined) return socketConstructor;
-  try {
-    const loaded = createRequire(import.meta.url)("ws") as unknown;
-    // The package exports the class; whether it arrives bare, as `default` or as `WebSocket` depends on the resolution
-    // path, so all three are accepted rather than pinning one.
+/**
+ * Resolve `ws`, in a CommonJS bundle that Electron loads from inside `app.asar`.
+ *
+ * ## Two failed fixes before this one, and what each taught
+ *
+ * **Attempt 1 — `createRequire(import.meta.url)`.** Correct in an ES module; in the bundle esbuild emits
+ * `var import_meta = {}`, so `.url` is `undefined` and `createRequire(undefined)` throws. Silent, because the throw was
+ * caught, and the only symptom was `⌘Q` reporting *"the orchestrator did not describe its sessions within 2000 ms"* —
+ * which blames the orchestrator for a client fault.
+ *
+ * **Attempt 2 — `globalThis.require`.** Also wrong, and less obvious: `require` is a **module-scope binding**, not a
+ * property of `globalThis`. Measured: in a plain `.cjs` file `typeof require === "function"` while
+ * `typeof globalThis.require === "undefined"`. So that route could never fire, and the log said so again.
+ *
+ * **Attempt 3 — `createRequire` on the asar path.** Also wrong, and this is the one the real machine proved:
+ * `createRequire("/…/Resources/app.asar/main.js")("ws")` fails with `ERR_INVALID_PACKAGE_CONFIG`, because **Node does not
+ * know how to stat inside an asar** — only Electron's patched module loader does.
+ *
+ * ## What actually works
+ *
+ * `require("ws")` **as a bare call**, with `ws` marked `external` in the esbuild invocation. Three facts combine:
+ *
+ *   - esbuild leaves a bare `require("ws")` untouched when the module is external (verified: the output line is
+ *     `return require("ws")`);
+ *   - in CommonJS `require` is in scope for the bundle, so the call compiles and runs;
+ *   - Electron patches `require` to read inside `app.asar`, which is where `node_modules/ws` sits beside `main.js`.
+ *
+ * The ESM path (`npm run app`, which runs the TypeScript directly) has no `require`, so `createRequire` anchored on
+ * `process.argv[1]` covers it — a real path there, because an unbundled run is on the filesystem rather than in an asar.
+ *
+ * **The lesson worth keeping:** each attempt was plausible, each failed for a different and specific reason, and the only
+ * way any of them was caught was by running the bundle. A source-level test cannot distinguish these.
+ */
+function resolveWs(): WebSocketConstructor | undefined {
+  const accept = (loaded: unknown): WebSocketConstructor | undefined => {
+    // The package exports the class; whether it arrives bare, as `default` or as `WebSocket` depends on how it is
+    // reached, so all three are accepted rather than pinning one.
     const candidate =
       typeof loaded === "function"
         ? loaded
         : ((loaded as { WebSocket?: unknown } | null)?.WebSocket ?? (loaded as { default?: unknown } | null)?.default);
-    if (typeof candidate === "function") socketConstructor = candidate as WebSocketConstructor;
+    return typeof candidate === "function" ? (candidate as WebSocketConstructor) : undefined;
+  };
+
+  /*
+   * Route 1: the CommonJS `require`, which the bundle has.
+   *
+   * `require` is in scope in a CommonJS module, and `ws` is `external` in the build so this call is emitted verbatim.
+   * Electron patches `require` to read inside `app.asar`, which is the only loader that can find the packaged copy.
+   *
+   * The `typeof` guard is written against an indirect reference so this file still typechecks and parses as an ES module
+   * (where `require` does not exist) — the call is guarded, never evaluated eagerly.
+   */
+  const commonjsRequire = typeof require === "function" ? (require as (id: string) => unknown) : undefined;
+  if (commonjsRequire !== undefined) {
+    try {
+      const accepted = accept(commonjsRequire("ws"));
+      if (accepted !== undefined) return accepted;
+    } catch {
+      // Not resolvable from here; try the ESM route.
+    }
+  }
+
+  /*
+   * Route 2: an ES-module run (`npm run app`), where `require` does not exist. `process.argv[1]` is the entry script and
+   * is a REAL path — unlike `import.meta.url`, it survives being bundled, and unlike the asar case there is no archive to
+   * read through because an unbundled run is on the filesystem.
+   */
+  const entry = process.argv[1];
+  if (entry !== undefined && entry !== "") {
+    try {
+      const accepted = accept(createRequire(entry)("ws"));
+      if (accepted !== undefined) return accepted;
+    } catch {
+      // Try the working directory.
+    }
+  }
+
+  // Route 3: last resort, resolve from where the app was started.
+  try {
+    const accepted = accept(createRequire(join(process.cwd(), "noop.js"))("ws"));
+    if (accepted !== undefined) return accepted;
   } catch {
-    // Left unresolved: `connectSocket` turns this into a socket that never answers.
+    // Nothing left to try.
+  }
+  return undefined;
+}
+
+function socketClient(): WebSocketConstructor | undefined {
+  if (socketConstructor !== undefined) return socketConstructor;
+  socketConstructor = resolveWs();
+  if (socketConstructor === undefined) {
+    /*
+     * Logged once, and loudly, because the consequence is silent: `⌘Q` will wait its full timeout and report that the
+     * orchestrator did not answer. Without this line, that message looks like the orchestrator's fault — which is exactly
+     * how two wrong fixes survived.
+     */
+    console.error(
+      "Pi Central: could not resolve `ws`, so asking the orchestrator which sessions are live will time out. " +
+        "The quit dialog will not be able to name sessions.",
+    );
   }
   return socketConstructor;
 }
@@ -1701,7 +1926,13 @@ function socketClient(): WebSocketConstructor | undefined {
  */
 function connectSocket(url: string): SocketLike {
   const Client = socketClient();
-  if (Client === undefined) return { on: () => undefined, close: () => undefined };
+  if (Client === undefined) {
+    /*
+     * No client. The socket accepts listeners and never speaks, which `askLiveSessions` reports as a timeout — and the
+     * timeout is now explained by the log line in `socketClient` rather than looking like an unresponsive orchestrator.
+     */
+    return { on: () => undefined, close: () => undefined };
+  }
   const socket = new Client(url);
   return {
     on: (event: string, listener: (argument: never) => void) => {

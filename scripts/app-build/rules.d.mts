@@ -49,4 +49,9 @@ export function gatekeeperAdviceProblems(document: string): string[];
 
 export function installPath(home: string): string;
 
+export function destinationDecision(
+  existing: { exists: boolean; identifier?: string | undefined },
+  ourIdentifier: string,
+): { action: "install" | "replace" | "refuse"; reason: string };
+
 export function requiresAdmin(path: string): boolean;

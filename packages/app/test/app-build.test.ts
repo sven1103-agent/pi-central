@@ -22,6 +22,7 @@ import {
   GATEKEEPER_BYPASS_PATTERNS,
   buildConfig,
   bundleProblems,
+  destinationDecision,
   chooseSigning,
   configProblems,
   gatekeeperAdviceProblems,
@@ -324,4 +325,55 @@ test("the app shell document states the identity steps and the TCC consequence",
 
 test("the pattern list is exported, so a future document can be checked against it", () => {
   assert.equal(GATEKEEPER_BYPASS_PATTERNS.length >= 4, true);
+});
+
+// -----------------------------------------------------------------------------------------------------------
+// The install guard — a real reader lost their app to this.
+// -----------------------------------------------------------------------------------------------------------
+
+test("a bundle we did not create is REFUSED, never deleted", () => {
+  /*
+   * The incident: `npm run install-app` did `rmSync(destination, { recursive: true, force: true })` on
+   * `~/Applications/Pi Central.app` — which is exactly where Safari's "Add to Dock" puts the web app. The reader's PWA
+   * was destroyed and the Electron bundle took its name.
+   *
+   * The rule: a bundle is only replaced when its identifier says it is this app.
+   */
+  // A Safari web app: a real bundle, with a different identifier.
+  const safari = destinationDecision({ exists: true, identifier: "com.apple.Safari.WebApp.ABC123" }, "com.pi-central.app");
+  assert.equal(safari.action, "refuse");
+  assert.match(safari.reason, /NOT removed/, "and it says the thing was left alone");
+  assert.match(safari.reason, /Safari web app/, "naming the case that actually happened");
+
+  // A bundle with no readable identifier is refused too — that is a web app or a foreign app, never ours.
+  const unknown = destinationDecision({ exists: true, identifier: undefined }, "com.pi-central.app");
+  assert.equal(unknown.action, "refuse");
+  assert.match(unknown.reason, /no readable identifier/);
+});
+
+test("our own bundle is replaced, and nothing there is a plain install", () => {
+  // The two allowed paths, or the guard would refuse everything and the app could never be upgraded.
+  assert.equal(destinationDecision({ exists: true, identifier: "com.pi-central.app" }, "com.pi-central.app").action, "replace");
+  assert.equal(destinationDecision({ exists: false }, "com.pi-central.app").action, "install");
+});
+
+test("the install copies to a staging path and renames, so a failed copy loses nothing", () => {
+  /*
+   * The second half of the same incident class: `rm -rf` then `cp` means a failed copy leaves the reader with NOTHING,
+   * which is worse than the old version still being installed. The order in the script is asserted, because that is
+   * where the destructiveness lived.
+   */
+  const script = readFileSync(join(ROOT, "scripts", "install-app.mjs"), "utf8");
+  const decision = script.indexOf("destinationDecision(existing");
+  const copy = script.indexOf("cpSync(builtApp, staging");
+  const removal = script.indexOf("rmSync(destination, { recursive: true, force: true })");
+  assert.notEqual(decision, -1, "the destination decision happens at all");
+  assert.notEqual(copy, -1, "the copy goes to a staging path");
+  // Refusal happens before anything is written.
+  assert.ok(decision < copy, "the decision comes before the copy");
+  // And the destination is only removed AFTER the staged copy verified, immediately before the rename.
+  assert.ok(removal > copy, "the destination is removed only after the copy succeeded");
+  const between = script.slice(copy, removal);
+  assert.match(between, /codesign.*--verify/s, "and the staged copy was verified in between");
+  assert.match(script.slice(removal), /renameSync\(staging, destination\)/, "the swap is a rename");
 });

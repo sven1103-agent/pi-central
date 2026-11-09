@@ -34,6 +34,33 @@ The script refuses to run on anything but macOS arm64, and fails loudly rather t
 also audits the artifact after building: if the bundle ever starts carrying product code, or an identifier, or a version
 that disagrees with the package, the build stops before installing.
 
+## Running a development build
+
+`npm run app` runs the shell from the checkout, and it is **isolated by construction** — it cannot touch the installed
+app:
+
+| | installed app | `npm run app` |
+|---|---|---|
+| app name | `Pi Central` | `Pi Central (dev)` |
+| state (`userData`) | `~/Library/Application Support/Pi Central` | `…/Pi Central (dev)` |
+| orchestrator state | `~/.config/pi-central` | `~/Library/Application Support/pi-central-dev` |
+| runtime record | shared | **its own** |
+
+That separation exists because the absence of it caused two destructive incidents:
+
+- `npm run install-app` **deleted a Safari PWA**, because "Add to Dock" writes the web app to
+  `~/Applications/Pi Central.app` — the same path this script installed to. The script now refuses to touch a bundle
+  whose `CFBundleIdentifier` is not `com.pi-central.app`, and it copies to a staging path and renames, so a failed copy
+  leaves the previous installation intact.
+- `npm run app` shared `userData` with the installed app, so a dev run could adopt the stable installation's
+  orchestrator and **remove its `runtime.json` on quit**.
+
+What is deliberately *shared* is your Pi installation (`~/.pi`) and your agent root (`~/.agent`). A dev build has to test
+the real thing, and `resolveAgentRoot` treats `~/.agent` as external and read-only, so redirecting the state root does
+not create a second credential store.
+
+**The dev window says so**: its title is `Pi Central (dev)`, and the terminal prints which state directory it is using.
+
 ## Keeping your privacy grants across rebuilds
 
 **This is the part that gets skipped, and then gets reported as a bug.** macOS keys privacy permissions (Documents,
@@ -102,6 +129,67 @@ rm -rf ~/Library/Application\ Support/Pi\ Central   # the app's own runtime reco
 
 Nothing else is left behind. The app installs into `~/Applications` precisely so that no step needs admin rights and
 removal is `rm -rf` with no leftovers.
+
+## When something goes wrong: the log
+
+A bundle launched from Finder has no terminal, so the app writes its diagnostics to a file:
+
+```
+~/Library/Logs/Pi Central/main.log
+```
+
+Open it from the app's own menu — **Pi Central → Reveal Log in Finder**, or **Open Log in Console…** — or from a shell:
+
+```bash
+tail -50 ~/Library/Logs/Pi\ Central/main.log
+```
+
+Every line has a timestamp, a level and the message, so a repeating failure reads as a repeating failure:
+
+```
+===== Pi Central started 2026-11-09T15:56:02.898Z =====
+2026-11-09 15:56:02.900 LOG   Pi Central: orchestrator at ws://127.0.0.1:51234 (pid 4242)
+2026-11-09 15:56:02.901 WARN  Pi Central: leaving the orchestrator running (pid 4242)
+```
+
+The file rotates at 1 MiB and keeps three generations, because a failing loop can fill a log in seconds.
+
+**This is the file to attach to a bug report.** It records the launch resolution (which `node`, `pi` and `safehouse` were
+found and how), every quit decision, every update attempt, and the reason a child was restarted — the questions that
+otherwise need a terminal this app does not have. A dev run (`npm run app`) uses the same log, under
+`~/Library/Logs/Pi Central (dev)/`.
+
+## If your `pi` is a shell alias
+
+Some setups put an alias in `.zshrc` rather than installing a program:
+
+```zsh
+alias pi='~/.config/sandbox-exec/run-sandboxed.sh'
+```
+
+**Pi Central deliberately ignores that alias.** It launches `pi` under Agent Safehouse, which is `sandbox-exec` itself
+(C1), so running an alias that wraps `pi` in another sandbox would nest Seatbelt twice and fail with `EPERM`. The app
+therefore resolves the **real binary** — `whence -p pi`, which skips aliases, functions and hashed entries — and uses
+that.
+
+You will see this in the app's log or in a failure panel, never silently:
+
+```
+pi is a shell ALIAS in /bin/zsh (alias pi=…), not a program, so there is no binary to launch. Pi Central runs `pi`
+under Agent Safehouse and deliberately does not use the alias: an alias usually wraps the command in its own sandbox,
+and Seatbelt does not nest (C1). Install pi as a normal program (or set PI_CENTRAL_PI to its real path — for `pi` the
+binary is usually /opt/homebrew/bin/pi, …).
+```
+
+If `pi` is *only* an alias on your machine, install the real thing (`npm install -g @earendil-works/pi-coding-agent`, or
+whatever your setup uses) or point the app at it directly:
+
+```bash
+PI_CENTRAL_PI=/opt/homebrew/bin/pi open ~/Applications/Pi\ Central.app
+```
+
+The sandbox your alias provides is not lost: Pi Central applies its own — a per-session Seatbelt profile through
+Safehouse, which is stricter than a single wrapper because each session gets its own working-directory grant.
 
 ## Why there is no App Sandbox
 

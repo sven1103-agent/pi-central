@@ -58,7 +58,12 @@ export function buildConfig(paths) {
      */
     electronDist: paths.electronDist,
     directories: { output: paths.output },
-    files: ["main.js", "package.json"],
+    /*
+     * `main.js` and the manifest, plus `node_modules/ws` — the ONE external dependency, needed at runtime because the
+     * socket is resolved with a bare `require("ws")` (issue #218). Excluding `node_modules` entirely would ship a bundle
+     * whose quit dialog can never name a session.
+     */
+    files: ["main.js", "package.json", "node_modules/ws/**"],
     mac: {
       // The only allowed target: this produces the `.app` and nothing else.
       target: "dir",
@@ -453,6 +458,50 @@ export function gatekeeperAdviceProblems(document) {
  * would let "you may not have noticed, run xattr …" through.
  */
 const NEGATION = /\b(do not|don't|never|must not|must never|avoid|refuse|not instructions|is not an instruction|instead of|rather than)\b/i;
+
+/**
+ * What to do about a bundle that is already at the install destination.
+ *
+ * ## The defect this exists for, which destroyed a reader's app
+ *
+ * `npm run install-app` did `rmSync(destination, { recursive: true, force: true })` — correct for replacing *our* app and
+ * catastrophic for anything else. Measured consequence: **it deleted a Safari PWA**, because "Add to Dock" puts the web
+ * app at exactly `~/Applications/Pi Central.app`, which is the destination this script chose. The reader's existing Pi
+ * Central disappeared and the Electron bundle took its name.
+ *
+ * The rule: a bundle is only replaced when its identifier says it is this app.
+ *
+ * | existing | answer |
+ * |---|---|
+ * | nothing | `install` |
+ * | our identifier | `replace` |
+ * | anything else | **`refuse`**, naming what was found |
+ *
+ * @param {{ exists: boolean, identifier?: string | undefined }} existing
+ * @param {string} ourIdentifier
+ * @returns {{ action: "install" | "replace" | "refuse", reason: string }}
+ */
+export function destinationDecision(existing, ourIdentifier) {
+  if (!existing.exists) return { action: "install", reason: "nothing is installed at that path" };
+  if (existing.identifier === ourIdentifier) {
+    return { action: "replace", reason: `replacing the installed ${ourIdentifier}` };
+  }
+  /*
+   * Refused, and the sentence says what was found. `Safari` is named for the case that actually happened, because a
+   * reader who lost a dock icon needs to know why rather than a generic "already exists".
+   */
+  const found =
+    existing.identifier === undefined || existing.identifier === ""
+      ? "a bundle with no readable identifier (a Safari web app, or another app's bundle)"
+      : `a bundle whose identifier is ${existing.identifier}`;
+  return {
+    action: "refuse",
+    reason:
+      `something that is not Pi Central is already installed there: ${found}. ` +
+      `It was NOT removed. If it is the Safari web app ("Add to Dock"), keep it and install the desktop app ` +
+      `somewhere else, or move the web app out of ~/Applications first.`,
+  };
+}
 
 /** Where the app is installed. `~/Applications` needs no admin rights (criterion 7). */
 /**

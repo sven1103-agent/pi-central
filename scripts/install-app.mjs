@@ -33,7 +33,7 @@
  * failed signature would produce an app that does not start, which is the failure criterion 1 names.
  */
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,6 +41,7 @@ import {
   buildConfig,
   bundleProblems,
   chooseSigning,
+  destinationDecision,
   configProblems,
   gatekeeperAdviceProblems,
   identityProblems,
@@ -123,8 +124,17 @@ mkdirSync(buildDir, { recursive: true });
       // CommonJS, because Electron's entry loader treats a `.js` file in a directory with no `"type": "module"` as
       // CommonJS and a bundle with top-level `await` would otherwise be rejected.
       format: "cjs",
-      // `electron` is provided by the runtime. Everything else is bundled, so the app carries no `node_modules`.
-      external: ["electron"],
+      /*
+       * `electron` is provided by the runtime.
+       *
+       * `ws` is external TOO, and that is what makes the socket work in the packaged app (issue #218). The shell opens one
+       * WebSocket, to ask which sessions are live for the quit dialog, and it resolves it with a bare `require("ws")`:
+       * Electron patches `require` so it reads inside `app.asar`, which is where the packaged copy sits. Bundling `ws`
+       * instead would work too, but the resolution has to survive THREE environments — a CommonJS asar bundle, an
+       * unbundled ESM dev run, and a test — and leaving it external is the only shape where the same call is valid in
+       * each. `bundle-resolution.test.ts` asserts the emitted call.
+       */
+      external: ["electron", "ws"],
       logLevel: "warning",
     });
   } catch (error) {
@@ -142,8 +152,17 @@ const bundledManifest = {
   version: rootManifest.version,
   description: appManifest.description,
   main: "main.js",
-  // No `dependencies`: everything the shell needs is bundled, and a dependency list would make electron-builder try to
-  // install into the app (and could carry product code, which criterion 5 forbids).
+  /*
+   * ONE dependency: `ws`, and it is not a product dependency.
+   *
+   * The shell opens a single WebSocket to ask the orchestrator which sessions are live for the quit dialog, and `ws` is
+   * left external so that one `require("ws")` works in the packaged asar, in an unbundled dev run, and in a test. That
+   * means it has to be ON DISK beside `main.js`, which is what a `dependencies` entry gets electron-builder to do.
+   *
+   * Everything else is bundled into `main.js`, and no other package may be added here: the `files` globs are audited
+   * (`configProblems`) precisely so product code cannot arrive this way.
+   */
+  dependencies: { ws: appManifest.dependencies?.ws ?? "^8.22.0" },
 };
 writeFileSync(join(buildDir, "package.json"), `${JSON.stringify(bundledManifest, null, 2)}\n`, "utf8");
 
@@ -275,47 +294,83 @@ const destination = installPath(homedir());
 if (requiresAdmin(destination)) {
   fail(`${destination} needs admin rights, and this app must install without them (criterion 7)`);
 }
-step(`installing into ${destination}`);
-spawnSync("mkdir", ["-p", dirname(destination)], { stdio: "ignore" });
-// Replaced wholesale: a merge would leave files from the previous version behind, which is how a bundle accumulates an
-// identity that no longer matches its signature.
-try {
-  rmSync(destination, { recursive: true, force: true });
-} catch (error) {
-  /*
-   * Reported as what it is. `EPERM` here is a permission on the destination, not a build failure — and the reader needs
-   * to know the app IS built and signed, and that only the copy failed, or they will go looking for a build problem.
-   */
-  fail(
-    `the app was built and signed, but could not be installed: ${error.message}\n` +
-      `  The finished bundle is at ${builtApp}\n` +
-      `  Move it into place yourself, or check permissions on ${dirname(destination)}.`,
-  );
-}
-try {
-  cpSync(builtApp, destination, { recursive: true, verbatimSymlinks: true });
-} catch (error) {
-  fail(`the app was built and signed, but could not be copied into place: ${error.message}\n  It is at ${builtApp}`);
+
+/*
+ * DECIDED BEFORE ANYTHING IS DELETED, because the first version deleted first and destroyed a reader's app.
+ *
+ * `~/Applications/Pi Central.app` is also where Safari's "Add to Dock" puts the web app, so a blanket `rm -rf` removed a
+ * PWA and put this bundle in its place. The destination is now inspected, and only a bundle carrying OUR identifier may
+ * be replaced.
+ */
+const existing = existsSync(destination) ? { exists: true, identifier: readIdentifier(destination) } : { exists: false };
+const decision = destinationDecision(existing, config.appId);
+step(decision.reason);
+if (decision.action === "refuse") {
+  fail(`refusing to install: ${decision.reason}\n  The built app is at ${builtApp} and was left alone.`);
 }
 
 /*
- * The copy is verified too. `cp` preserves the code but not necessarily the extended attributes a signature lives in
- * depending on the filesystem, and an app that does not verify after installation is an app that will not start.
+ * Copied to a temporary sibling and renamed into place, rather than `rm -rf` then `cp`.
+ *
+ * The old order left the reader with NOTHING if the copy failed — strictly worse than the previous version still being
+ * installed. A rename is atomic on the same filesystem, so the destination is either the old bundle or the new one.
  */
-const installed = spawnSync("codesign", ["--verify", "--deep", "--strict", destination], { stdio: "pipe", encoding: "utf8" });
-if (installed.status !== 0) {
-  fail(`the installed app does not verify:\n${installed.stderr || installed.stdout}`);
+const staging = `${destination}.installing`;
+step(`installing into ${destination}`);
+spawnSync("mkdir", ["-p", dirname(destination)], { stdio: "ignore" });
+try {
+  rmSync(staging, { recursive: true, force: true });
+  cpSync(builtApp, staging, { recursive: true, verbatimSymlinks: true });
+} catch (error) {
+  rmSync(staging, { recursive: true, force: true });
+  fail(
+    `the app was built and signed, but could not be copied into place: ${error.message}\n` +
+      `  The existing installation was left untouched, and the built app is at ${builtApp}`,
+  );
 }
 
-// ---------------------------------------------------------------------------------------------------------------
-// 8. What the reader should know.
-// ---------------------------------------------------------------------------------------------------------------
+/*
+ * Verified BEFORE it replaces anything: a copy that does not verify is a bundle that will not start, and swapping it in
+ * would trade a working installation for a broken one.
+ */
+const stagedVerify = spawnSync("codesign", ["--verify", "--deep", "--strict", staging], { stdio: "pipe", encoding: "utf8" });
+if (stagedVerify.status !== 0) {
+  rmSync(staging, { recursive: true, force: true });
+  fail(`the copied app does not verify, so nothing was installed:\n${stagedVerify.stderr || stagedVerify.stdout}`);
+}
+
+try {
+  if (decision.action === "replace") rmSync(destination, { recursive: true, force: true });
+  renameSync(staging, destination);
+} catch (error) {
+  rmSync(staging, { recursive: true, force: true });
+  fail(
+    `the app was built, signed and verified, but could not be moved into place: ${error.message}\n` +
+      `  A previous installation, if there was one, is still at ${destination}.`,
+  );
+}
 
 step(`installed ${destination}`);
 console.log("");
 console.log(`  version:  ${rootManifest.version}  (Electron ${electronVersion}, arm64)`);
 console.log(`  identity: ${signing.kind === "identity" ? signing.identity : "ad-hoc"}`);
-console.log(`  run it:   open "${destination}"`);
+console.log("");
+/*
+ * Said explicitly, because the first thing a reader does is look in /Applications and not find it.
+ *
+ * `~/Applications` is the standard per-user location — it is where macOS puts an app "for me only", it needs no admin
+ * rights, and Launchpad indexes it. What it is *not* is the folder a reader opens first, and it is not in the Finder
+ * sidebar by default, so "I installed it and I cannot find it" is the expected reaction unless this says so.
+ */
+console.log(`  It is in your HOME folder's Applications, not the system one:`);
+console.log(`    ~/Applications/Pi Central.app     (not /Applications)`);
+console.log("");
+console.log(`  open it:  open "${destination}"`);
+console.log(`  reveal:   open -R "${destination}"   (shows it in Finder)`);
+console.log(`  keep it:  drag it from that Finder window to the dock`);
+console.log("");
+console.log("  If Spotlight does not find it yet, give it a moment to index, or drag it to the dock now —");
+console.log("  Spotlight does not index every folder under ~ immediately.");
 console.log("");
 console.log("  Gatekeeper will refuse this app if it is moved to another machine, because it is not notarized.");
 console.log("  That is expected: notarization needs a Developer ID this project does not have. On THIS machine it");
@@ -338,6 +393,13 @@ function walk(root, prefix = "") {
     if (entry.isDirectory()) out.push(...walk(join(root, entry.name), relative));
   }
   return out;
+}
+
+/** The `CFBundleIdentifier` of a bundle, or `undefined` when it cannot be read. */
+function readIdentifier(bundle) {
+  const plist = readPlist(join(bundle, "Contents", "Info.plist"));
+  const id = plist["CFBundleIdentifier"];
+  return typeof id === "string" && id !== "" ? id : undefined;
 }
 
 /** `Info.plist` as an object. `plutil -convert json` because parsing XML by hand is a bug waiting to happen. */

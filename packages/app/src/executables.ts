@@ -65,6 +65,14 @@ export interface LookupContext {
   shell: string | undefined;
   /** Run a login shell and return its stdout, or `undefined` if it could not run or timed out. */
   runLoginShell: (shell: string, command: string) => string | undefined;
+  /**
+   * The same lookup, but reporting WHY it failed.
+   *
+   * Optional so existing callers and tests keep working; when it is supplied its note is carried into the failure
+   * message, which is the difference between "the login shell did not report it either" (true, useless) and
+   * "your shell printed 'Welcome to zsh!' and exit 1" (actionable).
+   */
+  diagnoseLoginShell?: (shell: string, command: string) => { path: string | undefined; note?: string };
 }
 
 /** Is this an absolute path to something that exists and is executable? */
@@ -109,17 +117,133 @@ export function searchPath(
  * business to stdout before the command runs.
  */
 export function loginShellLookup(shell: string, command: string): string | undefined {
-  const result = spawnSync(shell, ["-ilc", `command -v ${command}`], {
-    encoding: "utf8",
-    timeout: LOGIN_SHELL_TIMEOUT_MS,
-    // The shell reads the user's files, which may want a terminal; it does not get one, and that must
-    // not turn into a hang. `spawnSync`'s timeout covers the stuck case.
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  if (result.error !== undefined || result.status !== 0) return undefined;
+  return diagnoseLoginShellLookup(shell, command).path;
+}
+
+/**
+ * The shell command that prints a **path**, and the one that reports an alias.
+ *
+ * ## Why `command -v` is not enough, reported from a real machine
+ *
+ * The reader's `.zshrc` contains:
+ *
+ *     alias pi='~/.config/sandbox-exec/run-sandboxed.sh'
+ *
+ * so `command -v pi` prints `alias pi=/Users/…/run-sandboxed.sh` and exits **0**. The old lookup took the last line,
+ * found it was not absolute, and reported that the login shell "did not report" `pi` — while the shell had answered
+ * perfectly clearly, and `pi` was installed at `/opt/homebrew/bin/pi` all along.
+ *
+ * Two bugs in one: the answer was misread, and the message then blamed the shell for not answering.
+ *
+ * ## Why the alias is not followed
+ *
+ * It is tempting to take the alias's target and use it. That would be **wrong here**, and badly so: the reader aliased
+ * `pi` to a script that wraps it in `sandbox-exec`, and Pi Central launches `pi` under **Agent Safehouse**, which is
+ * itself `sandbox-exec` (C1). Following the alias would nest Seatbelt twice and fail with `EPERM` — the exact failure
+ * C1 exists to prevent. The app needs the real binary and its own sandbox, so `whence -p` (which skips aliases,
+ * functions and hashed entries, and prints only a path) is the right question.
+ *
+ * The alias is still *reported*, because a reader whose `pi` is aliased deserves to know their alias is not in effect
+ * inside Pi Central — otherwise the app silently behaves differently from their terminal, which is the kind of
+ * difference that gets filed as a bug months later.
+ */
+export const SHELL_PATH_QUERY = "whence -p";
+/** The alias query, for the note. `-zsh` prints `name=value`; bash prints `alias name='value'`. */
+export const SHELL_ALIAS_QUERY = "alias";
+
+/**
+ * Why a login-shell lookup failed, and not only that it did.
+ *
+ * ## The defect this exists for, reported from a real app launch
+ *
+ * The failure panel said:
+ *
+ * > Pi Central could not find `pi`. It is not on this app's PATH (/usr/bin:/bin:/usr/sbin:/sbin) and the
+ * > login shell did not report it either.
+ *
+ * — while `pi` was installed at `/opt/homebrew/bin/pi` and worked in the reader's terminal. "Did not report it" was
+ * true and useless: it covers four different causes with four different fixes, and the reader cannot tell which:
+ *
+ *   1. the shell **printed something that is not a path** (a version manager's manager announced itself on the last
+ *      line, a plugin manager printed a banner *after* `command -v` ran);
+ *   2. the shell **exited non-zero** — `command -v` not finding it, but also a broken `.zshrc` that aborts the shell;
+ *   3. the shell **timed out** (a version manager doing network work in `.zshrc`, which is common);
+ *   4. the shell **could not be started at all**.
+ *
+ * So the lookup now carries the reason, the exit status, and the **last output lines** — because a chatty `.zshrc` is
+ * exactly what makes the answer unusable, and quoting what it said is the only way the reader can see that.
+ *
+ * The return shape is deliberately separate from `loginShellLookup`, which stays a plain `string | undefined` so every
+ * existing caller is unaffected.
+ */
+export function diagnoseLoginShellLookup(
+  shell: string,
+  command: string,
+): { path: string | undefined; note?: string } {
+  const run = (query: string) =>
+    spawnSync(shell, ["-ilc", query], {
+      encoding: "utf8",
+      timeout: LOGIN_SHELL_TIMEOUT_MS,
+      // The shell reads the user's files, which may want a terminal; it does not get one, and that must
+      // not turn into a hang. `spawnSync`'s timeout covers the stuck case.
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+  const result = run(`${SHELL_PATH_QUERY} ${command}`);
+
+  if (result.error !== undefined) {
+    return { path: undefined, note: `${shell} could not be started: ${result.error.message}` };
+  }
+  // A timeout is its own cause: `spawnSync` reports it as a signal kill with no status.
+  if (result.signal !== null && result.signal !== undefined) {
+    return {
+      path: undefined,
+      note: `${shell} did not answer within ${LOGIN_SHELL_TIMEOUT_MS} ms (signal ${result.signal}); a version manager in your shell startup files is the usual cause`,
+    };
+  }
+
   const lines = (result.stdout ?? "").split("\n").map((line) => line.trim()).filter((line) => line !== "");
   const last = lines.at(-1);
-  return last === undefined || !isAbsolute(last) ? undefined : last;
+  if (last !== undefined && isAbsolute(last)) return { path: last };
+
+  /*
+   * No path. Before reporting that, ask whether it is an ALIAS — which is the case that produced the reported bug, and
+   * which is worth a different sentence: the binary exists, the reader's shell has a wrapper, and the app is going to
+   * ignore the wrapper deliberately.
+   */
+  const aliasResult = run(SHELL_ALIAS_QUERY);
+  const aliasLines = (aliasResult.stdout ?? "").split("\n").map((line) => line.trim()).filter((line) => line !== "");
+  const aliasLine = aliasLines.find((line) => new RegExp(`(^|\\s)(alias\\s+)?${command}=`).test(line));
+  if (aliasLine !== undefined) {
+    /*
+     * The alias's target, so the note can quote it. Two spellings: `pi=/x` (zsh's `alias`) and `alias pi='/x'` (bash's).
+     */
+    const value = /=\s*'?"?([^'"]+)'?"?$/.exec(aliasLine)?.[1] ?? aliasLine;
+    return {
+      path: undefined,
+      note:
+        `${command} is a shell ALIAS in ${shell} (${aliasLine}), not a program, so there is no binary to launch. ` +
+        `Pi Central runs \`${command}\` under Agent Safehouse and deliberately does not use the alias: an alias usually ` +
+        `wraps the command in its own sandbox, and Seatbelt does not nest (C1). ` +
+        `Install ${command} as a normal program (or set PI_CENTRAL_${command.toUpperCase()} to its real path — for ` +
+        `\`pi\` the binary is usually /opt/homebrew/bin/pi, not ${value}).`,
+    };
+  }
+
+  // The four remaining failures, each with what the shell actually said.
+  const said = lines.slice(-3).join(" / ");
+  const stderr = (result.stderr ?? "").split("\n").map((line) => line.trim()).filter((line) => line !== "").slice(-3).join(" / ");
+  const why =
+    last === undefined
+      ? `${shell} printed no path for \`${SHELL_PATH_QUERY} ${command}\``
+      : `${shell} printed ${JSON.stringify(last)}, which is not an absolute path`;
+  const detail = [
+    why,
+    result.status === undefined ? "" : `exit ${result.status}`,
+    said === "" ? "" : `stdout: ${said}`,
+    stderr === "" ? "" : `stderr: ${stderr}`,
+  ].filter((part) => part !== "").join("; ");
+  return { path: undefined, note: detail };
 }
 
 /**
@@ -163,11 +287,22 @@ export function resolveExecutable(
   if (fromPath !== undefined) {
     return { ok: true, executable: { name, path: fromPath, source: "environment" } };
   }
+  /*
+   * The login shell is asked when the PATH search did not answer, and its failure is CARRIED into the message rather
+   * than dropped. "The login shell did not report it either" was true and useless: it hides which of four causes it was
+   * (printed a non-path, exited non-zero, timed out, or would not start), and each has a different fix.
+   */
+  let shellNote: string | undefined;
   if (context.shell !== undefined && context.shell !== "") {
-    const answered = context.runLoginShell(context.shell, name);
+    const diagnosis = context.diagnoseLoginShell?.(context.shell, name);
+    const answered = diagnosis === undefined ? context.runLoginShell(context.shell, name) : diagnosis.path;
     if (answered !== undefined && isExecutableFile(answered)) {
       return { ok: true, executable: { name, path: answered, source: "login-shell" } };
     }
+    // A path was reported but is not usable, which is its own sentence: the shell knows where it is and the app may not
+    // read or execute it.
+    if (answered !== undefined) shellNote = `${context.shell} reported ${answered}, which is not an executable file`;
+    else if (diagnosis?.note !== undefined) shellNote = diagnosis.note;
   }
   return {
     ok: false,
@@ -177,7 +312,8 @@ export function resolveExecutable(
       // spawn" is the thing this criterion forbids.
       message:
         `Pi Central could not find \`${name}\`. It is not on this app's PATH ` +
-        `(${context.env["PATH"] ?? "which is empty"}) and the login shell did not report it either. ` +
+        `(${context.env["PATH"] ?? "which is empty"}) and asking your login shell did not resolve it` +
+        (shellNote === undefined ? ". " : `:\n\n  ${shellNote}\n\n`) +
         hint,
     },
   };

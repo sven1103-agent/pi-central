@@ -46,12 +46,21 @@ They are kept because each one is the reason a constraint or an invariant test e
 - A linked working copy is reported as one, and the refusal names the directory the link points at ([#217]).
 - A global install is found from its `node_modules` directory, instead of the app reporting that it could not find its own package ([#217]).
 - An update outcome is a dialog that returns to the dashboard, instead of a failure page that took the window and could not be left ([#217]).
+- `⌘Q` finishes: a stopped orchestrator is no longer still counted as running, so the quit no longer restarts its own wait every five seconds ([#218]).
 - Checking for updates and finding a newer version no longer does nothing, which is what the update guard made it do ([#217]).
 
 - `npm run install-app` builds `~/Applications/Pi Central.app`, ad-hoc or self-signed, on a machine with no Developer ID ([#218]).
 - A self-signed code-signing identity is used when one exists, so macOS privacy grants survive a rebuild ([#218]).
 - The build refuses a `.dmg`, notarization, publishing or an auto-updater, and refuses a bundle that carries product code ([#218]).
 - `docs/APP-SHELL.md` states the certificate steps, the Gatekeeper position and how to uninstall ([#218]).
+- A missing `pi` or `safehouse` reports why the login shell could not resolve it, quoting what the shell printed, instead of only saying it did not ([#218]).
+- `pi` that is a shell alias is resolved to the real binary, and the app says the alias was skipped rather than reporting it missing ([#218]).
+- `install-app` says where the app went, because it is in `~/Applications` and not `/Applications` ([#218]).
+- The app writes its diagnostics to `~/Library/Logs/Pi Central/main.log`, and the menu reveals it, so a Finder launch is diagnosable without a terminal ([#218]).
+- `⌘Q` can name the live sessions in the packaged app: `ws` is resolved with the module-scope `require`, which Electron patches to read inside `app.asar` ([#218]).
+- `install-app` refuses to overwrite a bundle it did not create, so it can no longer delete a Safari web app that shares the path ([#218]).
+- An install copies to a staging path and renames, so a failed copy leaves the previous installation intact ([#218]).
+- `npm run app` is a separate app with its own state, so a development run cannot adopt or delete the installed one's runtime record ([#218]).
 
 ### Changed
 

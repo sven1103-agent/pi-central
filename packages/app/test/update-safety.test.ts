@@ -24,6 +24,24 @@ import { installCommand, latestVersionCommand } from "../src/update-decide.ts";
 
 const MAIN = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
 const UPDATER = readFileSync(new URL("../src/updater.ts", import.meta.url), "utf8");
+
+/**
+ * A source file with its comments removed.
+ *
+ * Source assertions here are about CODE, and comments explain code — a check that cannot tell them apart reports the
+ * opposite of the truth. It has happened three times in this repository, so the helper is shared in one direction rather
+ * than rediscovered each time.
+ *
+ * @param {string} source
+ * @returns {string}
+ */
+function codeOnly(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .map((line) => line.replace(/\/\/.*$/, ""))
+    .join("\n");
+}
 const DECIDE = readFileSync(new URL("../src/update-decide.ts", import.meta.url), "utf8");
 
 /** Every source file the shell ships. Used for the "nothing phones home" scan. */
@@ -163,9 +181,15 @@ test("the update path sends no environment to npm beyond what npm inherits", () 
 // -----------------------------------------------------------------------------------------------------------
 
 test("nothing in the update path writes under ~/.pi", () => {
-  // principle 9 and #56 criterion 5. The journal lives in the app's own data directory; a path that reached into the
-  // Pi tree would be writing to the reader's agent environment, which this product promises not to do.
-  for (const source of [MAIN, UPDATER, DECIDE]) {
+  /*
+   * principle 9 and #56 criterion 5: the journal lives in the app's own data directory, and a path that reached into the
+   * Pi tree would be writing to the reader's agent environment.
+   *
+   * Comments are stripped first. The dev-isolation code legitimately *names* `~/.pi` while explaining that it is
+   * deliberately shared and read-only — as a mention, not a write. This is the third time a source assertion here has
+   * matched documentation instead of code, which is why `codeOnly` exists.
+   */
+  for (const source of [MAIN, UPDATER, DECIDE].map(codeOnly)) {
     assert.equal(/\.pi\/agent|\.pi["'`]|PI_CODING_AGENT_DIR\s*=/.test(source), false, "the update path must not name the Pi tree");
   }
   // Positively: the journal is written under the app data directory, which is where `runtime.json` already lives.

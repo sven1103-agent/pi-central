@@ -38,6 +38,21 @@ function handlerBody(event: string): string {
   return balancedBlock(MAIN, start, `the "${event}" handler`);
 }
 
+/**
+ * Strip comments from source, so an assertion about CODE cannot be satisfied by a mention of it.
+ *
+ * Needed more than once: `update-safety.test.ts` matched `http://host:port` in an error message, and this file matched
+ * the string `if (quitting) return;` inside the comment that explains why it may not come first. A checker that reads
+ * prose as code reports the opposite of the truth.
+ */
+function codeOnly(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .map((line) => line.replace(/\/\/.*$/, ""))
+    .join("\n");
+}
+
 /** The brace-balanced block that starts at the first `{` after `from`. */
 function balancedBlock(text: string, from: number, what: string): string {
   const open = text.indexOf("{", from);
@@ -188,4 +203,67 @@ test("`quitting` is not set before the question is answered", () => {
   // And the handler's first statement must not be it.
   const firstStatement = body.split(";")[0] ?? "";
   assert.equal(firstStatement.includes("quitting = true"), false, "the handler does not set it before deciding anything");
+});
+
+// -----------------------------------------------------------------------------------------------------------
+// The quit that never finished, reported from a running app.
+// -----------------------------------------------------------------------------------------------------------
+
+test("`running` is cleared on exit BEFORE the `quitting` early-return", () => {
+  /*
+   * Reported: "when I press Command Q, the window stays open forever and shows the disconnect state."
+   *
+   * The loop, exactly:
+   *
+   *   1. `⌘Q` -> `before-quit` -> `quitDecided` -> `app.quit()`
+   *   2. `before-quit` again -> `stopOrchestratorForQuit()` -> child `SIGTERM`
+   *   3. the child exits, and its `exit` handler did `if (quitting) return;` **before** `running = undefined`
+   *   4. so `running` still named a dead process, and the next pass waited for an `exit` that had already fired
+   *   5. after STOP_GRACE_MS it resolved and called `app.quit()` again -> back to 4, for ever
+   *
+   * The window stayed on screen because every pass called `preventDefault`, and it showed `disconnected` because the
+   * socket was gone while the page was still there. A five-second heartbeat of nothing.
+   *
+   * Every existing test passed while this shipped, because they assert the DECISIONS and the handler REGISTRATIONS —
+   * neither of which is the ordering inside a callback.
+   */
+  /*
+   * The window is the handler's opening, taken up to the first branch. It must span BOTH statements under test, so the
+   * slice ends at the `quitting` guard rather than at `!announced` — the first version cut the region before the guard it
+   * was looking for, and reported the ordering as wrong when it was right.
+   */
+  const exitHandler = codeOnly(MAIN.slice(MAIN.indexOf('child.on("exit", (code, signal) => {')));
+  const body = exitHandler.slice(0, exitHandler.indexOf("if (!announced)") + 1);
+  const cleared = body.indexOf("running = undefined");
+  const bail = body.indexOf("if (quitting) return");
+  assert.notEqual(cleared, -1, "the exit handler clears `running`");
+  assert.notEqual(bail, -1, "and still distinguishes a quit from a crash");
+  assert.ok(cleared < bail, "`running` is cleared BEFORE the early return, or a stopped child still looks running");
+});
+
+test("the stop is performed at most once, so `app.quit()` cannot re-enter it", () => {
+  // `app.quit()` re-enters `before-quit`; a handler that stops "whatever is running" every pass loops for ever.
+  const body = handlerBody("before-quit");
+  const committed = body.indexOf("if (quitDecided)");
+  const guard = body.indexOf("if (stopRequested) return");
+  const stop = body.indexOf("stopOrchestratorForQuit()");
+  assert.ok(committed !== -1 && guard > committed, "the once-only guard is inside the committed branch");
+  assert.ok(stop > guard, "and the stop is only reached when it has not been requested");
+  // The flag is set when the stop is requested, and reset when the reader cancels.
+  assert.match(MAIN, /stopRequested = true/);
+  assert.match(MAIN, /stopRequested = false/);
+});
+
+test("stopping a child that has already exited resolves immediately instead of waiting", () => {
+  /*
+   * The second half of the same bug: `child.once("exit")` on an already-dead child never fires, so the promise waited the
+   * full grace period before letting the quit proceed — which is what turned a stuck quit into a five-second loop rather
+   * than a hang. `exitCode`/`signalCode` are the facts that answer "has it already gone?".
+   */
+  const stop = MAIN.slice(MAIN.indexOf("function stopOrchestratorForQuit"));
+  assert.match(stop, /exitCode !== null \|\| child\.signalCode !== null/, "an exited child is detected before waiting");
+  // And the detection returns `undefined` — "nothing to wait for" — rather than a resolved promise, which the caller
+  // treats as "hold the quit".
+  const guard = stop.slice(stop.indexOf("exitCode !== null"), stop.indexOf("exitCode !== null") + 120);
+  assert.match(guard, /return undefined/);
 });
