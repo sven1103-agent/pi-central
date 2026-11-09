@@ -121,6 +121,37 @@ export function loginShellLookup(shell: string, command: string): string | undef
 }
 
 /**
+ * The shell command that prints a **path**, and the one that reports an alias.
+ *
+ * ## Why `command -v` is not enough, reported from a real machine
+ *
+ * The reader's `.zshrc` contains:
+ *
+ *     alias pi='~/.config/sandbox-exec/run-sandboxed.sh'
+ *
+ * so `command -v pi` prints `alias pi=/Users/…/run-sandboxed.sh` and exits **0**. The old lookup took the last line,
+ * found it was not absolute, and reported that the login shell "did not report" `pi` — while the shell had answered
+ * perfectly clearly, and `pi` was installed at `/opt/homebrew/bin/pi` all along.
+ *
+ * Two bugs in one: the answer was misread, and the message then blamed the shell for not answering.
+ *
+ * ## Why the alias is not followed
+ *
+ * It is tempting to take the alias's target and use it. That would be **wrong here**, and badly so: the reader aliased
+ * `pi` to a script that wraps it in `sandbox-exec`, and Pi Central launches `pi` under **Agent Safehouse**, which is
+ * itself `sandbox-exec` (C1). Following the alias would nest Seatbelt twice and fail with `EPERM` — the exact failure
+ * C1 exists to prevent. The app needs the real binary and its own sandbox, so `whence -p` (which skips aliases,
+ * functions and hashed entries, and prints only a path) is the right question.
+ *
+ * The alias is still *reported*, because a reader whose `pi` is aliased deserves to know their alias is not in effect
+ * inside Pi Central — otherwise the app silently behaves differently from their terminal, which is the kind of
+ * difference that gets filed as a bug months later.
+ */
+export const SHELL_PATH_QUERY = "whence -p";
+/** The alias query, for the note. `-zsh` prints `name=value`; bash prints `alias name='value'`. */
+export const SHELL_ALIAS_QUERY = "alias";
+
+/**
  * Why a login-shell lookup failed, and not only that it did.
  *
  * ## The defect this exists for, reported from a real app launch
@@ -149,13 +180,16 @@ export function diagnoseLoginShellLookup(
   shell: string,
   command: string,
 ): { path: string | undefined; note?: string } {
-  const result = spawnSync(shell, ["-ilc", `command -v ${command}`], {
-    encoding: "utf8",
-    timeout: LOGIN_SHELL_TIMEOUT_MS,
-    // The shell reads the user's files, which may want a terminal; it does not get one, and that must
-    // not turn into a hang. `spawnSync`'s timeout covers the stuck case.
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const run = (query: string) =>
+    spawnSync(shell, ["-ilc", query], {
+      encoding: "utf8",
+      timeout: LOGIN_SHELL_TIMEOUT_MS,
+      // The shell reads the user's files, which may want a terminal; it does not get one, and that must
+      // not turn into a hang. `spawnSync`'s timeout covers the stuck case.
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+  const result = run(`${SHELL_PATH_QUERY} ${command}`);
 
   if (result.error !== undefined) {
     return { path: undefined, note: `${shell} could not be started: ${result.error.message}` };
@@ -172,13 +206,36 @@ export function diagnoseLoginShellLookup(
   const last = lines.at(-1);
   if (last !== undefined && isAbsolute(last)) return { path: last };
 
-  // The four failures, each with what the shell actually said. Bounded, because a `.zshrc` can be very chatty and the
-  // panel is meant to be read.
+  /*
+   * No path. Before reporting that, ask whether it is an ALIAS — which is the case that produced the reported bug, and
+   * which is worth a different sentence: the binary exists, the reader's shell has a wrapper, and the app is going to
+   * ignore the wrapper deliberately.
+   */
+  const aliasResult = run(SHELL_ALIAS_QUERY);
+  const aliasLines = (aliasResult.stdout ?? "").split("\n").map((line) => line.trim()).filter((line) => line !== "");
+  const aliasLine = aliasLines.find((line) => new RegExp(`(^|\\s)(alias\\s+)?${command}=`).test(line));
+  if (aliasLine !== undefined) {
+    /*
+     * The alias's target, so the note can quote it. Two spellings: `pi=/x` (zsh's `alias`) and `alias pi='/x'` (bash's).
+     */
+    const value = /=\s*'?"?([^'"]+)'?"?$/.exec(aliasLine)?.[1] ?? aliasLine;
+    return {
+      path: undefined,
+      note:
+        `${command} is a shell ALIAS in ${shell} (${aliasLine}), not a program, so there is no binary to launch. ` +
+        `Pi Central runs \`${command}\` under Agent Safehouse and deliberately does not use the alias: an alias usually ` +
+        `wraps the command in its own sandbox, and Seatbelt does not nest (C1). ` +
+        `Install ${command} as a normal program (or set PI_CENTRAL_${command.toUpperCase()} to its real path — for ` +
+        `\`pi\` the binary is usually /opt/homebrew/bin/pi, not ${value}).`,
+    };
+  }
+
+  // The four remaining failures, each with what the shell actually said.
   const said = lines.slice(-3).join(" / ");
   const stderr = (result.stderr ?? "").split("\n").map((line) => line.trim()).filter((line) => line !== "").slice(-3).join(" / ");
   const why =
     last === undefined
-      ? `${shell} printed no path for \`command -v ${command}\``
+      ? `${shell} printed no path for \`${SHELL_PATH_QUERY} ${command}\``
       : `${shell} printed ${JSON.stringify(last)}, which is not an absolute path`;
   const detail = [
     why,

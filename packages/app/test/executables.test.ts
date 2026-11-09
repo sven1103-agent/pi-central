@@ -368,3 +368,91 @@ test("without the optional diagnosis, the message is exactly what it was", () =>
   assert.match(resolution.missing.message, /asking your login shell did not resolve it\./);
   assert.equal(resolution.missing.message.includes("undefined"), false);
 });
+
+// -----------------------------------------------------------------------------------------------------------
+// The alias, which is what the real failure actually was.
+// -----------------------------------------------------------------------------------------------------------
+
+test("`pi` aliased to a wrapper script resolves to the real binary, and says the alias was skipped", (t) => {
+  /*
+   * Reported from a real machine, after the message above was added:
+   *
+   *     alias pi='~/.config/sandbox-exec/run-sandboxed.sh'
+   *     exit=0
+   *
+   * `command -v pi` prints `alias pi=…` and exits 0. The old lookup took the last line, saw it was not absolute, and
+   * reported that the login shell "did not report" pi — while the shell had answered and `/opt/homebrew/bin/pi` existed.
+   *
+   * Two things are asserted here, and the second is the important one:
+   *
+   *   1. the lookup finds the REAL binary, because `whence -p` skips aliases;
+   *   2. and it does NOT follow the alias, because the alias wraps pi in `sandbox-exec` and Pi Central launches pi under
+   *      safehouse, which is also `sandbox-exec` — nesting Seatbelt twice is the failure C1 exists to prevent.
+   */
+  const root = scratch(t);
+  const bin = join(root, "bin");
+  mkdirSync(bin, { recursive: true });
+  const realPi = join(bin, "pi");
+  writeFileSync(realPi, "#!/bin/sh\n");
+  chmodSync(realPi, 0o755);
+
+  // A shell that behaves like zsh with the reader's alias, answering the two queries the lookup makes.
+  const shell = join(root, "alias-shell");
+  writeFileSync(
+    shell,
+    [
+      "#!/bin/sh",
+      // `whence -p` skips the alias and reports the binary — which is the whole point.
+      `if [ "$2" = "whence -p pi" ]; then echo "${realPi}"; exit 0; fi`,
+      `if [ "$2" = "alias" ]; then echo "pi=${root}/.config/sandbox-exec/run-sandboxed.sh"; exit 0; fi`,
+      "exit 1",
+    ].join("\n") + "\n",
+  );
+  chmodSync(shell, 0o755);
+
+  const diagnosis = diagnoseLoginShellLookup(shell, "pi");
+  assert.equal(diagnosis.path, realPi, "the real binary is found, not the wrapper the alias names");
+});
+
+test("when only an alias exists, the message explains it and does not blame the shell", (t) => {
+  // The other half: no binary at all, just an alias. This is a permissions/installation problem with a specific fix, and
+  // "the login shell did not report it either" was both wrong (it did) and unhelpful.
+  const root = scratch(t);
+  const shell = join(root, "alias-only-shell");
+  writeFileSync(
+    shell,
+    [
+      "#!/bin/sh",
+      // `whence -p` finds nothing…
+      `if [ "$2" = "whence -p pi" ]; then exit 1; fi`,
+      // …but the alias is there.
+      `if [ "$2" = "alias" ]; then echo "pi=${root}/.config/sandbox-exec/run-sandboxed.sh"; exit 0; fi`,
+      "exit 1",
+    ].join("\n") + "\n",
+  );
+  chmodSync(shell, 0o755);
+
+  const diagnosis = diagnoseLoginShellLookup(shell, "pi");
+  assert.equal(diagnosis.path, undefined);
+  const note = diagnosis.note ?? "";
+  assert.match(note, /ALIAS/, "it names the real situation");
+  assert.match(note, /run-sandboxed\.sh/, "quotes the alias, so the reader recognises it");
+  // The reason the alias is NOT used, which is the non-obvious part.
+  assert.match(note, /Seatbelt does not nest/);
+  assert.match(note, /C1/);
+  // And where the binary actually is, so the fix is one step.
+  assert.match(note, /opt\/homebrew\/bin\/pi/);
+});
+
+test("an alias note is not produced for a plain missing program", (t) => {
+  // The control: a shell with no alias and no binary must keep the ordinary message, or every failure grows an alias
+  // paragraph that says nothing true.
+  const root = scratch(t);
+  const shell = join(root, "nothing-shell");
+  writeFileSync(shell, "#!/bin/sh\nexit 1\n");
+  chmodSync(shell, 0o755);
+
+  const diagnosis = diagnoseLoginShellLookup(shell, "safehouse");
+  assert.equal(diagnosis.path, undefined);
+  assert.equal((diagnosis.note ?? "").includes("ALIAS"), false);
+});

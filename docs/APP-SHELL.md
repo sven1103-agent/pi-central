@@ -103,6 +103,38 @@ rm -rf ~/Library/Application\ Support/Pi\ Central   # the app's own runtime reco
 Nothing else is left behind. The app installs into `~/Applications` precisely so that no step needs admin rights and
 removal is `rm -rf` with no leftovers.
 
+## If your `pi` is a shell alias
+
+Some setups put an alias in `.zshrc` rather than installing a program:
+
+```zsh
+alias pi='~/.config/sandbox-exec/run-sandboxed.sh'
+```
+
+**Pi Central deliberately ignores that alias.** It launches `pi` under Agent Safehouse, which is `sandbox-exec` itself
+(C1), so running an alias that wraps `pi` in another sandbox would nest Seatbelt twice and fail with `EPERM`. The app
+therefore resolves the **real binary** — `whence -p pi`, which skips aliases, functions and hashed entries — and uses
+that.
+
+You will see this in the app's log or in a failure panel, never silently:
+
+```
+pi is a shell ALIAS in /bin/zsh (alias pi=…), not a program, so there is no binary to launch. Pi Central runs `pi`
+under Agent Safehouse and deliberately does not use the alias: an alias usually wraps the command in its own sandbox,
+and Seatbelt does not nest (C1). Install pi as a normal program (or set PI_CENTRAL_PI to its real path — for `pi` the
+binary is usually /opt/homebrew/bin/pi, …).
+```
+
+If `pi` is *only* an alias on your machine, install the real thing (`npm install -g @earendil-works/pi-coding-agent`, or
+whatever your setup uses) or point the app at it directly:
+
+```bash
+PI_CENTRAL_PI=/opt/homebrew/bin/pi open ~/Applications/Pi\ Central.app
+```
+
+The sandbox your alias provides is not lost: Pi Central applies its own — a per-session Seatbelt profile through
+Safehouse, which is stricter than a single wrapper because each session gets its own working-directory grant.
+
 ## Why there is no App Sandbox
 
 The app must be able to spawn `safehouse`, which applies a Seatbelt profile to each session. Seatbelt does not nest (C1),
