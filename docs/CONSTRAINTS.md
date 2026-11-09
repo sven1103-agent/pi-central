@@ -599,3 +599,39 @@ circle.** The Big Sur guidance ("supply the margin yourself") was applied *insid
 - **The native form is out of reach on this machine.** An `Assets.car` needs `Icon Composer` from Xcode 26;
   `xcrun --find icontool` reports *"not a developer tool"* against Command Line Tools. The `.icns` is the honest artifact
   for a project with no Apple Developer account, and it is stated as a limit rather than worked around.
+
+## C19 — `node_modules/electron/dist` is a live bundle, and `cp -r` destroys it
+
+`install-app` signs a **copy** of Electron's app bundle, and that copy is only valid if the framework symlinks are
+symlinks. `cp -r` dereferences them, so the naive backup/restore silently produces a bundle macOS will not sign:
+
+```
+install-app: codesign failed for …/Contents/Frameworks/Electron Framework.framework:
+  …: bundle format is ambiguous (could be app or framework)
+```
+
+"Ambiguous" is exact: with the links flattened, `Versions/A` and `Versions/Current` are the same file reached two ways, so
+the framework has two candidate current versions.
+
+Measured: a pristine `electron-v45.2.3-darwin-arm64` contains **14** symlinks, and flattening them is invisible until
+something reads the bundle:
+
+```
+Frameworks/Electron Framework.framework/{Electron Framework,Helpers,Libraries,Resources}
+Frameworks/Electron Framework.framework/Versions/Current
+Frameworks/Mantle.framework/{Mantle,Resources,Versions/Current}
+Frameworks/ReactiveObjC.framework/{ReactiveObjC,Resources,Versions/Current}
+Frameworks/Squirrel.framework/{Squirrel,Resources,Versions/Current}
+```
+
+### Consequences
+
+- **Copy with `cp -a`** (or `ditto`, or `rsync -a`) when duplicating Electron's bundle. The project's own install step
+  already uses `cpSync(..., { verbatimSymlinks: true })` for the same reason — this is the same rule one level up.
+- **Restore from the release tarball, not from a copy.** `node_modules/electron/checksums.json` carries the expected
+  SHA-256 for the platform's zip, which makes the restoration verifiable rather than hopeful.
+- **A flattened dist does not fail the build it fails the SIGNING**, several steps later, with a message about bundle
+  format rather than about symlinks. If codesign reports "ambiguous", check `find … -type l | wc -l` before anything else.
+- **`codesign --verify` on Electron's own framework reports** *"code has no resources but signature indicates they must be
+  present"* — **on a pristine extract too**. That is Electron's shipping state, not damage; `--deep --strict` on the whole
+  app is the check that means something.

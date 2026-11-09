@@ -22,7 +22,7 @@ thing?", answer it here. -->
 ## Constraints
 
 <!-- Does this touch isolation, credentials, rendering, or session identity? Name the constraint
-(C1–C18) or ADR. Delete this section only if genuinely not applicable. -->
+(C1–C19) or ADR. Delete this section only if genuinely not applicable. -->
 
 ## Anything left undone
 

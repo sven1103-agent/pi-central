@@ -26,7 +26,7 @@ exists) rather than a sync: once an issue is open it belongs to whoever is worki
    screenshot. Where a claim cannot be verified in CI (sandbox behaviour, for instance), the issue
    says so explicitly rather than leaving it implied.
 3. **It carries its constraint.** If a slice touches isolation, credentials, or rendering, the
-   issue links the constraint (C1–C18) or ADR that governs it. These are the places where a
+   issue links the constraint (C1–C19) or ADR that governs it. These are the places where a
    locally reasonable change is globally wrong.
 4. **It is one writer.** Slices that edit the same module in parallel are sequenced, not merged
    into one oversized change.
