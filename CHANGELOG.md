@@ -45,6 +45,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The updater uses the `npm` beside the Node it launches, so it cannot install into a different prefix than the one it verifies ([#217]).
 - A linked working copy is reported as one, and the refusal names the directory the link points at ([#217]).
 - A global install is found from its `node_modules` directory, instead of the app reporting that it could not find its own package ([#217]).
+- An update outcome is a dialog that returns to the dashboard, instead of a failure page that took the window and could not be left ([#217]).
+- Checking for updates and finding a newer version no longer does nothing, which is what the update guard made it do ([#217]).
 
 ### Changed
 

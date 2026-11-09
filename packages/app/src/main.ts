@@ -94,6 +94,7 @@ import {
 } from "./update-decide.ts";
 import { applyUpdate, checkLatestVersion, type CommandResult, type UpdateEnvironment } from "./updater.ts";
 import { decideOwner, findBrew, maySelfUpdate, npmBesideNode, ownerRefusal, readOwnerEvidence } from "./installation-owner.ts";
+import { updateNotice, wantsRetry, type UpdateNotice } from "./update-notice.ts";
 
 /**
  * The name macOS shows, and therefore the directory the runtime record lives in.
@@ -1177,18 +1178,29 @@ async function checkForUpdateFromMenu(): Promise<void> {
     const check = await checkLatestVersion(updateEnvironment());
     console.log(`Pi Central: ${check.verdict.action === "install" ? check.verdict.reason : check.verdict.reason}`);
     if (check.verdict.action !== "install") {
-      dialog.showMessageBoxSync({
-        type: "info",
-        message: "Pi Central is up to date",
-        detail: `Running ${check.current}; the latest release is ${check.latest ?? "unknown"}.`,
-        buttons: ["OK"],
-        noLink: true,
+      const notice = updateNotice(check.verdict.kind === "up-to-date" ? "up-to-date" : "nothing-to-apply", {
+        runningVersion: check.current,
+        ...(check.verdict.kind === "up-to-date" ? {} : { detail: check.verdict.reason }),
       });
+      await showNotice(notice);
       return;
     }
+    /*
+     * A newer version exists. The reader is told what it is and offered the update — the same confirmation
+     * `applyUpdateFromMenu` shows — rather than being dropped straight into an install from a "check" action.
+     *
+     * `updating` is released BEFORE the handoff, because `applyUpdateFromMenu` refuses while an update is already in
+     * flight: leaving it set here made "check found a newer version" silently do nothing at all — no dialog, no error,
+     * just a check that appeared to succeed.
+     */
+    updating = false;
     await applyUpdateFromMenu(check.verdict.version);
   } catch (error) {
-    showFailure("Pi Central could not check for updates", (error as Error).message);
+    /*
+     * A failed CHECK is a notice, not a failure page: nothing was changed, the dashboard is fine, and the reader must be
+     * able to go on using the app. This was one of the paths that replaced the window and left no way back.
+     */
+    await showNotice(updateNotice("check-failed", { detail: (error as Error).message }));
   } finally {
     updating = false;
   }
@@ -1214,9 +1226,11 @@ async function applyUpdateFromMenu(knownVersion?: string): Promise<void> {
      */
     const ownership = installationOwner();
     if (!ownership.mayUpdate) {
-      showFailure(
-        "Pi Central was not installed by npm in a place this app can update",
-        `${ownership.refusal}\n\nNothing was changed.`,
+      await showNotice(
+        updateNotice("managed-elsewhere", {
+          runningVersion: readRunningVersion(),
+          detail: ownership.refusal,
+        }),
       );
       return;
     }
@@ -1228,7 +1242,7 @@ async function applyUpdateFromMenu(knownVersion?: string): Promise<void> {
       const latest = await env.readLatestVersion();
       const verdict = assessAvailableVersion(from, parseLatestVersion(latest.stdout) ?? latest.stdout);
       if (verdict.action === "refuse") {
-        showFailure("There is no update to apply", verdict.reason);
+        await showNotice(updateNotice("nothing-to-apply", { runningVersion: from, detail: verdict.reason }));
         return;
       }
       to = verdict.version;
@@ -1261,10 +1275,58 @@ async function applyUpdateFromMenu(knownVersion?: string): Promise<void> {
     // A failure that left the previous version running is consistent, so the journal is cleared; one that left the disk
     // in an unknown state keeps it, so the next launch does not adopt a process whose code was replaced.
     if (result.failure.kind !== "version-mismatch") clearUpdateJournal();
+    /*
+     * The failure is a NOTICE, not a failure page (issue #217).
+     *
+     * `showFailure` replaces the window's document and its only control restarts the orchestrator — which is alive, so the
+     * button does nothing and the dashboard is unreachable. A failed update leaves a working app, so it gets a dialog that
+     * closes back onto it. `updateFailurePage` still supplies the wording; the surface is what changed.
+     */
     const page = updateFailurePage(result.failure, result.runningVersion);
-    showFailure(page.title, page.detail);
+    const notice = updateNotice("failed", {
+      runningVersion: result.runningVersion,
+      detail: `${page.title}\n\n${page.detail}`,
+      // A retry is offered only when nothing was replaced, because re-running npm over a half-installed package is a
+      // different and worse operation than re-running it over an untouched one.
+      canRetry: result.failure.kind !== "version-mismatch",
+    });
+    const retryResponse = await showNotice(notice);
+    if (wantsRetry(notice, retryResponse)) {
+      console.log("Pi Central: retrying the update");
+      // Outside this `finally`, because `updating` is still true here and the retry would refuse itself.
+      setTimeout(() => void applyUpdateFromMenu(), 0);
+    }
   } finally {
     updating = false;
+  }
+}
+
+/** The version this app is running, for a notice. Never throws: "unknown" is a reportable answer. */
+function readRunningVersion(): string {
+  const located = locatePackage();
+  return located.ok ? located.package.version : "unknown";
+}
+
+/**
+ * Show an update outcome, and return which button was pressed.
+ *
+ * ## Why this is not `showFailure`
+ *
+ * `showFailure` replaces the window's document with a diagnostic page whose only control is *Try again* → `retry()`,
+ * which restarts the **orchestrator**. On the update path the orchestrator is alive, so that button refuses and the
+ * dashboard is gone — the dead end reported from a running app. An update outcome belongs in a dialog that closes back
+ * onto the dashboard, which is what this is.
+ *
+ * Errors are swallowed into a log line: a dialog that cannot be shown must not fail the action that produced it, and the
+ * terminal already has the outcome.
+ */
+async function showNotice(notice: UpdateNotice): Promise<number> {
+  try {
+    const { response } = await dialog.showMessageBox(notice);
+    return response;
+  } catch (error) {
+    console.error(`Pi Central: could not show a dialog (${(error as Error).message}): ${notice.message}`);
+    return notice.defaultId;
   }
 }
 
