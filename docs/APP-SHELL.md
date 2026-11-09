@@ -130,6 +130,35 @@ rm -rf ~/Library/Application\ Support/Pi\ Central   # the app's own runtime reco
 Nothing else is left behind. The app installs into `~/Applications` precisely so that no step needs admin rights and
 removal is `rm -rf` with no leftovers.
 
+## When something goes wrong: the log
+
+A bundle launched from Finder has no terminal, so the app writes its diagnostics to a file:
+
+```
+~/Library/Logs/Pi Central/main.log
+```
+
+Open it from the app's own menu — **Pi Central → Reveal Log in Finder**, or **Open Log in Console…** — or from a shell:
+
+```bash
+tail -50 ~/Library/Logs/Pi\ Central/main.log
+```
+
+Every line has a timestamp, a level and the message, so a repeating failure reads as a repeating failure:
+
+```
+===== Pi Central started 2026-11-09T15:56:02.898Z =====
+2026-11-09 15:56:02.900 LOG   Pi Central: orchestrator at ws://127.0.0.1:51234 (pid 4242)
+2026-11-09 15:56:02.901 WARN  Pi Central: leaving the orchestrator running (pid 4242)
+```
+
+The file rotates at 1 MiB and keeps three generations, because a failing loop can fill a log in seconds.
+
+**This is the file to attach to a bug report.** It records the launch resolution (which `node`, `pi` and `safehouse` were
+found and how), every quit decision, every update attempt, and the reason a child was restarted — the questions that
+otherwise need a terminal this app does not have. A dev run (`npm run app`) uses the same log, under
+`~/Library/Logs/Pi Central (dev)/`.
+
 ## If your `pi` is a shell alias
 
 Some setups put an alias in `.zshrc` rather than installing a program:

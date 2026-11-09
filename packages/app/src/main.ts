@@ -77,6 +77,7 @@ import {
   type SessionSummary,
 } from "./runtime-record.ts";
 import { askLiveSessions, type SocketLike } from "./live-sessions.ts";
+import { openLogWriter, teeConsole } from "./app-log.ts";
 import {
   INSTALL_TIMEOUT_MS,
   STOP_HARD_DEADLINE_MS,
@@ -129,6 +130,22 @@ import { updateNotice, wantsRetry, type UpdateNotice } from "./update-notice.ts"
  *
  * This must run before any `getPath("userData")`, which is why it is here rather than in `whenReady`.
  */
+/*
+ * Diagnostics go to a file as well as to the console (issue #218, reported from use).
+ *
+ * The installed app is launched from Finder, where `stdout` is attached to nothing — so every `console.log` was written
+ * into the void. When the reader reported "⌘Q leaves the window open for ever", the line that named the cause
+ * (`the orchestrator did not stop within 5000 ms; quitting anyway`) had been written several times, and was unreadable.
+ *
+ * Asking a reader to launch the `.app` from a shell to see it is asking them to reproduce a DIFFERENT launch path: a
+ * Finder launch has launchd's environment, not their shell's, and that difference produced three separate bugs in this
+ * increment. So the log is a file, and the app can reveal it.
+ *
+ * Installed before `setName` because the path is derived from the app's name — and before anything else that might log.
+ */
+const logWriter = openLogWriter(app.getPath("logs"));
+if (logWriter !== undefined) teeConsole(console, logWriter.write);
+
 const development = process.env["PI_CENTRAL_DEV"] === "1";
 if (development) {
   /*
@@ -1401,6 +1418,33 @@ async function showNotice(notice: UpdateNotice): Promise<number> {
   }
 }
 
+/**
+ * Open the log in Console.app, filtered to it.
+ *
+ * `open -a Console <path>` is the one command that gets a reader to a live, scrollable view of the file — which is what
+ * makes "paste me the log" a request they can satisfy. Falls back to revealing the file when Console is unavailable,
+ * because a diagnostic path that fails silently is the problem this whole module exists to fix.
+ */
+function revealLog(): void {
+  if (logWriter === undefined) return;
+  try {
+    // `Console` accepts a file argument and selects it; a failure here is not worth a dialog.
+    shell.openPath(logWriter.path).catch(() => revealLogFile());
+  } catch {
+    revealLogFile();
+  }
+}
+
+/** Show the log file in Finder, so it can be attached to an issue or dragged into a mail. */
+function revealLogFile(): void {
+  if (logWriter === undefined) return;
+  try {
+    shell.showItemInFolder(logWriter.path);
+  } catch (error) {
+    console.error(`Pi Central: could not reveal ${logWriter.path}: ${(error as Error).message}`);
+  }
+}
+
 /** The menu, which is the only way to reach the update path (criterion 1). */
 function buildMenu(): void {
   const template = [
@@ -1412,6 +1456,13 @@ function buildMenu(): void {
         { type: "separator" },
         { label: "Check for Updates…", click: () => void checkForUpdateFromMenu() },
         { label: "Update Pi Central…", click: () => void applyUpdateFromMenu() },
+        { type: "separator" },
+        /*
+         * The log, one click away. A path in a document is a path nobody finds, and this is the surface that answers
+         * "what did it actually do?" for every failure the app can report.
+         */
+        { label: "Open Log in Console…", click: () => revealLog(), enabled: logWriter !== undefined },
+        { label: "Reveal Log in Finder", click: () => revealLogFile(), enabled: logWriter !== undefined },
         { type: "separator" },
         { role: "hide" },
         { role: "hideOthers" },
