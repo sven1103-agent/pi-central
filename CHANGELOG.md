@@ -46,6 +46,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - A linked working copy is reported as one, and the refusal names the directory the link points at ([#217]).
 - A global install is found from its `node_modules` directory, instead of the app reporting that it could not find its own package ([#217]).
 - An update outcome is a dialog that returns to the dashboard, instead of a failure page that took the window and could not be left ([#217]).
+- `⌘Q` finishes: a stopped orchestrator is no longer still counted as running, so the quit no longer restarts its own wait every five seconds ([#218]).
 - Checking for updates and finding a newer version no longer does nothing, which is what the update guard made it do ([#217]).
 
 - `npm run install-app` builds `~/Applications/Pi Central.app`, ad-hoc or self-signed, on a machine with no Developer ID ([#218]).

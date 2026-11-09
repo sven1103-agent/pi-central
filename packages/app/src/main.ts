@@ -149,6 +149,14 @@ let quitDecided = false;
 /** Set while the question is on screen, so a second `⌘Q` cannot stack dialogs. */
 let askingAboutQuit = false;
 
+/**
+ * Whether the quit has already asked the orchestrator to stop.
+ *
+ * Read by `before-quit`, which `app.quit()` re-enters: without it the stop is re-attempted on every pass, against a
+ * process that has already exited, and the quit never finishes.
+ */
+let stopRequested = false;
+
 /** How long a stopped orchestrator is given to exit before the app stops waiting for it. */
 const STOP_GRACE_MS = 5000;
 
@@ -759,8 +767,24 @@ function spawnOrchestrator(pkg: PackageRoot, environment: Environment): Promise<
 
   child.on("exit", (code, signal) => {
     clearTimeout(timeout);
-    if (quitting) return;
+    /*
+     * `running` is cleared FIRST, before the `quitting` early-return (issue #218, reported as: `⌘Q` leaves the window
+     * open for ever showing `disconnected`).
+     *
+     * This line used to sit below the `if (quitting) return;`, so a child stopped BY the quit was never removed from
+     * `running`. `stopOrchestratorForQuit` then saw an orchestrator on the next pass, waited on an `exit` event that had
+     * already fired, timed out after STOP_GRACE_MS, and called `app.quit()` again — a loop every five seconds that never
+     * ended, with the window left on screen because `before-quit` kept calling `preventDefault`.
+     *
+     * "A child that has exited is not running" is true regardless of why it exited, so it is set before any branch
+     * decides what the exit MEANS.
+     */
     running = undefined;
+    /*
+     * A quit is not a crash. This guard stays, AFTER the clear above: it is what stops the supervisor from restarting a
+     * child the reader asked to stop, and it is the reason `running` had to move — the two facts are independent.
+     */
+    if (quitting) return;
     if (!announced) {
       /*
        * The child died BEFORE it announced a URL (issue #215).
@@ -1485,7 +1509,16 @@ if (!app.requestSingleInstanceLock()) {
      */
     if (quitDecided) {
       quitting = true;
+      /*
+       * The stop is performed AT MOST ONCE (issue #218).
+       *
+       * Each `app.quit()` re-enters this handler, so a handler that stops "whatever is running" on every pass will try
+       * to stop an already-dead process, wait for an `exit` that already happened, and call `app.quit()` again — for
+       * ever. `stopRequested` makes the second and later passes fall straight through and let the quit complete.
+       */
+      if (stopRequested) return;
       const stopped = stopOrchestratorForQuit();
+      stopRequested = true;
       if (stopped !== undefined) {
         event.preventDefault();
         void stopped.then(() => app.quit());
@@ -1540,6 +1573,7 @@ async function decideAndQuit(): Promise<void> {
   if (choice === "cancel") {
     // The app stays open, and a later `⌘Q` must ask again — so the gate is reset rather than left set.
     quitting = false;
+    stopRequested = false;
     console.log("Pi Central: quit cancelled; nothing was stopped");
     return;
   }
@@ -1628,6 +1662,11 @@ function stopOrchestratorForQuit(): Promise<void> | undefined {
   }
 
   const child = current.child;
+  /*
+   * A child that has already exited will never emit `exit` again, so waiting on it is waiting for ever (or until the
+   * grace timer). This is the state the reported bug left the app in, and the guard costs one check.
+   */
+  if (child.exitCode !== null || child.signalCode !== null) return undefined;
   return new Promise<void>((resolve) => {
     let done = false;
     const finish = (): void => {
