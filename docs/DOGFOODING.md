@@ -196,6 +196,44 @@ and **Settings → About** prints the same value for the tab you have open. If t
 tab is running a different build from the one on disk — which is exactly the situation above, stated
 before you go looking for it. Both come from issue #114.
 
+## Verifying what quitting means (issue #216)
+
+One command, from a **plain terminal** (not an agent's sandbox — Seatbelt does not nest, C1):
+
+```bash
+npm run verify:lifecycle
+```
+
+It starts a real orchestrator the way the shell does, starts two sessions, and walks the whole `⌘Q` sequence through
+the **same decision functions the app calls**. It prints one line per acceptance criterion and ends with how many
+passed. Three outcomes, and the difference matters:
+
+| | meaning |
+|---|---|
+| `PASS` | the criterion holds against a real process |
+| `FAIL` | it does not, and the script exits non-zero |
+| `CANNOT` | the fact could not be obtained **here** — never counted as a pass |
+
+`CANNOT` appears for two environmental reasons, both of which a plain terminal fixes: `/bin/ps` is refused (C16), or
+sessions reach `failed` because safehouse cannot run inside another sandbox (C1). If you see three `CANNOT`s, that is
+what happened — not a defect.
+
+**What it cannot check, and the two clicks that can.** It does not launch Electron, so these are still yours:
+
+1. `npm run app`, start two sessions, leave unsent text in one composer.
+2. `⌘Q`. The dialog must list **both** sessions with their directories, with **Keep sessions running** highlighted.
+   Press `Escape`: nothing is stopped and the terminal says `quit cancelled; nothing was stopped`.
+3. `⌘Q` → **Keep sessions running**. Quit, run `npm run app` again. The terminal must print
+   *`the recorded orchestrator (pid N, port N) is running and serving Pi Central's UI…`* and must **not** print
+   *`reopened 2 sessions from the last run`*.
+4. `⌘Q` → **Stop them and quit**. Reopen. Now it **must** print `reopened 2 sessions from the last run`.
+
+Steps 3 and 4 together are the whole slice: 3 proves *adopt*, 4 proves *restore*. Either alone is ambiguous, because a
+shell that always restarts looks identical to one that always restores.
+
+The script already covers criterion 8's mechanism (a seeded `open-sessions.json` is reopened, and each entry keeps its
+mode); what step 4 adds is that it happens for **your** sessions after a real quit.
+
 ## Known rough edges
 
 These are filed rather than worked around, because they are the difference between "possible" and

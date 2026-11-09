@@ -79,6 +79,53 @@ distributes product code of its own.** Concretely:
 
 The shell is therefore macOS-only, which costs nothing: Safehouse is macOS-only already (C10).
 
+## Amendment — what quitting means, and why the shell keeps a process record
+
+Issue #216 turned ADR-0013's sentence *"sessions can outlive the window and even the app"* into behaviour, and
+one part of that needs a decision recorded rather than an implementation buried in `main.ts`.
+
+**The shell writes `runtime.json` under `app.getPath("userData")`**, naming the orchestrator's PID, port and
+start time. Three properties of that file are the decision:
+
+1. **It is a hint, never an authority.** A PID that is gone, that now belongs to a different process (compared
+   by the start time the OS reports, C16), or that is not listening produces a **fresh spawn**. The failure this
+   refuses is specific: adopting a stranger's loopback port and presenting its page in a window with Pi
+   Central's dock icon, which is exactly what §5 and [ADR-0006](0006-untrusted-markdown-rendering.md)'s
+   origin discipline exist to prevent, one level down.
+2. **It is written by the shell, about a process the shell started, and it is not a second record of what is
+   open.** #185's `open-sessions.json` remains the mechanism for that, and the dialog `⌘Q` shows names the
+   sessions from the **orchestrator's own snapshot** rather than from either file — a count the shell derived
+   would be wrong the first time a session failed to start (ADR-0011 §4 requires naming them).
+3. **It is removed on a clean quit and left behind by a crash**, deliberately: `kill -9` leaves a stale file,
+   and property 1 is what makes that harmless. There is no heartbeat, no lock and no `pid` file protocol —
+   nothing to go stale in a way that could block a launch.
+
+**And the child is spawned `detached: true`.** This is not decoration: without it, the orchestrator shares the
+app's process group, so a signal aimed at that group (`kill -TERM -<pgid>`, a logout, a shell's job control)
+reaches every session under it. Measured while writing the test for it: a child survives its parent's ordinary
+**exit** either way on macOS, so "survives the parent" is not evidence for the flag — the group is.
+
+**And the question states a count, not a list** — an amendment to #216's criterion 3, which asked for the session names
+and directories. The first implementation did list them, and a report from real use at seven sessions rejected it: *"the
+list is not useful — just show that X sessions are still running."* The reason holds, and is visible in the screenshot
+that produced it: **the rail is behind the dialog**, showing the same sessions with their state and activity, so a list
+in the modal duplicates the app's own primary surface and pushes out the sentence the modal exists to say.
+
+The property criterion 3 was protecting survives, because it was never about the rows: the number is **derived from the
+supervisor's list** and never counted by the shell. `stopDialog` is still built from that list, and
+`runtime-record.test.ts` feeds lists of 1, 2 and 7 and reads 1, 2 and 7 back, which a shell that invented or cached a
+tally cannot do.
+
+What is lost is seeing *which* sessions are at stake without dismissing the dialog. That is a real trade rather than a
+free win, and it is acceptable only because both answers are non-destructive by default: `Keep` is the default, `Cancel`
+is the dismissal, and the rail answers "which ones" without quitting anything. If the question ever becomes "stop these
+specific ones", the list has to come back — with the rail's own rows, not a second rendering of them.
+
+**A consequence worth stating, because it is a limit rather than a design choice:** the shell cannot always
+prove which process a record names. Where the host forbids the probe (C16), the launch says so and spawns
+anyway, keeping the record for the next attempt. There is no third option — the shell holds no authority to
+stop a process it did not start, and it does not choose ports (ADR-0013 §4), so it cannot take over.
+
 ## Consequences
 
 **Positive**

@@ -139,6 +139,37 @@ async function main(): Promise<number> {
   // failure it explains happens *inside* main — but the handler is outside it.
   startupPort = options.port;
 
+  /*
+   * A closed stdout is not a fatal error (issue #216).
+   *
+   * The desktop shell reads this process's banner from a pipe, and `⌘Q` → "Keep sessions running" ends the shell while
+   * this process keeps working. When the parent exits, its read end of that pipe goes with it and the next
+   * `console.log` fails with `EPIPE` — and with **no `stdout` error listener** Node treats that as an unhandled
+   * stream error and **kills the process**.
+   *
+   * Measured, because it is not the behaviour a reader expects: a child whose parent read one line and exited died
+   * within one write interval, while the same child with an `error` listener kept running. The consequence for this
+   * product is exact — the orchestrator would stop the first time it logged anything after the app quit, taking every
+   * session with it, which is the one outcome the detach design exists to prevent.
+   *
+   * The stream is left in a non-fatal state rather than being redirected: `log` is deliberately conservative, and the
+   * honest reading of "nobody is listening any more" is that the message is dropped, not that the process should die.
+   * `stderr` gets the same treatment for the same reason — `console.error` during a session failure is exactly as
+   * likely as `console.log`, and there is no shell to see it either.
+   */
+  const tolerateClosedStream = (stream: NodeJS.WriteStream): void => {
+    stream.on("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "EPIPE") return;
+      // Anything else is reported to stderr, which has its own listener and therefore cannot re-enter this one. A
+      // failure on stderr itself has nowhere left to go, so it is dropped rather than thrown: an unhandled `error`
+      // event terminates the process, which is the outcome this whole guard exists to avoid.
+      if (stream === process.stderr) return;
+      process.stderr.write(`Pi Central: stdout failed: ${error.message}\n`);
+    });
+  };
+  tolerateClosedStream(process.stdout);
+  tolerateClosedStream(process.stderr);
+
   // Answered before the sandbox probe and before any config is read. `--version` must work in a
   // sandbox, on a host with no Safehouse, and with no home directory — it is the question someone
   // asks when something is already wrong, so it must not be able to fail for the same reason.

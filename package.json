@@ -39,7 +39,8 @@
     "build:package": "node scripts/build-package.mjs",
     "pack": "npm run build:package && npm pack",
     "serve:package": "node bin/pi-central.js",
-    "app": "electron packages/app/src/main.ts"
+    "app": "electron packages/app/src/main.ts",
+    "verify:lifecycle": "node scripts/verify-lifecycle-216.mjs"
   },
   "dependencies": {
     "ws": "^8.22.0"
