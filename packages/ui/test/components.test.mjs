@@ -3064,49 +3064,128 @@ test("the right bar is shown only when a session is focused", () => {
 
 test("both bars and the workspace are ONE flex row, so neither bar is a full-width island", () => {
   /*
-   * The defect a screenshot caught and no test did: the right bar was rendered at the same level as `.shell`,
-   * so `.shell { display: flex }` contained only the LEFT bar. The result was the left bar as a 48px island,
-   * and the context bar and the workspace each on their own full-width row — three stacked bands instead of
-   * three columns.
+   * The defect, twice. First the right bar was rendered at `.shell`'s own level; the fix then left it AFTER
+   * the shell's closing `</div>` — which looked nested because it was indented 8 spaces, so the indentation
+   * assertion believed it. A screenshot showed the consequence: both bars collapsed to their content width
+   * and height, because an empty `.shell` gives the flex row nothing to distribute.
    *
-   * Asserted by INDENTATION, which is the one thing that survives this class of mistake: JSX does not
-   * require the nesting to be visually obvious, so a tag at 6 spaces is a sibling of the `.shell` at 6
-   * spaces and a tag at 8 spaces is inside it. A `depth`-counting scan was tried first and closed the shell
-   * early, because the dialogs rendered inside `.panes` contain their own `</div>`s — a structural scan has
-   * to model JSX, and a test that mis-models it reports on its own arithmetic.
+   * So this asserts the SHAPE THAT MATTERS to the CSS rather than parsing JSX: `.shell` is a flex ROW, the
+   * workspace flexes inside it, and both bars are flex-none columns. Those three rules are what make three
+   * columns; where the tags sit is only how they are produced. A JSX depth parser was attempted and is not
+   * worth it — `.panes`'s opening tag carries a `style={{…}}` expression, so any `<div[^>]*>` pattern needs a
+   * JSX parser to be honest, and a test that needs one should ask a different question.
    */
-  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  const lines = app.split("\n");
-  const shellLine = lines.findIndex((line) => line.trim() === '<div className="shell">');
-  assert.notEqual(shellLine, -1, "the shell row must exist");
-  const shellIndent = lines[shellLine].search(/\S/);
+  const css = readCss();
+  const rule = (selector) => {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+  };
 
-  const left = lines.findIndex((line) => line.includes('side="left"'));
-  const panes = lines.findIndex((line) => line.includes('"panes is-collapsed" : "panes"'));
-  const right = lines.findIndex((line) => line.includes('side="right"'));
-  assert.ok(left > shellLine && panes > shellLine && right > shellLine, "all three come after the shell opens");
+  const shell = rule(".shell");
+  assert.match(shell, /display:\s*flex/, "the shell is the flex row");
+  assert.ok(!/flex-direction:\s*column/.test(shell), "a column here stacks the bars into bands");
+  assert.match(shell, /min-height:\s*0/, "…and takes the row the grid gives it, or an empty row collapses");
 
-  const indentOf = (i) => lines[i].search(/\S/);
+  const panes = rule(".shell > .panes");
+  assert.match(panes, /flex:\s*1/, "the workspace takes the remaining width");
+  assert.match(panes, /min-width:\s*0/, "…and may shrink below its content, as `.panes` itself requires");
+
+  const bar = rule(".activity");
+  assert.match(bar, /flex:\s*none/, "the bars are fixed beside the workspace, not flexible");
+  assert.match(bar, /flex-direction:\s*column/, "each bar is a column of items");
+  assert.match(bar, /width:\s*48px/, "the measured width");
+
   /*
-   * Checked PER BAR, not `Math.max` of the two. The first version of this assertion took the maximum and so
-   * passed with the right bar at the shell's own level — the left bar's indentation masked it. A falsification
-   * (de-indenting the right bar back to the bug) is what showed the assertion could not fail.
+   * Nesting, answered by a real scanner rather than by indentation or string order.
+   *
+   * Both shortcuts failed, which is why the code below is a character walk:
+   *   - INDENTATION is not nesting in this file (line 1823 is a `</div>` at 6 spaces, inside `.panes`);
+   *   - SOURCE ORDER is not nesting either — moving the right bar outside `.shell` does not reorder those
+   *     strings, it only moves a `</div>`. An order-based assertion passed with the bug reintroduced.
+   *
+   * A JSX tag boundary cannot be found with `<div[^>]*>` because attribute lists contain `{…}` expressions
+   * (`.panes` carries `style={{ "--panel-width": … }}`). So the walk skips brace-balanced expressions and
+   * string literals, and counts only real `<div>`/`</div>` tags.
    */
-  for (const [name, line] of [["left", left], ["right", right]]) {
-    assert.ok(
-      indentOf(line) > shellIndent,
-      `the ${name} bar must be nested inside the shell (shell at ${shellIndent}, ${name} bar at ` +
-        `${indentOf(line)}) — at equal indentation it is a sibling and \`display: flex\` never sees it`,
-    );
+  const src = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+
+  /**
+   * The DIRECT children of the div whose opening tag starts at `from`, as a list of names.
+   *
+   * ## Why this is a character walk and not a regex
+   *
+   * Three shortcuts were tried on this file and each reported the wrong tree:
+   *
+   *   1. **Indentation.** Line 1823 is a `</div>` at 6 spaces that closes `.panes`, while the shell's own close
+   *      is at 6 spaces too. Formatting cannot tell them apart.
+   *   2. **`<div[^>]*>`.** `.panes`'s opening tag carries `style={{ "--panel-width": … }}`, so the pattern either
+   *      stops early or needs a JSX parser.
+   *   3. **Source order of `side="right"`.** Moving the bar out of the shell does not reorder those strings; it
+   *      only moves a `</div>`. That assertion passed with the bug reintroduced.
+   *
+   * A fourth came from skipping every `{…}`: `{focused !== undefined && (` is a WRAPPER, not an attribute, so
+   * skipping it swallowed the right bar entirely and the walk reported one bar for a tree that has two. Hence
+   * `inTag`: `{…}` is skipped only between `<` and `>`, where it is an attribute expression.
+   *
+   * Depth is seeded at 1 to stand for the container itself, so a `<div>` at depth 1 is a direct child and a
+   * `</div>` that brings depth to 0 is the container's close.
+   */
+  function directChildren(source, from) {
+    const out = [];
+    let depth = 1;
+    for (let i = from; i < source.length; i += 1) {
+      const ch = source[i];
+
+      if (ch === "<") {
+        if (source.startsWith("</div>", i)) {
+          depth -= 1;
+          if (depth === 0) return out;
+          i += 5;
+          continue;
+        }
+        /*
+         * A `<div>` is counted but its tag is NOT consumed. Consuming it is what broke the previous version:
+         * `.panes`'s tag runs over four lines and ends with `>` alone, and a consumption loop that starts on
+         * the next character still has to know where the `{…}` expressions inside it end. Counting the open and
+         * continuing means the walk simply encounters those characters again — and a stray `>` or `=>` inside an
+         * attribute is harmless, because only `<div`, `</div>`, `<ActivityBar` and `<` are looked for.
+         */
+        if (source.startsWith("<div", i)) {
+          if (depth === 1) {
+            const window = source.slice(i, i + 240);
+            const named = /className=(?:"([^"]*)"|\{([^}]*)\})/.exec(window);
+            out.push(named === null ? "" : (named[1] ?? named[2] ?? ""));
+          }
+          depth += 1;
+          continue;
+        }
+        if (source.startsWith("<ActivityBar", i) && depth === 1) out.push("ACTIVITY-BAR");
+        continue;
+      }
+    }
+    return undefined;
   }
 
-  // The order is what puts each bar on its own edge: left bar, workspace, right bar.
-  assert.ok(left < panes && panes < right, `expected left < panes < right, got ${left}, ${panes}, ${right}`);
+  const shellAt = src.indexOf('<div className="shell">');
+  assert.notEqual(shellAt, -1, "the shell row must exist");
+  // Start AFTER the shell's own opening tag, or the walk counts the shell itself as its first child.
+  const openEnd = src.indexOf(">", shellAt) + 1;
+  const inside = directChildren(src, openEnd);
+  assert.ok(inside !== undefined, "the shell's closing tag must be found (a brace walk that never closes is a bug here)");
 
-  const css = readCss();
-  const shellRule = /\.shell\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
-  assert.match(shellRule, /display:\s*flex/, "the shell is the flex row that makes them columns");
-  assert.ok(!/flex-direction:\s*column/.test(shellRule), "a column here would stack the bars into bands");
+  /*
+   * The shell's direct children, in order: the left bar, the workspace, the right bar. This is the assertion
+   * that fails when the right bar is a sibling of the shell — the list then has one ACTIVITY-BAR and the bar
+   * appears nowhere in it.
+   */
+  assert.equal(inside.length, 3, `expected 3 direct children of .shell, found ${inside.length}: ${JSON.stringify(inside)}`);
+  assert.equal(inside[0], "ACTIVITY-BAR", "the left bar is first");
+  assert.match(inside[1] ?? "", /panes/, "the workspace is in the middle");
+  assert.equal(inside[2], "ACTIVITY-BAR", "the right bar is last");
+
+  // And the bar count is what distinguishes the fixed tree from the broken one: outside the shell, the right
+  // bar is not in this list at all.
+  assert.equal(inside.filter((name) => name === "ACTIVITY-BAR").length, 2, "both bars are inside the shell");
 });
 
 test("no glyph is used for two different destinations", () => {

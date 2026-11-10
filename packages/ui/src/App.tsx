@@ -1821,7 +1821,6 @@ export function App() {
         </Panel>
         )}
       </div>
-
       {settingsOpen && (
         <Settings
           install={state.install}
@@ -1879,7 +1878,6 @@ export function App() {
           }}
         />
       )}
-      </div>
         {/*
         The CONTEXT bar, on the window's right edge, shown only when a session is open.
 
@@ -1914,6 +1912,7 @@ export function App() {
           />
         )}
 
+      </div>
     </div>
   );
 }
