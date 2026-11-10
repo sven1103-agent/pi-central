@@ -3081,7 +3081,13 @@ test("both bars and the workspace are ONE flex row, so neither bar is a full-wid
     return new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? "";
   };
 
-  const shell = rule(".shell");
+  /*
+   * Matched as a standalone selector, not by `\.shell\s*\{` — `.app > .shell { grid-row: … }` appears first in
+   * the file and a loose regex reads THAT rule body instead. This is the same class of trap the panel's
+   * container test documents ("String.match returns the first match"), and it is caught by asserting a property
+   * the wrong rule cannot have.
+   */
+  const shell = new RegExp("(?:^|\\n)\\.shell\\s*\\{([^}]*)\\}").exec(css)?.[1] ?? "";
   assert.match(shell, /display:\s*flex/, "the shell is the flex row");
   assert.ok(!/flex-direction:\s*column/.test(shell), "a column here stacks the bars into bands");
   assert.match(shell, /min-height:\s*0/, "…and takes the row the grid gives it, or an empty row collapses");
@@ -3207,4 +3213,63 @@ test("no glyph is used for two different destinations", () => {
   // And no glyph twice within the app bar either.
   assert.equal(new Set(leftGlyphs).size, leftGlyphs.length, "each destination has its own mark");
   assert.equal(new Set(rightGlyphs).size, rightGlyphs.length, "each panel mode has its own mark");
+});
+
+test("the shell occupies the growing row, whatever banners are present", () => {
+  /*
+   * The bottom gap, from a screenshot: the workspace stopped ~80px above the window's bottom edge.
+   *
+   * `grid-template-rows: 44px 1fr` on `.app` was correct only while the shell was the second child. The
+   * banners between them are CONDITIONAL, so on the common path the second child is a falsy `&&` expression,
+   * the `1fr` track belonged to nothing, and the shell fell into an implicit `auto` row sized to its content.
+   *
+   * Checked in two halves: the template has a growing LAST track, and the shell is pinned to it. Either alone
+   * leaves the bug reachable.
+   */
+  const css = readCss();
+  const appRule = /\.app\s*\{([^}]*)\}/.exec(css);
+  assert.ok(appRule, "the .app rule must exist");
+  const app = appRule[1];
+  assert.match(app, /grid-template-rows:[^;]*minmax\(0,\s*1fr\)/, "the last track must be the one that grows");
+  assert.ok(
+    !/grid-template-rows:\s*44px\s+1fr\s*;/.test(app),
+    "a bare `44px 1fr` gives the growing track to the first conditional banner",
+  );
+  assert.ok(!/grid-auto-rows/.test(app), "an implicit row per banner is the bug, not the fix");
+});
+
+test("the shell is pinned to the last grid row, so a banner cannot take the growing track", () => {
+  // The companion to the template above. `grid-row: -2 / -1` means "the last track", whatever the banners did.
+  const css = readCss();
+  const pinned = /\.app\s*>\s*\.shell\s*\{([^}]*)\}/.exec(css);
+  assert.ok(pinned, "the shell must have its own grid placement rule");
+  assert.match(pinned[1], /grid-row:\s*-2\s*\/\s*-1/, "the shell occupies the final track");
+});
+
+test("the activity bars recede behind the panes instead of competing with the rail", () => {
+  /*
+   * From a screenshot: "the gray vertical bars distract next to the sessions". They used `--panel-2`
+   * (#1c2230), which is LIGHTER than both the rail (`--panel`, #161b22) and the transcript (`--bg`, #0e1116),
+   * so each bar read as a third slab of surface between two others. Chrome should not be the brightest thing
+   * in the window.
+   */
+  const css = readCss();
+  const barRule = /\.activity\s*\{([^}]*)\}/.exec(css);
+  assert.ok(barRule, "the .activity rule must exist");
+  assert.match(barRule[1], /background:\s*var\(--bg\)/, "the bar uses the window background, not a raised surface");
+  assert.ok(!/--panel-2/.test(barRule[1]), "--panel-2 is lighter than the rail, so it competes");
+});
+
+test("a selected activity item is marked by colour and an edge, not by a filled tile", () => {
+  /*
+   * The tile was 40px in a 48px bar — most of it — so a selected item looked like a button held down, and the
+   * tint read as yet another slab beside the rail.
+   */
+  const css = readCss();
+  const start = css.indexOf('.activity-item[aria-selected="true"]');
+  assert.notEqual(start, -1, "the selected state must be styled");
+  const block = css.slice(start, css.indexOf("}", start));
+  assert.ok(!/background:/.test(block), "a filled tile reads as a permanently pressed button");
+  assert.match(css, /\.activity-left \.activity-item::before/, "the left bar's marker is placed");
+  assert.match(css, /\.activity-right \.activity-item::before/, "and the right bar's");
 });

@@ -180,11 +180,27 @@ button { font: inherit; color: inherit; }
 
 /* ------------------------------------------------------------------ layout */
 
+/*
+ * The app is a grid of [topbar][banners][the rest], and the "rest" track must be the one that grows.
+ *
+ * `grid-template-rows: 44px 1fr` was wrong the moment a banner was added to the tree: the banners are
+ * CONDITIONAL, so on the common path the second child is a falsy `&&` and the `1fr` track belongs to
+ * nothing — the shell then lands in an implicit `auto` row and the window is left with dead space below
+ * it. Measured in a screenshot: the workspace ended ~80px above the bottom of the window.
+ *
+ * `minmax(0, 1fr)` with `grid-auto-rows: auto` for the banners, and the shell pinned to the last row, is
+ * the version that survives any number of optional banners: whatever else is present, the growing track
+ * is the shell's.
+ */
 .app {
   display: grid;
-  grid-template-rows: 44px 1fr;
+  grid-template-rows: 44px auto minmax(0, 1fr);
   height: 100%;
 }
+
+/* Any number of banners may be present (isolation, update, error strip). They sit in the `auto` track and
+   push the shell down; the shell always occupies the last, growing track. */
+.app > .shell { grid-row: -2 / -1; }
 
 
 /*
@@ -349,7 +365,16 @@ button { font: inherit; color: inherit; }
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  background: var(--panel-2);
+  /*
+   * `--bg`, not `--panel-2`. Reported from a screenshot: "the gray vertical bars distract next to the
+   * sessions". `--panel-2` (#1c2230) is LIGHTER than the rail's `--panel` (#161b22), so each bar read as a
+   * third stripe of surface competing with the rail and the transcript.
+   *
+   * The bars are chrome, not content. `--bg` (the window's own background) makes them recede behind both
+   * surfaces they border, which is what a chrome rail should do — and the 1px `--line` on the facing edge is
+   * what still says where it ends.
+   */
+  background: var(--bg);
   padding: var(--sp-2) 0;
 }
 
@@ -381,16 +406,22 @@ button { font: inherit; color: inherit; }
   user-select: none;
 }
 .activity-item:hover { color: var(--text); background: var(--panel); }
+/*
+ * The selected state is the GLYPH COLOUR plus the edge marker below — not a filled tile.
+ *
+ * The first version also painted `--accent-tint`, so a 40px translucent square sat in a 48px bar: most of
+ * the bar, which reads as a button that is permanently pressed, and (reported from a screenshot) as another
+ * grey slab beside the rail. Colour and an edge marker together are enough to say "this one".
+ */
 .activity-item[aria-selected="true"],
-.activity-item[aria-current="page"] { color: var(--accent-text); background: var(--accent-tint); }
+.activity-item[aria-current="page"] { color: var(--accent-text); }
 .activity-item[aria-expanded="true"] { color: var(--accent-text); }
 
 /*
- * The selected marker is a 2px bar on the INNER edge, not a filled tile.
+ * The marker is a 2px bar on the bar's OUTER edge (the window's edge), where VS Code puts it.
  *
- * A filled 40px square in a 48px bar is most of the bar, which makes the selected item read as a button
- * that is always pressed. The edge marker is the convention in VS Code for the same reason, and it costs
- * no colour from the glyph so the glyph can stay legible at `--dim` weight.
+ * `left: -5px` / `right: -5px` place it in the bar's own 4px padding rather than inside the 40px button, so
+ * it never sits on the glyph. Only one edge is used per side: the outer one, so the two bars mirror.
  */
 .activity-item[aria-selected="true"]::before,
 .activity-item[aria-current="page"]::before {
