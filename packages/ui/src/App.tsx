@@ -1963,8 +1963,18 @@ export function App() {
               aria-label={panel.collapsed ? "Show the session panel" : "Hide the session panel"}
               onClick={togglePanelCollapsed}
             >
-              <span className="navrail-glyph" aria-hidden="true">
-                {panel.collapsed ? "▭" : "▮"}
+              {/*
+                A CHEVRON, pointing at the edge the panel moves toward: `◀` pulls it in from the right, `▶`
+                pushes it back out. Reported from use: "i think there are better icons for opening / closing
+                a panel" — the previous pair (`▭`/`▮`) were two rectangles, which said "a rectangle" rather
+                than "this edge moves".
+
+                Rendered from the same glyph slot as the mode items, so it inherits the bar's colour and the
+                focus ring; the rotation is a class, not a different codepoint, so the two states are one
+                shape and cannot drift apart.
+              */}
+              <span className={`navrail-glyph navrail-chevron${panel.collapsed ? "" : " is-open"}`} aria-hidden="true">
+                ◀
               </span>
             </button>
           </ActivityBar>

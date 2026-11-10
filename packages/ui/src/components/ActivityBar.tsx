@@ -67,15 +67,21 @@ export function ActivityBar({
   children?: React.ReactNode;
   as?: "nav" | "tablist";
 }) {
-  const shared = {
-    role: as === "tablist" ? ("tablist" as const) : undefined,
-    "aria-label": label,
-    "aria-orientation": as === "tablist" ? ("vertical" as const) : undefined,
-  };
+  /*
+   * `role="tablist"` goes on the GROUP of modes, not on the bar itself.
+   *
+   * The bar also holds a footer (the panel's show/hide toggle), and a tablist may contain only tabs — a
+   * plain `<button>` inside one is invalid ARIA, and assistive tech is entitled to ignore it. The first
+   * version put the role on the outer element, so the toggle was a non-tab child of a tablist.
+   */
+  const groupRole =
+    as === "tablist"
+      ? { role: "tablist" as const, "aria-label": label, "aria-orientation": "vertical" as const }
+      : {};
 
   return (
-    <div className={`navrail navrail-${side}`} {...shared}>
-      <div className="navrail-group">
+    <div className={`navrail navrail-${side}`} data-side={side}>
+      <div className="navrail-group" {...groupRole}>
         {items.map((item) => (
           <button
             key={item.id}

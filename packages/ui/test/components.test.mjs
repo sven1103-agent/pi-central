@@ -3438,3 +3438,48 @@ test("the panel and its door share one condition, so neither outlives the other"
     "the panel renders on the Sessions page only",
   );
 });
+
+test("the panel toggle is a chevron pointing at the edge the panel moves toward", () => {
+  /*
+   * Reported from use: "i think there are better icons for opening / closing a panel". The previous pair was
+   * `▭`/`▮` — two rectangles, which says "a rectangle" rather than "this edge moves".
+   *
+   * The choice, and why it is ONE codepoint rather than two:
+   *   - a chevron states the MOTION, which is what the control does;
+   *   - `◀` when collapsed points at the panel's edge (the right one), `▶` when open points back out;
+   *   - it is the same glyph rotated, so the two states cannot drift apart and a font missing one of a pair
+   *     cannot make the toggle look like it changed meaning.
+   */
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  // Comments stripped: the block explains the change and therefore NAMES the glyphs it replaced.
+  const bar = app
+    .slice(app.indexOf('side="right"'))
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  assert.match(bar, /navrail-chevron/, "the toggle renders the chevron class");
+  assert.ok(!/▮|▭/.test(bar), "the old rectangle pair is gone from the markup");
+  assert.match(bar, /panel\.collapsed \? "" : " is-open"/, "one glyph, rotated by a class for the open state");
+
+  const css = readCss();
+  assert.match(css, /\.navrail-chevron\.is-open\s*\{[^}]*rotate\(180deg\)/, "the open state is the same shape turned");
+  // Motion is a preference, not a decoration: honour it.
+  assert.match(css, /prefers-reduced-motion[^{]*\{[^}]*\.navrail-chevron\s*\{[^}]*transition:\s*none/);
+});
+
+test("the bar's tablist holds only tabs, so the toggle is not an orphan inside it", () => {
+  /*
+   * Found while changing the icon: `role="tablist"` was on the BAR, and the bar also holds the panel toggle in
+   * its footer. A tablist may contain only tabs — a plain `<button>` inside one is invalid ARIA and assistive
+   * tech is entitled to ignore it, which would have made the only door to the panel unreachable to it.
+   *
+   * The role now goes on the GROUP of modes. Asserted on the component because that is where the structure is.
+   */
+  const bar = readFileSync(new URL("../src/components/ActivityBar.tsx", import.meta.url), "utf8");
+  const src = bar.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  // The outer element must NOT carry the role; the inner group must.
+  assert.match(src, /<div className=\{`navrail navrail-\$\{side\}`\}[^>]*>/, "the bar's own element has no role");
+  assert.ok(
+    !/navrail-\$\{side\}`\}[^>]*role=/.test(src),
+    "the role must not be on the bar, because the bar also holds a non-tab control",
+  );
+  assert.match(src, /className="navrail-group"\s*\{\.\.\.groupRole\}/, "the mode group carries it instead");
+});
