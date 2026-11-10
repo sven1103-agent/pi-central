@@ -10,6 +10,31 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+<!-- Empty at tag time: a release cannot ship undocumented changes. -->
+
+## [0.11.0] — 2026-11-10
+
+A window you open from the dock, and navigation that says which job each control has.
+
+The desktop shell arrives as a **launcher**: it starts the package you installed with npm and shows that
+package's UI, so there is still one artifact, one version and one place that decides what runs
+([ADR-0013](docs/decisions/0013-application-shell.md)). It brings a dock icon, an application menu, and
+`⌘Q` that asks before stopping your sessions — and it keeps them running when you quit.
+
+The interface then lost its nine-control topbar. Navigation moved to the two window edges: the left bar
+chooses a page (Sessions, History, Settings) and the right bar offers views of the **open context**
+(Session, Files, Trace), appearing only where that context exists. A page owns its own furniture, so
+History no longer shows a list of live sessions or a panel about one.
+
+**One protocol change: `PROTOCOL_VERSION` 8 → 9.** One new control (`install`) and one new event
+(`installFacts`), because a returning window asks for this installation's facts instead of walking the
+whole session store. A 0.10.0 UI works against this orchestrator and simply re-checks silently.
+
+Seventy-seven entries across twelve issues. One thing is a **limit rather than a feature**, and it is
+stated rather than hidden: there is no downloadable `.app`. Both routes that once avoided notarization are
+gone — Homebrew closed the last one on 2026-09-01 — so the desktop shell is for people who have the
+checkout, and everyone else gets the same dock icon by adding the web app to their dock.
+
 ### Added
 
 - A desktop shell that launches the installed package and shows its UI, keeping no product code of its own ([#214]).

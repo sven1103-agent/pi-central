@@ -1,6 +1,6 @@
 {
   "name": "@pi-central/app",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "private": true,
   "type": "module",
   "description": "Pi Central desktop shell: a launcher over the installed npm package (ADR-0013).",
