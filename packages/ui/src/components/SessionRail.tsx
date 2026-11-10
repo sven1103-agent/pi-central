@@ -383,7 +383,7 @@ function RailRow({
             {session.state === "failed" && session.error !== undefined && <span>failed</span>}
           </span>
           {session.warnings.length > 0 && (
-            <span className="r3" style={{ color: "var(--warn-text)" }} title={session.warnings.join("\n")}>
+            <span className="r3 r-warn" style={{ color: "var(--warn-text)" }} title={session.warnings.join("\n")}>
               ⚠ {session.warnings[0]}
             </span>
           )}

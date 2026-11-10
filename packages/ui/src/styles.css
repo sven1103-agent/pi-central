@@ -690,7 +690,18 @@ button { font: inherit; color: inherit; }
 }
 .group-header .count { font-family: var(--mono); }
 
-/* Row: 3 lines, state on the left border, no card. */
+/*
+ * Row: 3 lines, state on the left border, no card.
+ *
+ * ## The rounded corner is what separates rows, and it was missing
+ *
+ * `DESIGN.md` §5.1 specifies `border-radius: 0 6px 6px 0` and the rule had none — so a run of rows read as one
+ * continuous slab with coloured left edges, and the eye had nothing telling it where a session ended. The radius is
+ * on the TRAILING corners only, because the left edge is the state bar and must stay a straight vertical run.
+ *
+ * No gap between rows: the rounded corner plus the fill on hover is the separator. A gap would work too, but it
+ * breaks the state colour into dashes, and the left edge is the one thing that must read as continuous.
+ */
 .rail-row {
   display: block;
   width: 100%;
@@ -698,6 +709,7 @@ button { font: inherit; color: inherit; }
   background: none;
   border: none;
   border-left: 3px solid var(--line);
+  border-radius: 0 var(--r-2) var(--r-2) 0;
   padding: var(--sp-2) var(--sp-3);
   cursor: pointer;
   color: var(--dim);
@@ -759,7 +771,24 @@ button { font: inherit; color: inherit; }
   white-space: nowrap;
   margin-top: 1px;
 }
-.rail-row .r3 { display: flex; gap: var(--sp-2); }
+/*
+ * Line 3 is a TWO-COLUMN grid, not a flex row that packs left.
+ *
+ * Reported from the roster: every row's `ctx` label sat at a different x, because `.r3` was `display: flex` with the
+ * gauge as `flex: 1` (capped at 120px) and the label following it — so a short label simply left trailing space and
+ * the numbers down the rail formed a ragged column. Mono type exists here to make values LINE UP (§5.1 says so
+ * explicitly: "what makes six values line up in a column across 20 rows"), and a ragged right edge defeats it.
+ *
+ * `grid-template-columns: auto 1fr` with the gauge fixed: the bar is one width for every row, and the label starts at
+ * the same x for every row. The gauge no longer stretches to the row, which is correct — a 120px cap that only some
+ * rows reached was measuring nothing.
+ */
+.rail-row .r3 {
+  display: grid;
+  grid-template-columns: var(--gauge-width) auto;
+  align-items: center;
+  gap: var(--sp-2);
+}
 .rail-row .ask { color: var(--warn-text); }
 
 /*
@@ -3147,11 +3176,18 @@ select.btn { font-family: var(--sans); }
  */
 .context-bar {
   display: inline-block;
-  /* Flexible by default, capped by the shared gauge width — so the row's bar is as long as the header's, and a
-     narrow rail shrinks it instead of overflowing. */
-  flex: 1;
-  min-width: 42px;
-  max-width: var(--gauge-width);
+  /*
+   * A FIXED width, because the rail's line 3 is a grid whose first track is `--gauge-width`.
+   *
+   * It was `flex: 1` capped at `--gauge-width`, which made the bar's length depend on how much room its own label
+   * needed — so no two rows shared a gauge length, and the labels below them started at different x. A gauge is read by
+   * comparing fills across rows; two bars of different lengths cannot be compared.
+   *
+   * `width: 100%` fills its track, and the header's own use of this class is inside a fixed-width container, so the
+   * single rule serves both.
+   */
+  width: 100%;
+  min-width: 0;
   height: 4px;
   border-radius: var(--r-pill);
   /*
@@ -3177,6 +3213,23 @@ select.btn { font-family: var(--sans); }
   transition: width 240ms ease-out;
 }
 .context-bar.is-full .context-bar-fill { background: var(--warn); }
+
+/*
+ * The warning line is a NOTE, not a second path line.
+ *
+ * In the roster it rendered at the same size and weight as line 2 (and as line 3's numbers), in `--warn-text`, so a
+ * row with a warning read as four competing lines and the warning pulled the eye before the NAME — which is the one
+ * thing the row is for. `--fs-2xs` and a lighter weight keep it legible without outranking the title, and the ⚠ is
+ * already there to carry the severity.
+ */
+.rail-row .r-warn {
+  /* Not the two-column gauge grid: this line has no gauge. */
+  display: block;
+  font-family: var(--sans);
+  font-size: var(--fs-2xs);
+  font-weight: 400;
+  opacity: 0.85;
+}
 
 
 /*

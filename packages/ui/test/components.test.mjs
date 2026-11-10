@@ -3534,3 +3534,49 @@ test("the bar's items sit at the top, in reading order — not spread down the c
   const end = /\n\.navrail-end\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
   assert.match(end, /margin-top:\s*auto/, "a footer group pins itself to the bottom");
 });
+
+test("the roster's ctx labels form a column, and the gauge is one length for every row", () => {
+  /*
+   * From the roster: every row's `ctx` label sat at a different x, because `.r3` was `display: flex` with the gauge
+   * as `flex: 1` capped at `--gauge-width` — so a short label left trailing space and the numbers down the rail formed
+   * a ragged edge.
+   *
+   * `DESIGN.md` §5.1 says mono is "what makes six values line up in a column across 20 rows". A ragged right edge
+   * defeats exactly that. The fix is a two-column grid whose first track is the shared gauge width: the bar is one
+   * length everywhere, and the label starts at the same x everywhere.
+   */
+  const css = readCss();
+  // The LAST `.rail-row .r3` rule — the file declares it twice and the first has no layout.
+  const r3 = [...css.matchAll(/\.rail-row \.r3\s*\{([^}]*)\}/g)].map((m) => m[1]).at(-1) ?? "";
+  assert.match(r3, /display:\s*grid/, "line 3 is a grid, so its columns align across rows");
+  assert.match(r3, /grid-template-columns:\s*var\(--gauge-width\)/, "the gauge track is the shared width");
+  assert.ok(!/display:\s*flex/.test(r3), "a flex row packs left and gives a ragged edge");
+});
+
+test("a roster row is rounded on its trailing corners, so rows are not one slab", () => {
+  /*
+   * `DESIGN.md` §5.1 specifies `border-radius: 0 6px 6px 0` and the rule had NONE — a run of rows read as one
+   * continuous slab with coloured left edges, and nothing told the eye where a session ended.
+   *
+   * Trailing corners only: the left edge is the state bar and must stay a straight vertical run, or the state colour
+   * would break into dashes down the rail.
+   */
+  const css = readCss();
+  const row = /\n\.rail-row\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(row, /border-radius:\s*0 var\(--r-2\) var\(--r-2\) 0/, "trailing corners are rounded");
+  assert.match(row, /border-left:\s*3px solid/, "…and the leading edge stays square, because it is the state bar");
+});
+
+test("a warning line does not outrank the session's name", () => {
+  /*
+   * In the roster the warning rendered at the same size and weight as the path line above it, in `--warn-text`, so a
+   * row with a warning read as four competing lines and the warning pulled the eye before the NAME — the one thing the
+   * row is for. `--fs-2xs` plus a lighter weight keeps it legible while leaving the title dominant; the `⚠` already
+   * carries the severity.
+   */
+  const css = readCss();
+  const warn = /\n\.rail-row \.r-warn\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(warn, /font-size:\s*var\(--fs-2xs\)/, "smaller than the path line");
+  assert.match(warn, /font-family:\s*var\(--sans\)/, "and sans, so it reads as a note rather than a value");
+  assert.match(warn, /display:\s*block/, "not the two-column gauge grid — this line has no gauge");
+});
