@@ -4468,19 +4468,20 @@ select.btn { font-family: var(--sans); }
    the panel is 300px, and a viewport query would answer the wrong question. */
 
 /*
-   The panel is a ROW, not a column: the modes moved from a tab strip above the content to a vertical bar
-   on the *outer* edge — the right edge of the window — so the bar reads as "what can I show" rather than
-   as a second row of tabs.
+   The panel is a COLUMN of [content][resizer], and the mode bar is NOT in it.
 
-   `container-type` moved to `.panel-content` and that is not cosmetic. An inline-size container cannot
-   have its size queried by a descendant that is laid out beside its content, because the query would
-   measure the panel including the 48px bar. `.panel-content` is the column the queries were always
-   about: the width available to a document.
+   The bar lives in the shell, at the window's right edge, because `.panes` is a three-track grid and a
+   bar inside the panel would be a fourth column competing with `--panel-width` and the resizer. It also
+   keeps `clampPanelWidth` meaning what it means.
+
+   `container-type` is on `.panel-content` rather than `.panel` so the number a query sees is the width a
+   document actually gets. Here they are currently the same element's width, but the separation is the
+   property being asserted: a future bar or gutter inside the panel must not silently shrink the measure.
 */
 .panel {
   position: relative;
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   min-height: 0;
   min-width: 0;
   background: var(--panel);

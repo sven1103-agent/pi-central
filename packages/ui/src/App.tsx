@@ -1402,7 +1402,9 @@ export function App() {
               // "Sessions" is the only word in the whole bar, so the tooltip carries the extra fact that
               // this is a toggle: below 1024 it opens the drawer, above it hides the column.
               label: railIsDrawer ? (railOpen ? "Hide sessions" : "Show sessions") : "Sessions",
-              glyph: "▤",
+              // Not `▤`: that is the Files glyph in the context bar, and the same mark for "the session
+              // list" and "this session's files" is a collision a reader has to resolve from position alone.
+              glyph: "☰",
               active: tab === "sessions" && (!railIsDrawer || railOpen),
               expanded: railIsDrawer ? railOpen : undefined,
               controls: railIsDrawer ? "session-rail" : undefined,
@@ -1429,34 +1431,6 @@ export function App() {
             </span>
           </button>
         </ActivityBar>
-
-      {/*
-        The CONTEXT bar, on the right edge, shown only when a session is open.
-
-        "Only if a session is active" is the reader's own requirement, and it is also what makes the bar
-        honest: Session/Files/Trace are views of a session, so offering them with nothing focused would
-        promise three views of nothing. When the panel is open it stays a thin 48px strip on the outside
-        of the panel — see `.panel`'s comment for why that is cheaper than a fourth grid track.
-      */}
-      {focused !== undefined && (
-        <ActivityBar
-          side="right"
-          as="tablist"
-          label="Session view"
-          items={PANEL_MODES.map(({ mode, label, glyph }) => ({
-            id: `session-view-${mode}`,
-            label,
-            glyph,
-            active: !panel.collapsed && panel.mode === mode,
-            onSelect: () => {
-              // Choosing a mode also opens a collapsed panel: the bar is the door to the panel, so a
-              // selected-but-invisible mode would make the click look broken.
-              if (panel.collapsed) togglePanelCollapsed();
-              setPanelMode(mode);
-            },
-          }))}
-        />
-      )}
 
       <div
         className={panel.collapsed ? "panes is-collapsed" : "panes"}
@@ -1906,6 +1880,40 @@ export function App() {
         />
       )}
       </div>
+        {/*
+        The CONTEXT bar, on the window's right edge, shown only when a session is open.
+
+        "Only if a session is active" is the reader's own requirement, and it is also what makes the bar
+        honest: Session/Files/Trace are views of a session, so offering them with nothing focused would
+        promise three views of nothing. When the panel is open it stays a thin 48px strip on the outside
+        of the panel — see `.panel`'s comment for why that is cheaper than a fourth grid track.
+
+        It sits INSIDE `.shell` and AFTER `.panes`, which is what makes it the outermost thing on that
+        side. The first version rendered it as a SIBLING of `.shell`, so the flex row contained one bar
+        and the other two became separate grid rows: the left bar was a 48px island, and the context bar
+        and the workspace each took a full-width row. A screenshot showed it; no test caught it, because
+        every assertion was about the bar's own markup rather than about where it lives.
+        */}
+        {focused !== undefined && (
+          <ActivityBar
+            side="right"
+            as="tablist"
+            label="Session view"
+            items={PANEL_MODES.map(({ mode, label, glyph }) => ({
+              id: `session-view-${mode}`,
+              label,
+              glyph,
+              active: !panel.collapsed && panel.mode === mode,
+              onSelect: () => {
+                // Choosing a mode also opens a collapsed panel: the bar is the door to the panel, so a
+                // selected-but-invisible mode would make the click look broken.
+                if (panel.collapsed) togglePanelCollapsed();
+                setPanelMode(mode);
+              },
+            }))}
+          />
+        )}
+
     </div>
   );
 }

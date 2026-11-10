@@ -1877,8 +1877,15 @@ test("the panel is a named query container, and the split query targets that nam
   assert.ok(content, "the panel must have a content column");
   assert.match(content[1], /container-type:\s*inline-size/, "the content column is the query container");
   assert.match(content[1], /container-name:\s*panel\b/, "…with the same name, so the queries still match");
+  /*
+   * The panel is a COLUMN and holds no bar. An earlier version of this assertion required
+   * `flex-direction: row` — it was describing the implementation I had just written, including the bug in
+   * it, rather than the property that matters. A test can hold a defect in place.
+   */
   const panel = /\.panel\s*\{([^}]*)\}/.exec(css);
-  assert.match(panel?.[1] ?? "", /flex-direction:\s*row/, "the panel lays its content and bar out side by side");
+  assert.match(panel?.[1] ?? "", /flex-direction:\s*column/, "the panel is a column: content above, resizer overlay");
+  const rendered = renderToString(createElement(Panel, panelProps(), createElement("p", null, "body")));
+  assert.ok(!/class="activity/.test(rendered), "and no bar is rendered inside it");
 });
 
 test("the panel column is sized by a custom property, so only one thing writes the width", () => {
@@ -3053,4 +3060,72 @@ test("the right bar is shown only when a session is focused", () => {
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   const guarded = /focused !== undefined && \(\s*<ActivityBar/.test(app.replace(/\s+/g, " "));
   assert.ok(guarded, "the context bar must be inside a `focused !== undefined` guard");
+});
+
+test("both bars and the workspace are ONE flex row, so neither bar is a full-width island", () => {
+  /*
+   * The defect a screenshot caught and no test did: the right bar was rendered at the same level as `.shell`,
+   * so `.shell { display: flex }` contained only the LEFT bar. The result was the left bar as a 48px island,
+   * and the context bar and the workspace each on their own full-width row — three stacked bands instead of
+   * three columns.
+   *
+   * Asserted by INDENTATION, which is the one thing that survives this class of mistake: JSX does not
+   * require the nesting to be visually obvious, so a tag at 6 spaces is a sibling of the `.shell` at 6
+   * spaces and a tag at 8 spaces is inside it. A `depth`-counting scan was tried first and closed the shell
+   * early, because the dialogs rendered inside `.panes` contain their own `</div>`s — a structural scan has
+   * to model JSX, and a test that mis-models it reports on its own arithmetic.
+   */
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const lines = app.split("\n");
+  const shellLine = lines.findIndex((line) => line.trim() === '<div className="shell">');
+  assert.notEqual(shellLine, -1, "the shell row must exist");
+  const shellIndent = lines[shellLine].search(/\S/);
+
+  const left = lines.findIndex((line) => line.includes('side="left"'));
+  const panes = lines.findIndex((line) => line.includes('"panes is-collapsed" : "panes"'));
+  const right = lines.findIndex((line) => line.includes('side="right"'));
+  assert.ok(left > shellLine && panes > shellLine && right > shellLine, "all three come after the shell opens");
+
+  const indentOf = (i) => lines[i].search(/\S/);
+  /*
+   * Checked PER BAR, not `Math.max` of the two. The first version of this assertion took the maximum and so
+   * passed with the right bar at the shell's own level — the left bar's indentation masked it. A falsification
+   * (de-indenting the right bar back to the bug) is what showed the assertion could not fail.
+   */
+  for (const [name, line] of [["left", left], ["right", right]]) {
+    assert.ok(
+      indentOf(line) > shellIndent,
+      `the ${name} bar must be nested inside the shell (shell at ${shellIndent}, ${name} bar at ` +
+        `${indentOf(line)}) — at equal indentation it is a sibling and \`display: flex\` never sees it`,
+    );
+  }
+
+  // The order is what puts each bar on its own edge: left bar, workspace, right bar.
+  assert.ok(left < panes && panes < right, `expected left < panes < right, got ${left}, ${panes}, ${right}`);
+
+  const css = readCss();
+  const shellRule = /\.shell\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(shellRule, /display:\s*flex/, "the shell is the flex row that makes them columns");
+  assert.ok(!/flex-direction:\s*column/.test(shellRule), "a column here would stack the bars into bands");
+});
+
+test("no glyph is used for two different destinations", () => {
+  /*
+   * From a screenshot: `▤` was Sessions in the left bar AND Files in the context bar. In a 48px bar the glyph
+   * is the only thing telling two items apart, so reusing one makes the reader resolve the collision from
+   * position alone — and the two are not even the same kind of thing (a list of all sessions vs. this
+   * session's files).
+   */
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const leftGlyphs = [...app.matchAll(/glyph: "([^"]+)"/g)].map((m) => m[1]);
+  const rightGlyphs = PANEL_MODES.map(({ glyph }) => glyph);
+  assert.ok(leftGlyphs.length >= 2, "the app bar has items");
+  assert.deepEqual(
+    leftGlyphs.filter((g) => rightGlyphs.includes(g)),
+    [],
+    `a glyph may appear in only one bar; reused: ${leftGlyphs.filter((g) => rightGlyphs.includes(g)).join(", ")}`,
+  );
+  // And no glyph twice within the app bar either.
+  assert.equal(new Set(leftGlyphs).size, leftGlyphs.length, "each destination has its own mark");
+  assert.equal(new Set(rightGlyphs).size, rightGlyphs.length, "each panel mode has its own mark");
 });
