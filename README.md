@@ -29,9 +29,14 @@ Contributors: jump to [Working on this project](#working-on-this-project).
 ![Pi Central's dashboard: a session rail on the left listing one running, one idle and one stopped
 session with their working directories and context burn; the transcript in the middle showing the
 assistant's prose, a first-person turn containing a pasted screenshot rendered inline with its type
-and size, and a collapsed "Thinking…" group below it; the session header on the right with the model
+and size, and a collapsed "Thinking…" group below it; the session panel on the right with the model
 and thinking pickers; the composer at the foot with its key hints and an auto-follow toggle; and a
 topbar reading two sessions, one running, one scratch and connected.](docs/images/dashboard.png)
+
+<!-- The screenshot predates the activity bars: it still shows the wordmark and the combined
+Sessions|History strip in the topbar. Alt text describes the IMAGE, so it is left matching what the
+file actually shows; the description of the current layout is in the prose and in DESIGN.md. Retaking
+it needs a browser, which the agent sandbox cannot launch. -->
 
 **Status: works end to end, verified, and published.** The version is deliberately not written here —
 `pi-central --version` reports the version of the package it shipped in. See
@@ -48,41 +53,37 @@ Check these first — Pi Central will not run without them, and it is better to 
 | **[Safehouse](https://agent-safehouse.dev)** | Composes the per-session sandbox profile. | `safehouse --help` |
 | **Node ≥ 22** | The orchestrator runs TypeScript directly. | `node --version` |
 
-## Quick start
+## Install
 
 ```bash
-npm install --global pi-central   # inert: this package runs no install scripts
-npm audit signatures              # verify BEFORE the first run
+npm install --global pi-central
 pi-central
 ```
 
-It prints the URL it is serving — <http://127.0.0.1:8787> unless you passed `--port`. One process serves
-both the UI and the socket, so there is no dev server to start.
+Open the URL it prints — <http://127.0.0.1:8787> unless you passed `--port`. That is the whole
+installation: one process serves both the UI and the socket, so there is no dev server, no config file
+and no service to start.
 
-> **Run it from a plain terminal.** Not from an editor task, a sandboxed shell, or an agent harness.
-> macOS Seatbelt does not nest: `safehouse` applies its policy with `sandbox-exec`, which cannot run
-> inside an existing sandbox. Pi Central checks this before binding a port and refuses with an
-> explanation rather than failing confusingly later. ([C1](docs/CONSTRAINTS.md))
+Optional next steps: [add it to your dock](#in-your-dock), or [run it as a native app](#as-a-native-app).
 
-Once it is running, [install it as an app](#install-it-as-an-app) and you will not need the terminal
-again until the next reboot.
+> **Run it from a plain terminal** — not from an editor task, a sandboxed shell or an agent harness.
+> macOS Seatbelt does not nest, so `safehouse` cannot apply its policy inside an existing sandbox. Pi
+> Central checks this before binding a port and refuses with an explanation ([C1](docs/CONSTRAINTS.md)).
 
-### Verify what you installed
+### Verify the download
 
-`npm audit signatures` checks the **provenance attestation** every release carries — a signed statement,
-minted by the release workflow's OIDC identity rather than a stored token, that this tarball came from
-this commit via this workflow.
+```bash
+npm audit signatures       # the provenance attestation matches the tarball
+pi-central --version       # the version you actually have
+```
 
-What it does **not** do: it is a check you have to run (npm does not refuse an unattested tarball), and
-it answers *"did the publisher produce this?"* — not *"is the publisher trustworthy?"*. Pi Central runs
-**outside** the sandbox with your privileges by design, because it is the component that spawns sandboxed
-sessions. The attestation tells a tampered tarball from a genuine one; it cannot make a genuine tarball
-safe.
-
-`npx pi-central` has no window to check in: it fetches and executes in one step. If you use it, pin an
-exact version (`npx pi-central@<version>`, where `<version>` is what `pi-central --version` reports).
-The number is not written here on purpose — a README that restates a version goes stale, and
-`scripts/check-version.mjs` refuses to let one.
+`npm audit signatures` checks the attestation every release carries — a signed statement, minted by the
+release workflow's OIDC identity rather than a stored token, that this tarball came from this commit via
+this workflow. It does **not** refuse an unattested tarball (npm shows a badge; enforcement is yours),
+and it answers *"did the publisher produce this?"* rather than *"is the publisher trustworthy?"* — Pi
+Central runs outside the sandbox with your privileges by design, so this tells a tampered tarball from a
+genuine one and cannot make a genuine one safe. Why `npx pi-central` cannot be verified this way, and why
+it should be pinned, is in [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Why it exists
 
@@ -108,10 +109,10 @@ already inside `sandbox-exec` cannot apply a second profile, so an architecture 
 in-process would have no sandbox at all. The orchestrator must live outside and spawn one `safehouse`
 invocation per session. Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Install it as an app
+## In your dock
 
-Pi Central is a web app that installs to your dock. Start it once (see [Quick start](#quick-start)),
-open <http://127.0.0.1:8787>, then install it from the browser's own menu:
+Pi Central is a web app. Start it once (see [Install](#install)), open <http://127.0.0.1:8787>, then add
+it to your dock from the browser's own menu:
 
 | Browser | How |
 |---|---|
@@ -119,26 +120,23 @@ open <http://127.0.0.1:8787>, then install it from the browser's own menu:
 | **Chrome / Edge** | the install icon at the right end of the address bar, or *⋮ → Install page as app* |
 | **Firefox** | **not supported** — Mozilla has no PWA install on desktop. The service worker still works; use another browser for the dock icon. |
 
-You get the π mark in the dock and a window with no tab bar or address field.
+You get the π mark in the dock and a window with no tab bar or address field. It is **not offline**,
+deliberately: every screen is fed by the socket, so with the orchestrator down the app says
+`disconnected` rather than showing a blank dashboard.
 
-**It is not an offline app, deliberately.** Every screen is fed by the socket, so if the orchestrator is
-not running the installed app says `disconnected` and nothing else. A window that claimed to work
-offline would open onto a blank dashboard.
+## As a native app
 
-### Or as a native app, from this checkout
-
-There is also an optional desktop shell — a real `.app` in `~/Applications`, which can apply Pi Central
-updates itself and keeps your sessions running when you quit:
+Optional: a real `.app` in `~/Applications` that keeps your sessions running when you quit.
 
 ```bash
-npm install
-npm run install-app
+git clone https://github.com/sven1103-agent/pi-central && cd pi-central
+npm install && npm run install-app
 ```
 
-It needs no Apple Developer account and no admin rights. It is a launcher, not a second copy of Pi
-Central: it starts the npm-installed package and shows its UI, so the npm package stays the only thing
-that is updated. See [docs/APP-SHELL.md](docs/APP-SHELL.md) for the signing identity that keeps macOS
-privacy grants across rebuilds, and for what Gatekeeper will and will not do.
+No Apple Developer account and no admin rights. It is a **launcher**, not a second copy — it starts the
+npm-installed package and shows its UI, so the npm package stays the only thing that is updated. The
+signing identity that keeps macOS privacy grants across rebuilds, and what Gatekeeper will and will not
+do, are in [docs/APP-SHELL.md](docs/APP-SHELL.md).
 
 ## What works, and what does not
 
