@@ -359,7 +359,7 @@ button { font: inherit; color: inherit; }
  * private-use or emoji codepoint renders differently on every OS; these are geometric shapes that exist
  * in every UI font (`◉ ▤ ≡`). No SVG pipeline, and `currentColor` gives the selected state for free.
  */
-.activity {
+.navrail {
   flex: none;
   width: 48px;
   display: flex;
@@ -380,14 +380,14 @@ button { font: inherit; color: inherit; }
 
 /* The border is on the side facing the content, so each bar reads as an edge of the window rather than
    as a card floating in it. */
-.activity-left { border-right: 1px solid var(--line); }
-.activity-right { border-left: 1px solid var(--line); }
+.navrail-left { border-right: 1px solid var(--line); }
+.navrail-right { border-left: 1px solid var(--line); }
 
-.activity-group { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.navrail-group { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 /* Settings belongs at the bottom, where a settings control is looked for. */
-.activity-end { margin-top: auto; }
+.navrail-end { margin-top: auto; }
 
-.activity-item {
+.navrail-item {
   position: relative;
   width: 40px;
   height: 40px;
@@ -405,7 +405,7 @@ button { font: inherit; color: inherit; }
   /* The glyph is centred, so it must not be selected as text on a double click. */
   user-select: none;
 }
-.activity-item:hover { color: var(--text); background: var(--panel); }
+.navrail-item:hover { color: var(--text); background: var(--panel); }
 /*
  * The selected state is the GLYPH COLOUR plus the edge marker below — not a filled tile.
  *
@@ -413,9 +413,9 @@ button { font: inherit; color: inherit; }
  * the bar, which reads as a button that is permanently pressed, and (reported from a screenshot) as another
  * grey slab beside the rail. Colour and an edge marker together are enough to say "this one".
  */
-.activity-item[aria-selected="true"],
-.activity-item[aria-current="page"] { color: var(--accent-text); }
-.activity-item[aria-expanded="true"] { color: var(--accent-text); }
+.navrail-item[aria-selected="true"],
+.navrail-item[aria-current="page"] { color: var(--accent-text); }
+.navrail-item[aria-expanded="true"] { color: var(--accent-text); }
 
 /*
  * The marker is a 2px bar on the bar's OUTER edge (the window's edge), where VS Code puts it.
@@ -423,8 +423,8 @@ button { font: inherit; color: inherit; }
  * `left: -5px` / `right: -5px` place it in the bar's own 4px padding rather than inside the 40px button, so
  * it never sits on the glyph. Only one edge is used per side: the outer one, so the two bars mirror.
  */
-.activity-item[aria-selected="true"]::before,
-.activity-item[aria-current="page"]::before {
+.navrail-item[aria-selected="true"]::before,
+.navrail-item[aria-current="page"]::before {
   content: "";
   position: absolute;
   top: 6px;
@@ -433,10 +433,10 @@ button { font: inherit; color: inherit; }
   border-radius: 1px;
   background: var(--accent);
 }
-.activity-left .activity-item::before { left: -5px; }
-.activity-right .activity-item::before { right: -5px; }
+.navrail-left .navrail-item::before { left: -5px; }
+.navrail-right .navrail-item::before { right: -5px; }
 
-.activity-glyph { display: block; }
+.navrail-glyph { display: block; }
 
 /* ------------------------------------------------------------------ topbar */
 

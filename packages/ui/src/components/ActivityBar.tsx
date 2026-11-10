@@ -74,8 +74,8 @@ export function ActivityBar({
   };
 
   return (
-    <div className={`activity activity-${side}`} {...shared}>
-      <div className="activity-group">
+    <div className={`navrail navrail-${side}`} {...shared}>
+      <div className="navrail-group">
         {items.map((item) => (
           <button
             key={item.id}
@@ -86,7 +86,7 @@ export function ActivityBar({
               here (the first version emitted `activity-right-` + the id) made the reference dangle.
             */
             id={item.id}
-            className="activity-item"
+            className="navrail-item"
             aria-selected={as === "tablist" ? item.active === true : undefined}
             aria-current={as === "nav" && item.active === true ? "page" : undefined}
             aria-expanded={item.expanded}
@@ -98,13 +98,13 @@ export function ActivityBar({
             aria-label={item.label}
             onClick={item.onSelect}
           >
-            <span className="activity-glyph" aria-hidden="true">
+            <span className="navrail-glyph" aria-hidden="true">
               {item.glyph}
             </span>
           </button>
         ))}
       </div>
-      {children !== undefined && <div className="activity-group activity-end">{children}</div>}
+      {children !== undefined && <div className="navrail-group navrail-end">{children}</div>}
     </div>
   );
 }

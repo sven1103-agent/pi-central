@@ -1420,13 +1420,13 @@ export function App() {
         >
           <button
             type="button"
-            className="activity-item"
+            className="navrail-item"
             title="Settings"
             aria-label="Settings"
             ref={settingsTriggerRef}
             onClick={() => setSettingsOpen(true)}
           >
-            <span className="activity-glyph" aria-hidden="true">
+            <span className="navrail-glyph" aria-hidden="true">
               ⚙
             </span>
           </button>

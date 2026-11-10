@@ -3031,12 +3031,12 @@ test("the word mark is a mark: the product name is not drawn in the topbar", () 
 
 test("both bars are vertical, labelled, and 48px wide", () => {
   const css = readCss();
-  const activity = /\.activity\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  const activity = /\.navrail\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
   assert.match(activity, /flex-direction:\s*column/, "a bar is a column");
   assert.match(activity, /width:\s*48px/, "the width is the measured 48px, not an accident");
   // The edges face the content, so each bar reads as a side of the window.
-  assert.match(css, /\.activity-left\s*\{[^}]*border-right/, "the left bar's edge faces the content");
-  assert.match(css, /\.activity-right\s*\{[^}]*border-left/, "the right bar's edge faces the content");
+  assert.match(css, /\.navrail-left\s*\{[^}]*border-right/, "the left bar's edge faces the content");
+  assert.match(css, /\.navrail-right\s*\{[^}]*border-left/, "the right bar's edge faces the content");
 });
 
 test("the left bar is a nav and the right bar is a tablist, because they mean different things", () => {
@@ -3096,7 +3096,7 @@ test("both bars and the workspace are ONE flex row, so neither bar is a full-wid
   assert.match(panes, /flex:\s*1/, "the workspace takes the remaining width");
   assert.match(panes, /min-width:\s*0/, "…and may shrink below its content, as `.panes` itself requires");
 
-  const bar = rule(".activity");
+  const bar = rule(".navrail");
   assert.match(bar, /flex:\s*none/, "the bars are fixed beside the workspace, not flexible");
   assert.match(bar, /flex-direction:\s*column/, "each bar is a column of items");
   assert.match(bar, /width:\s*48px/, "the measured width");
@@ -3254,8 +3254,8 @@ test("the activity bars recede behind the panes instead of competing with the ra
    * in the window.
    */
   const css = readCss();
-  const barRule = /\.activity\s*\{([^}]*)\}/.exec(css);
-  assert.ok(barRule, "the .activity rule must exist");
+  const barRule = /\.navrail\s*\{([^}]*)\}/.exec(css);
+  assert.ok(barRule, "the .navrail rule must exist");
   assert.match(barRule[1], /background:\s*var\(--bg\)/, "the bar uses the window background, not a raised surface");
   assert.ok(!/--panel-2/.test(barRule[1]), "--panel-2 is lighter than the rail, so it competes");
 });
@@ -3266,10 +3266,55 @@ test("a selected activity item is marked by colour and an edge, not by a filled 
    * tint read as yet another slab beside the rail.
    */
   const css = readCss();
-  const start = css.indexOf('.activity-item[aria-selected="true"]');
+  const start = css.indexOf('.navrail-item[aria-selected="true"]');
   assert.notEqual(start, -1, "the selected state must be styled");
   const block = css.slice(start, css.indexOf("}", start));
   assert.ok(!/background:/.test(block), "a filled tile reads as a permanently pressed button");
-  assert.match(css, /\.activity-left \.activity-item::before/, "the left bar's marker is placed");
-  assert.match(css, /\.activity-right \.activity-item::before/, "and the right bar's");
+  assert.match(css, /\.navrail-left \.navrail-item::before/, "the left bar's marker is placed");
+  assert.match(css, /\.navrail-right \.navrail-item::before/, "and the right bar's");
+});
+
+test("the bars use a namespace of their own, because `.activity` already means a tool group", () => {
+  /*
+   * From a screenshot: the left bar rendered as a grey slab with a 3px left border, and the marks above it
+   * were black boxes. The cause was a CLASS COLLISION — `.activity` and `.activity-glyph` are the transcript's
+   * tool-activity group (styles.css: `.activity { border-left: 3px solid var(--quarantine); background:
+   * var(--panel); max-width: var(--reading-measure); margin: 2px 0 var(--sp-3) }`).
+   *
+   * The bar inherited every one of those, which is why it looked like a strip of surface with a coloured edge
+   * rather than chrome — and why the glyphs sat in bordered boxes.
+   *
+   * A shared class is invisible in both directions: the bar's own rules looked fine, and the transcript's
+   * looked fine. So this asserts the namespaces are DISJOINT, which is the property that was violated.
+   */
+  const css = readCss();
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const bar = readFileSync(new URL("../src/components/ActivityBar.tsx", import.meta.url), "utf8");
+
+  // Every class the bar renders must be `navrail*`.
+  const rendered = [...`${app}${bar}`.matchAll(/className=(?:"([^"]+)"|{`([^`]+)`})/g)]
+    .flatMap((m) => (m[1] ?? m[2] ?? "").split(/\s+/))
+    .filter((name) => name !== "");
+  // Only the classes on the bar's own elements matter; the app renders many other things.
+  const barClasses = rendered.filter((name) => /^(navrail|activity)/.test(name));
+  assert.ok(barClasses.length > 0, "the bar must render classes at all");
+  for (const name of barClasses) {
+    assert.match(name, /^navrail/, `"${name}" is rendered by the bar but is not in the navrail namespace`);
+  }
+
+  /*
+   * And the transcript's names are untouched: `.activity` still carries its quarantine border, and
+   * `.activity-glyph` still carries its quarantine colour. If a future change renames those to `navrail`, the
+   * bar would inherit the transcript's look and this test would say so.
+   */
+  const activityRule = /(?:^|\n)\.activity\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(activityRule, /border-left:\s*3px solid var\(--quarantine\)/, "`.activity` is still the tool group");
+  const activityGlyph = /(?:^|\n)\.activity-glyph\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(activityGlyph, /var\(--quarantine\)/, "`.activity-glyph` is still the tool group's mark");
+
+  // The bar's own rule must not carry the transcript's properties.
+  const navrail = /(?:^|\n)\.navrail\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  for (const leak of ["--quarantine", "reading-measure"]) {
+    assert.ok(!navrail.includes(leak), `the bar must not inherit ${leak} from the tool group`);
+  }
 });
