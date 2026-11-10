@@ -446,19 +446,20 @@ button { font: inherit; color: inherit; }
 .navrail-glyph { display: block; }
 
 /*
- * The panel toggle's chevron. One codepoint with a transform, rather than `◀`/`▶` as two characters: the two
- * states are then guaranteed to be the same shape, and a font that lacks one of a pair cannot make the toggle
- * look like it changed meaning. `◀` points at the panel's edge (the right one) when the panel is hidden.
+ * The rule between a bar-level control and the view items.
+ *
+ * Reported from use: "Include a small visual separator, so it is not mixed up with the other icon actions."
+ * The panel toggle sits at the top of the right bar and the modes below it; without a rule the toggle reads as
+ * a fourth mode, although it does something else entirely (it shows/hides the region the modes live in).
+ *
+ * Inset rather than full width, so it reads as a divider between two groups rather than as a section header.
  */
-.navrail-chevron {
-  transition: transform 120ms ease;
-  /* The filled triangle is heavy at this size on a dark bar; the open state reads lighter as an outline. */
-  font-size: 13px;
-  line-height: 1;
-}
-.navrail-chevron.is-open { transform: rotate(180deg); }
-@media (prefers-reduced-motion: reduce) {
-  .navrail-chevron { transition: none; }
+.navrail-rule {
+  flex: none;
+  height: 1px;
+  margin: var(--sp-2) 10px;
+  background: var(--line);
+  border-radius: 1px;
 }
 
 /* ------------------------------------------------------------------ topbar */

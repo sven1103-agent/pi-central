@@ -57,12 +57,24 @@ export function ActivityBar({
   side,
   label,
   items,
+  header,
   children,
   as = "nav",
 }: {
   side: "left" | "right";
   label: string;
   items: readonly ActivityItem[];
+  /**
+   * AT THE TOP of the bar, above the items and behind a rule.
+   *
+   * Reported from use: "make this a top icon on the right bar. Right bottom is out of reach." The footer slot
+   * put a control at the end of a full-height column, so on a tall window the panel toggle sat far from the
+   * modes it belongs to.
+   *
+   * It is separated by a rule because it is a different KIND of control from the items below: those select a
+   * view, this shows or hides the region the views live in. Unseparated it reads as one more mode.
+   */
+  header?: React.ReactNode;
   /** Pinned to the end of the bar: the bottom is where a settings control belongs. */
   children?: React.ReactNode;
   as?: "nav" | "tablist";
@@ -81,6 +93,14 @@ export function ActivityBar({
 
   return (
     <div className={`navrail navrail-${side}`} data-side={side}>
+      {header !== undefined && (
+        <>
+          <div className="navrail-group">{header}</div>
+          {/* Separates a bar-level control from the view items: `aria-hidden` because it is a visual rule,
+              and the grouping is already carried by the elements' own roles. */}
+          <div className="navrail-rule" aria-hidden="true" />
+        </>
+      )}
       <div className="navrail-group" {...groupRole}>
         {items.map((item) => (
           <button

@@ -3439,30 +3439,55 @@ test("the panel and its door share one condition, so neither outlives the other"
   );
 });
 
-test("the panel toggle is a chevron pointing at the edge the panel moves toward", () => {
+test("the panel toggle is the divided-square pair, at the TOP of the right bar, behind a rule", () => {
   /*
-   * Reported from use: "i think there are better icons for opening / closing a panel". The previous pair was
-   * `▭`/`▮` — two rectangles, which says "a rectangle" rather than "this edge moves".
+   * Three reports, in order, and this test pins the final shape:
    *
-   * The choice, and why it is ONE codepoint rather than two:
-   *   - a chevron states the MOTION, which is what the control does;
-   *   - `◀` when collapsed points at the panel's edge (the right one), `▶` when open points back out;
-   *   - it is the same glyph rotated, so the two states cannot drift apart and a font missing one of a pair
-   *     cannot make the toggle look like it changed meaning.
+   *   1. "the show hide panel toggle shall be an icon, and it needs to be integrated in the context aware
+   *      bar, not globally" — it moved from a word in the topbar to a glyph in the bar;
+   *   2. "i think there are better icons for opening / closing a panel" — a pair of rectangles said
+   *      "a rectangle";
+   *   3. "use this icon pair and make this a top icon on the right bar. Right bottom is out of reach.
+   *      Include a small visual separator" — the footer put it at the bottom of a full-height column.
+   *
+   * The pair is `◫` / `◨`: a square divided by a vertical rule (two panes, panel shown) and the same square
+   * with its RIGHT half filled (one pane, panel hidden). The filled half is the panel's side, so the picture
+   * says which side is missing — a depiction, not a direction, which is why it is two codepoints and not one
+   * rotated glyph.
    */
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  // Comments stripped: the block explains the change and therefore NAMES the glyphs it replaced.
-  const bar = app
-    .slice(app.indexOf('side="right"'))
-    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
-  assert.match(bar, /navrail-chevron/, "the toggle renders the chevron class");
-  assert.ok(!/▮|▭/.test(bar), "the old rectangle pair is gone from the markup");
-  assert.match(bar, /panel\.collapsed \? "" : " is-open"/, "one glyph, rotated by a class for the open state");
+  const src = app.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  const bar = src.slice(src.indexOf('side="right"'));
 
+  // The pair, in the right polarity: filled when the panel is GONE.
+  assert.match(bar, /panel\.collapsed \? "◨" : "◫"/, "filled half when collapsed, divided square when shown");
+  assert.ok(!/▮|▭|◀|▶/.test(bar), "the earlier rectangle and chevron glyphs are gone from the markup");
+
+  // It is the HEADER of the bar, not the footer: `header=` comes before `items=`.
+  const headerAt = bar.indexOf("header={");
+  const itemsAt = bar.indexOf("items={");
+  assert.notEqual(headerAt, -1, "the toggle is the bar's header");
+  assert.ok(headerAt < itemsAt, "the header is rendered above the mode items");
+  assert.ok(!/children=\{/.test(bar), "…and nothing is left in the footer slot");
+
+  // The separator exists and is decorative.
+  const component = readFileSync(new URL("../src/components/ActivityBar.tsx", import.meta.url), "utf8");
+  assert.match(component, /className="navrail-rule" aria-hidden="true"/, "a rule separates the header from the items");
   const css = readCss();
-  assert.match(css, /\.navrail-chevron\.is-open\s*\{[^}]*rotate\(180deg\)/, "the open state is the same shape turned");
-  // Motion is a preference, not a decoration: honour it.
-  assert.match(css, /prefers-reduced-motion[^{]*\{[^}]*\.navrail-chevron\s*\{[^}]*transition:\s*none/);
+  const rule = /\.navrail-rule\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(rule, /height:\s*1px/, "a hairline, not a band");
+  assert.match(rule, /margin:[^;]*\b10px/, "inset, so it reads as a divider between groups");
+});
+
+test("the header slot is separated from the items by a rule, and only when it is used", () => {
+  // The app bar has no header, so it must render no rule — a stray divider at the top of the left bar would be
+  // a line between nothing and the first item.
+  const component = readFileSync(new URL("../src/components/ActivityBar.tsx", import.meta.url), "utf8");
+  assert.match(
+    component,
+    /\{header !== undefined && \(/,
+    "the rule and the header are rendered together, so neither can exist alone",
+  );
 });
 
 test("the bar's tablist holds only tabs, so the toggle is not an orphan inside it", () => {

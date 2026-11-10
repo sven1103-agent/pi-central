@@ -1934,6 +1934,44 @@ export function App() {
               does not — it is the only door back to a collapsed panel, and the panel is collapsed by
               default, so a bar gated on `focused` would leave a fresh window with no way to open it at all.
             */
+            header={
+              <>
+              {/*
+                Show/hide, as a GLYPH at the TOP of the context bar.
+
+                Reported from use, twice. First: "the show hide panel toggle shall be an icon, and it needs to be
+                integrated in the context aware bar, not globally" — a word in the topbar made a session-level
+                region's control look like window chrome. Then: "make this a top icon on the right bar. Right
+                bottom is out of reach." The footer was at the foot of a full-height column, so on a tall window
+                it sat ~900px from the modes it belongs with.
+
+                It is the FIRST item of the bar and separated from them by a rule, because it is a different KIND
+                of control: the modes select a view of the session, this shows or hides the region those views
+                live in. Without the separator it reads as a fourth mode.
+              */}
+              <button
+                type="button"
+                className="navrail-item"
+                aria-expanded={!panel.collapsed}
+                title={panel.collapsed ? "Show the session panel" : "Hide the session panel"}
+                aria-label={panel.collapsed ? "Show the session panel" : "Hide the session panel"}
+                onClick={togglePanelCollapsed}
+              >
+                {/*
+                  The pair from the reader's own screenshot: a square divided by a vertical rule (two panes, the
+                  panel is shown) and the same square with its RIGHT half filled (one pane, the panel is hidden).
+                  The filled half is the panel's side, so the picture says which side is missing.
+
+                  Two codepoints rather than one rotated, because these two are a *depiction* rather than a
+                  direction: `◫` and `◨` are the same square at the same stroke weight, and the bar is 48px wide
+                  so the difference has to be a fill, not an arrow.
+                */}
+                <span className="navrail-glyph" aria-hidden="true">
+                  {panel.collapsed ? "◨" : "◫"}
+                </span>
+              </button>
+            </>
+            }
             items={(focused === undefined ? [] : PANEL_MODES).map(({ mode, label, glyph }) => ({
               id: `session-view-${mode}`,
               label,
@@ -1947,36 +1985,6 @@ export function App() {
               },
             }))}
           >
-            {/*
-              Show/hide, as a GLYPH at the foot of the context bar — reported from use: "the show hide panel
-              toggle shall be an icon, and it needs to be integrated in the context aware bar, not globally."
-              Correct on both counts: it controls the panel, the panel is context, so a word in the topbar was
-              a window-level control for a session-level region. The same toggle was also the only way to
-              REOPEN a collapsed panel, which is why it still exists while the bar's mode items remain — see
-              `ActivityBar`'s note on the door.
-            */}
-            <button
-              type="button"
-              className="navrail-item"
-              aria-expanded={!panel.collapsed}
-              title={panel.collapsed ? "Show the session panel" : "Hide the session panel"}
-              aria-label={panel.collapsed ? "Show the session panel" : "Hide the session panel"}
-              onClick={togglePanelCollapsed}
-            >
-              {/*
-                A CHEVRON, pointing at the edge the panel moves toward: `◀` pulls it in from the right, `▶`
-                pushes it back out. Reported from use: "i think there are better icons for opening / closing
-                a panel" — the previous pair (`▭`/`▮`) were two rectangles, which said "a rectangle" rather
-                than "this edge moves".
-
-                Rendered from the same glyph slot as the mode items, so it inherits the bar's colour and the
-                focus ring; the rotation is a class, not a different codepoint, so the two states are one
-                shape and cannot drift apart.
-              */}
-              <span className={`navrail-glyph navrail-chevron${panel.collapsed ? "" : " is-open"}`} aria-hidden="true">
-                ◀
-              </span>
-            </button>
           </ActivityBar>
         )}
 
