@@ -77,6 +77,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 - Roster rows are rounded on their trailing corners, so a run of sessions no longer reads as one slab ([#241]).
 - A roster row's context gauge is one length everywhere and its `ctx` label sits in a column, instead of a different x per row ([#241]).
 - A roster row's warning is a quieter note, so it no longer outranks the session's name ([#241]).
+- The app logs which package it serves, and says when a checkout is running against a different installed package ([#244]).
+- `install-app` prints the installed package's root and version, and names them when they match the checkout's number but not its code ([#244]).
 - `docs/STACK.md` no longer claims there is no Electron path; ADR-0013 states the shell as a launcher rather than a second artifact ([#212]).
 
 ### Fixed
@@ -106,6 +108,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 [#218]: https://github.com/sven1103-agent/pi-central/issues/218
 [#239]: https://github.com/sven1103-agent/pi-central/issues/239
 [#241]: https://github.com/sven1103-agent/pi-central/issues/241
+[#244]: https://github.com/sven1103-agent/pi-central/issues/244
 [#246]: https://github.com/sven1103-agent/pi-central/issues/246
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
