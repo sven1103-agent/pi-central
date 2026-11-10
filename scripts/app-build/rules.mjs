@@ -471,8 +471,11 @@ export function identityProblems(identity, expectedVersion) {
  *
  * `xattr -d com.apple.quarantine` and "right-click → Open" are the two instructions that spread through an
  * unsigned-app project, and both teach a reader to defeat a security control to run code from strangers. The supported
- * routes are named instead: build it locally, or install through a Homebrew tap/cask — neither sets the quarantine
- * attribute (ADR-0013 fact 1).
+ * route is named instead — **build it locally**, which sets no quarantine attribute (ADR-0013 fact 1).
+ *
+ * A Homebrew tap/cask was named here as a second route and **stopped being one on 2026-09-01**, when Homebrew ended
+ * support for casks that fail a Gatekeeper check. The message below said otherwise for two months; a dead route
+ * presented as live is worse than no route, because it sends a reader to a door that does not open.
  *
  * `spctl -a` failing is expected and is documented as such. What is forbidden is the *bypass*, not an honest statement
  * that Gatekeeper will refuse.
@@ -519,8 +522,8 @@ export function gatekeeperAdviceProblems(document) {
     const context = `${lines[index - 1] ?? ""} ${line}`;
     if (NEGATION.test(context)) continue;
     problems.push(
-      "the documentation tells the reader to work around Gatekeeper; the supported routes are a local build or a " +
-        "Homebrew tap/cask, neither of which sets the quarantine attribute (ADR-0013)",
+      "the documentation tells the reader to work around Gatekeeper; the supported route is a local build, which " +
+        "sets no quarantine attribute (a Homebrew cask stopped accepting un-notarized apps on 2026-09-01)",
     );
   }
   return problems;

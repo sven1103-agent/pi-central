@@ -165,27 +165,46 @@ codesign -dv ~/Applications/Pi Central.app 2>&1 | grep -E "Identifier|Authority|
 `Signature=adhoc` means the grants will not survive a rebuild. An `Authority=` line naming your certificate means they
 will.
 
-## Gatekeeper, honestly
+## Gatekeeper, and why there is no downloadable `.app`
 
-`spctl -a ~/Applications/Pi Central.app` **fails**, and that is the accepted state:
+`spctl -a ~/Applications/Pi Central.app` **fails**, and that is the expected state:
 
 ```
 Pi Central.app: internal error in Code Signing subsystem
 ```
 
-Gatekeeper's assessment is about *notarization*, which needs a Developer ID this project does not have. What makes the
-app run anyway is that **a bundle produced locally is not quarantined** — `npm`, `git`, `curl`, Homebrew and `cp` do not
-set `com.apple.quarantine`; a browser download does. So an app you built on this machine runs, and the same app copied to
-another machine may be refused.
+Gatekeeper's assessment is about **notarization**, which needs a paid Apple Developer account. What makes the app run
+anyway is that **a bundle produced locally is not quarantined**: `npm`, `git`, `curl`, Homebrew and `cp` do not set
+`com.apple.quarantine`, and macOS only assesses a bundle that carries it. So an app you built on this machine runs, and a
+copy sent to another machine may be refused.
 
-**Do not disable Gatekeeper, and do not strip the quarantine attribute.** If you want this on another Mac, the supported
-routes are:
+### The two routes that used to exist, and what happened to them
 
-- **build it there** — one `npm install && npm run install-app`;
-- **a Homebrew tap or cask** — installs from a git-backed source and does not set the quarantine attribute.
+This section previously named two supported ways to get the app onto another Mac. **One of them no longer exists**, and
+it is worth stating plainly rather than leaving a dead instruction:
 
-`xattr -d com.apple.quarantine …`, "right-click → Open", and "allow apps from anywhere" are not instructions this project
-gives, and the docs test fails if any of them appear.
+| route | status |
+|---|---|
+| **build it there** — `npm install && npm run install-app` | ✅ still works. No quarantine, so no Gatekeeper assessment. |
+| **a Homebrew tap or cask** | ❌ **closed.** Homebrew ended support for any cask that fails a Gatekeeper check on **1 September 2026**, and removed `--no-quarantine`. A cask can no longer carry an un-notarized app to a reader. |
+
+So there is **no route from "I want this app" to a working bundle** that avoids notarization. Shipping a `.app` to
+strangers needs a Developer ID and a notarization step; neither exists here. That is a decision recorded in
+[ADR-0013](decisions/0013-application-shell.md), and the question of whether to change it is tracked as an issue rather
+than as a wish.
+
+**What this does not block.** The app is for people who have the checkout — it is a power-user surface over a package
+they installed themselves. Everyone else gets the same dock icon and standalone window by **adding the web app to their
+dock** (Safari: *File → Add to Dock*), which needs no checkout, no signature and no Gatekeeper conversation. The README's
+install section is the place to start.
+
+> Deliberately a sentence rather than a link to that section: this file and the README are edited on separate branches,
+> and a link to a heading one of them renames fails the docs check on whichever branch merges second. The action is
+> named instead, so neither branch can break the other.
+
+**Do not disable Gatekeeper, and do not strip the quarantine attribute.** `xattr -d com.apple.quarantine …`,
+"right-click → Open", and "allow apps from anywhere" are not instructions this project gives, and the docs test fails if
+any of them appear.
 
 ## Uninstalling
 

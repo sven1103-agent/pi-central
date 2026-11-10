@@ -380,3 +380,60 @@ test("the mark FILLS the canvas, because macOS 26 draws the tile and plate itsel
   assert.equal(minX, 0, "the drawing starts at the left edge");
   assert.equal(maxX, 1023, "and reaches the right edge");
 });
+
+// -----------------------------------------------------------------------------------------------------------
+// Criterion 8 — the docs must not hand a reader a bypass, or a route that closed.
+// -----------------------------------------------------------------------------------------------------------
+
+test("no document offers a Homebrew cask as a way to run an un-notarized app", () => {
+  /*
+   * A route that closed. `docs/APP-SHELL.md` and ADR-0013 both named "a Homebrew tap or cask" as a supported way to get
+   * the app onto another Mac, on the grounds that it does not set the quarantine attribute. Homebrew ended support for
+   * any cask that fails a Gatekeeper check on **1 September 2026** and removed `--no-quarantine`, so that route has not
+   * existed since — and the error message in `gatekeeperAdviceProblems` still offered it.
+   *
+   * A dead route presented as live is worse than no route: it sends a reader to a door that does not open, and the
+   * failure looks like their mistake.
+   *
+   * The check is on the PROHIBITION alternating with the route: a document may mention a cask historically (the ADR
+   * does, and says it closed), but it may not list one as supported without saying so.
+   */
+  const documents = [
+    join(ROOT, "docs", "APP-SHELL.md"),
+    join(ROOT, "docs", "decisions", "0013-application-shell.md"),
+    join(ROOT, "README.md"),
+  ];
+  for (const path of documents) {
+    const text = readFileSync(path, "utf8");
+    // Every mention of a cask as a route must be near a word that says it closed.
+    /*
+     * Checked on the LINE plus the line before it, not a ±400-character window: a window is wide enough to catch a
+     * "closed" that belongs to a different sentence, which is how the first version of this assertion passed with the
+     * closed route reinstated in the table. The unit of a claim is its sentence.
+     */
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i] ?? "";
+      if (!/Homebrew (?:tap|tap\/cask|cask|tap or cask)/i.test(line)) continue;
+      // The claim and its sentence: one line either side. A wrapped paragraph puts the qualifier above OR below the
+      // mention (the ADR says "When this was written …" above and "**The second one closed**" below), and a one-sided
+      // window misses one of those and fails on correct prose.
+      const sentence = `${lines[i - 1] ?? ""} ${line} ${lines[i + 1] ?? ""}`;
+      assert.match(
+        sentence,
+        /\b(closed|stopped|no longer|ended|end of|removed|deprecated|2026-09-01|1 September 2026|previously|used to|was named)\b/i,
+        `${path}:${i + 1}: a Homebrew cask is offered as a route without saying it closed:\n    ${line.trim()}`,
+      );
+    }
+  }
+});
+
+test("the Gatekeeper refusal names the one route that still works", () => {
+  // The message a reader sees. It must not name a cask as available, and it must name the local build, which still sets
+  // no quarantine attribute.
+  const problems = gatekeeperAdviceProblems("run `xattr -d com.apple.quarantine` on the app");
+  assert.equal(problems.length, 1);
+  assert.match(problems[0] ?? "", /local build/, "the surviving route is named");
+  assert.ok(!/tap\/cask, neither/.test(problems[0] ?? ""), "a cask is not offered as a live route");
+  assert.match(problems[0] ?? "", /2026-09-01/, "and the message says when the other route closed");
+});

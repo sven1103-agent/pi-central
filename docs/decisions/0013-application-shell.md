@@ -173,9 +173,19 @@ reported defect.
 - **The shell has no self-update.** Bumping Electron means re-running `install-app`. Acceptable for a
   launcher, and honest: versioning it like a config file is better than pretending it is a product.
 - **Distribution to strangers is not solved.** Without notarization, a `.app` downloaded through a
-  browser meets Gatekeeper, and since macOS 15 the Control-click bypass is gone. The documented routes
-  are "build it locally" and a Homebrew tap/cask (both avoid quarantine); "disable Gatekeeper" is
-  explicitly not one of them.
+  browser meets Gatekeeper, and since macOS 15 the Control-click bypass is gone. "Disable Gatekeeper" is
+  explicitly not a route.
+
+  When this was written, two routes avoided quarantine: *build it locally* and *a Homebrew tap or cask*.
+  **The second one closed on 2026-09-01**, when Homebrew ended support for any cask that fails a
+  Gatekeeper check and removed `--no-quarantine`. Only "build it locally" remains, so there is now **no
+  route from "I want this app" to a working bundle** without a Developer ID and a notarization step.
+
+  That makes the app a surface for people who have the checkout, which is what this record's own
+  framing already said — the npm package is the distributable and the shell is a power-user launcher
+  over it. Everyone else gets the same dock icon and standalone window by adding the web app to their
+  dock, which needs no checkout and no signature. Whether to buy a Developer ID and move the shell onto
+  the distribution path is a separate decision, tracked as an issue rather than assumed.
 - **A second runtime enters the repository**, which is a real cost against ADR-0005's "one runtime"
   argument. Chromium is not free to carry, audit or update.
 - **Net new privileged surface.** The renderer is a Chromium window with access to the orchestrator's
