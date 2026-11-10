@@ -389,6 +389,33 @@ try {
 }
 
 step(`installed ${destination}`);
+
+/*
+ * Say which Pi Central the installed app will actually show (issue #244).
+ *
+ * The app is a LAUNCHER: it starts the npm-installed package and serves THAT package's UI (ADR-0013). So building the
+ * app does not put this checkout's UI in the dock — and because an unreleased checkout usually carries the same version
+ * number as the last release, nothing else would show the difference.
+ *
+ * Reported from use: "when i run install app, i still see the older UI state". Worth a sentence here, at the moment the
+ * expectation is formed, rather than only in the app's log.
+ */
+const installedPackage = findInstalledPackage();
+console.log("");
+if (installedPackage === undefined) {
+  console.log("  The app launches the npm-installed package, and none was found — it will show a");
+  console.log("  failure page naming the install command. Install it with:  npm install -g pi-central");
+} else {
+  console.log(`  The app will serve Pi Central ${installedPackage.version} from`);
+  console.log(`    ${installedPackage.root}`);
+  if (installedPackage.version === rootManifest.version) {
+    // The one case that misleads: same number, possibly different code.
+    console.log("");
+    console.log(`  That is the installed package, NOT this checkout — even though both report ${rootManifest.version}.`);
+    console.log("  If you are testing uncommitted UI work, the app will not show it. Either install this checkout");
+    console.log("  (npm install -g .) or point the app at it:  PI_CENTRAL_PACKAGE=$(pwd) npm run app");
+  }
+}
 console.log("");
 console.log(`  version:  ${rootManifest.version}  (Electron ${electronVersion}, arm64)`);
 console.log(`  identity: ${signing.kind === "identity" ? signing.identity : "ad-hoc"}`);
@@ -449,6 +476,32 @@ function readPlist(path) {
   } catch {
     return {};
   }
+}
+
+/**
+ * The globally installed `pi-central`, as `{ root, version }`, or `undefined`.
+ *
+ * The same candidates `main.ts`'s `locatePackage` searches, in the same order — deliberately duplicated rather than
+ * imported, because that module is TypeScript built by esbuild for Electron and this script runs under plain `node`.
+ * If the two lists ever disagree, this prints nothing rather than printing something false.
+ */
+function findInstalledPackage() {
+  const candidates = [];
+  const npm = spawnSync(process.env["SHELL"] ?? "/bin/zsh", ["-ilc", "command -v npm"], { encoding: "utf8" });
+  const npmPath = npm.status === 0 ? npm.stdout.trim().split("\n").pop() : undefined;
+  if (npmPath !== undefined && npmPath !== "") candidates.push(join(dirname(npmPath), "..", "lib", "node_modules"));
+  candidates.push(join(homedir(), ".npm-global", "lib", "node_modules"), "/opt/homebrew/lib/node_modules", "/usr/local/lib/node_modules");
+  for (const candidate of candidates) {
+    const manifest = join(candidate, "pi-central", "package.json");
+    if (!existsSync(manifest)) continue;
+    try {
+      const parsed = JSON.parse(readFileSync(manifest, "utf8"));
+      return { root: join(candidate, "pi-central"), version: parsed.version ?? "unknown" };
+    } catch {
+      // A half-written manifest is not an answer; keep looking.
+    }
+  }
+  return undefined;
 }
 
 /** The SHA-256 of a file, for comparing an icon against the framework's own. */

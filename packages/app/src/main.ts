@@ -79,6 +79,7 @@ import {
 import { askLiveSessions, type SocketLike } from "./live-sessions.ts";
 import { openLogWriter, teeConsole } from "./app-log.ts";
 import { dockIconCandidates } from "./app-icon.ts";
+import { describeLaunch, shellSourceRoot } from "./launch-origin.ts";
 import {
   INSTALL_TIMEOUT_MS,
   STOP_HARD_DEADLINE_MS,
@@ -742,6 +743,25 @@ function expectsNewProcess(): boolean {
  * the failure page has already been shown by then, and the update path treats it as a failed respawn.
  */
 function spawnOrchestrator(pkg: PackageRoot, environment: Environment): Promise<number | undefined> {
+  /*
+   * Say which package is being served, before spawning it (issue #244).
+   *
+   * Reported from use: "when i run install app, i still see the older UI state". Correct and by design — the shell
+   * launches the installed npm package (ADR-0013), so a locally built app shows whatever `npm install -g` last put on
+   * disk. The trap is that nothing said so, and an unreleased checkout usually carries the SAME version number as the
+   * last release, so the two are indistinguishable from the UI.
+   *
+   * `shellSourceRoot` is only defined for a run from a checkout, so an installed app stays quiet: serving the installed
+   * package is the normal case, not a warning.
+   */
+  const origin = describeLaunch({
+    packageRoot: pkg.root,
+    shellSourceRoot: shellSourceRoot(process.argv[1]),
+    overridden: process.env["PI_CENTRAL_PACKAGE"] !== undefined && process.env["PI_CENTRAL_PACKAGE"] !== "",
+  });
+  console.log(origin.message);
+  if (origin.caveat !== undefined) console.warn(`Pi Central: ${origin.caveat}`);
+
   const plan = planSpawn({
     node: environment.node,
     pkg,
