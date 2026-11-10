@@ -29,7 +29,7 @@ approvals, tool trace, and the sanitized `.md` pipeline are all named in `docs/S
 
 ```
 ┌ topbar 44px ───────────────────────────────────────────────────────────────┐
-│ Pi Central · [Sessions|History] · fleet counts · isolation · connection     │
+│ mark · fleet counts · connection · [Show panel]                             │
 ├ rail 288px (240–420) ─┬─ transcript column 1fr ─┬─ panel var, 280–1200 ────┤
 │ New session (primary) │ session header          │ [Session|Files]  ← modes  │
 │ Open in a directory…  │ header: ctx/tok/cost ▾  │ Session: Isolation,Paths │
@@ -47,7 +47,9 @@ approvals, tool trace, and the sanitized `.md` pipeline are all named in `docs/S
 | Rail | Live sessions, ordered by *attention*; the two start actions; filter | On-disk history (40 dead rows under live ones was the spike's worst rail mistake) |
 | Transcript column | One focused session: header, metrics, run state, dialogs, transcript, composer | Session list, cross-session stats |
 | Panel | The auditable facts about the focused session (Session), its working directory (Files), or every call it made (Trace) | Anything actionable mid-run except `Rename`, `Stop`, and copy affordances |
-| Topbar | Fleet counts + mode tabs + connection | Per-session controls |
+| Topbar | The mark, fleet counts and connection — the facts about the window | Per-session controls, navigation, actions |
+| Left activity bar | App navigation: Sessions, History, Settings (pinned at the foot) | Anything about one session |
+| Right activity bar | The focused session's views: Session, Files, Trace. **Shown only when a session is focused** | Anything about the app |
 
 **Primary:** the focused session, its approvals, its composer. **Secondary:** history, rename, stop, model/thinking pickers. **Absent:** any directory field on the primary path; any "move this session"; any per-session isolation toggle.
 
@@ -94,7 +96,11 @@ The `1024–1439` sheet in an earlier revision was **not implemented**: a fixed 
 
 ## 3. Wireframes
 
-Geometry: rail 288px · gutter 1px `--line` · **panel** 360px default, 280px min, max `min(1200, 60vw)`, stored as `--panel-width` · topbar 44px · rail row 68px · session header one band · run bar 2px · composer min 96px.
+Geometry: **activity bars 48px each** · rail 288px · gutter 1px `--line` · **panel** 360px default, 280px min, max `min(1200, 60vw)`, stored as `--panel-width` · topbar 44px · rail row 68px · session header one band · run bar 2px · composer min 96px.
+
+**The two bars are edges, and they cost 96px.** Measured against the shell's `minWidth: 900`: below 1024 the rail is already a drawer (`.panes` is a single column), so only the right bar is a column there and the cost is 48px; at 1280 with both bars and the panel open, the transcript is 534px. The bars arrived because the topbar had become one 44px strip holding nine unrelated things — a mark, the word mark, a duplicated "Sessions" control, two view tabs, fleet counts, a connection dot and two actions — with nothing saying which were navigation, which were state and which were actions. See the note under "Navigation" for what moved where.
+
+**Navigation is on the edges, by job.** Left = the whole app (Sessions, History, Settings), reachable from anywhere. Right = the open context (Session details, Files, Trace), *only when a session is focused* — three views of a session, offered with nothing focused, would promise three views of nothing. The right-hand three already existed as the panel's `PANEL_MODES`; promoting them to a bar and moving them to the window's outer edge made them legible rather than inventing a new information architecture. The topbar keeps what belongs to the window and nothing else.
 
 **One workspace header, and one reading lane.** The workspace used to open with three full-width strips — a session
 header, a `ctx · tokens · cost · msgs` metrics row, and a legend explaining tool frames — above a conversation that

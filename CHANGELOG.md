@@ -67,6 +67,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Changed
 
+- Navigation moved to two vertical bars on the window's edges: app views on the left, the focused session's views on the right ([#239]).
+- The topbar keeps only the mark, the fleet counts, the connection and the panel toggle, instead of nine unrelated controls in one strip ([#239]).
+- The product name is no longer drawn beside the mark in the topbar; the heading and its accessible name remain ([#239]).
+- The fleet counters are separated in the text, so `9 sessions3 scratch` reads as `9 sessions · 3 scratch` ([#239]).
 - `docs/STACK.md` no longer claims there is no Electron path; ADR-0013 states the shell as a launcher rather than a second artifact ([#212]).
 
 ### Fixed

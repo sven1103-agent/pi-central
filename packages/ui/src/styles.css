@@ -186,6 +186,7 @@ button { font: inherit; color: inherit; }
   height: 100%;
 }
 
+
 /*
  * Panes are separated by 1px gutters of --line rather than borders or cards, keeping the
  * prototype's technique. Cards would add visual weight to what is a continuous surface.
@@ -224,6 +225,17 @@ button { font: inherit; color: inherit; }
  * divider, because with two tracks there is only one gap.
  */
 .panes.is-collapsed { grid-template-columns: 288px 1fr; }
+/*
+ * The shell is a ROW of [activity bar][panes], so the left bar is an edge of the window rather than a
+ * column competing with the rail. `.panes` keeps its own three-track grid, unchanged — which is what
+ * keeps `--panel-width`, `clampPanelWidth` and the `@container panel` query meaning what they meant.
+ */
+.shell {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+.shell > .panes { flex: 1; min-width: 0; }
 
 /*
  * There is deliberately no narrow-viewport rule for the panel any more.
@@ -313,6 +325,88 @@ button { font: inherit; color: inherit; }
 /* Visually hidden text for a control whose label is its own `aria-label`; kept for the focus ring only. */
 .rail-backdrop:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
 
+/* ------------------------------------------------------------------ activity bars */
+
+/*
+ * The two vertical bars, one per edge of the window.
+ *
+ * ## Why 48px, and why they are not free
+ *
+ * Measured cost: 48px each, so the transcript loses 96px when both are present. That was checked against
+ * the window's `minWidth: 900` before choosing it — at 900 the rail is already a drawer (`< 1024`), so
+ * only the right bar is a column there and the cost is 48px, not 96. The numbers are in
+ * `docs/ACTIVITY-BARS.md`; they are a decision, not an accident.
+ *
+ * ## Why the items are text glyphs
+ *
+ * The bar is 48px wide, so every item is a glyph with a tooltip and an accessible name. A glyph that is a
+ * private-use or emoji codepoint renders differently on every OS; these are geometric shapes that exist
+ * in every UI font (`◉ ▤ ≡`). No SVG pipeline, and `currentColor` gives the selected state for free.
+ */
+.activity {
+  flex: none;
+  width: 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background: var(--panel-2);
+  padding: var(--sp-2) 0;
+}
+
+/* The border is on the side facing the content, so each bar reads as an edge of the window rather than
+   as a card floating in it. */
+.activity-left { border-right: 1px solid var(--line); }
+.activity-right { border-left: 1px solid var(--line); }
+
+.activity-group { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+/* Settings belongs at the bottom, where a settings control is looked for. */
+.activity-end { margin-top: auto; }
+
+.activity-item {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  /* Its own face rather than the platform's light button chrome on a dark page (#100). */
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  color: var(--dim);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  /* The glyph is centred, so it must not be selected as text on a double click. */
+  user-select: none;
+}
+.activity-item:hover { color: var(--text); background: var(--panel); }
+.activity-item[aria-selected="true"],
+.activity-item[aria-current="page"] { color: var(--accent-text); background: var(--accent-tint); }
+.activity-item[aria-expanded="true"] { color: var(--accent-text); }
+
+/*
+ * The selected marker is a 2px bar on the INNER edge, not a filled tile.
+ *
+ * A filled 40px square in a 48px bar is most of the bar, which makes the selected item read as a button
+ * that is always pressed. The edge marker is the convention in VS Code for the same reason, and it costs
+ * no colour from the glyph so the glyph can stay legible at `--dim` weight.
+ */
+.activity-item[aria-selected="true"]::before,
+.activity-item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.activity-left .activity-item::before { left: -5px; }
+.activity-right .activity-item::before { right: -5px; }
+
+.activity-glyph { display: block; }
+
 /* ------------------------------------------------------------------ topbar */
 
 .topbar {
@@ -374,11 +468,15 @@ button { font: inherit; color: inherit; }
    screen, and unreadable to assistive tech with CSS dropped. A visual separator carried in a
    pseudo-element gives the same spacing and keeps the DOM's text contiguous; it is also not a
    separator character, so it is not announced twice with the gap. */
-/* Spacing AND separation both come from the text, not from `gap` alone (issue #13).
+/*
+   Spacing AND separation both come from the TEXT, not from `gap` (issue #13).
+
    `gap` is invisible to `textContent`, so the rendered summary read `2 sessions1 scratch` — fine on
-   screen, unreadable with CSS dropped. A pseudo-element does not fix that either: it is not in the
-   text. The separator is therefore a real character between counters (rendered by the component), and
-   the gap is dropped so the separation is not doubled. */
+   screen, unreadable with CSS dropped. The previous note here claimed "the separator is therefore a real
+   character between counters (rendered by the component)" and the component never rendered one: measured
+   in a real window, the topbar read `9 sessions3 scratch`. The `·` is now in the DOM (App.tsx), and
+   `gap: 0` stays so the separation is not doubled — the space after the middot is the spacing.
+*/
 .fleet { display: flex; gap: 0; }
 .fleet-needs { color: var(--warn-text); font-weight: 600; }
 /* Pressure on the NEXT interruption rather than the current one (issue #13). One tint quieter than
@@ -4369,13 +4467,31 @@ select.btn { font-family: var(--sans); }
    deliberate over a viewport media query: the panel is resizable, so the window can be 2560px while
    the panel is 300px, and a viewport query would answer the wrong question. */
 
+/*
+   The panel is a ROW, not a column: the modes moved from a tab strip above the content to a vertical bar
+   on the *outer* edge — the right edge of the window — so the bar reads as "what can I show" rather than
+   as a second row of tabs.
+
+   `container-type` moved to `.panel-content` and that is not cosmetic. An inline-size container cannot
+   have its size queried by a descendant that is laid out beside its content, because the query would
+   measure the panel including the 48px bar. `.panel-content` is the column the queries were always
+   about: the width available to a document.
+*/
 .panel {
   position: relative;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   min-height: 0;
   min-width: 0;
   background: var(--panel);
+}
+
+.panel-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   container-type: inline-size;
   container-name: panel;
 }

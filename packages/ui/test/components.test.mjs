@@ -29,7 +29,7 @@ globalThis.document = dom.window.document;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 
 let server;
-let ErrorStrip, SessionRail, ToolTrace, DialogDock, TranscriptView, HistoryView, Composer, FileTree, FilePane, Panel, PanelToggle, FilesPanel, Settings, initialState;
+let ErrorStrip, SessionRail, ToolTrace, DialogDock, TranscriptView, HistoryView, Composer, FileTree, FilePane, Panel, PanelToggle, FilesPanel, Settings, initialState, ActivityBar, PANEL_MODES;
 
 before(async () => {
   // `root` must be the UI package, not the process CWD: Vite resolves the `/src/...` specifiers
@@ -42,6 +42,8 @@ before(async () => {
   });
   ({ ErrorStrip } = await server.ssrLoadModule("/src/App.tsx"));
   ({ SessionRail } = await server.ssrLoadModule("/src/components/SessionRail.tsx"));
+  ({ ActivityBar } = await server.ssrLoadModule("/src/components/ActivityBar.tsx"));
+  ({ PANEL_MODES } = await server.ssrLoadModule("/src/panel.ts"));
   ({ ToolTrace } = await server.ssrLoadModule("/src/components/ToolTrace.tsx"));
   ({ DialogDock } = await server.ssrLoadModule("/src/components/DialogDock.tsx"));
   ({ TranscriptView } = await server.ssrLoadModule("/src/components/Transcript.tsx"));
@@ -1731,22 +1733,60 @@ function panelProps(extra = {}) {
   };
 }
 
-test("the panel offers every mode, and marks the active one", () => {
-  const html = renderToString(createElement(Panel, panelProps(), createElement("p", null, "body")));
+test("the context bar offers every panel mode, and marks the active one", async () => {
+  /*
+   * The modes moved OUT of the panel and onto the window's right edge, so they are asserted where they
+   * live now. The first version of this change had a bar in both places, which produced two elements with
+   * the same id — so this test also pins that there is exactly ONE of each.
+   *
+   * `Panel` still owns `aria-controls`/`role=tabpanel`; the bar owns the tabs.
+   */
+  const html = renderToString(createElement(ActivityBar, {
+    side: "right",
+    as: "tablist",
+    label: "Session view",
+    items: PANEL_MODES.map(({ mode, label, glyph }) => ({
+      id: `session-view-${mode}`,
+      label,
+      glyph,
+      active: mode === "session",
+      onSelect() {},
+    })),
+  }));
   assert.match(html, /role="tablist"/);
-  assert.match(html, /role="tab"/);
+  assert.match(html, /aria-orientation="vertical"/, "the bar is a column, so it says so");
   // Session, Files, Trace — the trace moved here from a drawer under the transcript, so there are three.
   assert.equal((html.match(/role="tab"/g) ?? []).length, 3, "Session, Files and Trace");
   assert.equal((html.match(/aria-selected="true"/g) ?? []).length, 1);
-  assert.match(html, /aria-selected="true"[^>]*>Session</);
-  assert.match(html, />Trace</, "the trace is reachable as a mode rather than a strip");
+  assert.match(html, /aria-selected="true"[^>]*aria-label="Session"/);
+  assert.match(html, /aria-label="Trace"/, "the trace is reachable as a mode rather than a strip");
+  // One element per mode, so the ids are unique in the document.
+  for (const mode of ["session", "files", "trace"]) {
+    assert.equal((html.match(new RegExp(`id="session-view-${mode}"`, "g")) ?? []).length, 1, `one ${mode} item`);
+  }
 });
 
-test("only the selected TAB is in the tab order (roving tabindex)", () => {
-  // Scoped to the tabs on purpose: the resize separator is also tabbable, and counting every
-  // `tabindex="0"` in the panel conflated the two — which is how the first version of this test
-  // passed for the wrong reason.
+test("the panel is a body and a resizer, with no mode bar of its own", () => {
+  // The bar is one element at the window's right edge, not one per panes-with-a-panel. Asserted as an
+  // absence because the failure mode was a second copy that looked correct in isolation.
   const html = renderToString(createElement(Panel, panelProps(), createElement("p", null, "body")));
+  assert.ok(!/role="tablist"/.test(html), "the panel must not render its own mode tabs");
+  assert.ok(!/class="activity/.test(html), "nor its own activity bar");
+  assert.match(html, /class="panel-body"/, "…it renders the body");
+});
+
+test("only the selected ITEM is in the tab order (roving tabindex)", () => {
+  // Scoped to the tabs on purpose: the resize separator is also tabbable, and counting every
+  // `tabindex="0"` conflated the two — which is how the first version of this test passed for the wrong
+  // reason. Now the bar is asserted in isolation, so only its own items can appear.
+  const html = renderToString(createElement(ActivityBar, {
+    side: "right",
+    as: "tablist",
+    label: "Session view",
+    items: PANEL_MODES.map(({ mode, label, glyph }) => ({
+      id: `session-view-${mode}`, label, glyph, active: mode === "files", onSelect() {},
+    })),
+  }));
   const tabs = html.match(/<button[^>]*role="tab"[^>]*>/g) ?? [];
   assert.equal(tabs.length, 3, "expected three tabs");
   const selected = tabs.filter((t) => t.includes('aria-selected="true"'));
@@ -1757,11 +1797,12 @@ test("only the selected TAB is in the tab order (roving tabindex)", () => {
   for (const tab of other) assert.match(tab, /tabindex="-1"/, "the unselected tabs must be skipped");
 });
 
-test("the body is tied to the tab that labels it", () => {
-  // `aria-labelledby` on the tabpanel is what makes the region announce as "Files, tab panel"
-  // rather than as an unlabelled group.
+test("the body is tied to the control that selects it", () => {
+  // `aria-labelledby` on the tabpanel is what makes the region announce as "Files, tab panel" rather
+  // than as an unlabelled group. The id it names belongs to the context bar, which is outside the panel
+  // — `aria-labelledby` deliberately spans the document.
   const html = renderToString(createElement(Panel, panelProps({ mode: "files" }), createElement("p", null, "body")));
-  assert.match(html, /id="panel-body-files"[^>]*aria-labelledby="panel-tab-files"/);
+  assert.match(html, /id="panel-body-files"[^>]*aria-labelledby="session-view-files"/);
 });
 
 test("the resize handle is an operable separator with its bounds stated", () => {
@@ -1825,6 +1866,19 @@ test("the panel is a named query container, and the split query targets that nam
   assert.match(css, /container-type:\s*inline-size/, "the panel must be a size container");
   assert.match(css, /container-name:\s*panel\b/, "the container must be named");
   assert.match(css, /@container panel \(min-width: 560px\)/, "the split must query that name");
+  /*
+   * And the container is `.panel-content`, not `.panel` — a deliberate move when the mode bar became a
+   * vertical column inside the panel. An inline-size container cannot be queried by content laid out
+   * beside it: `@container panel (min-width: 560px)` would then measure the panel INCLUDING the 48px
+   * bar, and split the file view 48px early. Measured in the figure work: at a 560px panel that is the
+   * difference between a readable document and a clipped one.
+   */
+  const content = /\.panel-content\s*\{([^}]*)\}/.exec(css);
+  assert.ok(content, "the panel must have a content column");
+  assert.match(content[1], /container-type:\s*inline-size/, "the content column is the query container");
+  assert.match(content[1], /container-name:\s*panel\b/, "…with the same name, so the queries still match");
+  const panel = /\.panel\s*\{([^}]*)\}/.exec(css);
+  assert.match(panel?.[1] ?? "", /flex-direction:\s*row/, "the panel lays its content and bar out side by side");
 });
 
 test("the panel column is sized by a custom property, so only one thing writes the width", () => {
@@ -2049,7 +2103,14 @@ test("a collapsed panel renders no panel body at all", () => {
   assert.match(html, /class="panel"/, "the panel renders when it IS included");
   // The shell excludes it entirely when collapsed; `App.tsx` holds that branch, so this asserts the
   // contract the branch relies on: the panel is a plain element with no hidden state of its own.
-  assert.ok(!/hidden/.test(html), "the panel has no built-in collapse; the shell decides");
+  /*
+   * Asserted against the PANEL element rather than the whole document: the mode glyphs carry
+   * `aria-hidden="true"` on purpose (each item has its own `aria-label`), so a bare `/hidden/` test now
+   * matches the glyph and would report on the wrong thing. The property is unchanged — the panel has no
+   * built-in collapse, so the shell decides by not rendering it.
+   */
+  const panelTag = /<aside[^>]*>/.exec(html)?.[0] ?? "";
+  assert.ok(!/hidden|display:\s*none|aria-expanded/.test(panelTag), "the panel has no built-in collapse; the shell decides");
 });
 
 // --- Wrapping is a choice, and the default is wrapped (issue #73) ----------------------------------
@@ -2780,8 +2841,16 @@ test("the rail is reachable below the drawer breakpoint", () => {
 
   // A drawer that is never opened is `display: none` with extra steps.
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  assert.match(app, /rail-toggle/, "a control must open the drawer");
-  assert.match(app, /aria-expanded=\{railOpen\}/, "…and state whether it is open");
+  /*
+   * The opener moved from a `rail-toggle` button in the topbar to the Sessions item in the left activity
+   * bar. It is still a BUTTON with `aria-expanded` and `aria-controls` — the property the original test
+   * was written for — so the assertions follow the responsibility rather than the class name. Asserting
+   * `rail-toggle` here would have kept the test green while nothing opened the drawer.
+   */
+  assert.match(app, /id: "activity-left-sessions"/, "the left bar has a Sessions item");
+  assert.match(app, /expanded: railIsDrawer \? railOpen : undefined/, "…which states whether the drawer is open");
+  assert.match(app, /controls: railIsDrawer \? "session-rail" : undefined/, "…and what it controls");
+  assert.match(app, /setRailOpen\(\(open\) => !open\)/, "…and toggles it");
   assert.match(app, /rail-backdrop/, "a backdrop must close it");
   assert.match(app, /setRailOpen\(false\)/, "Escape, the backdrop and a selection all close it");
 
@@ -2897,4 +2966,91 @@ test("the run track clears the companion's first line", () => {
     /padding:\s*calc\(var\(--sp-3\) \+ 2px\)/,
     "the stacked header clears the track too, and adds the track's own height",
   );
+});
+
+// ---------------------------------------------------------------------------------------------------
+// The activity bars (the topbar rethink).
+// ---------------------------------------------------------------------------------------------------
+
+test("the fleet counters are separated in the TEXT, not only by CSS", () => {
+  /*
+   * The defect this pins, measured in a real window: `9 sessions3 scratch`. The CSS carried a note claiming
+   * the separator was "a real character between counters (rendered by the component)" — the component never
+   * rendered one, and `gap: 0` removed the only visual spacing, so both the screen and the accessible name
+   * ran the numbers together.
+   *
+   * A `·` in the DOM is the fix rather than a `::before`: a pseudo-element is not in `textContent`, so it
+   * would look right and read wrong.
+   */
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const fleet = /<div className="fleet">([\s\S]*?)<\/div>/.exec(app)?.[1] ?? "";
+  assert.ok(fleet.length > 0, "the fleet block must exist");
+  for (const label of ["running", "scratch", "need you"]) {
+    assert.match(fleet, new RegExp(`· \\{[^}]*\\} ${label}`), `"${label}" must carry its own separator`);
+  }
+  // The first counter has no separator by design: a leading middot reads as a stray bullet.
+  assert.ok(!/fleet\.total[^<]*<span>· /.test(fleet), "the first counter must not be prefixed");
+});
+
+test("the word mark is a mark: the product name is not drawn in the topbar", () => {
+  /*
+   * "Can we remove the word text mark" — and the constraint that makes it safe to remove: the `<h1>` is the
+   * only top-level heading in the app, so the NAME has to stay reachable even though it is no longer drawn.
+   * Removing the text without keeping the heading would leave a page with no `h1` at all.
+   */
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const wordmark = /<h1 className="wordmark">([\s\S]*?)<\/h1>/.exec(app)?.[1] ?? "";
+  assert.ok(wordmark.length > 0, "the wordmark heading must exist");
+  assert.match(wordmark, /logoIcon/, "the mark stays");
+  assert.match(wordmark, /<span className="visually-hidden">Pi Central<\/span>/, "the name stays, not drawn");
+  /*
+   * The prose in this block names the product, so comments are stripped before asking whether the NAME is
+   * rendered — a checker that reads its own rationale as code reports the opposite of the truth, which is the
+   * same defect `lifecycle-wiring.test.ts` documents for `codeOnly`.
+   */
+  const markup = wordmark.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  /*
+   * The accessible copy is removed before asking, because it LEGITIMATELY contains the name — that is the
+   * whole point of it. What must not exist is the name as a bare text node, which is what the first version
+   * of the topbar rendered beside the mark.
+   */
+  const visible = markup.replace(/<span className="visually-hidden">[\s\S]*?<\/span>/g, "");
+  assert.ok(!/Pi Central/.test(visible), `the name must not be drawn; found it in: ${visible.trim()}`);
+  // And exactly one `<h1>`, so this removal did not promote some other heading. Counted on the source with
+  // JSX comments stripped, because the block above mentions `<h1>` in prose and a raw count included it.
+  const noComments = app.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  assert.equal((noComments.match(/<h1\b/g) ?? []).length, 1, "the app has exactly one h1");
+});
+
+test("both bars are vertical, labelled, and 48px wide", () => {
+  const css = readCss();
+  const activity = /\.activity\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(activity, /flex-direction:\s*column/, "a bar is a column");
+  assert.match(activity, /width:\s*48px/, "the width is the measured 48px, not an accident");
+  // The edges face the content, so each bar reads as a side of the window.
+  assert.match(css, /\.activity-left\s*\{[^}]*border-right/, "the left bar's edge faces the content");
+  assert.match(css, /\.activity-right\s*\{[^}]*border-left/, "the right bar's edge faces the content");
+});
+
+test("the left bar is a nav and the right bar is a tablist, because they mean different things", () => {
+  /*
+   * Sessions and Settings are DESTINATIONS — announced as tabs they would promise a tabpanel that does not
+   * exist. Session/Files/Trace are alternative views of one thing, which is what a tablist means and what
+   * the panel body's `aria-labelledby` needs.
+   */
+  assert.match(readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8"), /side="left"[\s\S]{0,200}label="Main"/);
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.ok(!/side="left"[\s\S]{0,120}as="tablist"/.test(app), "the app bar is not a tablist");
+  assert.match(app, /side="right"\s+as="tablist"/, "the context bar is");
+});
+
+test("the right bar is shown only when a session is focused", () => {
+  /*
+   * The reader's requirement: "only if session is active, so it becomes a context aware navigation". It is
+   * also what keeps the bar honest — three views of a session, offered with nothing focused, would promise
+   * three views of nothing.
+   */
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const guarded = /focused !== undefined && \(\s*<ActivityBar/.test(app.replace(/\s+/g, " "));
+  assert.ok(guarded, "the context bar must be inside a `focused !== undefined` guard");
 });

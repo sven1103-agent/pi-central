@@ -39,13 +39,6 @@ import {
   type PanelMode,
 } from "../panel.ts";
 
-/** The modes, in tab order. Named here so the tab list and the body cannot disagree. */
-const MODES: { mode: PanelMode; label: string }[] = [
-  { mode: "session", label: "Session" },
-  { mode: "files", label: "Files" },
-  { mode: "trace", label: "Trace" },
-];
-
 export function Panel({
   mode,
   onMode,
@@ -111,41 +104,28 @@ export function Panel({
 
   return (
     <aside className="panel" aria-label="Panel">
-      <div className="panel-head">
-        <div className="tabs" role="tablist" aria-label="Panel view">
-          {MODES.map(({ mode: value, label }) => (
-            <button
-              key={value}
-              type="button"
-              role="tab"
-              id={`panel-tab-${value}`}
-              className="tab"
-              aria-selected={mode === value}
-              aria-controls={`panel-body-${value}`}
-              // Roving tabindex: only the selected tab is in the tab order, so Tab moves past the
-              // group rather than through both tabs.
-              tabIndex={mode === value ? 0 : -1}
-              onClick={() => onMode(value)}
-            >
-              {label}
-            </button>
-          ))}
+      <div className="panel-content">
+        {/*
+          `key` on the body would remount it and lose scroll position when switching modes, which for a
+          document view means jumping back to line 1. Both bodies are therefore rendered from the same
+          element with a stable id, and only the content changes.
+        */}
+        <div
+          className="panel-body"
+          id={`panel-body-${mode}`}
+          role="tabpanel"
+          /*
+            Named by the item in the CONTEXT BAR, which lives in the shell at the window's right edge
+            rather than inside this panel. `aria-labelledby` may reference any id in the document, and
+            pointing at the control that selects this view is the property that matters. The first attempt
+            put a second bar inside the panel and produced two elements with the same id — an invalid
+            document, and `aria-labelledby` would have resolved to whichever came first.
+          */
+          aria-labelledby={`session-view-${mode}`}
+          tabIndex={-1}
+        >
+          {children}
         </div>
-      </div>
-
-      {/*
-        `key` on the body would remount it and lose scroll position when switching modes, which for a
-        document view means jumping back to line 1. Both bodies are therefore rendered from the same
-        element with a stable id, and only the content changes.
-      */}
-      <div
-        className="panel-body"
-        id={`panel-body-${mode}`}
-        role="tabpanel"
-        aria-labelledby={`panel-tab-${mode}`}
-        tabIndex={-1}
-      >
-        {children}
       </div>
 
       {resizable && (
