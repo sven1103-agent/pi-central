@@ -67,14 +67,24 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Changed
 
-- Navigation moved to two vertical bars on the window's edges: app views on the left, the focused session's views on the right ([#239]).
-- The topbar keeps only the mark, the fleet counts, the connection and the panel toggle, instead of nine unrelated controls in one strip ([#239]).
+- Navigation moved to two vertical bars on the window's edges: app views on the left, the open context's views on the right ([#239]).
+- The topbar keeps only the mark, the fleet counts and the connection, instead of nine unrelated controls in one strip ([#239]).
+- A page owns its furniture, so the session rail and the session panel appear on the Sessions page and not beside History ([#239]).
+- The panel's show/hide control is a glyph at the top of the context bar, above a rule, instead of a word in the topbar ([#239]).
 - The product name is no longer drawn beside the mark in the topbar; the heading and its accessible name remain ([#239]).
 - The fleet counters are separated in the text, so `9 sessions3 scratch` reads as `9 sessions · 3 scratch` ([#239]).
+- The History page is centred on the reading measure instead of hugging the left edge ([#239]).
+- Roster rows are rounded on their trailing corners, so a run of sessions no longer reads as one slab ([#239]).
+- A roster row's context gauge is one length everywhere and its `ctx` label sits in a column, instead of a different x per row ([#239]).
+- A roster row's warning is a quieter note, so it no longer outranks the session's name ([#239]).
 - `docs/STACK.md` no longer claims there is no Electron path; ADR-0013 states the shell as a launcher rather than a second artifact ([#212]).
 
 ### Fixed
 
+- Both activity bars and the workspace share one flex row, so neither bar collapses onto a row of its own ([#239]).
+- The workspace takes the grid's growing row, so the window has no dead space below it when no banner is shown ([#239]).
+- The activity bars use their own class namespace: they had inherited the transcript's `.activity` border and background ([#239]).
+- The right activity bar is a `tablist` of modes only, so the panel toggle inside it is no longer an orphan non-tab child ([#239]).
 - A child that exits before reporting a URL shows what it printed, instead of leaving the window blank and the terminal silent ([#215]).
 - A failure page failing its own CSP audit is replaced by a constant one, instead of being logged as refused and shown anyway ([#215]).
 - `Try again` on a failure page re-runs the launch, instead of reloading a document with no state and showing the same text again ([#215]).
