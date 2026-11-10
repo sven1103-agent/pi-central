@@ -3508,3 +3508,29 @@ test("the bar's tablist holds only tabs, so the toggle is not an orphan inside i
   );
   assert.match(src, /className="navrail-group"\s*\{\.\.\.groupRole\}/, "the mode group carries it instead");
 });
+
+test("the bar's items sit at the top, in reading order — not spread down the column", () => {
+  /*
+   * From a screenshot: the panel toggle was at the top, the rule in the middle, and the three MODE GLYPHS at
+   * the very bottom of a tall bar, hundreds of pixels from the control they belong with.
+   *
+   * The cause was `justify-content: space-between` on a bar that had just grown a third child (toggle, rule,
+   * modes). `space-between` distributed those three across the full height. It was correct when the bar had
+   * exactly two groups and one of them was meant to sit at the foot.
+   *
+   * `flex-start` puts everything at the top; a child that genuinely wants the foot opts in with
+   * `margin-top: auto`, which is what `.navrail-end` does and why the left bar's Settings still reaches the
+   * bottom.
+   */
+  const css = readCss();
+  const bar = /\n\.navrail\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(bar, /justify-content:\s*flex-start/, "items stack from the top");
+  assert.ok(
+    !/justify-content:\s*space-between/.test(bar),
+    "space-between spreads a header, a rule and a group across the whole height",
+  );
+
+  // The opt-in for a bottom control still exists, or the left bar's Settings would float up to the items.
+  const end = /\n\.navrail-end\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(end, /margin-top:\s*auto/, "a footer group pins itself to the bottom");
+});

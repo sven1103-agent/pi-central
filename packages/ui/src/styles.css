@@ -371,7 +371,18 @@ button { font: inherit; color: inherit; }
   width: 48px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  /*
+   * `flex-start`, NOT `space-between`.
+   *
+   * The bar grew a third child when the panel toggle became a `header` (toggle, rule, modes). `space-between`
+   * then distributed those three across the full height — the toggle at the top, the RULE in the middle, and
+   * the modes at the BOTTOM, which a screenshot showed as three mode glyphs stranded at the foot of a tall bar.
+   *
+   * Everything belongs at the top, in reading order. A control that genuinely wants the foot opts in with
+   * `.navrail-end { margin-top: auto }` — which the LEFT bar's Settings does, and that still works because
+   * `margin-top: auto` distributes the free space itself.
+   */
+  justify-content: flex-start;
   /*
    * `--bg`, not `--panel-2`. Reported from a screenshot: "the gray vertical bars distract next to the
    * sessions". `--panel-2` (#1c2230) is LIGHTER than the rail's `--panel` (#161b22), so each bar read as a
