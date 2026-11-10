@@ -163,9 +163,13 @@ strangers needs a Developer ID and a notarization step; neither exists here. Tha
 than as a wish.
 
 **What this does not block.** The app is for people who have the checkout — it is a power-user surface over a package
-they installed themselves. Everyone else gets the same dock icon and standalone window through
-[adding the web app to the dock](../README.md#install-it-as-an-app), which needs no checkout, no signature and no Gatekeeper
-conversation.
+they installed themselves. Everyone else gets the same dock icon and standalone window by **adding the web app to their
+dock** (Safari: *File → Add to Dock*), which needs no checkout, no signature and no Gatekeeper conversation. The README's
+install section is the place to start.
+
+> Deliberately a sentence rather than a link to that section: this file and the README are edited on separate branches,
+> and a link to a heading one of them renames fails the docs check on whichever branch merges second. The action is
+> named instead, so neither branch can break the other.
 
 **Do not disable Gatekeeper, and do not strip the quarantine attribute.** `xattr -d com.apple.quarantine …`,
 "right-click → Open", and "allow apps from anywhere" are not instructions this project gives, and the docs test fails if
