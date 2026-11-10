@@ -34,6 +34,37 @@ The script refuses to run on anything but macOS arm64, and fails loudly rather t
 also audits the artifact after building: if the bundle ever starts carrying product code, or an identifier, or a version
 that disagrees with the package, the build stops before installing.
 
+### The app shows the installed package's UI, not your checkout's
+
+**This surprises everyone once, so it is worth reading before it surprises you.**
+
+The app is a launcher: it starts the `pi-central` that `npm install -g` put on disk and serves *that* package's UI
+([ADR-0013](decisions/0013-application-shell.md)). Building the app does not put your working tree in the dock.
+
+It is easy to miss, because an unreleased checkout normally carries the **same version number** as the last release —
+so both report the same number while one has your changes and the other does not. `install-app` now prints which
+package the app will serve, and calls out that case explicitly:
+
+```
+  The app will serve Pi Central <version> from
+    /opt/homebrew/lib/node_modules/pi-central
+
+  That is the installed package, NOT this checkout — even though both report <version>.
+```
+
+To look at uncommitted work in the desktop app, either install the checkout or point the app at it:
+
+```bash
+npm run build:package && npm run ui:build
+npm install -g .                                   # then just open the app
+# …or, without installing:
+PI_CENTRAL_PACKAGE=$(pwd) npm run app
+```
+
+`PI_CENTRAL_PACKAGE` is the documented override and the only supported way to serve a tree the app did not install.
+The app must never carry the UI itself — that would make it a second distributable, which is the failure ADR-0013
+exists to prevent.
+
 ## The icon
 
 The bundle carries Pi Central's mark in `Contents/Resources/icon.icns`, so the dock, ⌘-Tab, the About panel, Finder and
