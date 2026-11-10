@@ -116,7 +116,6 @@ import { Inspector } from "./components/Inspector.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { FilesPanel } from "./components/FilesPanel.tsx";
 import { Panel } from "./components/Panel.tsx";
-import { PanelToggle } from "./components/PanelToggle.tsx";
 import {
   PANEL_DEFAULT_WIDTH,
   PANEL_MODES,
@@ -1324,15 +1323,6 @@ export function App() {
             </span>
             {connectionDetail && <span className="hint">· {connectionDetail}</span>}
           </span>
-          {/*
-            The ONE action left in the topbar. Settings moved to the left activity bar (it is app
-            navigation, not window chrome) and the view tabs moved to the same bar, so this is the only
-            control whose job is about the WINDOW rather than about the app or the session.
-
-            It stays labelled rather than becoming a gear: it is the door to the panel's contents, and a
-            glyph here would have to compete with the two bars either side of it.
-          */}
-          <PanelToggle collapsed={panel.collapsed} onToggle={togglePanelCollapsed} />
         </div>
       </header>
 
@@ -1744,7 +1734,13 @@ export function App() {
           0px, and still fetches nothing useful — and two of those have already caused a defect here.
           Its geometry and mode live in `panel`, so re-opening restores them.
         */}
-        {!panel.collapsed && (
+        {/*
+          The panel is CONTEXT, so it is bound by the same rule as the context bar: Session/Files/Trace all
+          describe a live session. Guarding the bar but not the panel is what left the trace list sitting
+          beside the History page — the bar is the panel's *door*, so they must share one condition or the
+          door closes onto a room that is still there.
+        */}
+        {!panel.collapsed && tab === "sessions" && (
         <Panel
           mode={panel.mode}
           onMode={setPanelMode}
@@ -1918,12 +1914,27 @@ export function App() {
 
           History's own detail belongs inside History (`DESIGN.md` §6), not in a bar about live sessions.
         */}
-        {focused !== undefined && tab === "sessions" && (
+        {/*
+          The right bar is CONTEXT, so it exists only where context does: the Sessions page. Reported from
+          use: "Showing trace information in the history does not make any sense." Agreed — Session/Files/
+          Trace all describe a live session, and History is the archive.
+
+          It renders WITHOUT a focused session, though, because it now carries the panel's show/hide toggle
+          and that is the only door to a collapsed panel (the default). With no session there are no modes,
+          so the bar is a `nav` rather than a `tablist`: a tablist with zero tabs is invalid ARIA and would
+          announce an empty group.
+        */}
+        {tab === "sessions" && (
           <ActivityBar
             side="right"
-            as="tablist"
-            label="Session view"
-            items={PANEL_MODES.map(({ mode, label, glyph }) => ({
+            as={focused === undefined ? "nav" : "tablist"}
+            label={focused === undefined ? "Panel" : "Session view"}
+            /*
+              The MODE items need a live session: Session/Files/Trace are views of one. The show/hide toggle
+              does not — it is the only door back to a collapsed panel, and the panel is collapsed by
+              default, so a bar gated on `focused` would leave a fresh window with no way to open it at all.
+            */
+            items={(focused === undefined ? [] : PANEL_MODES).map(({ mode, label, glyph }) => ({
               id: `session-view-${mode}`,
               label,
               glyph,
@@ -1935,7 +1946,28 @@ export function App() {
                 setPanelMode(mode);
               },
             }))}
-          />
+          >
+            {/*
+              Show/hide, as a GLYPH at the foot of the context bar — reported from use: "the show hide panel
+              toggle shall be an icon, and it needs to be integrated in the context aware bar, not globally."
+              Correct on both counts: it controls the panel, the panel is context, so a word in the topbar was
+              a window-level control for a session-level region. The same toggle was also the only way to
+              REOPEN a collapsed panel, which is why it still exists while the bar's mode items remain — see
+              `ActivityBar`'s note on the door.
+            */}
+            <button
+              type="button"
+              className="navrail-item"
+              aria-expanded={!panel.collapsed}
+              title={panel.collapsed ? "Show the session panel" : "Hide the session panel"}
+              aria-label={panel.collapsed ? "Show the session panel" : "Hide the session panel"}
+              onClick={togglePanelCollapsed}
+            >
+              <span className="navrail-glyph" aria-hidden="true">
+                {panel.collapsed ? "▭" : "▮"}
+              </span>
+            </button>
+          </ActivityBar>
         )}
 
       </div>

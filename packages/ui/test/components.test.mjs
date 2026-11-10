@@ -2067,16 +2067,24 @@ test("absent facts are explained ONCE, and the reason is distinguished from 'not
 
 // --- The panel toggle, and a collapsed panel (issue #75) -------------------------------------------
 
-test("the panel toggle's label states the ACTION, and aria-expanded states the fact", () => {
-  // A control labelled by its state is read as a status, and then clicked twice by anyone who takes
-  // it for one. The label must offer the next action; `aria-expanded` carries the current truth.
-  const collapsed = renderToString(createElement(PanelToggle, { collapsed: true, onToggle() {} }));
-  assert.match(collapsed, /Show panel/);
-  assert.match(collapsed, /aria-expanded="false"/);
-
-  const open = renderToString(createElement(PanelToggle, { collapsed: false, onToggle() {} }));
-  assert.match(open, /Hide panel/);
-  assert.match(open, /aria-expanded="true"/);
+test("the panel toggle is a GLYPH in the context bar, and still states the action in words", () => {
+  /*
+   * Moved twice. It was `PanelToggle` in the topbar (a word), and reported from use: "the show hide panel
+   * toggle shall be an icon, and it needs to be integrated in the context aware bar, not globally."
+   *
+   * The 48px bar cannot carry the words visibly, so the `title` and `aria-label` carry them — the label states
+   * the ACTION ("Show…" / "Hide…"), because a control labelled by its state reads as a status and gets clicked
+   * twice. `aria-expanded` carries the current truth.
+   *
+   * `PanelToggle.tsx` is kept as the module that documented those rules, and its reasoning still holds; what
+   * changed is where it is rendered.
+   */
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.ok(!/from "\.\/components\/PanelToggle\.tsx"/.test(app), "the topbar no longer renders it");
+  const bar = app.slice(app.indexOf('side="right"'));
+  assert.match(bar, /aria-expanded=\{!panel\.collapsed\}/, "the toggle states the fact in the context bar");
+  assert.match(bar, /aria-label=\{panel\.collapsed \? "Show the session panel" : "Hide the session panel"\}/);
+  assert.match(bar, /onClick=\{togglePanelCollapsed\}/);
 });
 
 test("a collapsed panel leaves no panel track behind", () => {
@@ -3048,7 +3056,7 @@ test("the left bar is a nav and the right bar is a tablist, because they mean di
   assert.match(readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8"), /side="left"[\s\S]{0,200}label="Main"/);
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.ok(!/side="left"[\s\S]{0,120}as="tablist"/.test(app), "the app bar is not a tablist");
-  assert.match(app, /side="right"\s+as="tablist"/, "the context bar is");
+  assert.match(app, /side="right"[\s\S]{0,120}as=\{focused === undefined \? "nav" : "tablist"\}/, "the context bar is a tablist of modes");
 });
 
 test("the right bar is shown only when a session is focused", () => {
@@ -3058,8 +3066,20 @@ test("the right bar is shown only when a session is focused", () => {
    * three views of nothing.
    */
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  const guarded = /focused !== undefined && tab === "sessions" && \(\s*<ActivityBar/.test(app.replace(/\s+/g, " "));
-  assert.ok(guarded, "the context bar must be inside a `focused !== undefined && tab === sessions` guard");
+  /*
+   * The bar must exist on the Sessions page even with no session — it carries the panel's show/hide toggle,
+   * which is the only door to a collapsed panel, and collapsed is the default. Gating the whole bar on
+   * `focused` (which the first version did) leaves a fresh window with no way to open the panel at all.
+   *
+   * What the SESSION gates is the mode list, not the bar.
+   */
+  const flat = app.replace(/\s+/g, " ");
+  assert.match(flat, /\{tab === "sessions" && \( <ActivityBar/, "the bar exists on the Sessions page only");
+  assert.match(
+    flat,
+    /items=\{\(focused === undefined \? \[\] : PANEL_MODES\)/,
+    "the modes require a session; the toggle does not",
+  );
 });
 
 test("both bars and the workspace are ONE flex row, so neither bar is a full-width island", () => {
@@ -3359,8 +3379,13 @@ test("a page shows its own list, not another page's", () => {
   // The context bar needs BOTH a live session and the Sessions page.
   assert.match(
     src.replace(/\s+/g, " "),
-    /focused !== undefined && tab === "sessions" && \( <ActivityBar/,
-    "the context bar needs a live session AND the Sessions page",
+    /\{tab === "sessions" && \( <ActivityBar/,
+    "the context bar belongs to the Sessions page",
+  );
+  assert.match(
+    src.replace(/\s+/g, " "),
+    /items=\{\(focused === undefined \? \[\] : PANEL_MODES\)/,
+    "…and its views of a session require a session",
   );
 });
 
@@ -3377,4 +3402,39 @@ test("the History page gives its list the rail's 288px back", () => {
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   assert.match(app, /is-pageless/, "the shell applies the modifier for a page with no list");
   assert.match(app, /tab === "history" \? " is-pageless"/, "…for exactly the History page");
+});
+
+test("the History page is centred on the reading measure", () => {
+  /*
+   * Reported from use: "the history content is now very left aligned and shall be centered". Without a cap the
+   * rows stretched to the full column (~840px in a 1560px window) with the text hugging the left edge — and a
+   * prose line that long is unreadable anyway, which is what `--reading-measure` is for.
+   *
+   * The property is a capped column that is centred (`margin-inline: auto`), not padding on the scroller: the
+   * scrollbar must stay at the window's edge, and padding cannot centre.
+   */
+  const css = readCss();
+  const inner = /\.history\s*>\s*\*\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(inner, /max-width:\s*var\(--reading-measure\)/, "the page content is capped at the reading measure");
+  assert.match(inner, /margin-inline:\s*auto/, "…and centred, not left-aligned");
+  // A second cap on a child would put that child off the shared centreline.
+  const search = /\.history-search\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.ok(!/max-width/.test(search), "the search row must inherit the page measure, not cap itself");
+});
+
+test("the panel and its door share one condition, so neither outlives the other", () => {
+  /*
+   * The bug this pins: the context BAR was gated on the page but the PANEL was not, so the trace list sat
+   * beside the History page — "Showing trace information in the history does not make any sense."
+   *
+   * A bar is the panel's door. If the door closes and the room stays, the result is content with no control;
+   * if the room goes and the door stays, the control opens nothing. They must be one condition.
+   */
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const src = app.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  assert.match(
+    src.replace(/\s+/g, " "),
+    /\{!panel\.collapsed && tab === "sessions" && \( <Panel/,
+    "the panel renders on the Sessions page only",
+  );
 });

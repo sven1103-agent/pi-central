@@ -1,6 +1,16 @@
 /**
  * The control that shows or hides the right panel (issue #75).
  *
+ * ## Not mounted anywhere (issue #239 follow-up)
+ *
+ * The topbar rendered this; the show/hide control now lives as a glyph in the context activity bar, because a
+ * word in the topbar was a WINDOW-level control for a session-level region — reported from use as "the show
+ * hide panel toggle shall be an icon, and it needs to be integrated in the context aware bar, not globally".
+ *
+ * The module is kept rather than deleted: the three rules below are the reasoning behind the control that
+ * replaced it, and the bar implements all three (a glyph, `aria-expanded`, and a label stating the action).
+ * Deleting it would delete the only written record of why the label says "Show…" and not "Panel open".
+ *
  * ## Why the label states the ACTION, not the state
  *
  * A button labelled by its state ("Panel open") is read as a status and then clicked twice by anyone

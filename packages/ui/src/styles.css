@@ -2207,8 +2207,36 @@ select.btn { font-family: var(--sans); }
 
 /* ------------------------------------------------------------------ history */
 
-.history { flex: 1; overflow-y: auto; padding: var(--sp-4) 18px; min-height: 0; }
-.history-search { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-4); max-width: 640px; }
+/*
+ * The history page is a READING surface, and it is centred on the reading measure.
+ *
+ * Reported from use: "the history content is now very left aligned and shall be centered". Both halves of
+ * that are one bug. Without a cap the rows stretched to the full column (measured ~840px in a 1560px
+ * window) with text hugging the left edge — a line of prose that long is unreadable anyway, which is why
+ * `--reading-measure` exists for the transcript. Centring the same cap is what makes it a page rather than a
+ * list nailed to one side.
+ *
+ * `margin-inline: auto` on a capped column, not `padding` on the scroller: the scrollbar must stay at the
+ * window's edge, and padding cannot centre.
+ */
+.history {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-4) 18px;
+  min-height: 0;
+}
+
+/* The inner column, capped and centred. Applied to the direct children so the actions row (search, sort,
+   paging) shares the measure with the list — a control strip of a different width than its content is the
+   "misaligned by a few pixels" look this file keeps removing. */
+.history > * {
+  max-width: var(--reading-measure);
+  margin-inline: auto;
+}
+/* No cap of its own: it inherits the page measure from `.history > *`, so the control strip and the
+   rows share one width and one centreline. A second cap here left the strip visibly narrower and
+   left-of-centre against the list below it. */
+.history-search { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-4); }
 
 .history-row {
   display: block;

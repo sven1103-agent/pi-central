@@ -47,9 +47,11 @@ approvals, tool trace, and the sanitized `.md` pipeline are all named in `docs/S
 | Rail | Live sessions, ordered by *attention*; the two start actions; filter | On-disk history (40 dead rows under live ones was the spike's worst rail mistake) |
 | Transcript column | One focused session: header, metrics, run state, dialogs, transcript, composer | Session list, cross-session stats |
 | Panel | The auditable facts about the focused session (Session), its working directory (Files), or every call it made (Trace) | Anything actionable mid-run except `Rename`, `Stop`, and copy affordances |
-| Topbar | The mark, fleet counts and connection — the facts about the window | Per-session controls, navigation, actions |
+| Topbar | The mark, fleet counts and connection — the facts about the window | Per-session controls, navigation, actions, the panel toggle |
 | Left activity bar | App navigation: Sessions, History, Settings (pinned at the foot) | Anything about one session |
 | Right activity bar | The open context's views: Session, Files, Trace. **Shown only on the Sessions page with a session focused** | Anything about the app |
+
+**The panel is context, and its door is the context bar.** The show/hide control is a glyph at the foot of the right bar — not a word in the topbar, which made a session-level region's control look like window chrome. The bar and the panel share ONE condition (`!panel.collapsed && tab === "sessions"`): a bar whose door closes while the room stays leaves content with no control, and the reverse opens nothing. The bar itself renders on the Sessions page even with no session focused, because it is the only door to a collapsed panel and collapsed is the default; the mode items are what require a session.
 
 **A page owns its furniture.** The left bar chooses a page, and the page decides what it shows. The session rail is the *Sessions* page's list, so it is not rendered beside History — which is one full-width list with its own search (§6). The context bar follows the same rule: Session/Files/Trace are views of a live session, so on a page about the session archive the bar would name a context the page does not have. When a page has no list of its own, `.panes.is-pageless` releases the rail's 288px track rather than reserving it for a column that is not there.
 
