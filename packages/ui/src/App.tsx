@@ -1433,9 +1433,25 @@ export function App() {
         </ActivityBar>
 
       <div
-        className={panel.collapsed ? "panes is-collapsed" : "panes"}
+        className={
+          (panel.collapsed ? "panes is-collapsed" : "panes") + (tab === "history" ? " is-pageless" : "")
+        }
         style={{ "--panel-width": `${panel.width}px` } as React.CSSProperties}
       >
+        {/*
+          The rail is the SESSIONS page's list, not a permanent column.
+
+          Reported from use: "The history panel shows the sessions and the context detail panel from
+          sessions. That is a violation of what we wanted the bars to work." Exactly — the bars promise that
+          the left bar chooses a PAGE and the right bar offers views of the OPEN CONTEXT. A list of live
+          sessions sitting beside the history page is neither: it belongs to the Sessions page.
+
+          `DESIGN.md` §6 already said so for History — "One full-width list, not a rail tail" — and the
+          arrangement here is the same rule stated once: page-chosen lists go inside the page's own area.
+          Below `RAIL_DRAWER_MAX_WIDTH` the drawer is how the list is reached on the Sessions page, and it is
+          not reachable at all on History, which has its own search.
+        */}
+        {tab === "sessions" && (
         <SessionRail
           /*
            * ONE list of rows: the PERSISTED roster, with activity joined in (issue #89).
@@ -1479,6 +1495,7 @@ export function App() {
           home={home}
           historyTotal={state.historyTotal}
         />
+        )}
 
         {tab === "history" ? (
           <main className="column">
@@ -1892,7 +1909,16 @@ export function App() {
         and the workspace each took a full-width row. A screenshot showed it; no test caught it, because
         every assertion was about the bar's own markup rather than about where it lives.
         */}
-        {focused !== undefined && (
+        {/*
+          "Only if a session is active" — and specifically only on the SESSIONS page, where a session is the
+          open context. Reported from use: the context bar was offering Session/Files/Trace while the History
+          page was open, and the panel behind it was showing a live session's inspector. Three views of a
+          session, offered on a page about the session archive, is the same dishonesty as offering them with
+          nothing focused: the bar names an open context that the page does not have.
+
+          History's own detail belongs inside History (`DESIGN.md` §6), not in a bar about live sessions.
+        */}
+        {focused !== undefined && tab === "sessions" && (
           <ActivityBar
             side="right"
             as="tablist"

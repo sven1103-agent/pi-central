@@ -49,7 +49,9 @@ approvals, tool trace, and the sanitized `.md` pipeline are all named in `docs/S
 | Panel | The auditable facts about the focused session (Session), its working directory (Files), or every call it made (Trace) | Anything actionable mid-run except `Rename`, `Stop`, and copy affordances |
 | Topbar | The mark, fleet counts and connection — the facts about the window | Per-session controls, navigation, actions |
 | Left activity bar | App navigation: Sessions, History, Settings (pinned at the foot) | Anything about one session |
-| Right activity bar | The focused session's views: Session, Files, Trace. **Shown only when a session is focused** | Anything about the app |
+| Right activity bar | The open context's views: Session, Files, Trace. **Shown only on the Sessions page with a session focused** | Anything about the app |
+
+**A page owns its furniture.** The left bar chooses a page, and the page decides what it shows. The session rail is the *Sessions* page's list, so it is not rendered beside History — which is one full-width list with its own search (§6). The context bar follows the same rule: Session/Files/Trace are views of a live session, so on a page about the session archive the bar would name a context the page does not have. When a page has no list of its own, `.panes.is-pageless` releases the rail's 288px track rather than reserving it for a column that is not there.
 
 **Primary:** the focused session, its approvals, its composer. **Secondary:** history, rename, stop, model/thinking pickers. **Absent:** any directory field on the primary path; any "move this session"; any per-session isolation toggle.
 

@@ -3058,8 +3058,8 @@ test("the right bar is shown only when a session is focused", () => {
    * three views of nothing.
    */
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  const guarded = /focused !== undefined && \(\s*<ActivityBar/.test(app.replace(/\s+/g, " "));
-  assert.ok(guarded, "the context bar must be inside a `focused !== undefined` guard");
+  const guarded = /focused !== undefined && tab === "sessions" && \(\s*<ActivityBar/.test(app.replace(/\s+/g, " "));
+  assert.ok(guarded, "the context bar must be inside a `focused !== undefined && tab === sessions` guard");
 });
 
 test("both bars and the workspace are ONE flex row, so neither bar is a full-width island", () => {
@@ -3317,4 +3317,64 @@ test("the bars use a namespace of their own, because `.activity` already means a
   for (const leak of ["--quarantine", "reading-measure"]) {
     assert.ok(!navrail.includes(leak), `the bar must not inherit ${leak} from the tool group`);
   }
+});
+
+test("a page shows its own list, not another page's", () => {
+  /*
+   * Reported from use: "The history panel shows the sessions and the context detail panel from sessions.
+   * That is a violation of what we wanted the bars to work."
+   *
+   * The rule the bars promise: the LEFT bar chooses a PAGE, and a page owns its own furniture. The session
+   * rail is the Sessions page's list, so it must not render beside History — which has its own full-width
+   * list and its own search (`DESIGN.md` §6: "One full-width list, not a rail tail").
+   *
+   * The context bar is bound by the same rule from the other side: Session/Files/Trace are views of a LIVE
+   * session, so on a page about the session ARCHIVE the bar names a context the page does not have.
+   */
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  // Comments first and foremost: the guard string appears in the prose that EXPLAINS it, and a check that
+  // reads prose as code reports the opposite of the truth — the failure this file's `codeOnly` convention
+  // exists for. Falsification caught exactly that: with the guard removed the comment still satisfied
+  // `lastIndexOf("tab === \"sessions\" && (")`.
+  const src = app.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+
+  const railAt = src.indexOf("<SessionRail");
+  assert.notEqual(railAt, -1, "the session rail must exist");
+
+  /*
+   * The guard must be ADJACENT to the element, not merely somewhere before it in the file. Everything between
+   * the guard and `<SessionRail` is whitespace, which is what makes "this conditional wraps that element" a
+   * statement about the code rather than about the file's length.
+   */
+  const beforeRail = src.slice(0, railAt);
+  const guardAt = beforeRail.lastIndexOf('{tab === "sessions" && (');
+  assert.notEqual(guardAt, -1, "the rail must be rendered only on the Sessions page");
+  const between = src.slice(guardAt, railAt);
+  assert.equal(
+    between.replace(/[{}\s]/g, ""),
+    'tab==="sessions"&&(',
+    `the guard must wrap the rail, not merely precede it; found "${between.trim().slice(0, 60)}"`,
+  );
+
+  // The context bar needs BOTH a live session and the Sessions page.
+  assert.match(
+    src.replace(/\s+/g, " "),
+    /focused !== undefined && tab === "sessions" && \( <ActivityBar/,
+    "the context bar needs a live session AND the Sessions page",
+  );
+});
+
+test("the History page gives its list the rail's 288px back", () => {
+  /*
+   * The companion of the test above. If the rail is not rendered, reserving its grid track leaves a 288px
+   * hole — which is a layout bug that looks like a loading bug. `is-pageless` is the modifier that removes
+   * the track, and it must exist in both the collapsed and expanded form.
+   */
+  const css = readCss();
+  assert.match(css, /\.panes\.is-pageless\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+var\(--panel-width/);
+  assert.match(css, /\.panes\.is-pageless\.is-collapsed\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*;/);
+
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /is-pageless/, "the shell applies the modifier for a page with no list");
+  assert.match(app, /tab === "history" \? " is-pageless"/, "…for exactly the History page");
 });

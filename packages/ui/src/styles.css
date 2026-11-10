@@ -241,6 +241,13 @@ button { font: inherit; color: inherit; }
  * divider, because with two tracks there is only one gap.
  */
 .panes.is-collapsed { grid-template-columns: 288px 1fr; }
+
+/*
+ * A page that has no list of its own: History is one full-width list (`DESIGN.md` §6), so the rail's 288px
+ * track must not be reserved for a column that is not rendered. Two tracks, not three.
+ */
+.panes.is-pageless { grid-template-columns: minmax(0, 1fr) var(--panel-width, 320px); }
+.panes.is-pageless.is-collapsed { grid-template-columns: minmax(0, 1fr); }
 /*
  * The shell is a ROW of [activity bar][panes], so the left bar is an edge of the window rather than a
  * column competing with the rail. `.panes` keeps its own three-track grid, unchanged — which is what
