@@ -21,7 +21,7 @@
  * the window equivalent to a browser tab; #215 asserts them properly, and they are stated here so this
  * slice does not open a window that is already worse than the tab it replaces.
  */
-import { BrowserWindow, Menu, app, dialog, shell } from "electron";
+import { BrowserWindow, Menu, app, dialog, nativeImage, shell } from "electron";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import { accessSync, constants, existsSync, lstatSync, readFileSync, readlinkSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -78,6 +78,7 @@ import {
 } from "./runtime-record.ts";
 import { askLiveSessions, type SocketLike } from "./live-sessions.ts";
 import { openLogWriter, teeConsole } from "./app-log.ts";
+import { dockIconCandidates } from "./app-icon.ts";
 import {
   INSTALL_TIMEOUT_MS,
   STOP_HARD_DEADLINE_MS,
@@ -1445,6 +1446,61 @@ function revealLogFile(): void {
   }
 }
 
+/**
+ * Put Pi Central's icon on the dock, so a development run does not advertise Electron's (issue #239).
+ *
+ * Silently does nothing when the bundle is authoritative (a packaged launch) or when the master PNG is not there, which is
+ * a checkout that has never run `npm run build:icon`. A missing dev icon is a cosmetic regression in a dev session; failing
+ * the launch over it would make the app unusable for exactly the reader who is about to fix it. The log line is there so
+ * "the dock still shows Electron" has an answer other than "works here".
+ *
+ * `dock` is undefined off macOS, and this app is macOS-only (C10) — but the guard is kept because a test imports this
+ * module's siblings under Node, where `app.dock` is a stub at best.
+ */
+function applyDockIcon(): void {
+  const candidates = dockIconCandidates({ packaged: app.isPackaged, entryPath: process.argv[1] });
+  if (candidates.length === 0) return;
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue;
+    const image = nativeImage.createFromPath(candidate);
+    // An EMPTY image is the failure `nativeImage` reports for a format it cannot decode (an `.icns`, for instance), and
+    // `setIcon` with one leaves the dock tile blank — worse than the wrong icon, because it reads as a crash.
+    if (image.isEmpty()) {
+      console.warn(`Pi Central: ${candidate} is not an image Electron can decode, so the dock icon is unchanged`);
+      continue;
+    }
+    app.dock?.setIcon(image);
+    return;
+  }
+  console.warn(
+    `Pi Central: no app icon found (looked in ${candidates.join(", ")}), so the dock shows Electron's — ` +
+      "run npm run build:icon",
+  );
+}
+
+/**
+ * What the About panel says, and with which mark (issue #239).
+ *
+ * `role: "about"` shows the panel, but everything in it is Electron's default when the app has not said otherwise: the
+ * framework's icon, and — in a checkout run — Electron's own version. That is one more surface advertising "Electron" for a
+ * product called Pi Central, and it is the one a reader opens to answer *"which version am I actually running?"*.
+ *
+ * The version comes from the package the shell launches, which is the same source every other version statement in this app
+ * uses (`readRunningVersion`). `applicationVersion` rather than `version`: the former is the short version macOS shows,
+ * the latter is the build number.
+ *
+ * `credits` is where the honest sentence goes, because the About panel is the one place a reader looks for "what is this":
+ * it names the package the shell launches, so the desktop app and the npm artifact cannot be mistaken for two products.
+ */
+function applyAboutPanel(): void {
+  app.setAboutPanelOptions({
+    applicationName: app.name,
+    applicationVersion: readRunningVersion(),
+    credits: "Pi Central runs the package you installed with npm, in a window of its own.",
+    copyright: "MIT licensed.",
+  });
+}
+
 /** The menu, which is the only way to reach the update path (criterion 1). */
 function buildMenu(): void {
   const template = [
@@ -1521,6 +1577,16 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
+    /*
+     * The dock icon, for a development run (issue #239).
+     *
+     * A packaged launch gets it from the bundle's own `icon.icns`, which macOS reads — so this is deliberately a no-op
+     * there (`dockIconCandidates` returns nothing when packaged). What it fixes is `npm run app`: that starts the Electron
+     * binary out of `node_modules`, whose bundle icon is Electron's, so the dock showed Electron's logo while a reader was
+     * looking straight at Pi Central's window.
+     */
+    applyDockIcon();
+    applyAboutPanel();
     // The menu is the only route to the update path (issue #217, criterion 1). Built once, before the first launch, so
     // a reader can reach it even when the orchestrator failed to start.
     buildMenu();

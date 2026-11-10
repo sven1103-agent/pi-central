@@ -534,3 +534,104 @@ could not be spawned at all (`spawnSync` reported `EPERM`), and `/bin/sh -c 'ps 
 - **Identity is a start time, not a PID.** PIDs are recycled, and a record survives `kill -9`. The recorded
   value is `Date.now() - etime` so that the writing side and the checking side are one measurement rather
   than two, compared within a tolerance of seconds.
+
+## C17 — `iconutil -c icns` does not work, so an `.icns` is assembled by hand
+
+`iconutil` is the documented way to build a macOS icon container from an iconset directory, and on macOS
+**26.7.2** it refuses every input, including valid ones:
+
+```
+$ iconutil -c icns /tmp/t.iconset -o t.icns
+/tmp/t.iconset:Invalid Iconset.
+/tmp/t.iconset:Invalid Iconset.
+```
+
+The iconset was complete and correctly named — `icon_16x16.png` through `icon_512x512@2x.png`, RGBA PNGs at
+the right dimensions — and it was rejected. The reverse direction works, so this was isolated rather than
+assumed:
+
+```
+$ iconutil -c iconset electron.icns -o extracted.iconset   # exit 0, ten PNGs
+$ iconutil -c icns extracted.iconset -o re.icns            # "Invalid Iconset."
+```
+
+That is `iconutil` refusing a set **it had just produced itself** from Electron's own valid `.icns`. Copying
+the files, `xattr -c`-ing them, and using absolute paths all changed nothing.
+
+### Consequences
+
+- **The app icon is written byte by byte.** An `.icns` is `icns`, a big-endian total length, then
+  `[type][length][payload]` elements; `scripts/build-icon.mjs` emits `ic07`–`ic14` with PNG payloads, which is
+  the set macOS reads from 10.7 on and the same set Electron's own icon carries. `sips` produces the square
+  PNGs, and the run verifies the result by reading it back through `sips`/ImageIO — the reader the dock uses.
+- **A build step that fails on a healthy input is not a build step.** The first version of this script called
+  `iconutil` and would have failed the whole `install-app` on a machine where nothing was wrong.
+- **`nativeImage.createFromPath` does not decode an `.icns`.** Verified separately: it returns an *empty* image
+  for one `sips` and ImageIO read fine, because Electron's decoder is Skia's (PNG and JPEG), not ImageIO's. So
+  the development run sets its dock icon from the **PNG** master, not from the `.icns` beside it — and
+  `setIcon` with an empty image leaves a blank dock tile, which reads as a crash rather than as a wrong icon.
+
+## C18 — On macOS 26, a padded `.icns` gets its inset applied twice
+
+macOS 26 renders app icons as a **tile the system draws**: the plate, the border and the grid are the platform's, and
+the artwork is expected to fill the canvas. Apps built for it carry no `.icns` at all — `Calculator.app` and
+`Stickies.app` hold only an `Assets.car` produced by Icon Composer — and a plain `.icns` is the legacy path, which the
+system wraps in its own plate.
+
+Both facts are measured here rather than assumed:
+
+```
+Electron's electron.icns   opaque box 922/1024 px  (90.0%)
+our first icon.png         opaque box 824/1024 px  (80.5%)
+```
+
+What the 824 px mark produced, in the dock: **a light rounded plate with a grey margin between the plate and the green
+circle.** The Big Sur guidance ("supply the margin yourself") was applied *inside* the system's own margin.
+
+### Consequences
+
+- **Do not pad the app icon.** The mark fills the 1024 px canvas. The only transparency is outside the inscribed circle,
+  which is why the four corners are transparent and the four edge midpoints are not — that is the assertion
+  `app-build.test.ts` makes, and it is the inverse of the one that shipped the defect.
+- **A transparent margin is evidence of the bug, not of care.** The first version's test required
+  `transparent > 10% of the canvas`, so it *enforced* the inset. A test can hold a defect in place; when the swatch looks
+  wrong, check what the test asked for.
+- **The native form is out of reach on this machine.** An `Assets.car` needs `Icon Composer` from Xcode 26;
+  `xcrun --find icontool` reports *"not a developer tool"* against Command Line Tools. The `.icns` is the honest artifact
+  for a project with no Apple Developer account, and it is stated as a limit rather than worked around.
+
+## C19 — `node_modules/electron/dist` is a live bundle, and `cp -r` destroys it
+
+`install-app` signs a **copy** of Electron's app bundle, and that copy is only valid if the framework symlinks are
+symlinks. `cp -r` dereferences them, so the naive backup/restore silently produces a bundle macOS will not sign:
+
+```
+install-app: codesign failed for …/Contents/Frameworks/Electron Framework.framework:
+  …: bundle format is ambiguous (could be app or framework)
+```
+
+"Ambiguous" is exact: with the links flattened, `Versions/A` and `Versions/Current` are the same file reached two ways, so
+the framework has two candidate current versions.
+
+Measured: a pristine `electron-v45.2.3-darwin-arm64` contains **14** symlinks, and flattening them is invisible until
+something reads the bundle:
+
+```
+Frameworks/Electron Framework.framework/{Electron Framework,Helpers,Libraries,Resources}
+Frameworks/Electron Framework.framework/Versions/Current
+Frameworks/Mantle.framework/{Mantle,Resources,Versions/Current}
+Frameworks/ReactiveObjC.framework/{ReactiveObjC,Resources,Versions/Current}
+Frameworks/Squirrel.framework/{Squirrel,Resources,Versions/Current}
+```
+
+### Consequences
+
+- **Copy with `cp -a`** (or `ditto`, or `rsync -a`) when duplicating Electron's bundle. The project's own install step
+  already uses `cpSync(..., { verbatimSymlinks: true })` for the same reason — this is the same rule one level up.
+- **Restore from the release tarball, not from a copy.** `node_modules/electron/checksums.json` carries the expected
+  SHA-256 for the platform's zip, which makes the restoration verifiable rather than hopeful.
+- **A flattened dist does not fail the build it fails the SIGNING**, several steps later, with a message about bundle
+  format rather than about symlinks. If codesign reports "ambiguous", check `find … -type l | wc -l` before anything else.
+- **`codesign --verify` on Electron's own framework reports** *"code has no resources but signature indicates they must be
+  present"* — **on a pristine extract too**. That is Electron's shipping state, not damage; `--deep --strict` on the whole
+  app is the check that means something.

@@ -46,7 +46,7 @@ Everything the changelog is not allowed to contain is still worth writing down �
 | Why the change is shaped this way | the **commit message** |
 | The full argument, alternatives rejected, evidence | the **PR body** |
 | A decision with lasting architectural weight | a new **ADR** in `docs/decisions/` |
-| A hard limit discovered by breaking it | **`docs/CONSTRAINTS.md`** (C1–C16) |
+| A hard limit discovered by breaking it | **`docs/CONSTRAINTS.md`** (C1–C19) |
 | How a defect escaped and what now prevents it | the **test's own header comment** |
 
 The commit message is the natural home for a paragraph like *"the worker applied the inverse of the
@@ -65,7 +65,7 @@ to be compressed again is the signal that this section was ignored.
 
 These are the mistakes that are cheap to avoid and expensive to find:
 
-- **Read `docs/CONSTRAINTS.md` first** (C1–C16). Most "obvious" designs are ruled out there, and the
+- **Read `docs/CONSTRAINTS.md` first** (C1–C19). Most "obvious" designs are ruled out there, and the
   constraint usually explains why in one paragraph.
 - **`npm run verify` must pass** (typecheck + tests + doc references + version agreement). Adding a
   `[#N]` definition without a reference, or a reference without a definition, fails it.

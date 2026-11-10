@@ -26,7 +26,7 @@ exists) rather than a sync: once an issue is open it belongs to whoever is worki
    screenshot. Where a claim cannot be verified in CI (sandbox behaviour, for instance), the issue
    says so explicitly rather than leaving it implied.
 3. **It carries its constraint.** If a slice touches isolation, credentials, or rendering, the
-   issue links the constraint (C1–C14) or ADR that governs it. These are the places where a
+   issue links the constraint (C1–C19) or ADR that governs it. These are the places where a
    locally reasonable change is globally wrong.
 4. **It is one writer.** Slices that edit the same module in parallel are sequenced, not merged
    into one oversized change.
@@ -146,6 +146,7 @@ gave it. The record is [ADR-0013](decisions/0013-application-shell.md).
 | Close hides, `⌘Q` keeps sessions, the next launch reattaches (#216) | ✅ this slice |
 | The shell applies an update: stop, install, verify, respawn, reload (#217) | ✅ this slice |
 | `npm run install-app` produces a locally signed app (#218) | ✅ this slice |
+| The bundle carries Pi Central's icon, and a dev run does too (#239) | ✅ this slice |
 
 Non-goals of the whole increment, stated once: a `.dmg`, notarization, `electron-updater`, a stored
 credential in CI, and x64.
