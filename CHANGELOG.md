@@ -81,6 +81,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Fixed
 
+- The docs no longer offer a Homebrew tap or cask as a way to run an un-notarized app; Homebrew closed support for those casks on 2026-09-01 ([#246]).
 - Both activity bars and the workspace share one flex row, so neither bar collapses onto a row of its own ([#241]).
 - The workspace takes the grid's growing row, so the window has no dead space below it when no banner is shown ([#241]).
 - The activity bars use their own class namespace: they had inherited the transcript's `.activity` border and background ([#241]).
@@ -105,6 +106,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 [#218]: https://github.com/sven1103-agent/pi-central/issues/218
 [#239]: https://github.com/sven1103-agent/pi-central/issues/239
 [#241]: https://github.com/sven1103-agent/pi-central/issues/241
+[#246]: https://github.com/sven1103-agent/pi-central/issues/246
 
 <!-- Empty at tag time: `scripts/check-version.mjs --release` refuses to release while this holds entries, so a release cannot silently ship undocumented changes. An HTML comment is exempt from that check, which is why this note is here rather than a paragraph. -->
 
