@@ -122,6 +122,20 @@ export function resizePanelTo(
  */
 export type PanelMode = "session" | "files" | "trace";
 
+/**
+ * The panel's modes and their labels, in order.
+ *
+ * Here rather than in `Panel.tsx` because there are now TWO consumers: the panel's tab list and the right
+ * activity bar. Two lists that must agree is the drift this repository keeps writing tests for, so there
+ * is one list. The `glyph` is the bar's form of the same word — text rather than SVG, so the bar needs no
+ * asset and inherits `currentColor`.
+ */
+export const PANEL_MODES: readonly { mode: PanelMode; label: string; glyph: string }[] = [
+  { mode: "session", label: "Session", glyph: "◉" },
+  { mode: "files", label: "Files", glyph: "▤" },
+  { mode: "trace", label: "Trace", glyph: "≡" },
+];
+
 export interface PanelPrefs {
   width: number;
   mode: PanelMode;

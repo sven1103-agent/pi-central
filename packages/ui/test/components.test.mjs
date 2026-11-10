@@ -29,7 +29,7 @@ globalThis.document = dom.window.document;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 
 let server;
-let ErrorStrip, SessionRail, ToolTrace, DialogDock, TranscriptView, HistoryView, Composer, FileTree, FilePane, Panel, PanelToggle, FilesPanel, Settings, initialState;
+let ErrorStrip, SessionRail, ToolTrace, DialogDock, TranscriptView, HistoryView, Composer, FileTree, FilePane, Panel, PanelToggle, FilesPanel, Settings, initialState, ActivityBar, PANEL_MODES;
 
 before(async () => {
   // `root` must be the UI package, not the process CWD: Vite resolves the `/src/...` specifiers
@@ -42,6 +42,8 @@ before(async () => {
   });
   ({ ErrorStrip } = await server.ssrLoadModule("/src/App.tsx"));
   ({ SessionRail } = await server.ssrLoadModule("/src/components/SessionRail.tsx"));
+  ({ ActivityBar } = await server.ssrLoadModule("/src/components/ActivityBar.tsx"));
+  ({ PANEL_MODES } = await server.ssrLoadModule("/src/panel.ts"));
   ({ ToolTrace } = await server.ssrLoadModule("/src/components/ToolTrace.tsx"));
   ({ DialogDock } = await server.ssrLoadModule("/src/components/DialogDock.tsx"));
   ({ TranscriptView } = await server.ssrLoadModule("/src/components/Transcript.tsx"));
@@ -1731,22 +1733,60 @@ function panelProps(extra = {}) {
   };
 }
 
-test("the panel offers every mode, and marks the active one", () => {
-  const html = renderToString(createElement(Panel, panelProps(), createElement("p", null, "body")));
+test("the context bar offers every panel mode, and marks the active one", async () => {
+  /*
+   * The modes moved OUT of the panel and onto the window's right edge, so they are asserted where they
+   * live now. The first version of this change had a bar in both places, which produced two elements with
+   * the same id — so this test also pins that there is exactly ONE of each.
+   *
+   * `Panel` still owns `aria-controls`/`role=tabpanel`; the bar owns the tabs.
+   */
+  const html = renderToString(createElement(ActivityBar, {
+    side: "right",
+    as: "tablist",
+    label: "Session view",
+    items: PANEL_MODES.map(({ mode, label, glyph }) => ({
+      id: `session-view-${mode}`,
+      label,
+      glyph,
+      active: mode === "session",
+      onSelect() {},
+    })),
+  }));
   assert.match(html, /role="tablist"/);
-  assert.match(html, /role="tab"/);
+  assert.match(html, /aria-orientation="vertical"/, "the bar is a column, so it says so");
   // Session, Files, Trace — the trace moved here from a drawer under the transcript, so there are three.
   assert.equal((html.match(/role="tab"/g) ?? []).length, 3, "Session, Files and Trace");
   assert.equal((html.match(/aria-selected="true"/g) ?? []).length, 1);
-  assert.match(html, /aria-selected="true"[^>]*>Session</);
-  assert.match(html, />Trace</, "the trace is reachable as a mode rather than a strip");
+  assert.match(html, /aria-selected="true"[^>]*aria-label="Session"/);
+  assert.match(html, /aria-label="Trace"/, "the trace is reachable as a mode rather than a strip");
+  // One element per mode, so the ids are unique in the document.
+  for (const mode of ["session", "files", "trace"]) {
+    assert.equal((html.match(new RegExp(`id="session-view-${mode}"`, "g")) ?? []).length, 1, `one ${mode} item`);
+  }
 });
 
-test("only the selected TAB is in the tab order (roving tabindex)", () => {
-  // Scoped to the tabs on purpose: the resize separator is also tabbable, and counting every
-  // `tabindex="0"` in the panel conflated the two — which is how the first version of this test
-  // passed for the wrong reason.
+test("the panel is a body and a resizer, with no mode bar of its own", () => {
+  // The bar is one element at the window's right edge, not one per panes-with-a-panel. Asserted as an
+  // absence because the failure mode was a second copy that looked correct in isolation.
   const html = renderToString(createElement(Panel, panelProps(), createElement("p", null, "body")));
+  assert.ok(!/role="tablist"/.test(html), "the panel must not render its own mode tabs");
+  assert.ok(!/class="activity/.test(html), "nor its own activity bar");
+  assert.match(html, /class="panel-body"/, "…it renders the body");
+});
+
+test("only the selected ITEM is in the tab order (roving tabindex)", () => {
+  // Scoped to the tabs on purpose: the resize separator is also tabbable, and counting every
+  // `tabindex="0"` conflated the two — which is how the first version of this test passed for the wrong
+  // reason. Now the bar is asserted in isolation, so only its own items can appear.
+  const html = renderToString(createElement(ActivityBar, {
+    side: "right",
+    as: "tablist",
+    label: "Session view",
+    items: PANEL_MODES.map(({ mode, label, glyph }) => ({
+      id: `session-view-${mode}`, label, glyph, active: mode === "files", onSelect() {},
+    })),
+  }));
   const tabs = html.match(/<button[^>]*role="tab"[^>]*>/g) ?? [];
   assert.equal(tabs.length, 3, "expected three tabs");
   const selected = tabs.filter((t) => t.includes('aria-selected="true"'));
@@ -1757,11 +1797,12 @@ test("only the selected TAB is in the tab order (roving tabindex)", () => {
   for (const tab of other) assert.match(tab, /tabindex="-1"/, "the unselected tabs must be skipped");
 });
 
-test("the body is tied to the tab that labels it", () => {
-  // `aria-labelledby` on the tabpanel is what makes the region announce as "Files, tab panel"
-  // rather than as an unlabelled group.
+test("the body is tied to the control that selects it", () => {
+  // `aria-labelledby` on the tabpanel is what makes the region announce as "Files, tab panel" rather
+  // than as an unlabelled group. The id it names belongs to the context bar, which is outside the panel
+  // — `aria-labelledby` deliberately spans the document.
   const html = renderToString(createElement(Panel, panelProps({ mode: "files" }), createElement("p", null, "body")));
-  assert.match(html, /id="panel-body-files"[^>]*aria-labelledby="panel-tab-files"/);
+  assert.match(html, /id="panel-body-files"[^>]*aria-labelledby="session-view-files"/);
 });
 
 test("the resize handle is an operable separator with its bounds stated", () => {
@@ -1825,6 +1866,26 @@ test("the panel is a named query container, and the split query targets that nam
   assert.match(css, /container-type:\s*inline-size/, "the panel must be a size container");
   assert.match(css, /container-name:\s*panel\b/, "the container must be named");
   assert.match(css, /@container panel \(min-width: 560px\)/, "the split must query that name");
+  /*
+   * And the container is `.panel-content`, not `.panel` — a deliberate move when the mode bar became a
+   * vertical column inside the panel. An inline-size container cannot be queried by content laid out
+   * beside it: `@container panel (min-width: 560px)` would then measure the panel INCLUDING the 48px
+   * bar, and split the file view 48px early. Measured in the figure work: at a 560px panel that is the
+   * difference between a readable document and a clipped one.
+   */
+  const content = /\.panel-content\s*\{([^}]*)\}/.exec(css);
+  assert.ok(content, "the panel must have a content column");
+  assert.match(content[1], /container-type:\s*inline-size/, "the content column is the query container");
+  assert.match(content[1], /container-name:\s*panel\b/, "…with the same name, so the queries still match");
+  /*
+   * The panel is a COLUMN and holds no bar. An earlier version of this assertion required
+   * `flex-direction: row` — it was describing the implementation I had just written, including the bug in
+   * it, rather than the property that matters. A test can hold a defect in place.
+   */
+  const panel = /\.panel\s*\{([^}]*)\}/.exec(css);
+  assert.match(panel?.[1] ?? "", /flex-direction:\s*column/, "the panel is a column: content above, resizer overlay");
+  const rendered = renderToString(createElement(Panel, panelProps(), createElement("p", null, "body")));
+  assert.ok(!/class="activity/.test(rendered), "and no bar is rendered inside it");
 });
 
 test("the panel column is sized by a custom property, so only one thing writes the width", () => {
@@ -2006,16 +2067,24 @@ test("absent facts are explained ONCE, and the reason is distinguished from 'not
 
 // --- The panel toggle, and a collapsed panel (issue #75) -------------------------------------------
 
-test("the panel toggle's label states the ACTION, and aria-expanded states the fact", () => {
-  // A control labelled by its state is read as a status, and then clicked twice by anyone who takes
-  // it for one. The label must offer the next action; `aria-expanded` carries the current truth.
-  const collapsed = renderToString(createElement(PanelToggle, { collapsed: true, onToggle() {} }));
-  assert.match(collapsed, /Show panel/);
-  assert.match(collapsed, /aria-expanded="false"/);
-
-  const open = renderToString(createElement(PanelToggle, { collapsed: false, onToggle() {} }));
-  assert.match(open, /Hide panel/);
-  assert.match(open, /aria-expanded="true"/);
+test("the panel toggle is a GLYPH in the context bar, and still states the action in words", () => {
+  /*
+   * Moved twice. It was `PanelToggle` in the topbar (a word), and reported from use: "the show hide panel
+   * toggle shall be an icon, and it needs to be integrated in the context aware bar, not globally."
+   *
+   * The 48px bar cannot carry the words visibly, so the `title` and `aria-label` carry them — the label states
+   * the ACTION ("Show…" / "Hide…"), because a control labelled by its state reads as a status and gets clicked
+   * twice. `aria-expanded` carries the current truth.
+   *
+   * `PanelToggle.tsx` is kept as the module that documented those rules, and its reasoning still holds; what
+   * changed is where it is rendered.
+   */
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.ok(!/from "\.\/components\/PanelToggle\.tsx"/.test(app), "the topbar no longer renders it");
+  const bar = app.slice(app.indexOf('side="right"'));
+  assert.match(bar, /aria-expanded=\{!panel\.collapsed\}/, "the toggle states the fact in the context bar");
+  assert.match(bar, /aria-label=\{panel\.collapsed \? "Show the session panel" : "Hide the session panel"\}/);
+  assert.match(bar, /onClick=\{togglePanelCollapsed\}/);
 });
 
 test("a collapsed panel leaves no panel track behind", () => {
@@ -2049,7 +2118,14 @@ test("a collapsed panel renders no panel body at all", () => {
   assert.match(html, /class="panel"/, "the panel renders when it IS included");
   // The shell excludes it entirely when collapsed; `App.tsx` holds that branch, so this asserts the
   // contract the branch relies on: the panel is a plain element with no hidden state of its own.
-  assert.ok(!/hidden/.test(html), "the panel has no built-in collapse; the shell decides");
+  /*
+   * Asserted against the PANEL element rather than the whole document: the mode glyphs carry
+   * `aria-hidden="true"` on purpose (each item has its own `aria-label`), so a bare `/hidden/` test now
+   * matches the glyph and would report on the wrong thing. The property is unchanged — the panel has no
+   * built-in collapse, so the shell decides by not rendering it.
+   */
+  const panelTag = /<aside[^>]*>/.exec(html)?.[0] ?? "";
+  assert.ok(!/hidden|display:\s*none|aria-expanded/.test(panelTag), "the panel has no built-in collapse; the shell decides");
 });
 
 // --- Wrapping is a choice, and the default is wrapped (issue #73) ----------------------------------
@@ -2780,8 +2856,16 @@ test("the rail is reachable below the drawer breakpoint", () => {
 
   // A drawer that is never opened is `display: none` with extra steps.
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  assert.match(app, /rail-toggle/, "a control must open the drawer");
-  assert.match(app, /aria-expanded=\{railOpen\}/, "…and state whether it is open");
+  /*
+   * The opener moved from a `rail-toggle` button in the topbar to the Sessions item in the left activity
+   * bar. It is still a BUTTON with `aria-expanded` and `aria-controls` — the property the original test
+   * was written for — so the assertions follow the responsibility rather than the class name. Asserting
+   * `rail-toggle` here would have kept the test green while nothing opened the drawer.
+   */
+  assert.match(app, /id: "activity-left-sessions"/, "the left bar has a Sessions item");
+  assert.match(app, /expanded: railIsDrawer \? railOpen : undefined/, "…which states whether the drawer is open");
+  assert.match(app, /controls: railIsDrawer \? "session-rail" : undefined/, "…and what it controls");
+  assert.match(app, /setRailOpen\(\(open\) => !open\)/, "…and toggles it");
   assert.match(app, /rail-backdrop/, "a backdrop must close it");
   assert.match(app, /setRailOpen\(false\)/, "Escape, the backdrop and a selection all close it");
 
@@ -2897,4 +2981,602 @@ test("the run track clears the companion's first line", () => {
     /padding:\s*calc\(var\(--sp-3\) \+ 2px\)/,
     "the stacked header clears the track too, and adds the track's own height",
   );
+});
+
+// ---------------------------------------------------------------------------------------------------
+// The activity bars (the topbar rethink).
+// ---------------------------------------------------------------------------------------------------
+
+test("the fleet counters are separated in the TEXT, not only by CSS", () => {
+  /*
+   * The defect this pins, measured in a real window: `9 sessions3 scratch`. The CSS carried a note claiming
+   * the separator was "a real character between counters (rendered by the component)" — the component never
+   * rendered one, and `gap: 0` removed the only visual spacing, so both the screen and the accessible name
+   * ran the numbers together.
+   *
+   * A `·` in the DOM is the fix rather than a `::before`: a pseudo-element is not in `textContent`, so it
+   * would look right and read wrong.
+   */
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const fleet = /<div className="fleet">([\s\S]*?)<\/div>/.exec(app)?.[1] ?? "";
+  assert.ok(fleet.length > 0, "the fleet block must exist");
+  for (const label of ["running", "scratch", "need you"]) {
+    assert.match(fleet, new RegExp(`· \\{[^}]*\\} ${label}`), `"${label}" must carry its own separator`);
+  }
+  // The first counter has no separator by design: a leading middot reads as a stray bullet.
+  assert.ok(!/fleet\.total[^<]*<span>· /.test(fleet), "the first counter must not be prefixed");
+});
+
+test("the word mark is a mark: the product name is not drawn in the topbar", () => {
+  /*
+   * "Can we remove the word text mark" — and the constraint that makes it safe to remove: the `<h1>` is the
+   * only top-level heading in the app, so the NAME has to stay reachable even though it is no longer drawn.
+   * Removing the text without keeping the heading would leave a page with no `h1` at all.
+   */
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const wordmark = /<h1 className="wordmark">([\s\S]*?)<\/h1>/.exec(app)?.[1] ?? "";
+  assert.ok(wordmark.length > 0, "the wordmark heading must exist");
+  assert.match(wordmark, /logoIcon/, "the mark stays");
+  assert.match(wordmark, /<span className="visually-hidden">Pi Central<\/span>/, "the name stays, not drawn");
+  /*
+   * The prose in this block names the product, so comments are stripped before asking whether the NAME is
+   * rendered — a checker that reads its own rationale as code reports the opposite of the truth, which is the
+   * same defect `lifecycle-wiring.test.ts` documents for `codeOnly`.
+   */
+  const markup = wordmark.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  /*
+   * The accessible copy is removed before asking, because it LEGITIMATELY contains the name — that is the
+   * whole point of it. What must not exist is the name as a bare text node, which is what the first version
+   * of the topbar rendered beside the mark.
+   */
+  const visible = markup.replace(/<span className="visually-hidden">[\s\S]*?<\/span>/g, "");
+  assert.ok(!/Pi Central/.test(visible), `the name must not be drawn; found it in: ${visible.trim()}`);
+  // And exactly one `<h1>`, so this removal did not promote some other heading. Counted on the source with
+  // JSX comments stripped, because the block above mentions `<h1>` in prose and a raw count included it.
+  const noComments = app.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  assert.equal((noComments.match(/<h1\b/g) ?? []).length, 1, "the app has exactly one h1");
+});
+
+test("both bars are vertical, labelled, and 48px wide", () => {
+  const css = readCss();
+  const activity = /\.navrail\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(activity, /flex-direction:\s*column/, "a bar is a column");
+  assert.match(activity, /width:\s*48px/, "the width is the measured 48px, not an accident");
+  // The edges face the content, so each bar reads as a side of the window.
+  assert.match(css, /\.navrail-left\s*\{[^}]*border-right/, "the left bar's edge faces the content");
+  assert.match(css, /\.navrail-right\s*\{[^}]*border-left/, "the right bar's edge faces the content");
+});
+
+test("the left bar is a nav and the right bar is a tablist, because they mean different things", () => {
+  /*
+   * Sessions and Settings are DESTINATIONS — announced as tabs they would promise a tabpanel that does not
+   * exist. Session/Files/Trace are alternative views of one thing, which is what a tablist means and what
+   * the panel body's `aria-labelledby` needs.
+   */
+  assert.match(readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8"), /side="left"[\s\S]{0,200}label="Main"/);
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.ok(!/side="left"[\s\S]{0,120}as="tablist"/.test(app), "the app bar is not a tablist");
+  assert.match(app, /side="right"[\s\S]{0,120}as=\{focused === undefined \? "nav" : "tablist"\}/, "the context bar is a tablist of modes");
+});
+
+test("the right bar is shown only when a session is focused", () => {
+  /*
+   * The reader's requirement: "only if session is active, so it becomes a context aware navigation". It is
+   * also what keeps the bar honest — three views of a session, offered with nothing focused, would promise
+   * three views of nothing.
+   */
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  /*
+   * The bar must exist on the Sessions page even with no session — it carries the panel's show/hide toggle,
+   * which is the only door to a collapsed panel, and collapsed is the default. Gating the whole bar on
+   * `focused` (which the first version did) leaves a fresh window with no way to open the panel at all.
+   *
+   * What the SESSION gates is the mode list, not the bar.
+   */
+  const flat = app.replace(/\s+/g, " ");
+  assert.match(flat, /\{tab === "sessions" && \( <ActivityBar/, "the bar exists on the Sessions page only");
+  assert.match(
+    flat,
+    /items=\{\(focused === undefined \? \[\] : PANEL_MODES\)/,
+    "the modes require a session; the toggle does not",
+  );
+});
+
+test("both bars and the workspace are ONE flex row, so neither bar is a full-width island", () => {
+  /*
+   * The defect, twice. First the right bar was rendered at `.shell`'s own level; the fix then left it AFTER
+   * the shell's closing `</div>` — which looked nested because it was indented 8 spaces, so the indentation
+   * assertion believed it. A screenshot showed the consequence: both bars collapsed to their content width
+   * and height, because an empty `.shell` gives the flex row nothing to distribute.
+   *
+   * So this asserts the SHAPE THAT MATTERS to the CSS rather than parsing JSX: `.shell` is a flex ROW, the
+   * workspace flexes inside it, and both bars are flex-none columns. Those three rules are what make three
+   * columns; where the tags sit is only how they are produced. A JSX depth parser was attempted and is not
+   * worth it — `.panes`'s opening tag carries a `style={{…}}` expression, so any `<div[^>]*>` pattern needs a
+   * JSX parser to be honest, and a test that needs one should ask a different question.
+   */
+  const css = readCss();
+  const rule = (selector) => {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+  };
+
+  /*
+   * Matched as a standalone selector, not by `\.shell\s*\{` — `.app > .shell { grid-row: … }` appears first in
+   * the file and a loose regex reads THAT rule body instead. This is the same class of trap the panel's
+   * container test documents ("String.match returns the first match"), and it is caught by asserting a property
+   * the wrong rule cannot have.
+   */
+  const shell = new RegExp("(?:^|\\n)\\.shell\\s*\\{([^}]*)\\}").exec(css)?.[1] ?? "";
+  assert.match(shell, /display:\s*flex/, "the shell is the flex row");
+  assert.ok(!/flex-direction:\s*column/.test(shell), "a column here stacks the bars into bands");
+  assert.match(shell, /min-height:\s*0/, "…and takes the row the grid gives it, or an empty row collapses");
+
+  const panes = rule(".shell > .panes");
+  assert.match(panes, /flex:\s*1/, "the workspace takes the remaining width");
+  assert.match(panes, /min-width:\s*0/, "…and may shrink below its content, as `.panes` itself requires");
+
+  const bar = rule(".navrail");
+  assert.match(bar, /flex:\s*none/, "the bars are fixed beside the workspace, not flexible");
+  assert.match(bar, /flex-direction:\s*column/, "each bar is a column of items");
+  assert.match(bar, /width:\s*48px/, "the measured width");
+
+  /*
+   * Nesting, answered by a real scanner rather than by indentation or string order.
+   *
+   * Both shortcuts failed, which is why the code below is a character walk:
+   *   - INDENTATION is not nesting in this file (line 1823 is a `</div>` at 6 spaces, inside `.panes`);
+   *   - SOURCE ORDER is not nesting either — moving the right bar outside `.shell` does not reorder those
+   *     strings, it only moves a `</div>`. An order-based assertion passed with the bug reintroduced.
+   *
+   * A JSX tag boundary cannot be found with `<div[^>]*>` because attribute lists contain `{…}` expressions
+   * (`.panes` carries `style={{ "--panel-width": … }}`). So the walk skips brace-balanced expressions and
+   * string literals, and counts only real `<div>`/`</div>` tags.
+   */
+  const src = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+
+  /**
+   * The DIRECT children of the div whose opening tag starts at `from`, as a list of names.
+   *
+   * ## Why this is a character walk and not a regex
+   *
+   * Three shortcuts were tried on this file and each reported the wrong tree:
+   *
+   *   1. **Indentation.** Line 1823 is a `</div>` at 6 spaces that closes `.panes`, while the shell's own close
+   *      is at 6 spaces too. Formatting cannot tell them apart.
+   *   2. **`<div[^>]*>`.** `.panes`'s opening tag carries `style={{ "--panel-width": … }}`, so the pattern either
+   *      stops early or needs a JSX parser.
+   *   3. **Source order of `side="right"`.** Moving the bar out of the shell does not reorder those strings; it
+   *      only moves a `</div>`. That assertion passed with the bug reintroduced.
+   *
+   * A fourth came from skipping every `{…}`: `{focused !== undefined && (` is a WRAPPER, not an attribute, so
+   * skipping it swallowed the right bar entirely and the walk reported one bar for a tree that has two. Hence
+   * `inTag`: `{…}` is skipped only between `<` and `>`, where it is an attribute expression.
+   *
+   * Depth is seeded at 1 to stand for the container itself, so a `<div>` at depth 1 is a direct child and a
+   * `</div>` that brings depth to 0 is the container's close.
+   */
+  function directChildren(source, from) {
+    const out = [];
+    let depth = 1;
+    for (let i = from; i < source.length; i += 1) {
+      const ch = source[i];
+
+      if (ch === "<") {
+        if (source.startsWith("</div>", i)) {
+          depth -= 1;
+          if (depth === 0) return out;
+          i += 5;
+          continue;
+        }
+        /*
+         * A `<div>` is counted but its tag is NOT consumed. Consuming it is what broke the previous version:
+         * `.panes`'s tag runs over four lines and ends with `>` alone, and a consumption loop that starts on
+         * the next character still has to know where the `{…}` expressions inside it end. Counting the open and
+         * continuing means the walk simply encounters those characters again — and a stray `>` or `=>` inside an
+         * attribute is harmless, because only `<div`, `</div>`, `<ActivityBar` and `<` are looked for.
+         */
+        if (source.startsWith("<div", i)) {
+          if (depth === 1) {
+            const window = source.slice(i, i + 240);
+            const named = /className=(?:"([^"]*)"|\{([^}]*)\})/.exec(window);
+            out.push(named === null ? "" : (named[1] ?? named[2] ?? ""));
+          }
+          depth += 1;
+          continue;
+        }
+        if (source.startsWith("<ActivityBar", i) && depth === 1) out.push("ACTIVITY-BAR");
+        continue;
+      }
+    }
+    return undefined;
+  }
+
+  const shellAt = src.indexOf('<div className="shell">');
+  assert.notEqual(shellAt, -1, "the shell row must exist");
+  // Start AFTER the shell's own opening tag, or the walk counts the shell itself as its first child.
+  const openEnd = src.indexOf(">", shellAt) + 1;
+  const inside = directChildren(src, openEnd);
+  assert.ok(inside !== undefined, "the shell's closing tag must be found (a brace walk that never closes is a bug here)");
+
+  /*
+   * The shell's direct children, in order: the left bar, the workspace, the right bar. This is the assertion
+   * that fails when the right bar is a sibling of the shell — the list then has one ACTIVITY-BAR and the bar
+   * appears nowhere in it.
+   */
+  assert.equal(inside.length, 3, `expected 3 direct children of .shell, found ${inside.length}: ${JSON.stringify(inside)}`);
+  assert.equal(inside[0], "ACTIVITY-BAR", "the left bar is first");
+  assert.match(inside[1] ?? "", /panes/, "the workspace is in the middle");
+  assert.equal(inside[2], "ACTIVITY-BAR", "the right bar is last");
+
+  // And the bar count is what distinguishes the fixed tree from the broken one: outside the shell, the right
+  // bar is not in this list at all.
+  assert.equal(inside.filter((name) => name === "ACTIVITY-BAR").length, 2, "both bars are inside the shell");
+});
+
+test("no glyph is used for two different destinations", () => {
+  /*
+   * From a screenshot: `▤` was Sessions in the left bar AND Files in the context bar. In a 48px bar the glyph
+   * is the only thing telling two items apart, so reusing one makes the reader resolve the collision from
+   * position alone — and the two are not even the same kind of thing (a list of all sessions vs. this
+   * session's files).
+   */
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const leftGlyphs = [...app.matchAll(/glyph: "([^"]+)"/g)].map((m) => m[1]);
+  const rightGlyphs = PANEL_MODES.map(({ glyph }) => glyph);
+  assert.ok(leftGlyphs.length >= 2, "the app bar has items");
+  assert.deepEqual(
+    leftGlyphs.filter((g) => rightGlyphs.includes(g)),
+    [],
+    `a glyph may appear in only one bar; reused: ${leftGlyphs.filter((g) => rightGlyphs.includes(g)).join(", ")}`,
+  );
+  // And no glyph twice within the app bar either.
+  assert.equal(new Set(leftGlyphs).size, leftGlyphs.length, "each destination has its own mark");
+  assert.equal(new Set(rightGlyphs).size, rightGlyphs.length, "each panel mode has its own mark");
+});
+
+test("the shell occupies the growing row, whatever banners are present", () => {
+  /*
+   * The bottom gap, from a screenshot: the workspace stopped ~80px above the window's bottom edge.
+   *
+   * `grid-template-rows: 44px 1fr` on `.app` was correct only while the shell was the second child. The
+   * banners between them are CONDITIONAL, so on the common path the second child is a falsy `&&` expression,
+   * the `1fr` track belonged to nothing, and the shell fell into an implicit `auto` row sized to its content.
+   *
+   * Checked in two halves: the template has a growing LAST track, and the shell is pinned to it. Either alone
+   * leaves the bug reachable.
+   */
+  const css = readCss();
+  const appRule = /\.app\s*\{([^}]*)\}/.exec(css);
+  assert.ok(appRule, "the .app rule must exist");
+  const app = appRule[1];
+  assert.match(app, /grid-template-rows:[^;]*minmax\(0,\s*1fr\)/, "the last track must be the one that grows");
+  assert.ok(
+    !/grid-template-rows:\s*44px\s+1fr\s*;/.test(app),
+    "a bare `44px 1fr` gives the growing track to the first conditional banner",
+  );
+  assert.ok(!/grid-auto-rows/.test(app), "an implicit row per banner is the bug, not the fix");
+});
+
+test("the shell is pinned to the last grid row, so a banner cannot take the growing track", () => {
+  // The companion to the template above. `grid-row: -2 / -1` means "the last track", whatever the banners did.
+  const css = readCss();
+  const pinned = /\.app\s*>\s*\.shell\s*\{([^}]*)\}/.exec(css);
+  assert.ok(pinned, "the shell must have its own grid placement rule");
+  assert.match(pinned[1], /grid-row:\s*-2\s*\/\s*-1/, "the shell occupies the final track");
+});
+
+test("the activity bars recede behind the panes instead of competing with the rail", () => {
+  /*
+   * From a screenshot: "the gray vertical bars distract next to the sessions". They used `--panel-2`
+   * (#1c2230), which is LIGHTER than both the rail (`--panel`, #161b22) and the transcript (`--bg`, #0e1116),
+   * so each bar read as a third slab of surface between two others. Chrome should not be the brightest thing
+   * in the window.
+   */
+  const css = readCss();
+  const barRule = /\.navrail\s*\{([^}]*)\}/.exec(css);
+  assert.ok(barRule, "the .navrail rule must exist");
+  assert.match(barRule[1], /background:\s*var\(--bg\)/, "the bar uses the window background, not a raised surface");
+  assert.ok(!/--panel-2/.test(barRule[1]), "--panel-2 is lighter than the rail, so it competes");
+});
+
+test("a selected activity item is marked by colour and an edge, not by a filled tile", () => {
+  /*
+   * The tile was 40px in a 48px bar — most of it — so a selected item looked like a button held down, and the
+   * tint read as yet another slab beside the rail.
+   */
+  const css = readCss();
+  const start = css.indexOf('.navrail-item[aria-selected="true"]');
+  assert.notEqual(start, -1, "the selected state must be styled");
+  const block = css.slice(start, css.indexOf("}", start));
+  assert.ok(!/background:/.test(block), "a filled tile reads as a permanently pressed button");
+  assert.match(css, /\.navrail-left \.navrail-item::before/, "the left bar's marker is placed");
+  assert.match(css, /\.navrail-right \.navrail-item::before/, "and the right bar's");
+});
+
+test("the bars use a namespace of their own, because `.activity` already means a tool group", () => {
+  /*
+   * From a screenshot: the left bar rendered as a grey slab with a 3px left border, and the marks above it
+   * were black boxes. The cause was a CLASS COLLISION — `.activity` and `.activity-glyph` are the transcript's
+   * tool-activity group (styles.css: `.activity { border-left: 3px solid var(--quarantine); background:
+   * var(--panel); max-width: var(--reading-measure); margin: 2px 0 var(--sp-3) }`).
+   *
+   * The bar inherited every one of those, which is why it looked like a strip of surface with a coloured edge
+   * rather than chrome — and why the glyphs sat in bordered boxes.
+   *
+   * A shared class is invisible in both directions: the bar's own rules looked fine, and the transcript's
+   * looked fine. So this asserts the namespaces are DISJOINT, which is the property that was violated.
+   */
+  const css = readCss();
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const bar = readFileSync(new URL("../src/components/ActivityBar.tsx", import.meta.url), "utf8");
+
+  // Every class the bar renders must be `navrail*`.
+  const rendered = [...`${app}${bar}`.matchAll(/className=(?:"([^"]+)"|{`([^`]+)`})/g)]
+    .flatMap((m) => (m[1] ?? m[2] ?? "").split(/\s+/))
+    .filter((name) => name !== "");
+  // Only the classes on the bar's own elements matter; the app renders many other things.
+  const barClasses = rendered.filter((name) => /^(navrail|activity)/.test(name));
+  assert.ok(barClasses.length > 0, "the bar must render classes at all");
+  for (const name of barClasses) {
+    assert.match(name, /^navrail/, `"${name}" is rendered by the bar but is not in the navrail namespace`);
+  }
+
+  /*
+   * And the transcript's names are untouched: `.activity` still carries its quarantine border, and
+   * `.activity-glyph` still carries its quarantine colour. If a future change renames those to `navrail`, the
+   * bar would inherit the transcript's look and this test would say so.
+   */
+  const activityRule = /(?:^|\n)\.activity\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(activityRule, /border-left:\s*3px solid var\(--quarantine\)/, "`.activity` is still the tool group");
+  const activityGlyph = /(?:^|\n)\.activity-glyph\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(activityGlyph, /var\(--quarantine\)/, "`.activity-glyph` is still the tool group's mark");
+
+  // The bar's own rule must not carry the transcript's properties.
+  const navrail = /(?:^|\n)\.navrail\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  for (const leak of ["--quarantine", "reading-measure"]) {
+    assert.ok(!navrail.includes(leak), `the bar must not inherit ${leak} from the tool group`);
+  }
+});
+
+test("a page shows its own list, not another page's", () => {
+  /*
+   * Reported from use: "The history panel shows the sessions and the context detail panel from sessions.
+   * That is a violation of what we wanted the bars to work."
+   *
+   * The rule the bars promise: the LEFT bar chooses a PAGE, and a page owns its own furniture. The session
+   * rail is the Sessions page's list, so it must not render beside History — which has its own full-width
+   * list and its own search (`DESIGN.md` §6: "One full-width list, not a rail tail").
+   *
+   * The context bar is bound by the same rule from the other side: Session/Files/Trace are views of a LIVE
+   * session, so on a page about the session ARCHIVE the bar names a context the page does not have.
+   */
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  // Comments first and foremost: the guard string appears in the prose that EXPLAINS it, and a check that
+  // reads prose as code reports the opposite of the truth — the failure this file's `codeOnly` convention
+  // exists for. Falsification caught exactly that: with the guard removed the comment still satisfied
+  // `lastIndexOf("tab === \"sessions\" && (")`.
+  const src = app.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+
+  const railAt = src.indexOf("<SessionRail");
+  assert.notEqual(railAt, -1, "the session rail must exist");
+
+  /*
+   * The guard must be ADJACENT to the element, not merely somewhere before it in the file. Everything between
+   * the guard and `<SessionRail` is whitespace, which is what makes "this conditional wraps that element" a
+   * statement about the code rather than about the file's length.
+   */
+  const beforeRail = src.slice(0, railAt);
+  const guardAt = beforeRail.lastIndexOf('{tab === "sessions" && (');
+  assert.notEqual(guardAt, -1, "the rail must be rendered only on the Sessions page");
+  const between = src.slice(guardAt, railAt);
+  assert.equal(
+    between.replace(/[{}\s]/g, ""),
+    'tab==="sessions"&&(',
+    `the guard must wrap the rail, not merely precede it; found "${between.trim().slice(0, 60)}"`,
+  );
+
+  // The context bar needs BOTH a live session and the Sessions page.
+  assert.match(
+    src.replace(/\s+/g, " "),
+    /\{tab === "sessions" && \( <ActivityBar/,
+    "the context bar belongs to the Sessions page",
+  );
+  assert.match(
+    src.replace(/\s+/g, " "),
+    /items=\{\(focused === undefined \? \[\] : PANEL_MODES\)/,
+    "…and its views of a session require a session",
+  );
+});
+
+test("the History page gives its list the rail's 288px back", () => {
+  /*
+   * The companion of the test above. If the rail is not rendered, reserving its grid track leaves a 288px
+   * hole — which is a layout bug that looks like a loading bug. `is-pageless` is the modifier that removes
+   * the track, and it must exist in both the collapsed and expanded form.
+   */
+  const css = readCss();
+  assert.match(css, /\.panes\.is-pageless\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+var\(--panel-width/);
+  assert.match(css, /\.panes\.is-pageless\.is-collapsed\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*;/);
+
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(app, /is-pageless/, "the shell applies the modifier for a page with no list");
+  assert.match(app, /tab === "history" \? " is-pageless"/, "…for exactly the History page");
+});
+
+test("the History page is centred on the reading measure", () => {
+  /*
+   * Reported from use: "the history content is now very left aligned and shall be centered". Without a cap the
+   * rows stretched to the full column (~840px in a 1560px window) with the text hugging the left edge — and a
+   * prose line that long is unreadable anyway, which is what `--reading-measure` is for.
+   *
+   * The property is a capped column that is centred (`margin-inline: auto`), not padding on the scroller: the
+   * scrollbar must stay at the window's edge, and padding cannot centre.
+   */
+  const css = readCss();
+  const inner = /\.history\s*>\s*\*\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(inner, /max-width:\s*var\(--reading-measure\)/, "the page content is capped at the reading measure");
+  assert.match(inner, /margin-inline:\s*auto/, "…and centred, not left-aligned");
+  // A second cap on a child would put that child off the shared centreline.
+  const search = /\.history-search\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.ok(!/max-width/.test(search), "the search row must inherit the page measure, not cap itself");
+});
+
+test("the panel and its door share one condition, so neither outlives the other", () => {
+  /*
+   * The bug this pins: the context BAR was gated on the page but the PANEL was not, so the trace list sat
+   * beside the History page — "Showing trace information in the history does not make any sense."
+   *
+   * A bar is the panel's door. If the door closes and the room stays, the result is content with no control;
+   * if the room goes and the door stays, the control opens nothing. They must be one condition.
+   */
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const src = app.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  assert.match(
+    src.replace(/\s+/g, " "),
+    /\{!panel\.collapsed && tab === "sessions" && \( <Panel/,
+    "the panel renders on the Sessions page only",
+  );
+});
+
+test("the panel toggle is the divided-square pair, at the TOP of the right bar, behind a rule", () => {
+  /*
+   * Three reports, in order, and this test pins the final shape:
+   *
+   *   1. "the show hide panel toggle shall be an icon, and it needs to be integrated in the context aware
+   *      bar, not globally" — it moved from a word in the topbar to a glyph in the bar;
+   *   2. "i think there are better icons for opening / closing a panel" — a pair of rectangles said
+   *      "a rectangle";
+   *   3. "use this icon pair and make this a top icon on the right bar. Right bottom is out of reach.
+   *      Include a small visual separator" — the footer put it at the bottom of a full-height column.
+   *
+   * The pair is `◫` / `◨`: a square divided by a vertical rule (two panes, panel shown) and the same square
+   * with its RIGHT half filled (one pane, panel hidden). The filled half is the panel's side, so the picture
+   * says which side is missing — a depiction, not a direction, which is why it is two codepoints and not one
+   * rotated glyph.
+   */
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const src = app.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  const bar = src.slice(src.indexOf('side="right"'));
+
+  // The pair, in the right polarity: filled when the panel is GONE.
+  assert.match(bar, /panel\.collapsed \? "◨" : "◫"/, "filled half when collapsed, divided square when shown");
+  assert.ok(!/▮|▭|◀|▶/.test(bar), "the earlier rectangle and chevron glyphs are gone from the markup");
+
+  // It is the HEADER of the bar, not the footer: `header=` comes before `items=`.
+  const headerAt = bar.indexOf("header={");
+  const itemsAt = bar.indexOf("items={");
+  assert.notEqual(headerAt, -1, "the toggle is the bar's header");
+  assert.ok(headerAt < itemsAt, "the header is rendered above the mode items");
+  assert.ok(!/children=\{/.test(bar), "…and nothing is left in the footer slot");
+
+  // The separator exists and is decorative.
+  const component = readFileSync(new URL("../src/components/ActivityBar.tsx", import.meta.url), "utf8");
+  assert.match(component, /className="navrail-rule" aria-hidden="true"/, "a rule separates the header from the items");
+  const css = readCss();
+  const rule = /\.navrail-rule\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(rule, /height:\s*1px/, "a hairline, not a band");
+  assert.match(rule, /margin:[^;]*\b10px/, "inset, so it reads as a divider between groups");
+});
+
+test("the header slot is separated from the items by a rule, and only when it is used", () => {
+  // The app bar has no header, so it must render no rule — a stray divider at the top of the left bar would be
+  // a line between nothing and the first item.
+  const component = readFileSync(new URL("../src/components/ActivityBar.tsx", import.meta.url), "utf8");
+  assert.match(
+    component,
+    /\{header !== undefined && \(/,
+    "the rule and the header are rendered together, so neither can exist alone",
+  );
+});
+
+test("the bar's tablist holds only tabs, so the toggle is not an orphan inside it", () => {
+  /*
+   * Found while changing the icon: `role="tablist"` was on the BAR, and the bar also holds the panel toggle in
+   * its footer. A tablist may contain only tabs — a plain `<button>` inside one is invalid ARIA and assistive
+   * tech is entitled to ignore it, which would have made the only door to the panel unreachable to it.
+   *
+   * The role now goes on the GROUP of modes. Asserted on the component because that is where the structure is.
+   */
+  const bar = readFileSync(new URL("../src/components/ActivityBar.tsx", import.meta.url), "utf8");
+  const src = bar.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  // The outer element must NOT carry the role; the inner group must.
+  assert.match(src, /<div className=\{`navrail navrail-\$\{side\}`\}[^>]*>/, "the bar's own element has no role");
+  assert.ok(
+    !/navrail-\$\{side\}`\}[^>]*role=/.test(src),
+    "the role must not be on the bar, because the bar also holds a non-tab control",
+  );
+  assert.match(src, /className="navrail-group"\s*\{\.\.\.groupRole\}/, "the mode group carries it instead");
+});
+
+test("the bar's items sit at the top, in reading order — not spread down the column", () => {
+  /*
+   * From a screenshot: the panel toggle was at the top, the rule in the middle, and the three MODE GLYPHS at
+   * the very bottom of a tall bar, hundreds of pixels from the control they belong with.
+   *
+   * The cause was `justify-content: space-between` on a bar that had just grown a third child (toggle, rule,
+   * modes). `space-between` distributed those three across the full height. It was correct when the bar had
+   * exactly two groups and one of them was meant to sit at the foot.
+   *
+   * `flex-start` puts everything at the top; a child that genuinely wants the foot opts in with
+   * `margin-top: auto`, which is what `.navrail-end` does and why the left bar's Settings still reaches the
+   * bottom.
+   */
+  const css = readCss();
+  const bar = /\n\.navrail\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(bar, /justify-content:\s*flex-start/, "items stack from the top");
+  assert.ok(
+    !/justify-content:\s*space-between/.test(bar),
+    "space-between spreads a header, a rule and a group across the whole height",
+  );
+
+  // The opt-in for a bottom control still exists, or the left bar's Settings would float up to the items.
+  const end = /\n\.navrail-end\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(end, /margin-top:\s*auto/, "a footer group pins itself to the bottom");
+});
+
+test("the roster's ctx labels form a column, and the gauge is one length for every row", () => {
+  /*
+   * From the roster: every row's `ctx` label sat at a different x, because `.r3` was `display: flex` with the gauge
+   * as `flex: 1` capped at `--gauge-width` — so a short label left trailing space and the numbers down the rail formed
+   * a ragged edge.
+   *
+   * `DESIGN.md` §5.1 says mono is "what makes six values line up in a column across 20 rows". A ragged right edge
+   * defeats exactly that. The fix is a two-column grid whose first track is the shared gauge width: the bar is one
+   * length everywhere, and the label starts at the same x everywhere.
+   */
+  const css = readCss();
+  // The LAST `.rail-row .r3` rule — the file declares it twice and the first has no layout.
+  const r3 = [...css.matchAll(/\.rail-row \.r3\s*\{([^}]*)\}/g)].map((m) => m[1]).at(-1) ?? "";
+  assert.match(r3, /display:\s*grid/, "line 3 is a grid, so its columns align across rows");
+  assert.match(r3, /grid-template-columns:\s*var\(--gauge-width\)/, "the gauge track is the shared width");
+  assert.ok(!/display:\s*flex/.test(r3), "a flex row packs left and gives a ragged edge");
+});
+
+test("a roster row is rounded on its trailing corners, so rows are not one slab", () => {
+  /*
+   * `DESIGN.md` §5.1 specifies `border-radius: 0 6px 6px 0` and the rule had NONE — a run of rows read as one
+   * continuous slab with coloured left edges, and nothing told the eye where a session ended.
+   *
+   * Trailing corners only: the left edge is the state bar and must stay a straight vertical run, or the state colour
+   * would break into dashes down the rail.
+   */
+  const css = readCss();
+  const row = /\n\.rail-row\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(row, /border-radius:\s*0 var\(--r-2\) var\(--r-2\) 0/, "trailing corners are rounded");
+  assert.match(row, /border-left:\s*3px solid/, "…and the leading edge stays square, because it is the state bar");
+});
+
+test("a warning line does not outrank the session's name", () => {
+  /*
+   * In the roster the warning rendered at the same size and weight as the path line above it, in `--warn-text`, so a
+   * row with a warning read as four competing lines and the warning pulled the eye before the NAME — the one thing the
+   * row is for. `--fs-2xs` plus a lighter weight keeps it legible while leaving the title dominant; the `⚠` already
+   * carries the severity.
+   */
+  const css = readCss();
+  const warn = /\n\.rail-row \.r-warn\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(warn, /font-size:\s*var\(--fs-2xs\)/, "smaller than the path line");
+  assert.match(warn, /font-family:\s*var\(--sans\)/, "and sans, so it reads as a note rather than a value");
+  assert.match(warn, /display:\s*block/, "not the two-column gauge grid — this line has no gauge");
 });

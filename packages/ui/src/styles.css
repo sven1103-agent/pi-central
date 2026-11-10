@@ -180,11 +180,28 @@ button { font: inherit; color: inherit; }
 
 /* ------------------------------------------------------------------ layout */
 
+/*
+ * The app is a grid of [topbar][banners][the rest], and the "rest" track must be the one that grows.
+ *
+ * `grid-template-rows: 44px 1fr` was wrong the moment a banner was added to the tree: the banners are
+ * CONDITIONAL, so on the common path the second child is a falsy `&&` and the `1fr` track belongs to
+ * nothing — the shell then lands in an implicit `auto` row and the window is left with dead space below
+ * it. Measured in a screenshot: the workspace ended ~80px above the bottom of the window.
+ *
+ * `minmax(0, 1fr)` with `grid-auto-rows: auto` for the banners, and the shell pinned to the last row, is
+ * the version that survives any number of optional banners: whatever else is present, the growing track
+ * is the shell's.
+ */
 .app {
   display: grid;
-  grid-template-rows: 44px 1fr;
+  grid-template-rows: 44px auto minmax(0, 1fr);
   height: 100%;
 }
+
+/* Any number of banners may be present (isolation, update, error strip). They sit in the `auto` track and
+   push the shell down; the shell always occupies the last, growing track. */
+.app > .shell { grid-row: -2 / -1; }
+
 
 /*
  * Panes are separated by 1px gutters of --line rather than borders or cards, keeping the
@@ -224,6 +241,24 @@ button { font: inherit; color: inherit; }
  * divider, because with two tracks there is only one gap.
  */
 .panes.is-collapsed { grid-template-columns: 288px 1fr; }
+
+/*
+ * A page that has no list of its own: History is one full-width list (`DESIGN.md` §6), so the rail's 288px
+ * track must not be reserved for a column that is not rendered. Two tracks, not three.
+ */
+.panes.is-pageless { grid-template-columns: minmax(0, 1fr) var(--panel-width, 320px); }
+.panes.is-pageless.is-collapsed { grid-template-columns: minmax(0, 1fr); }
+/*
+ * The shell is a ROW of [activity bar][panes], so the left bar is an edge of the window rather than a
+ * column competing with the rail. `.panes` keeps its own three-track grid, unchanged — which is what
+ * keeps `--panel-width`, `clampPanelWidth` and the `@container panel` query meaning what they meant.
+ */
+.shell {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+.shell > .panes { flex: 1; min-width: 0; }
 
 /*
  * There is deliberately no narrow-viewport rule for the panel any more.
@@ -313,6 +348,131 @@ button { font: inherit; color: inherit; }
 /* Visually hidden text for a control whose label is its own `aria-label`; kept for the focus ring only. */
 .rail-backdrop:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
 
+/* ------------------------------------------------------------------ activity bars */
+
+/*
+ * The two vertical bars, one per edge of the window.
+ *
+ * ## Why 48px, and why they are not free
+ *
+ * Measured cost: 48px each, so the transcript loses 96px when both are present. That was checked against
+ * the window's `minWidth: 900` before choosing it — at 900 the rail is already a drawer (`< 1024`), so
+ * only the right bar is a column there and the cost is 48px, not 96. The numbers are in
+ * `docs/ACTIVITY-BARS.md`; they are a decision, not an accident.
+ *
+ * ## Why the items are text glyphs
+ *
+ * The bar is 48px wide, so every item is a glyph with a tooltip and an accessible name. A glyph that is a
+ * private-use or emoji codepoint renders differently on every OS; these are geometric shapes that exist
+ * in every UI font (`◉ ▤ ≡`). No SVG pipeline, and `currentColor` gives the selected state for free.
+ */
+.navrail {
+  flex: none;
+  width: 48px;
+  display: flex;
+  flex-direction: column;
+  /*
+   * `flex-start`, NOT `space-between`.
+   *
+   * The bar grew a third child when the panel toggle became a `header` (toggle, rule, modes). `space-between`
+   * then distributed those three across the full height — the toggle at the top, the RULE in the middle, and
+   * the modes at the BOTTOM, which a screenshot showed as three mode glyphs stranded at the foot of a tall bar.
+   *
+   * Everything belongs at the top, in reading order. A control that genuinely wants the foot opts in with
+   * `.navrail-end { margin-top: auto }` — which the LEFT bar's Settings does, and that still works because
+   * `margin-top: auto` distributes the free space itself.
+   */
+  justify-content: flex-start;
+  /*
+   * `--bg`, not `--panel-2`. Reported from a screenshot: "the gray vertical bars distract next to the
+   * sessions". `--panel-2` (#1c2230) is LIGHTER than the rail's `--panel` (#161b22), so each bar read as a
+   * third stripe of surface competing with the rail and the transcript.
+   *
+   * The bars are chrome, not content. `--bg` (the window's own background) makes them recede behind both
+   * surfaces they border, which is what a chrome rail should do — and the 1px `--line` on the facing edge is
+   * what still says where it ends.
+   */
+  background: var(--bg);
+  padding: var(--sp-2) 0;
+}
+
+/* The border is on the side facing the content, so each bar reads as an edge of the window rather than
+   as a card floating in it. */
+.navrail-left { border-right: 1px solid var(--line); }
+.navrail-right { border-left: 1px solid var(--line); }
+
+.navrail-group { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+/* Settings belongs at the bottom, where a settings control is looked for. */
+.navrail-end { margin-top: auto; }
+
+.navrail-item {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  /* Its own face rather than the platform's light button chrome on a dark page (#100). */
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  color: var(--dim);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  /* The glyph is centred, so it must not be selected as text on a double click. */
+  user-select: none;
+}
+.navrail-item:hover { color: var(--text); background: var(--panel); }
+/*
+ * The selected state is the GLYPH COLOUR plus the edge marker below — not a filled tile.
+ *
+ * The first version also painted `--accent-tint`, so a 40px translucent square sat in a 48px bar: most of
+ * the bar, which reads as a button that is permanently pressed, and (reported from a screenshot) as another
+ * grey slab beside the rail. Colour and an edge marker together are enough to say "this one".
+ */
+.navrail-item[aria-selected="true"],
+.navrail-item[aria-current="page"] { color: var(--accent-text); }
+.navrail-item[aria-expanded="true"] { color: var(--accent-text); }
+
+/*
+ * The marker is a 2px bar on the bar's OUTER edge (the window's edge), where VS Code puts it.
+ *
+ * `left: -5px` / `right: -5px` place it in the bar's own 4px padding rather than inside the 40px button, so
+ * it never sits on the glyph. Only one edge is used per side: the outer one, so the two bars mirror.
+ */
+.navrail-item[aria-selected="true"]::before,
+.navrail-item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.navrail-left .navrail-item::before { left: -5px; }
+.navrail-right .navrail-item::before { right: -5px; }
+
+.navrail-glyph { display: block; }
+
+/*
+ * The rule between a bar-level control and the view items.
+ *
+ * Reported from use: "Include a small visual separator, so it is not mixed up with the other icon actions."
+ * The panel toggle sits at the top of the right bar and the modes below it; without a rule the toggle reads as
+ * a fourth mode, although it does something else entirely (it shows/hides the region the modes live in).
+ *
+ * Inset rather than full width, so it reads as a divider between two groups rather than as a section header.
+ */
+.navrail-rule {
+  flex: none;
+  height: 1px;
+  margin: var(--sp-2) 10px;
+  background: var(--line);
+  border-radius: 1px;
+}
+
 /* ------------------------------------------------------------------ topbar */
 
 .topbar {
@@ -374,11 +534,15 @@ button { font: inherit; color: inherit; }
    screen, and unreadable to assistive tech with CSS dropped. A visual separator carried in a
    pseudo-element gives the same spacing and keeps the DOM's text contiguous; it is also not a
    separator character, so it is not announced twice with the gap. */
-/* Spacing AND separation both come from the text, not from `gap` alone (issue #13).
+/*
+   Spacing AND separation both come from the TEXT, not from `gap` (issue #13).
+
    `gap` is invisible to `textContent`, so the rendered summary read `2 sessions1 scratch` — fine on
-   screen, unreadable with CSS dropped. A pseudo-element does not fix that either: it is not in the
-   text. The separator is therefore a real character between counters (rendered by the component), and
-   the gap is dropped so the separation is not doubled. */
+   screen, unreadable with CSS dropped. The previous note here claimed "the separator is therefore a real
+   character between counters (rendered by the component)" and the component never rendered one: measured
+   in a real window, the topbar read `9 sessions3 scratch`. The `·` is now in the DOM (App.tsx), and
+   `gap: 0` stays so the separation is not doubled — the space after the middot is the spacing.
+*/
 .fleet { display: flex; gap: 0; }
 .fleet-needs { color: var(--warn-text); font-weight: 600; }
 /* Pressure on the NEXT interruption rather than the current one (issue #13). One tint quieter than
@@ -526,7 +690,18 @@ button { font: inherit; color: inherit; }
 }
 .group-header .count { font-family: var(--mono); }
 
-/* Row: 3 lines, state on the left border, no card. */
+/*
+ * Row: 3 lines, state on the left border, no card.
+ *
+ * ## The rounded corner is what separates rows, and it was missing
+ *
+ * `DESIGN.md` §5.1 specifies `border-radius: 0 6px 6px 0` and the rule had none — so a run of rows read as one
+ * continuous slab with coloured left edges, and the eye had nothing telling it where a session ended. The radius is
+ * on the TRAILING corners only, because the left edge is the state bar and must stay a straight vertical run.
+ *
+ * No gap between rows: the rounded corner plus the fill on hover is the separator. A gap would work too, but it
+ * breaks the state colour into dashes, and the left edge is the one thing that must read as continuous.
+ */
 .rail-row {
   display: block;
   width: 100%;
@@ -534,6 +709,7 @@ button { font: inherit; color: inherit; }
   background: none;
   border: none;
   border-left: 3px solid var(--line);
+  border-radius: 0 var(--r-2) var(--r-2) 0;
   padding: var(--sp-2) var(--sp-3);
   cursor: pointer;
   color: var(--dim);
@@ -595,7 +771,24 @@ button { font: inherit; color: inherit; }
   white-space: nowrap;
   margin-top: 1px;
 }
-.rail-row .r3 { display: flex; gap: var(--sp-2); }
+/*
+ * Line 3 is a TWO-COLUMN grid, not a flex row that packs left.
+ *
+ * Reported from the roster: every row's `ctx` label sat at a different x, because `.r3` was `display: flex` with the
+ * gauge as `flex: 1` (capped at 120px) and the label following it — so a short label simply left trailing space and
+ * the numbers down the rail formed a ragged column. Mono type exists here to make values LINE UP (§5.1 says so
+ * explicitly: "what makes six values line up in a column across 20 rows"), and a ragged right edge defeats it.
+ *
+ * `grid-template-columns: auto 1fr` with the gauge fixed: the bar is one width for every row, and the label starts at
+ * the same x for every row. The gauge no longer stretches to the row, which is correct — a 120px cap that only some
+ * rows reached was measuring nothing.
+ */
+.rail-row .r3 {
+  display: grid;
+  grid-template-columns: var(--gauge-width) auto;
+  align-items: center;
+  gap: var(--sp-2);
+}
 .rail-row .ask { color: var(--warn-text); }
 
 /*
@@ -2071,8 +2264,36 @@ select.btn { font-family: var(--sans); }
 
 /* ------------------------------------------------------------------ history */
 
-.history { flex: 1; overflow-y: auto; padding: var(--sp-4) 18px; min-height: 0; }
-.history-search { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-4); max-width: 640px; }
+/*
+ * The history page is a READING surface, and it is centred on the reading measure.
+ *
+ * Reported from use: "the history content is now very left aligned and shall be centered". Both halves of
+ * that are one bug. Without a cap the rows stretched to the full column (measured ~840px in a 1560px
+ * window) with text hugging the left edge — a line of prose that long is unreadable anyway, which is why
+ * `--reading-measure` exists for the transcript. Centring the same cap is what makes it a page rather than a
+ * list nailed to one side.
+ *
+ * `margin-inline: auto` on a capped column, not `padding` on the scroller: the scrollbar must stay at the
+ * window's edge, and padding cannot centre.
+ */
+.history {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-4) 18px;
+  min-height: 0;
+}
+
+/* The inner column, capped and centred. Applied to the direct children so the actions row (search, sort,
+   paging) shares the measure with the list — a control strip of a different width than its content is the
+   "misaligned by a few pixels" look this file keeps removing. */
+.history > * {
+  max-width: var(--reading-measure);
+  margin-inline: auto;
+}
+/* No cap of its own: it inherits the page measure from `.history > *`, so the control strip and the
+   rows share one width and one centreline. A second cap here left the strip visibly narrower and
+   left-of-centre against the list below it. */
+.history-search { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-4); }
 
 .history-row {
   display: block;
@@ -2955,11 +3176,18 @@ select.btn { font-family: var(--sans); }
  */
 .context-bar {
   display: inline-block;
-  /* Flexible by default, capped by the shared gauge width — so the row's bar is as long as the header's, and a
-     narrow rail shrinks it instead of overflowing. */
-  flex: 1;
-  min-width: 42px;
-  max-width: var(--gauge-width);
+  /*
+   * A FIXED width, because the rail's line 3 is a grid whose first track is `--gauge-width`.
+   *
+   * It was `flex: 1` capped at `--gauge-width`, which made the bar's length depend on how much room its own label
+   * needed — so no two rows shared a gauge length, and the labels below them started at different x. A gauge is read by
+   * comparing fills across rows; two bars of different lengths cannot be compared.
+   *
+   * `width: 100%` fills its track, and the header's own use of this class is inside a fixed-width container, so the
+   * single rule serves both.
+   */
+  width: 100%;
+  min-width: 0;
   height: 4px;
   border-radius: var(--r-pill);
   /*
@@ -2985,6 +3213,23 @@ select.btn { font-family: var(--sans); }
   transition: width 240ms ease-out;
 }
 .context-bar.is-full .context-bar-fill { background: var(--warn); }
+
+/*
+ * The warning line is a NOTE, not a second path line.
+ *
+ * In the roster it rendered at the same size and weight as line 2 (and as line 3's numbers), in `--warn-text`, so a
+ * row with a warning read as four competing lines and the warning pulled the eye before the NAME — which is the one
+ * thing the row is for. `--fs-2xs` and a lighter weight keep it legible without outranking the title, and the ⚠ is
+ * already there to carry the severity.
+ */
+.rail-row .r-warn {
+  /* Not the two-column gauge grid: this line has no gauge. */
+  display: block;
+  font-family: var(--sans);
+  font-size: var(--fs-2xs);
+  font-weight: 400;
+  opacity: 0.85;
+}
 
 
 /*
@@ -4369,6 +4614,17 @@ select.btn { font-family: var(--sans); }
    deliberate over a viewport media query: the panel is resizable, so the window can be 2560px while
    the panel is 300px, and a viewport query would answer the wrong question. */
 
+/*
+   The panel is a COLUMN of [content][resizer], and the mode bar is NOT in it.
+
+   The bar lives in the shell, at the window's right edge, because `.panes` is a three-track grid and a
+   bar inside the panel would be a fourth column competing with `--panel-width` and the resizer. It also
+   keeps `clampPanelWidth` meaning what it means.
+
+   `container-type` is on `.panel-content` rather than `.panel` so the number a query sees is the width a
+   document actually gets. Here they are currently the same element's width, but the separation is the
+   property being asserted: a future bar or gutter inside the panel must not silently shrink the measure.
+*/
 .panel {
   position: relative;
   display: flex;
@@ -4376,6 +4632,14 @@ select.btn { font-family: var(--sans); }
   min-height: 0;
   min-width: 0;
   background: var(--panel);
+}
+
+.panel-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   container-type: inline-size;
   container-name: panel;
 }

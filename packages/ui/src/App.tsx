@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { PROTOCOL_VERSION, supportsDelete, supportsPlaces, supportsRetry, type Control, type HistoricalSession, type InstallFacts, type LiveSession, type ModelOption } from "@pi-central/protocol";
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
+import { ActivityBar } from "./components/ActivityBar.tsx";
 import { ConfirmDelete } from "./components/ConfirmDelete.tsx";
 import { StoppedSession } from "./components/StoppedSession.tsx";
 import { UpdateBanner } from "./components/UpdateBanner.tsx";
@@ -115,9 +116,9 @@ import { Inspector } from "./components/Inspector.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { FilesPanel } from "./components/FilesPanel.tsx";
 import { Panel } from "./components/Panel.tsx";
-import { PanelToggle } from "./components/PanelToggle.tsx";
 import {
   PANEL_DEFAULT_WIDTH,
+  PANEL_MODES,
   PANEL_FILES_DEFAULT_WIDTH,
   PANEL_PREFS_KEY,
   clampPanelWidth,
@@ -1280,62 +1281,36 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <h1 className="wordmark">
-          {/*
-            One artefact, two uses: this is the same file the favicon links to, so the tab and the topbar
-            cannot show different marks. `alt=""` because the word beside it already says "Pi Central" —
-            an alt here would make a screen reader hear the product name twice.
-          */}
-          <img className="wordmark-mark" src={logoIcon} alt="" aria-hidden="true" />
-          Pi Central
-        </h1>
         {/*
-          Only rendered when the rail is a drawer. A control that does nothing at every other width would be a permanent
-          question ("what is hidden?") on a layout where nothing is.
-        */}
-        {railIsDrawer && (
-          <button
-            type="button"
-            className="rail-toggle"
-            aria-expanded={railOpen}
-            aria-controls="session-rail"
-            onClick={() => setRailOpen((open) => !open)}
-          >
-            Sessions
-          </button>
-        )}
-        <div className="tabs" role="tablist" aria-label="View">
-          <button
-            type="button"
-            role="tab"
-            className="tab"
-            aria-selected={tab === "sessions"}
-            onClick={() => setTab("sessions")}
-          >
-            Sessions
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className="tab"
-            aria-selected={tab === "history"}
-            onClick={() => setTab("history")}
-          >
-            History
-          </button>
-        </div>
+          The MARK only, with the name kept as an accessible heading.
 
+          The word "Pi Central" beside the mark was the only decorative element in a strip whose job is
+          state and controls — and the name was already carried by the window title, the dock icon, the
+          About panel and the favicon. The `<h1>` stays because it is the only one in the app (a page with
+          no top-level heading is a navigation problem for a screen reader), so the text is present but
+          not drawn.
+
+          `alt=""` on the image, unchanged: an `alt` here plus the hidden text would announce the product
+          name twice.
+        */}
+        <h1 className="wordmark">
+          <img className="wordmark-mark" src={logoIcon} alt="" aria-hidden="true" />
+          <span className="visually-hidden">Pi Central</span>
+        </h1>
         <div className="topbar-right">
+          {/*
+            The counters are separate elements, so a separator has to be in the DOM or the text runs
+            together — measured in a real window: "9 sessions3 scratch". `styles.css` claimed the separator
+            was "rendered by the component" and it never was; `gap: 0` removed the only visual spacing.
+            A real `·` character (not a pseudo-element) keeps the text readable when CSS is dropped.
+          */}
           <div className="fleet">
-            {/* Each label matched to its number. The first version labelled the session COUNT
-                as "running", so two idle sessions read "2 running". */}
             <span>
               {fleet.total} session{fleet.total === 1 ? "" : "s"}
             </span>
-            {/* "0 running" is noise, so it only appears when something is actually running. */}
-            {fleet.running > 0 && <span>{fleet.running} running</span>}
-            {fleet.scratch > 0 && <span>{fleet.scratch} scratch</span>}
-            {fleet.needs > 0 && <span className="fleet-needs">{fleet.needs} need you</span>}
+            {fleet.running > 0 && <span>· {fleet.running} running</span>}
+            {fleet.scratch > 0 && <span>· {fleet.scratch} scratch</span>}
+            {fleet.needs > 0 && <span className="fleet-needs">· {fleet.needs} need you</span>}
           </div>
           <span className={`conn conn-${connectionStatus}`}>
             <span className="conn-dot" aria-hidden="true" />
@@ -1348,23 +1323,6 @@ export function App() {
             </span>
             {connectionDetail && <span className="hint">· {connectionDetail}</span>}
           </span>
-          {/*
-            Labelled, not an icon. A gear glyph would be shorter and would make the version — the
-            reason this surface exists — undiscoverable to anyone who reads words rather than shapes.
-          */}
-          {/*
-            Next to Settings because both are chrome, and before it because the panel is the thing a
-            user reaches for mid-session. Its label states the action — see `PanelToggle`.
-          */}
-          <PanelToggle collapsed={panel.collapsed} onToggle={togglePanelCollapsed} />
-          <button
-            type="button"
-            className="btn btn-quiet"
-            ref={settingsTriggerRef}
-            onClick={() => setSettingsOpen(true)}
-          >
-            Settings
-          </button>
         </div>
       </header>
 
@@ -1419,10 +1377,71 @@ export function App() {
         />
       )}
 
+      {/*
+        The app's own navigation, on the left edge: reachable from anywhere, about the whole app rather
+        than about one session. The window is a ROW of [bar][panes] so both bars are edges of the window
+        rather than cards inside it — see `styles.css`'s activity-bar section for the geometry decision.
+      */}
+      <div className="shell">
+        <ActivityBar
+          side="left"
+          label="Main"
+          items={[
+            {
+              id: "activity-left-sessions",
+              // "Sessions" is the only word in the whole bar, so the tooltip carries the extra fact that
+              // this is a toggle: below 1024 it opens the drawer, above it hides the column.
+              label: railIsDrawer ? (railOpen ? "Hide sessions" : "Show sessions") : "Sessions",
+              // Not `▤`: that is the Files glyph in the context bar, and the same mark for "the session
+              // list" and "this session's files" is a collision a reader has to resolve from position alone.
+              glyph: "☰",
+              active: tab === "sessions" && (!railIsDrawer || railOpen),
+              expanded: railIsDrawer ? railOpen : undefined,
+              controls: railIsDrawer ? "session-rail" : undefined,
+              onSelect: () => {
+                if (tab !== "sessions") setTab("sessions");
+                // A drawer is toggled; a column is permanent, so choosing Sessions from another view
+                // must not hide the rail the reader is looking at.
+                if (railIsDrawer) setRailOpen((open) => !open);
+              },
+            },
+            { id: "activity-left-history", label: "History", glyph: "↺", active: tab === "history", onSelect: () => setTab("history") },
+          ]}
+        >
+          <button
+            type="button"
+            className="navrail-item"
+            title="Settings"
+            aria-label="Settings"
+            ref={settingsTriggerRef}
+            onClick={() => setSettingsOpen(true)}
+          >
+            <span className="navrail-glyph" aria-hidden="true">
+              ⚙
+            </span>
+          </button>
+        </ActivityBar>
+
       <div
-        className={panel.collapsed ? "panes is-collapsed" : "panes"}
+        className={
+          (panel.collapsed ? "panes is-collapsed" : "panes") + (tab === "history" ? " is-pageless" : "")
+        }
         style={{ "--panel-width": `${panel.width}px` } as React.CSSProperties}
       >
+        {/*
+          The rail is the SESSIONS page's list, not a permanent column.
+
+          Reported from use: "The history panel shows the sessions and the context detail panel from
+          sessions. That is a violation of what we wanted the bars to work." Exactly — the bars promise that
+          the left bar chooses a PAGE and the right bar offers views of the OPEN CONTEXT. A list of live
+          sessions sitting beside the history page is neither: it belongs to the Sessions page.
+
+          `DESIGN.md` §6 already said so for History — "One full-width list, not a rail tail" — and the
+          arrangement here is the same rule stated once: page-chosen lists go inside the page's own area.
+          Below `RAIL_DRAWER_MAX_WIDTH` the drawer is how the list is reached on the Sessions page, and it is
+          not reachable at all on History, which has its own search.
+        */}
+        {tab === "sessions" && (
         <SessionRail
           /*
            * ONE list of rows: the PERSISTED roster, with activity joined in (issue #89).
@@ -1466,6 +1485,7 @@ export function App() {
           home={home}
           historyTotal={state.historyTotal}
         />
+        )}
 
         {tab === "history" ? (
           <main className="column">
@@ -1714,7 +1734,13 @@ export function App() {
           0px, and still fetches nothing useful — and two of those have already caused a defect here.
           Its geometry and mode live in `panel`, so re-opening restores them.
         */}
-        {!panel.collapsed && (
+        {/*
+          The panel is CONTEXT, so it is bound by the same rule as the context bar: Session/Files/Trace all
+          describe a live session. Guarding the bar but not the panel is what left the trace list sitting
+          beside the History page — the bar is the panel's *door*, so they must share one condition or the
+          door closes onto a room that is still there.
+        */}
+        {!panel.collapsed && tab === "sessions" && (
         <Panel
           mode={panel.mode}
           onMode={setPanelMode}
@@ -1808,7 +1834,6 @@ export function App() {
         </Panel>
         )}
       </div>
-
       {settingsOpen && (
         <Settings
           install={state.install}
@@ -1866,6 +1891,104 @@ export function App() {
           }}
         />
       )}
+        {/*
+        The CONTEXT bar, on the window's right edge, shown only when a session is open.
+
+        "Only if a session is active" is the reader's own requirement, and it is also what makes the bar
+        honest: Session/Files/Trace are views of a session, so offering them with nothing focused would
+        promise three views of nothing. When the panel is open it stays a thin 48px strip on the outside
+        of the panel — see `.panel`'s comment for why that is cheaper than a fourth grid track.
+
+        It sits INSIDE `.shell` and AFTER `.panes`, which is what makes it the outermost thing on that
+        side. The first version rendered it as a SIBLING of `.shell`, so the flex row contained one bar
+        and the other two became separate grid rows: the left bar was a 48px island, and the context bar
+        and the workspace each took a full-width row. A screenshot showed it; no test caught it, because
+        every assertion was about the bar's own markup rather than about where it lives.
+        */}
+        {/*
+          "Only if a session is active" — and specifically only on the SESSIONS page, where a session is the
+          open context. Reported from use: the context bar was offering Session/Files/Trace while the History
+          page was open, and the panel behind it was showing a live session's inspector. Three views of a
+          session, offered on a page about the session archive, is the same dishonesty as offering them with
+          nothing focused: the bar names an open context that the page does not have.
+
+          History's own detail belongs inside History (`DESIGN.md` §6), not in a bar about live sessions.
+        */}
+        {/*
+          The right bar is CONTEXT, so it exists only where context does: the Sessions page. Reported from
+          use: "Showing trace information in the history does not make any sense." Agreed — Session/Files/
+          Trace all describe a live session, and History is the archive.
+
+          It renders WITHOUT a focused session, though, because it now carries the panel's show/hide toggle
+          and that is the only door to a collapsed panel (the default). With no session there are no modes,
+          so the bar is a `nav` rather than a `tablist`: a tablist with zero tabs is invalid ARIA and would
+          announce an empty group.
+        */}
+        {tab === "sessions" && (
+          <ActivityBar
+            side="right"
+            as={focused === undefined ? "nav" : "tablist"}
+            label={focused === undefined ? "Panel" : "Session view"}
+            /*
+              The MODE items need a live session: Session/Files/Trace are views of one. The show/hide toggle
+              does not — it is the only door back to a collapsed panel, and the panel is collapsed by
+              default, so a bar gated on `focused` would leave a fresh window with no way to open it at all.
+            */
+            header={
+              <>
+              {/*
+                Show/hide, as a GLYPH at the TOP of the context bar.
+
+                Reported from use, twice. First: "the show hide panel toggle shall be an icon, and it needs to be
+                integrated in the context aware bar, not globally" — a word in the topbar made a session-level
+                region's control look like window chrome. Then: "make this a top icon on the right bar. Right
+                bottom is out of reach." The footer was at the foot of a full-height column, so on a tall window
+                it sat ~900px from the modes it belongs with.
+
+                It is the FIRST item of the bar and separated from them by a rule, because it is a different KIND
+                of control: the modes select a view of the session, this shows or hides the region those views
+                live in. Without the separator it reads as a fourth mode.
+              */}
+              <button
+                type="button"
+                className="navrail-item"
+                aria-expanded={!panel.collapsed}
+                title={panel.collapsed ? "Show the session panel" : "Hide the session panel"}
+                aria-label={panel.collapsed ? "Show the session panel" : "Hide the session panel"}
+                onClick={togglePanelCollapsed}
+              >
+                {/*
+                  The pair from the reader's own screenshot: a square divided by a vertical rule (two panes, the
+                  panel is shown) and the same square with its RIGHT half filled (one pane, the panel is hidden).
+                  The filled half is the panel's side, so the picture says which side is missing.
+
+                  Two codepoints rather than one rotated, because these two are a *depiction* rather than a
+                  direction: `◫` and `◨` are the same square at the same stroke weight, and the bar is 48px wide
+                  so the difference has to be a fill, not an arrow.
+                */}
+                <span className="navrail-glyph" aria-hidden="true">
+                  {panel.collapsed ? "◨" : "◫"}
+                </span>
+              </button>
+            </>
+            }
+            items={(focused === undefined ? [] : PANEL_MODES).map(({ mode, label, glyph }) => ({
+              id: `session-view-${mode}`,
+              label,
+              glyph,
+              active: !panel.collapsed && panel.mode === mode,
+              onSelect: () => {
+                // Choosing a mode also opens a collapsed panel: the bar is the door to the panel, so a
+                // selected-but-invisible mode would make the click look broken.
+                if (panel.collapsed) togglePanelCollapsed();
+                setPanelMode(mode);
+              },
+            }))}
+          >
+          </ActivityBar>
+        )}
+
+      </div>
     </div>
   );
 }

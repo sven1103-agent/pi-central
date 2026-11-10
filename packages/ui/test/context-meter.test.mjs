@@ -170,17 +170,34 @@ test("both gauges are sized from ONE token, so neither can be widened alone", ()
   // The header meter takes the token directly.
   assert.match(rule(".context-meter-track"), /width:\s*var\(--gauge-width\)/);
 
-  // The rail bar is flexible, capped by the same token — it may shrink in a narrow rail, but its maximum is the
-  // shared width, so at the sizes both are normally seen they agree.
-  assert.match(rule(".context-bar"), /max-width:\s*var\(--gauge-width\)/);
+  /*
+   * The rail bar FILLS its track rather than carrying the token itself.
+   *
+   * It used to be `flex: 1; max-width: var(--gauge-width)`, which made its length depend on how much room its own
+   * label needed — so no two rows shared a gauge length and the `ctx` labels below them started at different x. The
+   * roster reported exactly that raggedness.
+   *
+   * The width now comes from the rail's grid track (`grid-template-columns: var(--gauge-width) auto`), so the token is
+   * still the ONE source: it is declared on the track instead of on the bar. The bar takes `width: 100%` of it.
+   */
+  assert.match(rule(".context-bar"), /width:\s*100%/, "the bar fills its track");
+  assert.doesNotMatch(rule(".context-bar"), /max-width:/, "…and does not cap itself independently");
 
-  // And neither may reintroduce a literal of its own: a hard `width` on the bar would defeat the flexibility,
-  // and a `max-width` on the header meter would silently cap the token.
-  //
-  // Matched as a DECLARATION, i.e. after `;`/start — a bare `width: \d+px` pattern also matches inside
-  // `min-width: 42px`, which is a legitimate floor rather than a fixed size, and flagging it would have been a
-  // false positive (found by this test failing on its own first draft).
+  /*
+   * The LAST `.rail-row .r3` rule, not the first: the file declares it twice — once with the shared type
+   * (`font-family`, `overflow`) and once with the layout. `RegExp.exec` returns the first match, and the first one has
+   * no `grid-template-columns`, so a naive lookup reads the wrong rule and the assertion fails for the wrong reason.
+   */
+  const railRow = [...css.matchAll(/\.rail-row \.r3\s*\{([^}]*)\}/g)].map((m) => m[1]).at(-1) ?? "";
+  assert.match(
+    railRow,
+    /grid-template-columns:\s*var\(--gauge-width\)/,
+    "the rail's gauge track is the token, so all rows share one gauge length",
+  );
+
+  // Neither may reintroduce a literal of its own. Matched as a DECLARATION, i.e. after `;`/start — a bare
+  // `width: \d+px` pattern also matches inside `min-width`, which is a legitimate floor rather than a fixed size.
   const barWidth = /(?:^|;)\s*width:\s*\d+px/.exec(rule(".context-bar"));
-  assert.equal(barWidth, null, `the bar's width is flexible, not fixed (found ${barWidth?.[0]?.trim()})`);
+  assert.equal(barWidth, null, `the bar's width comes from its track, not a literal (found ${barWidth?.[0]?.trim()})`);
   assert.doesNotMatch(rule(".context-meter-track"), /max-width:/, "the header meter takes the token without a cap");
 });

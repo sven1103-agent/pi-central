@@ -635,3 +635,34 @@ Frameworks/Squirrel.framework/{Squirrel,Resources,Versions/Current}
 - **`codesign --verify` on Electron's own framework reports** *"code has no resources but signature indicates they must be
   present"* — **on a pristine extract too**. That is Electron's shipping state, not damage; `--deep --strict` on the whole
   app is the check that means something.
+
+## C20 — A CSS rule is correct for the number of children it has, and silently wrong at N+1
+
+Four layout defects shipped in one slice, all green in the suite, and all the same shape: a rule that was right
+for the children the element had, broken by a child that arrived later.
+
+| rule | was correct while | broke when |
+|---|---|---|
+| `.app { grid-template-rows: 44px 1fr }` | the shell was the second child | a conditional banner rendered before it, so `1fr` went to nothing |
+| `.panel { flex-direction: row }` | the mode bar lived inside it | the bar moved out, leaving one child in a row |
+| `.rail-row { no border-radius }` | never — it contradicted `DESIGN.md` §5.1 from the start | — |
+| `.navrail { justify-content: space-between }` | the bar had two children | the panel toggle made three, and the modes went to the bottom |
+
+Measured, each one, in a screenshot. None was caught by a test, because every assertion asked about ONE rule's
+properties rather than about the composition that broke.
+
+### Consequences
+
+- **A layout change is a change to every sibling's rule, not only to the element being added.** Before adding a
+  child, read the parent's rules for `justify-content`, `align-items`, `grid-template-*` and `flex-direction`, and
+  ask what they do with one more.
+- **`space-between` and `1fr` are the dangerous two.** Both distribute free space across whatever children exist,
+  so both change meaning when a child appears or disappears. `flex-start` plus an explicit `margin-top: auto` is the
+  version that survives.
+- **Indentation is not nesting, and neither is source order.** In a JSX file where a stale `</div>` and a
+  correctly-indented sibling look identical, only a depth count over characters answers "is this element inside
+  that one". Two attempts at that assertion passed with the bug reintroduced, once because the guard string also
+  appeared in the comment explaining the guard.
+- **A test can hold a defect in place.** One assertion required `flex-direction: row` on `.panel` because that was
+  the implementation of the moment, defect included. When a rule looks wrong on screen, check what the test asked
+  for before changing the rule.
