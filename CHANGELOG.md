@@ -30,107 +30,73 @@ History no longer shows a list of live sessions or a panel about one.
 (`installFacts`), because a returning window asks for this installation's facts instead of walking the
 whole session store. A 0.10.0 UI works against this orchestrator and simply re-checks silently.
 
-Seventy-seven entries across twelve issues. One thing is a **limit rather than a feature**, and it is
-stated rather than hidden: there is no downloadable `.app`. Both routes that once avoided notarization are
-gone — Homebrew closed the last one on 2026-09-01 — so the desktop shell is for people who have the
-checkout, and everyone else gets the same dock icon by adding the web app to their dock.
+Seventy-seven changes across twelve issues, in four groups below. One thing is a **limit rather than a
+feature**, and it is stated rather than hidden: there is no downloadable `.app`. Both routes that once
+avoided notarization are gone — Homebrew closed the last one on 2026-09-01 — so the desktop shell is for
+people who have the checkout, and everyone else gets the same dock icon by adding the web app to their
+dock.
 
-### Added
+### The desktop shell
 
-- A desktop shell that launches the installed package and shows its UI, keeping no product code of its own ([#214]).
-- The shell finds `node`, `pi` and `safehouse` through the reader's login shell, so a launch from Finder sees what a terminal sees ([#214]).
-- The orchestrator is always started on an ephemeral port, so a leftover process cannot stop a new window opening ([#214]).
-- The shell forwards `HOME` and the other process basics, so a session started from the app can run `pi` at all ([#214]).
-- `node_modules/.bin` is never used to resolve a tool or passed to a session, so `pi` is the installed one and every session can execute it ([#214]).
-- A window that returns to view asks the orchestrator whether it is stale, so a stale page picks up an update without being quit and reopened ([#213]).
-- Saved work holds the reload back: unsent text or attachments turn the banner into a sentence instead of discarding them ([#213]).
-- `install` states this installation's facts on its own, so the return-to-view re-check costs one file read instead of a walk of the session store ([#220]).
-- A window whose orchestrator predates `install` re-checks silently instead of filling the error strip once per focus ([#220]).
-- The window can only display the loopback document it was opened for: navigation, redirects, `<webview>` and new windows are refused ([#215]).
-- An `http(s)` link clicked in the window opens in the reader's browser, and any other scheme is dropped rather than handed to the OS ([#215]).
-- Every web permission is refused, from the app's own origin included, so a permission Electron adds later is denied by default ([#215]).
-- The window's options and its own assembled bundle are audited before the window opens, so a weakened `contextIsolation`, `sandbox` or `nodeIntegration` fails loudly ([#215]).
-- Closing the window hides it on macOS, and the dock icon reopens it with the orchestrator still running ([#216]).
-- `⌘Q` with live sessions asks first, naming them from the orchestrator's own list ([#216]).
-- The quit question states how many sessions are running, instead of listing what the rail already shows ([#216]).
-- `Keep sessions running` quits the app and leaves a detached orchestrator serving, with nothing sent to it ([#216]).
-- The next launch adopts a still-running orchestrator instead of starting a second over the same session files ([#216]).
-- A recorded orchestrator is adopted only when its PID's start time and its port's UI both agree, so a stale record or a recycled PID starts a fresh one ([#216]).
-- `runtime.json` is written atomically under the app's data directory and removed on a clean quit, so a `kill -9` leaves a hint rather than an authority ([#216]).
-- `npm run verify:lifecycle` checks the quit-and-reattach sequence against a real orchestrator, one line per criterion ([#216]).
-- The lifecycle verifier compares process identity with the app's own tolerance, so a healthy orchestrator is no longer reported as having vanished ([#216]).
+- A launcher that starts the installed package and shows its UI, carrying no product code of its own ([#214]).
+- It resolves `node`, `pi` and `safehouse` through your login shell, so a Finder launch sees what a terminal sees, and refuses with a named reason when one is missing ([#214], [#218]).
+- A `pi` that is a shell alias resolves to the real binary, and the app says the alias was skipped ([#218]).
+- The orchestrator is always started on an ephemeral port, with `HOME` and the process basics forwarded, so a leftover process cannot stop a new window and a session can run at all ([#214]).
+- The window can display only the loopback document it was opened for: navigation, redirects, `<webview>`, new windows, and every web permission are refused ([#215]).
+- Its window options and assembled bundle are audited before it opens, so a weakened `contextIsolation`, `sandbox` or `nodeIntegration` fails loudly ([#215]).
+- A child that exits before reporting a URL shows what it printed, and `Try again` re-runs the launch instead of reloading a dead page ([#215]).
+- Diagnostics go to `~/Library/Logs/Pi Central/main.log`, and the menu reveals it, so a Finder launch is diagnosable without a terminal ([#218]).
 
-- The app can apply a Pi Central update itself: stop, install, verify the version, respawn, reload ([#217]).
-- An update is only applied from a menu action, and the check action installs nothing ([#217]).
-- The installed version is read from the package and verified against the one requested, so an install that lands something else fails instead of reporting success ([#217]).
-- A child that cannot be stopped abandons the update, so files a live process is executing are never replaced ([#217]).
-- A failed install respawns the previous version and shows npm's own output in a copyable panel ([#217]).
-- The update journal recovers from a crash mid-update, starting the installed version rather than adopting the old one ([#217]).
-- An update is refused, naming the right command, when Pi Central is managed by Homebrew, a node version manager, a linked working copy, or a prefix this user cannot write ([#217]).
-- The updater uses the `npm` beside the Node it launches, so it cannot install into a different prefix than the one it verifies ([#217]).
-- A linked working copy is reported as one, and the refusal names the directory the link points at ([#217]).
-- A global install is found from its `node_modules` directory, instead of the app reporting that it could not find its own package ([#217]).
-- An update outcome is a dialog that returns to the dashboard, instead of a failure page that took the window and could not be left ([#217]).
-- `⌘Q` finishes: a stopped orchestrator is no longer still counted as running, so the quit no longer restarts its own wait every five seconds ([#218]).
-- Checking for updates and finding a newer version no longer does nothing, which is what the update guard made it do ([#217]).
+### Sessions that outlive the window
 
-- `npm run install-app` builds `~/Applications/Pi Central.app`, ad-hoc or self-signed, on a machine with no Developer ID ([#218]).
-- A self-signed code-signing identity is used when one exists, so macOS privacy grants survive a rebuild ([#218]).
-- The build refuses a `.dmg`, notarization, publishing or an auto-updater, and refuses a bundle that carries product code ([#218]).
+- Closing the window hides it; the dock icon reopens it with the orchestrator still running ([#216]).
+- `⌘Q` asks first when sessions are live, offering to leave them running detached, and the next launch adopts a still-running orchestrator rather than starting a second over the same files ([#216]).
+- An orchestrator is adopted only when its PID's start time and its port agree, so a stale record or a recycled PID starts a fresh one ([#216]).
+- A probe that is not allowed to read a process's start time is no longer read as "the process is gone" ([#216]).
+- Quitting no longer stops every session as a side effect, and the orchestrator survives its output pipe closing ([#216]).
+- `npm run verify:lifecycle` checks the quit-and-reattach sequence against a real orchestrator ([#216]).
+
+### Updates, and the app that applies them
+
+- The app can apply a Pi Central update itself — stop, install, verify the version, respawn, reload — from a menu action only; checking installs nothing ([#217]).
+- An install that lands a different version fails instead of reporting success, and a child that cannot be stopped abandons the update rather than replacing files it is executing ([#217]).
+- The update journal recovers from a crash mid-update, and a failed install respawns the previous version with npm's own output in a copyable panel ([#217]).
+- An update is refused, naming the right command, when Pi Central is managed by Homebrew, a version manager, a linked working copy, or an unwritable prefix — and the `npm` used is the one beside the Node it launches ([#217]).
+- `npm run install-app` builds `~/Applications/Pi Central.app`, ad-hoc or self-signed, on a machine with no Developer ID, and refuses a `.dmg`, notarization, publishing or an auto-updater ([#218]).
+- A self-signed identity is used when one exists, so macOS privacy grants survive a rebuild ([#218]).
+- The build refuses a bundle that carries product code, and refuses to overwrite a bundle it did not create — it can no longer delete a Safari web app that shares the path ([#218]).
+- An install stages and renames, so a failed copy leaves the previous installation intact ([#218]).
+- `npm run app` is a separate app with its own state, so a development run cannot adopt or delete the installed one's record ([#218]).
+- The app carries Pi Central's own icon in the dock, ⌘-Tab, the About panel, Finder and Launchpad, built from the brand mark; a build without one is refused ([#239]).
+- The app logs which package it serves, and says when a checkout is running against a different installed one ([#244]).
+
+### Navigation, and the page that owns it
+
+- Navigation moved to two vertical bars on the window's edges: app pages on the left, the open context's views on the right ([#241]).
+- The topbar keeps only the mark, the fleet counts and the connection, instead of nine unrelated controls ([#241]).
+- A page owns its furniture: the session rail and the session panel appear on the Sessions page, not beside History ([#241]).
+- The panel's show/hide control is a glyph above a rule in the context bar, instead of a word in the topbar, and the product name is no longer drawn beside the mark ([#241]).
+- The History page is centred on the reading measure ([#241]).
+- Roster rows are rounded on their trailing corners, their context gauge is one length with the `ctx` label in a column, and a warning no longer outranks the session's name ([#241]).
+- The fleet counters are separated in the text, so `9 sessions3 scratch` reads `9 sessions · 3 scratch` ([#241]).
+- A window that returns to view asks whether it is stale, so a stale page reloads instead of being quit and reopened — and unsent text or attachments hold that reload back ([#213]).
+- `install` states this installation's facts on its own, so the re-check costs one file read; a window whose orchestrator predates it re-checks silently ([#220]).
+
+### Documentation
+
 - `docs/APP-SHELL.md` states the certificate steps, the Gatekeeper position and how to uninstall ([#218]).
-- A missing `pi` or `safehouse` reports why the login shell could not resolve it, quoting what the shell printed, instead of only saying it did not ([#218]).
-- `pi` that is a shell alias is resolved to the real binary, and the app says the alias was skipped rather than reporting it missing ([#218]).
-- `install-app` says where the app went, because it is in `~/Applications` and not `/Applications` ([#218]).
-- The app writes its diagnostics to `~/Library/Logs/Pi Central/main.log`, and the menu reveals it, so a Finder launch is diagnosable without a terminal ([#218]).
-- `⌘Q` can name the live sessions in the packaged app: `ws` is resolved with the module-scope `require`, which Electron patches to read inside `app.asar` ([#218]).
-- `install-app` refuses to overwrite a bundle it did not create, so it can no longer delete a Safari web app that shares the path ([#218]).
-- An install copies to a staging path and renames, so a failed copy leaves the previous installation intact ([#218]).
-- `npm run app` is a separate app with its own state, so a development run cannot adopt or delete the installed one's runtime record ([#218]).
-- The app carries Pi Central's own icon in the dock, ⌘-Tab, the About panel, Finder and Launchpad, and a build without one is refused ([#239]).
-- `npm run build:icon` assembles the app icon from the brand mark, and `install-app` runs it so a redrawn logo reaches the bundle ([#239]).
-- A development run sets the dock icon itself, since it launches Electron's bundle and had been showing Electron's logo ([#239]).
+- The docs no longer offer a Homebrew cask as a way to run an un-notarized app; Homebrew closed that route on 2026-09-01 ([#246]).
+- ADR-0013 states the shell as a launcher rather than a second artifact, replacing the "no Electron" line in `docs/STACK.md` ([#212]).
 
-### Changed
-
-- Navigation moved to two vertical bars on the window's edges: app views on the left, the open context's views on the right ([#241]).
-- The topbar keeps only the mark, the fleet counts and the connection, instead of nine unrelated controls in one strip ([#241]).
-- A page owns its furniture, so the session rail and the session panel appear on the Sessions page and not beside History ([#241]).
-- The panel's show/hide control is a glyph at the top of the context bar, above a rule, instead of a word in the topbar ([#241]).
-- The product name is no longer drawn beside the mark in the topbar; the heading and its accessible name remain ([#241]).
-- The fleet counters are separated in the text, so `9 sessions3 scratch` reads as `9 sessions · 3 scratch` ([#241]).
-- The History page is centred on the reading measure instead of hugging the left edge ([#241]).
-- Roster rows are rounded on their trailing corners, so a run of sessions no longer reads as one slab ([#241]).
-- A roster row's context gauge is one length everywhere and its `ctx` label sits in a column, instead of a different x per row ([#241]).
-- A roster row's warning is a quieter note, so it no longer outranks the session's name ([#241]).
-- The app logs which package it serves, and says when a checkout is running against a different installed package ([#244]).
-- `install-app` prints the installed package's root and version, and names them when they match the checkout's number but not its code ([#244]).
-- `docs/STACK.md` no longer claims there is no Electron path; ADR-0013 states the shell as a launcher rather than a second artifact ([#212]).
-
-### Fixed
-
-- The docs no longer offer a Homebrew tap or cask as a way to run an un-notarized app; Homebrew closed support for those casks on 2026-09-01 ([#246]).
-- Both activity bars and the workspace share one flex row, so neither bar collapses onto a row of its own ([#241]).
-- The workspace takes the grid's growing row, so the window has no dead space below it when no banner is shown ([#241]).
-- The activity bars use their own class namespace: they had inherited the transcript's `.activity` border and background ([#241]).
-- The right activity bar is a `tablist` of modes only, so the panel toggle inside it is no longer an orphan non-tab child ([#241]).
-- A child that exits before reporting a URL shows what it printed, instead of leaving the window blank and the terminal silent ([#215]).
-- A failure page failing its own CSP audit is replaced by a constant one, instead of being logged as refused and shown anyway ([#215]).
-- `Try again` on a failure page re-runs the launch, instead of reloading a document with no state and showing the same text again ([#215]).
-- A crashed orchestrator shows its failure in the window that is open, instead of opening a second one behind the reader ([#215]).
-- The update banner's Reload button is the recovery it advertises, instead of sitting beside advice to quit the app ([#213]).
-- A reload is refused while the composer holds a draft, on the snapshot path too and not only on return ([#213]).
-- Quitting no longer stops every session as a side effect: the signal is sent only for the answer that says so ([#216]).
-- A probe that is not allowed to read a process's start time is no longer read as "the process is gone", which started a second orchestrator beside a live one ([#216]).
-- The orchestrator survives its output pipe closing, so quitting the app with sessions kept no longer kills it at the next log line ([#216]).
 
 [#212]: https://github.com/sven1103-agent/pi-central/issues/212
-[#214]: https://github.com/sven1103-agent/pi-central/issues/214
 [#213]: https://github.com/sven1103-agent/pi-central/issues/213
-[#220]: https://github.com/sven1103-agent/pi-central/issues/220
+[#214]: https://github.com/sven1103-agent/pi-central/issues/214
 [#215]: https://github.com/sven1103-agent/pi-central/issues/215
 [#216]: https://github.com/sven1103-agent/pi-central/issues/216
 [#217]: https://github.com/sven1103-agent/pi-central/issues/217
 [#218]: https://github.com/sven1103-agent/pi-central/issues/218
+[#220]: https://github.com/sven1103-agent/pi-central/issues/220
 [#239]: https://github.com/sven1103-agent/pi-central/issues/239
 [#241]: https://github.com/sven1103-agent/pi-central/issues/241
 [#244]: https://github.com/sven1103-agent/pi-central/issues/244
