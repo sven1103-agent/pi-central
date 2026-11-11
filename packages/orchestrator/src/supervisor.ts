@@ -54,6 +54,7 @@ import { ownInstallationWarning } from "@pi-central/protocol";
  */
 export const EMPTY_PROMPT_WITH_IMAGES = "See the attached image.";
 import { interpretRecord } from "./state.ts";
+import { RefreshCoalescer, applyStats, readStats } from "./stats.ts";
 
 export interface StartRequest {
   /** Directory to work in. Omitted means "the app-owned default workspace" (US-1, US-3). */
@@ -105,6 +106,14 @@ export class Supervisor extends EventEmitter {
   #sessions = new Map<string, LiveSession>();
   #processes = new Map<string, RpcProcess>();
   #created = 0;
+  /**
+   * The stats refreshes, coalesced per session (`stats.ts`).
+   *
+   * The cadence became `turn_end` so the meter and the cost are not minutes stale, which made two
+   * refreshes overlap reachable for the first time: a compaction, a settle and a turn can all land
+   * inside one round trip.
+   */
+  #stats = new RefreshCoalescer();
   /**
    * Which sessions were open, so a restart can reopen them (issue #185).
    *
@@ -694,20 +703,20 @@ export class Supervisor extends EventEmitter {
   }
 
   async #refreshStats(id: string): Promise<void> {
-    const session = this.#sessions.get(id);
-    const rpc = this.#processes.get(id);
-    if (!session || !rpc || !rpc.running) return;
-    try {
-      const stats = (await rpc.send({ type: "get_session_stats" }, 20_000)) as Record<string, unknown>;
-      const ctx = stats.contextUsage as { percent?: number | null } | undefined;
-      const tokens = stats.tokens as { total?: number } | undefined;
-      session.contextPercent = ctx?.percent ?? null;
-      session.tokensTotal = tokens?.total ?? null;
-      session.cost = typeof stats.cost === "number" ? stats.cost : null;
-      this.#patch(id);
-    } catch {
-      // Stats are cosmetic. Never fail a session over them.
-    }
+    await this.#stats.run(id, async () => {
+      // Re-read both each round rather than capturing them: a stop can delete the entry while a refresh is in
+      // flight, and asking a reaped process is how a cosmetic read turns into a log of timeouts.
+      const session = this.#sessions.get(id);
+      const rpc = this.#processes.get(id);
+      if (!session || !rpc || !rpc.running) return;
+      try {
+        applyStats(session, readStats(await rpc.send({ type: "get_session_stats" }, 20_000)));
+        this.#patch(id);
+      } catch {
+        // Stats are still cosmetic in the sense that they must never FAIL a session — but they are no longer
+        // cosmetic in when they are read: see the cadence note in `state.ts`.
+      }
+    });
   }
 
   #onRecord(id: string, record: PiRecord): void {

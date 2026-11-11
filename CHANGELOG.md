@@ -12,6 +12,46 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
+## [0.11.1] — 2026-11-11
+
+A hotfix for one behaviour: **a session's context usage and cost were blank for the whole of a new
+session's first run, and appeared only when it stopped to ask something.**
+
+The dashboard was not wrong about the numbers, it never asked for them. `contextPercent`, `tokens`
+and `cost` were refreshed only on `agent_settled` — the end of an entire run (C8) — so a session given
+a complex task reported `ctx —`, no rail bar and no cost for every minute of it, including the minutes
+it was spending money. `compaction_end` was the one exception, added because a compaction must show the
+drop it just produced; the same argument was never applied to the ordinary case.
+
+So the cadence is now once per turn. **`turn_end` is the right point rather than `message_end`:** Pi
+aggregates from the messages it has persisted, which happens as each message ends, so the turn is the
+first moment a whole assistant response and its tool results are in the count — and asking at
+`message_end` would mean two asks per turn, because the assistant turn ends immediately after it.
+
+One consequence had to be handled rather than hoped for. A per-turn ask can overlap a compaction and a
+settle, and a Pi that answers slowly would otherwise collect one 20 s-deadline promise per turn. The
+refresh is now a coalescer: one `get_session_stats` in flight per session, with asks that arrive during
+it merged into a single follow-up — merged rather than dropped, because a turn that finished mid-flight
+has already made the in-flight answer stale.
+
+Two smaller things this touched. Pi's payload is narrowed once, so `null` — the honest "Pi has not
+measured this yet", and the state right after a compaction — stays `null` rather than becoming a
+fabricated `0%` meter; a genuine `0` is still reported as `0`, which is the other half of the same rule.
+
+And two guards were wrong in ways that only a release exposes. `released-immutable.test.mjs` named
+`## [0.1.0]` whenever a new issue reference was added, because it split sections on any `##` and so
+let the oldest release's body run to the end of the file and swallow the shared reference block. The
+version gate refused to run at all on a machine that had built the desktop shell — `npm run install-app`
+writes a `dist-app/package.json` with the version baked in at build time, so bumping the version
+reported a disagreement about an artifact nobody ships. Both were found by cutting this release.
+
+### Fixed
+
+- Context usage, tokens and cost are read once per turn, instead of only when a run settles, so a long first run is no longer reported as unmeasured ([#251]).
+- The immutability guard names the released section that actually changed, instead of always the oldest one ([#251]).
+- The version gate skips the app's build output, so a machine that has run `npm run install-app` can cut a release ([#251]).
+
+
 ## [0.11.0] — 2026-11-10
 
 A window you open from the dock, and navigation that says which job each control has.
@@ -709,3 +749,4 @@ The spike that answered whether this was worth building.
 [#158]: https://github.com/sven1103-agent/pi-central/pull/158
 [#163]: https://github.com/sven1103-agent/pi-central/issues/163
 [#164]: https://github.com/sven1103-agent/pi-central/issues/164
+[#251]: https://github.com/sven1103-agent/pi-central/issues/251

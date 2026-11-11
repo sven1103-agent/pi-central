@@ -294,6 +294,27 @@ test("compaction and retry records do NOT move the session out of streaming", ()
   }
 });
 
+// --- The numbers arrive DURING a run, not at the end of one ---------------------------------------
+
+test("a turn refreshes the context meter and the cost, so a long first run is not reported as unmeasured", () => {
+  // The defect: `agent_settled` was the only refresh point, so a new session given a complex task showed `ctx —`,
+  // no rail bar and no cost for the whole run — minutes, and dollars — until the agent stopped to ask something.
+  // Every number the session panel and the rail display comes from this one effect.
+  //
+  // Falsification: remove the `turn_end` case from `interpretRecord` and this fails; nothing else in the suite
+  // notices, because no other record in a normal run was expected to refresh stats.
+  const effect = interpretRecord(session({ state: "streaming" }), { type: "turn_end" });
+  assert.equal(effect.refreshStats, true, "a finished turn is the first moment the numbers exist");
+});
+
+test("a turn is not completion, so it patches no state (C8)", () => {
+  // The refresh must not smuggle in a state change. A tool call, a retry, a compaction or a queued message can
+  // all follow `turn_end`, and a session that flipped to `idle` mid-run invites a teardown or a second prompt.
+  const effect = interpretRecord(session({ state: "streaming" }), { type: "turn_end" });
+  assert.equal(effect.patch, undefined);
+  assert.equal(effect.dialog, undefined);
+});
+
 // --- A failure names what killed it, and does not bury it (reported from a window) ---------------
 
 test("a shell-style 128+n exit is named as the signal it was", () => {
