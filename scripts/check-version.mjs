@@ -57,6 +57,7 @@ import {
   changelogReleases,
   currentVersionClaims,
   lockfileDisagreements,
+  isGeneratedDirectory,
   manifestDisagreements,
   releaseNotesRefusal,
   readmeVersionClaims,
@@ -67,8 +68,14 @@ import {
 const ROOT = resolve(import.meta.dirname, "..");
 const RELEASE_MODE = process.argv.includes("--release");
 
-/** Directories that hold no source of ours, and are expensive to walk. */
-const SKIP_DIRS = new Set([".git", "node_modules", "dist", ".vite", "coverage", "bin"]);
+/*
+ * The skip list lives in `version-policy.mjs` (`GENERATED_DIRS` / `isGeneratedDirectory`) so it is exported and
+ * tested rather than being a private constant here. That is how the two app-build names came to be missing:
+ * `npm run install-app` writes a `dist-app/package.json` with the version baked in at build time, so every
+ * version bump on a machine that had built the app failed the gate with
+ * `dist-app/package.json declares "0.11.0", expected 0.11.1` — about an artifact nobody ships, on the machine a
+ * release is cut from.
+ */
 
 function fail(lines) {
   console.error("check-version: FAILED\n");
@@ -81,7 +88,7 @@ function fail(lines) {
 function readFiles(dir, matches) {
   const out = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (SKIP_DIRS.has(entry.name)) continue;
+    if (isGeneratedDirectory(entry.name)) continue;
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
       out.push(...readFiles(path, matches));

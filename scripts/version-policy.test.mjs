@@ -23,6 +23,7 @@ import {
   changelogReleases,
   currentVersionClaims,
   isChangelog,
+  isGeneratedDirectory,
   isReadme,
   latestPointerProblem,
   lockfileDisagreements,
@@ -238,6 +239,35 @@ test("agreeing manifests produce no output at all", () => {
     (path) => file(path, JSON.stringify({ version: "0.2.0" })),
   );
   assert.deepEqual(manifestDisagreements(manifests, "0.2.0"), []);
+});
+
+// --- What the version gate must not look inside -----------------------------------------------------
+
+test("the app build output is skipped, because its manifest is a stale copy of this one", () => {
+  // The defect this records: `npm run install-app` (issue #218) writes `packages/app/dist-app/package.json` with
+  // `version: rootManifest.version` baked in at BUILD time. Bumping the version therefore failed the gate with
+  //
+  //     - packages/app/dist-app/package.json declares "0.11.0", expected 0.11.1
+  //
+  // on any machine that had ever built the app — which is the machine a release is cut from. The release was not
+  // broken; the gate was reading a generated copy of the number it was checking.
+  //
+  // Falsification: remove `dist-app` from `GENERATED_DIRS` and this fails; `npm run verify` then fails too, but
+  // only on a machine that has built the app, which is why it survived until a release was cut.
+  assert.equal(isGeneratedDirectory("dist-app"), true, "the packaged app's manifest is build output");
+  assert.equal(isGeneratedDirectory("dist-app-out"), true, "and so is what electron-builder emits beside it");
+});
+
+test("the skip list still skips what it always did", () => {
+  // A skip list that stops skipping is silent in the other direction: `node_modules` full of third-party
+  // versions would each be reported as a disagreement about ours.
+  for (const name of [".git", "node_modules", "dist", ".vite", "coverage", "bin"]) {
+    assert.equal(isGeneratedDirectory(name), true, `${name} must be skipped`);
+  }
+  // And it is a list of DIRECTORY NAMES, not a substring match: `packages/` must still be walked.
+  for (const name of ["packages", "scripts", "src", "test", "distant", "my-dist"]) {
+    assert.equal(isGeneratedDirectory(name), false, `${name} is source and must be walked`);
+  }
 });
 
 // --- The lockfile ----------------------------------------------------------------------------------

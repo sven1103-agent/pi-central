@@ -68,6 +68,22 @@ export function interpretRecord(session: LiveSession, record: PiRecord): RecordE
         refreshStats: true,
       };
 
+    case "turn_end":
+      // A stats refresh, and ONLY a stats refresh.
+      //
+      // `agent_settled` used to be the single refresh point, which meant a session reported `ctx —` and no cost for
+      // the ENTIRE first run: a complex task is minutes of turns, and the reader watching the rail had no numbers at
+      // all until the agent stopped and asked something. The meter answered "nobody has measured this" about a session
+      // that had just spent dollars.
+      //
+      // `turn_end` is the cadence point because it is the first moment the numbers exist: one assistant response and
+      // its tool calls finished, and Pi's `getSessionStats` aggregates from the messages it has persisted — which
+      // happens on `message_end`, before this record. Refreshing on `message_update` instead would ask once per delta,
+      // and on `message_end` would ask twice per turn (the assistant turn ends immediately after).
+      //
+      // No state patch: a turn is not completion, and a tool call or a queued message follows it (C8).
+      return { refreshStats: true };
+
     case "message_end":
       return countAsMessage(record) ? { patch: { messageCount: session.messageCount + 1 } } : {};
 

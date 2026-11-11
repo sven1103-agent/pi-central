@@ -360,6 +360,39 @@ export function lockfileDisagreements(lockText, declared) {
 }
 
 /**
+ * Directories that hold no source of ours: build output and vendored trees.
+ *
+ * A name list, matched at any depth, rather than a list of paths — `packages/app/dist-app` today, and whatever
+ * holds generated output tomorrow. Both app-build names were added after the 0.11.1 version bump failed on the
+ * maintainer's own machine: `npm run install-app` writes a `dist-app/package.json` with the version baked in at
+ * build time, so the gate reported `dist-app/package.json declares "0.11.0", expected 0.11.1` and refused the
+ * release over an artifact nobody ships. `dist-app-out` is the same thing one build phase later.
+ *
+ * `dist` was already here; the two new names are the ones that were MISSING, which is why this is exported and
+ * tested rather than left as a private constant in the CLI — a skip list is only ever noticed when it is wrong.
+ */
+export const GENERATED_DIRS = [
+  ".git",
+  "node_modules",
+  "dist",
+  "dist-app",
+  "dist-app-out",
+  ".vite",
+  "coverage",
+  "bin",
+];
+
+/**
+ * Whether a directory is one this policy must not look inside.
+ *
+ * @param {string} name a single path segment, as `readdirSync` reports it
+ * @returns {boolean}
+ */
+export function isGeneratedDirectory(name) {
+  return GENERATED_DIRS.includes(name);
+}
+
+/**
  * Every manifest whose `version` disagrees with the declaration.
  *
  * A manifest that fails to parse is skipped, not failed: npm reports a malformed `package.json`

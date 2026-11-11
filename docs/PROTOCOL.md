@@ -262,6 +262,18 @@ no options (`dist/modes/rpc/rpc-mode.js`). Do not plan around it.
 | `get_session_stats` | context usage, tokens, cost — the "how full is this session" indicator |
 | `set_session_name` | rename from the UI (`--name` sets it at spawn) |
 
+#### When Pi Central asks for stats
+
+Once per **turn** (`turn_end`), once on `compaction_end`, once on `agent_settled`, and once on the first
+`get_state` of a session. Not once per run: `agent_settled` alone meant a session given a complex task
+reported `ctx —` and no cost until it stopped — the numbers were absent for exactly as long as a run is
+expensive. The refresh is a coalescer (`packages/orchestrator/src/stats.ts`), so a burst of records
+produces one ask in flight plus at most one follow-up.
+
+`turn_end` rather than `message_end` because Pi aggregates from the messages it has **persisted**, which
+happens when a message ends; the turn is the first point at which a whole assistant response and its tool
+results are in the count, and asking at `message_end` would mean two asks per turn.
+
 ### Prompting
 
 | Command | Use |
@@ -319,6 +331,7 @@ errors. Extension commands (`/foo`) execute immediately even while streaming.
 | `tool_execution_start` / `_update` / `_end` | tool timeline; correlate by `toolCallId` |
 | `agent_end` | run ended — **do not** mark idle (C8) |
 | `agent_settled` | `→ idle`; this is the completion gate |
+| `turn_end` | refresh context usage, tokens and cost — the only in-run refresh point |
 | `queue_update` | show pending steering/follow-up |
 | `compaction_start` / `compaction_end` | context pressure indicator |
 | `auto_retry_start` / `auto_retry_end` | retry banner |

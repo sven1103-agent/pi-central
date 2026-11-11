@@ -129,6 +129,15 @@ test("a released section cannot GAIN an entry after it ships", (t) => {
     return;
   }
 
+  /*
+   * A section ends at the next RELEASE heading — not at the next `##`.
+   *
+   * The reference definitions (`[#185]: https://…`) live in one block at the END of the file, and the first
+   * version heading before that block is the OLDEST release. Splitting on any `##` therefore gave the oldest
+   * released section a body that ran to the end of the document, definitions included — so adding a definition
+   * for a new issue appeared to be a change to `## [0.1.0]`. Found by adding one: the guard named 0.1.0, which
+   * has nothing to do with the entry that was written.
+   */
   const sections = (text) => {
     const out = new Map();
     const heads = [...text.matchAll(/^## \[([\d.]+|[^\]]+)\][^\n]*$/gm)];
@@ -141,6 +150,13 @@ test("a released section cannot GAIN an entry after it ships", (t) => {
   };
 
   const live = sections(changelog);
+  /*
+   * Definitions are stripped before counting references, because a definition is not an entry.
+   *
+   * With the split above this is belt and braces for the same defect: the tolerant form costs one line and makes
+   * the check independent of where the block ends up in future.
+   */
+  const withoutDefinitions = (body) => body.replace(/^\[#\d{1,4}\]:.*$/gm, "");
   for (const [version, baseline] of Object.entries(recorded)) {
     // The file also carries `_kinds` (what each cited number is) and may gain other underscore-prefixed metadata.
     // Iterating those as releases is how this guard failed on its own bookkeeping rather than on the changelog.
@@ -154,7 +170,7 @@ test("a released section cannot GAIN an entry after it ships", (t) => {
         `may be rewritten, never extended — an entry added after a release describes code that is not in the ` +
         `tarball, which is how five fixes (141-146) ended up under the released 0.4.0.`,
     );
-    const now = new Set([...body.matchAll(/#(\d{1,4})\b/g)].map((m) => m[1]));
+    const now = new Set([...withoutDefinitions(body).matchAll(/#(\d{1,4})\b/g)].map((m) => m[1]));
     const added = [...now].filter((n) => !baseline.issues.includes(n));
     assert.deepEqual(
       added,
