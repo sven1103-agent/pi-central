@@ -4683,6 +4683,7 @@ select.btn { font-family: var(--sans); }
 .keys-what { display: flex; flex-direction: column; gap: 1px; font-size: var(--fs-sm); color: var(--text); }
 .keys-note { font-size: var(--fs-xs); color: var(--dim); }
 
+/* --- The panel: a region with modes, and a draggable edge (issue #8, reworked) ------------------
 
    This was the inspector: a fixed 320px column. A real window showed why that fails once it hosts a
    document — the text was clipped mid-word with a horizontal scrollbar. So the region has modes and
@@ -4840,7 +4841,8 @@ select.btn { font-family: var(--sans); }
    place you work. Wider than the confirm modal: it holds filesystem paths, and a path wrapped at
    440px is a path nobody reads. */
 
-.settings { max-width: 620px; width: min(620px, calc(100vw - 32px)); }.settings section { margin-top: var(--sp-4); }
+.settings { max-width: 620px; width: min(620px, calc(100vw - 32px)); }
+.settings section { margin-top: var(--sp-4); }
 .settings h4 {
   margin: 0 0 var(--sp-2);
   font-size: var(--fs-xs);

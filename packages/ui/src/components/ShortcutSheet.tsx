@@ -41,19 +41,37 @@ export function ShortcutSheet({
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
 
+  /*
+   * The LATEST `onClose`, read through a ref, so the listener below can be registered once.
+   *
+   * The shell passes an inline arrow (`onClose={() => { setKeysOpen(false); keysTriggerRef.current?.focus(); }}`), so a
+   * dependency on `onClose` makes the effect re-run on every render of `App` — and every socket event re-renders it. An
+   * effect that moves focus on each run therefore yanks the reader back to `Close` while they are reading the list, or
+   * out of the list entirely if they had tabbed into it. The carried probe that named this defect had a broken
+   * precondition of its own (`document.body.focus()` is a no-op, because `<body>` is not focusable), so the defect was
+   * confirmed by reverting this fix and watching the real test fail. "The sheet fights the keyboard" is the one thing
+   * this surface must not do.
+   */
+  const closeOf = useRef(onClose);
+  closeOf.current = onClose;
+
   useEffect(() => {
-    // Focus moves INTO the surface, so `Esc` works without a click and a keyboard reader is not left behind it.
+    // Mount-only: focus moves INTO the surface once, so `Esc` works without a click and a keyboard reader is not left
+    // behind it. `[]` is the whole point — "on open" is a mount, not an update.
     closeRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       // `stopPropagation`, because the composer's escape ladder is also on the window: without it one Escape would
       // close this sheet AND stop the focused session's run — two actions for one keystroke.
       event.stopPropagation();
-      onClose();
+      closeOf.current();
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [onClose]);
+  }, []);
 
   const sections = shortcutSections(platform);
 

@@ -2536,14 +2536,31 @@ function ConfirmStop({
   onConfirm: () => void;
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
+  /*
+   * The latest callbacks, through refs, so the listeners are registered once.
+   *
+   * `App` passes inline arrows (`onCancel={() => setConfirmStop(undefined)}`), so depending on them re-runs the focus
+   * effect on every render — including one caused by a socket event, since `App` re-renders on those. The reader would
+   * be pulled back off `Stop it` each time, on the one dialog whose buttons mean opposite things. The same defect was
+   * found by a probe in `ShortcutSheet`, which is why the shape is repeated here rather than noted once.
+   */
+  const cancelOf = useRef(onCancel);
+  cancelOf.current = onCancel;
+  const confirmOf = useRef(onConfirm);
+  confirmOf.current = onConfirm;
+
   useEffect(() => {
+    // Mount-only: focus enters on OPEN, and an update is not an open.
     cancelRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onCancel();
+      if (event.key === "Escape") cancelOf.current();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onCancel]);
+  }, []);
 
   /*
    * The chord that OPENED this dialog confirms it.
@@ -2561,11 +2578,11 @@ function ConfirmStop({
       if (chordOf(event) !== STOP_CHORD) return;
       event.preventDefault();
       event.stopPropagation();
-      onConfirm();
+      confirmOf.current();
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [onConfirm]);
+  }, []);
 
   return (
     <div className="modal-backdrop" onClick={onCancel} role="presentation">

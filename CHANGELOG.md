@@ -19,6 +19,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The Stopped heading selects its whole group, so finished sessions are cleared in one confirmation ([#253]).
 - `⌘/` opens every keyboard shortcut, reachable from the app bar's `?` control ([#253]).
 
+### Fixed
+
+- The keys sheet and both destructive confirmations take focus once on open, instead of on every shell re-render ([#253]).
+
 ## [0.11.1] — 2026-11-11
 
 A hotfix for one behaviour: **a session's context usage and cost were blank for the whole of a new

@@ -63,6 +63,101 @@ function press(init, target = document.body) {
   return event;
 }
 
+// --- Focus enters ONCE, not on every render -----------------------------------------------------
+
+/*
+ * These three surfaces all say "focus enters on open", and all three are given INLINE callbacks by `App`. The shell
+ * re-renders on every socket event, so an effect that moved focus with `onClose`/`onCancel`/`onConfirm` in its
+ * dependencies moved focus again on each of them — a sheet or dialog that yanks the reader back to its first control
+ * while they are reading it, or out of the control they had tabbed to.
+ *
+ * The probe that found this carried a bug of its own: it used `document.body.focus()`, which is a no-op in jsdom
+ * because `<body>` is not focusable. The precondition silently failed and the assertion passed for the wrong reason in
+ * the fixed build, so the fix looked unverified. Each test below therefore moves focus to a REAL focusable button, and
+ * asserts the move landed before asserting it survived.
+ */
+
+/** A focusable element OUTSIDE the surface, standing in for "the reader went elsewhere in the app". */
+function outsideButton() {
+  const button = document.createElement("button");
+  button.textContent = "outside";
+  document.body.append(button);
+  return button;
+}
+
+/**
+ * What has focus, as a STRING.
+ *
+ * `assert.equal(document.activeElement, button)` looks like the obvious form and is a trap: on failure Node renders
+ * both operands, and rendering two live jsdom nodes — cyclic, each with a document and a window — kills the process
+ * with SIGKILL after ~25 s. The failure then arrives as "the whole FILE timed out", with the sentence that actually
+ * failed lost. A string identifies the elements just as precisely and always reports.
+ */
+function focusLabel() {
+  const active = document.activeElement;
+  if (active === null) return "(none)";
+  return active.textContent === "" ? `<${active.tagName.toLowerCase()}>` : active.textContent;
+}
+
+test("a re-render of the open keys sheet does not take focus back", () => {
+  const outside = outsideButton();
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = ReactDOMClient.createRoot(container);
+  // A FRESH inline callback per render, exactly as `App` passes it — the input that made the effect re-run.
+  const render = () =>
+    act(() => root.render(React.createElement(ShortcutSheet, { onClose: () => {}, platform: "apple" })));
+
+  // `try/finally`: a failing assertion here must still unmount. A root left mounted under
+  // `IS_REACT_ACT_ENVIRONMENT` deadlocks the next test's `act` calls, so the failure would be reported as a 25 s
+  // timeout of the whole FILE rather than as the sentence below.
+  try {
+    render();
+    assert.equal(focusLabel(), "Close", "focus is inside on open");
+
+    act(() => outside.focus());
+    assert.equal(focusLabel(), "outside", "precondition: focus really moved out");
+
+    render();
+    assert.equal(focusLabel(), "outside", "a plain re-render must not pull focus back into the sheet");
+  } finally {
+    act(() => root.unmount());
+    outside.remove();
+  }
+});
+
+test("a re-render of the open delete confirmation does not take focus back", () => {
+  // The same defect on the one surface where it is dangerous: `Keep it` and `Delete transcript` mean opposite things,
+  // so a dialog that moves focus on a socket event can make a second press land on the other button.
+  const outside = outsideButton();
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = ReactDOMClient.createRoot(container);
+  const render = () =>
+    act(() => root.render(React.createElement(ConfirmDelete, { label: "x", onCancel: () => {}, onConfirm: () => {} })));
+
+  try {
+    render();
+    assert.equal(focusLabel(), "Keep it", "the cancel control takes focus");
+
+    const destructive = [...container.querySelectorAll("button")].find((b) =>
+      b.textContent.includes("Delete transcript"),
+    );
+    act(() => destructive.focus());
+    assert.equal(focusLabel(), "Delete transcript", "precondition: the reader tabbed to the destructive control");
+
+    render();
+    assert.equal(
+      focusLabel(),
+      "Delete transcript",
+      "a re-render must not move focus back to `Keep it` on an irreversible dialog",
+    );
+  } finally {
+    act(() => root.unmount());
+    outside.remove();
+  }
+});
+
 // --- The delete confirmation, answered twice with the same key ---------------------------------
 
 test("⌘⌫ opens the confirmation and a second ⌘⌫ confirms it", () => {
