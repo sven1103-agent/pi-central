@@ -19,6 +19,7 @@ reader can tell whether a decision still holds.
 | [0011](0011-distribution-and-update.md) | Distribution by bundled npm artifact; update = detect freely, apply on request | Accepted (application pending #56) |
 | [0012](0012-directory-chooser.md) | A placed directory browser in the orchestrator, not a native OS panel | Accepted |
 | [0013](0013-application-shell.md) | An optional desktop shell that is a launcher, never the update target | Accepted |
+| [0014](0014-os-actions.md) | The orchestrator may take one bounded OS action on a path it resolved | Proposed |
 
 ## Format
 

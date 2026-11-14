@@ -12,6 +12,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
+### Added
+
+- ADR-0014 proposes one bounded OS action: reveal a resolved path in Finder, so a PDF, an archive or a video is reachable without a renderer per format ([#254]).
+
 ## [0.11.1] — 2026-11-11
 
 A hotfix for one behaviour: **a session's context usage and cost were blank for the whole of a new
@@ -750,3 +754,4 @@ The spike that answered whether this was worth building.
 [#163]: https://github.com/sven1103-agent/pi-central/issues/163
 [#164]: https://github.com/sven1103-agent/pi-central/issues/164
 [#251]: https://github.com/sven1103-agent/pi-central/issues/251
+[#254]: https://github.com/sven1103-agent/pi-central/issues/254

@@ -5,6 +5,8 @@
 - **Supersedes:** the file-navigation portion of the earlier ADR-0006 draft
 - **Amended by:** [ADR-0012](0012-directory-chooser.md) — a second, separately bounded filesystem
   capability (a directory chooser for a directory no session owns yet)
+- **Amended by:** [ADR-0014](0014-os-actions.md) — a bounded OS action on a path a read could already
+  reach; it acts, but hands the bytes to no application
 
 ## Context
 
