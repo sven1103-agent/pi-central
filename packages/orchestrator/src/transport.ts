@@ -30,12 +30,14 @@ import {
   type HistoricalSession,
   type InstallFacts,
   type LiveSession,
+  type OsActionKind,
   type PiRecord,
   type ServerPayload,
 } from "@pi-central/protocol";
 import { findOwnPackage } from "./package-meta.ts";
 import type { Supervisor } from "./supervisor.ts";
 import type { FileError } from "./files.ts";
+import type { OsActionError } from "./os-actions.ts";
 import { acceptImages } from "./prompt-images.ts";
 import { discover, sessionAt } from "./registry.ts";
 import { abbreviate, listPlace, nameOf, placesFor } from "./places.ts";
@@ -109,6 +111,7 @@ const CONTROL_KINDS: Record<Control["kind"], true> = {
   listFiles: true,
   listPlaces: true,
   readFile: true,
+  reveal: true,
 };
 
 const KNOWN_CONTROL_KINDS: ReadonlySet<string> = new Set(Object.keys(CONTROL_KINDS));
@@ -745,6 +748,30 @@ export class Transport {
         }
         return;
       }
+      case "reveal": {
+        /*
+         * A refusal is decided before the spawn and reported here; a SUCCESS reports nothing.
+         *
+         * That asymmetry is ADR-0014 rule 6, not an omission: `open` returns 0 once `launchd` has accepted
+         * the request, which is not evidence that Finder displayed anything. So there is no success event to
+         * send, and inventing one would be the app claiming an outcome it cannot see. What the client may
+         * state is a refusal it produced, and a refusal can also arrive LATER (the binary is missing, or it
+         * exits non-zero), which is why the callback broadcasts rather than returning.
+         *
+         * `path` is echoed as the client SENT it, for the same reason `readFile` does: the client keys its
+         * per-row note by the path it asked for, and a resolved spelling would file the refusal under a key
+         * no row is watching.
+         */
+        const result = this.#supervisor.reveal(control.sessionId, control.path, {
+          onLaunchError: (error) => {
+            this.#broadcastOsActionError("reveal", control.sessionId, control.path, error);
+          },
+        });
+        if (!result.ok) {
+          this.#broadcastOsActionError("reveal", control.sessionId, control.path, result.error);
+        }
+        return;
+      }
     }
   }
 
@@ -766,6 +793,30 @@ export class Transport {
     this.#broadcast({
       kind: "fileError",
       request,
+      sessionId,
+      path,
+      reason: error.reason,
+      ...(error.code === undefined ? {} : { code: error.code }),
+      message: error.message,
+    });
+  }
+
+  /**
+   * Report a refused OS action (ADR-0014).
+   *
+   * A separate event from `fileError` because it belongs to no cache: it states that an attempt was refused,
+   * not that something is known about a path. `path` is echoed as the client sent it, so the refusal is filed
+   * under the row that asked.
+   */
+  #broadcastOsActionError(
+    action: OsActionKind,
+    sessionId: string,
+    path: string,
+    error: OsActionError,
+  ): void {
+    this.#broadcast({
+      kind: "osActionError",
+      action,
       sessionId,
       path,
       reason: error.reason,

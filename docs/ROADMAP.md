@@ -261,6 +261,17 @@ File access runs **directly at the user's UID** — no sidecar, no sandbox in th
       completes a typed prefix and expands `~`. Directories only, one gatekeeper (`resolveInPlaces`,
       segment-wise containment), and no read path for file contents — the capability is wider than
       `files.ts` and is recorded as a second boundary rather than as an exception to the first.
+- [x] **A file can be shown in Finder**, so every format the viewer cannot draw is reachable without a
+      renderer per format (issue #255, [ADR-0014](decisions/0014-os-actions.md)). The orchestrator takes
+      one bounded OS action (`os-actions.ts`): `open -g -R -- <resolved path>`, on a path `resolveWithin`
+      has already cleared, with no application flag and no shell. `-g` because revealing must not steal
+      focus from the composer, `-R` because `-R` hands the bytes to no application — which keeps
+      ADR-0007's "nothing discovered by browsing is executed" true verbatim rather than by amendment.
+      The viewer's format coverage is therefore **delegated, not rendered**: a PDF, an office document,
+      an archive and a video all reach the application the reader already trusts for them.
+      A refusal is stated in the tree with its reason, and a success states nothing at all — `open` exits
+      0 once `launchd` accepts the request, which is not evidence that Finder displayed anything.
+      Out of scope by decision: `open` without `-R`, and a reveal for a place or a transcript reference.
 - [ ] File operations: create file/dir, rename, move, delete — destructive actions behind
       explicit confirmation, never an implicit recursive delete.
 - [ ] Content editing stays out of scope; Pi mutates file contents from inside its sandbox.
@@ -269,10 +280,11 @@ File access runs **directly at the user's UID** — no sidecar, no sandbox in th
 
 **Deliverable:** file tree + viewer + basic file operations, with the guardrail tests.
 
-**Status:** read and list are done (issue #8). Remaining: file operations (#10) and the preview
-refinements of #9. A session whose `cwd` **is** `$HOME` still grants the agent read/write over the
-whole home tree — the boundary itself is correct, but the choice of root is not validated (#49). Whether such a
-session should be refused outright is #49's question and is deliberately not decided here.
+**Status:** read and list are done (issue #8), and a file the viewer cannot draw can be shown in Finder
+(issue #255, [ADR-0014](decisions/0014-os-actions.md)). Remaining: file operations (#10) and the
+preview refinements of #9. A session whose `cwd` **is** `$HOME` still grants the agent read/write over
+the whole home tree — the boundary itself is correct, but the choice of root is not validated (#49).
+Whether such a session should be refused outright is #49's question and is deliberately not decided here.
 
 ## Phase 3 — Fleet ergonomics
 

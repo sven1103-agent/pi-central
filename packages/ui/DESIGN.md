@@ -670,6 +670,9 @@ src/
     Panel, ModeTabs (the panel's Session|Files tab strip), PanelResizer
     Inspector, IsolationBlock, PathsBlock, UsageBlock, NoticesBlock, SessionActionsBlock
     FilesPanel, FileTree, TreeNode, FilePane, FileErrorNote   (issue #8: confined to the cwd)
+    // The reveal control is a second `<button>` beside the row's own, never inside it (issue #255): a
+    // control nested in a button is invalid HTML and unreachable by keyboard. `.filetree-line` is the
+    // wrapper that keeps `.filetree-name { flex: 1 }` meaning "the rest of the row" (C20).
     Settings, Fact                (issue #58: which build is running, and where it keeps things)
     StatusChips, StatusRegion (visually hidden polite announcer), ToastStack, Popover, CopyButton
     EmptyState, ErrorCard, DismissibleCard

@@ -9,7 +9,7 @@
  * rather than inferring "streaming" from having seen a delta (C8).
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { PROTOCOL_VERSION, supportsDelete, supportsPlaces, supportsRetry, type Control, type HistoricalSession, type InstallFacts, type LiveSession, type ModelOption } from "@pi-central/protocol";
+import { PROTOCOL_VERSION, supportsDelete, supportsPlaces, supportsRetry, supportsReveal, type Control, type HistoricalSession, type InstallFacts, type LiveSession, type ModelOption } from "@pi-central/protocol";
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
 import { ActivityBar } from "./components/ActivityBar.tsx";
 import { ConfirmDelete } from "./components/ConfirmDelete.tsx";
@@ -702,6 +702,22 @@ export function App() {
               });
             }
             break;
+          case "osActionError":
+            // A refused "show in Finder" (issue #255, ADR-0014). It goes to `revealNotes`, NOT to the
+            // file or directory cache: the refusal is about an ATTEMPT, so writing it into `files` would
+            // make a file that reads perfectly well display as a read error. The path is the one the
+            // client sent, which is what the per-row note is keyed by.
+            if (event.action === "reveal") {
+              dispatchFiles({
+                kind: "revealFailed",
+                sessionId: event.sessionId,
+                path: event.path,
+                reason: event.reason,
+                ...(event.code === undefined ? {} : { code: event.code }),
+                message: event.message,
+              });
+            }
+            break;
           default:
             break;
         }
@@ -898,6 +914,31 @@ export function App() {
       // problem; #10 will add explicit refresh.)
       dispatchFiles({ kind: "fileLoading", sessionId: focused.id, path });
       send({ kind: "readFile", sessionId: focused.id, path });
+    },
+    [focused, send],
+  );
+
+  /**
+   * Show a path from the tree in Finder (issue #255, ADR-0014).
+   *
+   * ## What this does NOT do, and why the absence is deliberate
+   *
+   * It does not open the pane, change the selection, or focus anything. The reader clicked a control on a
+   * row beside a composer they are mid-sentence in, and ADR-0014's whole shape is "no focus theft" — `-g`
+   * on the launcher keeps Finder behind the window, and this keeps the window's own state untouched. A
+   * reveal that also navigated would be two actions from one click, and the second one is not what was
+   * asked for.
+   *
+   * `revealRequested` clears any previous refusal for THIS path before the control is sent, so a retry
+   * cannot display the answer to the attempt before it. A success reports nothing at all (ADR-0014 rule
+   * 6), which is why there is no `revealSucceeded` to dispatch — the absence of a note means no stated
+   * problem, never "Finder showed it".
+   */
+  const revealFile = useCallback(
+    (path: string) => {
+      if (!focused) return;
+      dispatchFiles({ kind: "revealRequested", sessionId: focused.id, path });
+      send({ kind: "reveal", sessionId: focused.id, path });
     },
     [focused, send],
   );
@@ -2070,6 +2111,9 @@ export function App() {
               onToggleWrap={() => dispatchFiles({ kind: "toggleWrap", sessionId: focused.id })}
               onOpenFile={openFile}
               onCloseFile={() => dispatchFiles({ kind: "closeFile", sessionId: focused.id })}
+              // Absent for a peer that predates the control, so the tree does not offer something the
+              // orchestrator would answer with `bad control: unknown kind 'reveal'`.
+              {...(supportsReveal(state.install?.protocol) ? { onReveal: revealFile } : {})}
             />
           ) : (
             // No session to browse. Said rather than showing an empty tree, which would claim the

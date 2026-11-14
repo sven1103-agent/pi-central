@@ -41,6 +41,7 @@ export function FilesPanel({
   onToggleWrap,
   onOpenFile,
   onCloseFile,
+  onReveal,
 }: {
   sessionId: string;
   files: FilesState;
@@ -53,6 +54,11 @@ export function FilesPanel({
   onToggleWrap: () => void;
   onOpenFile: (path: string) => void;
   onCloseFile: () => void;
+  /**
+   * Show a path in Finder (issue #255, ADR-0014). Absent withholds the control, for a peer that predates
+   * the `reveal` control — see `FileTree`'s prop for why a visible-but-refused control is worse.
+   */
+  onReveal?: ((path: string) => void) | undefined;
 }) {
   // Resolved once, so the header and the body are produced by the same lookup and cannot name one
   // file while showing another.
@@ -87,6 +93,7 @@ export function FilesPanel({
             onCollapse={onCollapse}
             onToggleHidden={onToggleHidden}
             onOpenFile={onOpenFile}
+            onReveal={onReveal}
           />
         </div>
         {open && (

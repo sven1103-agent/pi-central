@@ -43,6 +43,7 @@ import {
   type ImageContent,
   type Result,
 } from "./files.ts";
+import { revealInFileManager, type OsActionResult, type RevealOptions } from "./os-actions.ts";
 import { resolveInstallationRoot } from "./installation-root.ts";
 import { ownInstallationWarning } from "@pi-central/protocol";
 
@@ -1046,6 +1047,27 @@ export class Supervisor extends EventEmitter {
       };
     }
     return readFileForDisplay(session.cwd, path);
+  }
+
+  /**
+   * Select one path from a session's working directory in the platform file manager (ADR-0014).
+   *
+   * The session lookup is here for the same reason `readFile`'s is: `cwd` has exactly one source, and the
+   * action must be confined by the SAME root a read uses. An unknown session is refused rather than resolved
+   * against some other root, or a stale id would reveal a directory with no relation to what it named.
+   *
+   * `onLaunchError` carries the failures that can only be known after the spawn — the binary is missing, or it
+   * exited non-zero. They arrive asynchronously, so they cannot be a return value.
+   */
+  reveal(id: string, path: string, options: RevealOptions = {}): OsActionResult {
+    const session = this.#sessions.get(id);
+    if (!session) {
+      return {
+        ok: false,
+        error: { reason: "not-found", message: `no session ${id}, so there is no working directory to reveal from` },
+      };
+    }
+    return revealInFileManager(session.cwd, path, options);
   }
 
   /**

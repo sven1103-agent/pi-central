@@ -157,3 +157,60 @@ test("a session rooted at HOME still confines to that directory, whatever HOME i
     rmSync(fauxHome, { recursive: true, force: true });
   }
 });
+
+test("the reveal is confined by the SESSION's cwd, which only the supervisor knows (ADR-0014)", () => {
+  /*
+   * `os-actions.test.ts` proves the action reuses `resolveWithin`. What it cannot prove is that the ROOT
+   * handed to that resolver is the session's own `cwd` — a reveal wired to `process.cwd()` would pass every
+   * test in that file and act on the wrong directory here.
+   *
+   * `platform: "linux"` is passed so the refusal is reached without spawning anything: the interesting
+   * assertion is WHICH reason comes back, and an escaping path must be refused by containment before the
+   * platform is ever consulted. Reversing that order would report "cannot show in Finder here" for a path
+   * that is also outside the tree, which names the wrong fix.
+   */
+  const root = mkdtempSync(join(tmpdir(), "pi-central-sup-"));
+  try {
+    const work = join(root, "work");
+    mkdirSync(work);
+    writeFileSync(join(work, "here.txt"), "in the session cwd\n");
+    writeFileSync(join(root, "outside.txt"), "not in the session cwd\n");
+
+    const { supervisor, sessionId } = supervisorWith(work, root);
+
+    // Inside the tree: reaches the platform check, which is the last thing before the spawn.
+    const inside = supervisor.reveal(sessionId, "here.txt", { platform: "linux" });
+    assert.equal(inside.ok, false, "linux must refuse rather than spawn");
+    assert.equal(inside.ok === false && inside.error.reason, "unsupported-platform");
+
+    // Outside it: refused by containment, which runs FIRST.
+    const escaped = supervisor.reveal(sessionId, "../outside.txt", { platform: "linux" });
+    assert.equal(escaped.ok, false);
+    assert.equal(escaped.ok === false && escaped.error.reason, "escapes-cwd");
+
+    supervisor.stop(sessionId);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an unknown session is refused by `reveal`, never resolved against another root", () => {
+  // The same rule `readFile` follows: falling back to any root would let a stale id act on a directory
+  // that had nothing to do with it — and for an OS action the consequence is a Finder window over someone
+  // else's files rather than a wrong listing.
+  const root = mkdtempSync(join(tmpdir(), "pi-central-sup-"));
+  try {
+    const work = join(root, "work");
+    mkdirSync(work);
+    writeFileSync(join(work, "here.txt"), "x\n");
+    const { supervisor, sessionId } = supervisorWith(work, root);
+    supervisor.stop(sessionId);
+
+    const unknown = supervisor.reveal("no-such-session", "here.txt", { platform: "darwin" });
+    assert.equal(unknown.ok, false);
+    assert.equal(unknown.ok === false && unknown.error.reason, "not-found");
+    assert.match(unknown.ok === false ? unknown.error.message : "", /no session no-such-session/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

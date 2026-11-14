@@ -4081,8 +4081,23 @@ select.btn { font-family: var(--sans); }
 .filetree-list { list-style: none; margin: 0; padding: 0; }
 .filetree-node { margin: 0; }
 
+/*
+   The row and its reveal control share a line (issue #255).
+
+   This wrapper is why the reveal button could be added without re-reading `.filetree-row`'s own flex
+   distribution: the row is still the only flex container that holds a name, so `.filetree-name { flex: 1 }
+   still means "the rest of the row". The alternative — putting the button inside `.filetree-row` — would
+   have nested a button in a button, and appending it as a SIBLING of `.filetree-row` would have made the
+   name compete with the control for space, which is the C20 change this line exists to avoid.
+
+   `align-items: baseline` so the glyph sits on the name's baseline rather than centred against a taller
+   row; `min-width: 0` so the row can still shrink inside a narrow panel instead of forcing a scrollbar. */
+.filetree-line {
+  display: flex; align-items: baseline; gap: 2px; min-width: 0;
+}
+
 .filetree-row {
-  display: flex; align-items: baseline; gap: 6px; width: 100%;
+  display: flex; align-items: baseline; gap: 6px; flex: 1; min-width: 0;
   background: none; border: 0; border-radius: 4px;
   padding: 2px 4px; margin: 0;
   color: var(--text); font: var(--fs-xs) var(--mono);
@@ -4090,6 +4105,18 @@ select.btn { font-family: var(--sans); }
 }
 .filetree-row:hover { background: var(--panel-2); }
 .filetree-row:focus-visible { outline: none; box-shadow: var(--focus); }
+
+/* The reveal control: same size and colour as `.filetree-kind`, so it reads as part of the row's
+   vocabulary rather than as a second kind of thing. `flex: none` and a fixed square keep it from being
+   squeezed by a long name, and the glyph is dim at rest because the row's own action stays primary. */
+.filetree-reveal {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; padding: 0;
+  background: none; border: 0; border-radius: 3px;
+  color: var(--dim); font-size: 11px; line-height: 1; cursor: pointer;
+}
+.filetree-reveal:hover { background: var(--panel-2); color: var(--text); }
+.filetree-reveal:focus-visible { outline: none; box-shadow: var(--focus); }
 
 /* The disclosure mark is fixed-width so names line up whether or not a row is expandable. */
 .filetree-mark { color: var(--dim); width: 10px; flex: none; }

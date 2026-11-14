@@ -61,6 +61,17 @@ function reasonLabel(reason: string): string {
       return "Not a directory";
     case "is-directory":
       return "That is a directory";
+    /*
+     * The one reason an OS action adds (issue #255, ADR-0014). Every other reason a reveal can produce
+     * comes from `resolveWithin` and keeps its wording, so an escaping path says "Outside the working
+     * directory" — the sentence that names the fix — exactly as a read does.
+     *
+     * A `case` in a `switch` with a `default` is deliberately the cheap form here: the reason set grew by
+     * one, and turning `reason` into the closed union is worth doing when it grows past two. Recorded in
+     * `reveal.test.mjs` rather than done as an unrequested refactor.
+     */
+    case "unsupported-platform":
+      return "Cannot show in Finder here";
     default:
       return "Could not read";
   }

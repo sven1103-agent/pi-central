@@ -250,6 +250,21 @@ export type Control =
   /** Read one text file, confined the same way. Answered with `file` or `fileError`. */
   | { kind: "readFile"; sessionId: string; path: string }
   /**
+   * Select one path in the platform file manager (issue #255, ADR-0014).
+   *
+   * ## Why this is a separate kind and not a flag on `readFile`
+   *
+   * The two share a boundary — `sessionId` → `cwd`, then `resolveWithin` — and they differ in what they
+   * are allowed to DO. `readFile` returns bytes; this asks the operating system to act on a path. A flag
+   * would make one handler's authority depend on a boolean, which is the shape where the cheaper case
+   * eventually inherits the wider authority. That argument is already written for `listPlaces` and it
+   * applies identically here.
+   *
+   * Answered with no event on success (see `PROTOCOL_VERSION` v10 and ADR-0014 rule 6: a launch is not a
+   * reveal, so there is no success to report) and with `osActionError` on a refusal.
+   */
+  | { kind: "reveal"; sessionId: string; path: string }
+  /**
    * List the directories inside one of the chooser's places (issue #76, ADR-0012).
    *
    * ## Why this is a separate control from `listFiles`, and not a flag on it
@@ -553,6 +568,30 @@ export type Event =
    * make that guess a coin flip — with the failure then recorded against the wrong one.
    */
   | { kind: "fileError"; sessionId: string; path: string; request: "list" | "read"; reason: FileErrorReason; code?: string | undefined; message: string }
+  /**
+   * An OS action was refused (issue #255, ADR-0014).
+   *
+   * ## Why a new kind rather than `fileError`
+   *
+   * `fileError` carries `request: "list" | "read"`, and the client routes by that field into a cache:
+   * `list` → `filesFailed`, `read` → `fileFailed`. A reveal refusal belongs to **no cache** — it is a
+   * statement about an attempt, not about what is known — so reusing `fileError` would either add a third
+   * cache that does not exist or write the refusal into the wrong one, which is the exact defect `request`
+   * was introduced to prevent.
+   *
+   * `action` names which OS action was refused. It is one value today and is a field rather than an
+   * implicit "reveal" because ADR-0014 makes a second action a new decision with its own event shape; a
+   * client that already switches on `action` will not silently misread it.
+   */
+  | {
+      kind: "osActionError";
+      action: OsActionKind;
+      sessionId: string;
+      path: string;
+      reason: OsActionFailureReason;
+      code?: string | undefined;
+      message: string;
+    }
   | { kind: "error"; message: string; sessionId?: string | undefined }
   /**
    * The roots the directory chooser offers, in display order (issue #76, ADR-0012).
@@ -589,6 +628,22 @@ export type Event =
    * page cannot make alone: its own bundle against the one on disk now.
    */
   | { kind: "installFacts"; install: InstallFacts };
+
+/**
+ * The OS actions a client may ask for (ADR-0014).
+ *
+ * One member on purpose. ADR-0014 decides `reveal` and refuses `open` with a reason, so a second arm here
+ * is a new record rather than a new case: the union is where that has to be argued.
+ */
+export type OsActionKind = "reveal";
+
+/**
+ * Why an OS action was refused. Mirrors `OsActionFailure` in the orchestrator's `os-actions.ts`.
+ *
+ * `FileErrorReason` plus the platform: every refusal a path can produce keeps its existing reason and
+ * meaning, because the action reuses `resolveWithin` rather than implementing its own confinement.
+ */
+export type OsActionFailureReason = FileErrorReason | "unsupported-platform";
 
 /** One entry in a directory listing. Metadata only: a listing never reads file contents. */
 export interface FileEntry {
@@ -758,8 +813,15 @@ export interface PlaceListingInfo {
  * answer `bad control: unknown kind 'install'` and the error strip would fill up with one row per alt-tab. The UI
  * gates the send on `supportsInstall` for exactly that reason, and the refusal is not the fallback — the silence
  * is.
+ *
+ * v10 (issue #255, ADR-0014): the `reveal` control and the `osActionError` event.
+ *
+ * Two new KINDS, so the fingerprint catches this one. The bump is not optional regardless: a v9 orchestrator
+ * receiving `reveal` would answer `bad control: unknown kind 'reveal'`, and the tree's control would look broken
+ * rather than unsupported. The asymmetry is why the UI gates the send on `supportsReveal` — but gating alone would
+ * leave a reader with a control that does nothing, so the refusal is also stated.
  */
-export const PROTOCOL_VERSION = 9 as const;
+export const PROTOCOL_VERSION = 10 as const;
 
 /**
  * The first protocol version that understands the `retry` control (issue #11).
@@ -816,6 +878,22 @@ export const INSTALL_FACTS_SINCE_PROTOCOL = 9;
 export function supportsInstall(protocol: number | undefined): boolean {
   // `undefined` is "not reported yet", not "old" — the same convention `supportsRetry` documents.
   return protocol === undefined ? true : protocol >= INSTALL_FACTS_SINCE_PROTOCOL;
+}
+
+/**
+ * The first protocol version that understands the `reveal` control (issue #255, ADR-0014).
+ *
+ * The same reasoning as `INSTALL_FACTS_SINCE_PROTOCOL`, with a consequence of its own: an unsupported send
+ * answers `bad control: unknown kind 'reveal'`, which reads as a broken control rather than as a version skew.
+ * The tree withholds the control instead — and, because a withheld control is indistinguishable from a missing
+ * feature, `docs/ROADMAP.md` records that the capability is delegated to the OS rather than rendered.
+ */
+export const REVEAL_SINCE_PROTOCOL = 10;
+
+/** Whether a peer speaking `protocol` can be asked to reveal a path in the file manager. */
+export function supportsReveal(protocol: number | undefined): boolean {
+  // `undefined` is "not reported yet", not "old" — the same convention `supportsRetry` documents.
+  return protocol === undefined ? true : protocol >= REVEAL_SINCE_PROTOCOL;
 }
 
 /** Whether a peer speaking `protocol` can be asked to delete a session. */

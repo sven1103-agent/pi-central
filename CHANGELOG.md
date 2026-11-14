@@ -19,6 +19,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The Stopped heading selects its whole group, so finished sessions are cleared in one confirmation ([#253]).
 - `⌘F` forgets the focused session: the row leaves the list, the transcript stays ([#253]).
 - `⌘K` opens every keyboard shortcut, reachable from the app bar's `?` control ([#253]).
+- A file the viewer cannot draw can be shown in Finder, from the tree, for every format — including a PDF, an archive or a video ([#255]).
+- The workspace itself can be shown in Finder from the file panel's header, so a folder holding only dotfiles — or nothing at all — is not a dead end ([#255]).
 
 ### Fixed
 
@@ -766,3 +768,4 @@ The spike that answered whether this was worth building.
 [#251]: https://github.com/sven1103-agent/pi-central/issues/251
 [#253]: https://github.com/sven1103-agent/pi-central/issues/253
 [#254]: https://github.com/sven1103-agent/pi-central/issues/254
+[#255]: https://github.com/sven1103-agent/pi-central/issues/255

@@ -22,6 +22,7 @@ import {
   isExpanded,
   openFileFor,
   reduceFiles,
+  revealNoteAt,
   showsHidden,
   showsWrapped,
   TREE_REREAD_MS,
@@ -544,4 +545,87 @@ test("invalidating a file's contents makes reopening it read the file again", ()
   // And the no-op case, for the same reason as the directory tick.
   const untouched = reduceFiles(state, { kind: "invalidateFile", sessionId: "s1", path: "a.txt" });
   assert.equal(untouched, state);
+});
+
+// --- Show in Finder (issue #255, ADR-0014) --------------------------------------------------------
+
+test("a second reveal attempt CLEARS the first refusal for that path", () => {
+  /*
+   * The falsifier for `revealRequested`: drop the action and this keeps showing the previous answer, so a
+   * reader who moves a file into place and retries reads the old refusal as the result of the retry. That
+   * is a claim about an attempt they just made, and it is false.
+   */
+  let state = initialFilesState();
+  state = reduceFiles(state, {
+    kind: "revealFailed",
+    sessionId: "s1",
+    path: "docs/a.txt",
+    reason: "not-found",
+    message: 'cannot reveal "docs/a.txt": no such file or directory (ENOENT)',
+  });
+  assert.equal(revealNoteAt(state, "s1", "docs/a.txt")?.reason, "not-found");
+
+  state = reduceFiles(state, { kind: "revealRequested", sessionId: "s1", path: "docs/a.txt" });
+  assert.equal(revealNoteAt(state, "s1", "docs/a.txt"), undefined, "the retry starts from silence");
+});
+
+test("a retry on one row leaves another row's refusal standing", () => {
+  // Per path, not a global clear: a refusal under one row is still true while a different row is retried,
+  // and clearing the record wholesale would make a real problem disappear from the tree.
+  let state = initialFilesState();
+  state = reduceFiles(state, { kind: "revealFailed", sessionId: "s1", path: "a", reason: "permission", code: "EACCES", message: "denied" });
+  state = reduceFiles(state, { kind: "revealFailed", sessionId: "s1", path: "b", reason: "not-found", message: "gone" });
+  state = reduceFiles(state, { kind: "revealRequested", sessionId: "s1", path: "a" });
+  assert.equal(revealNoteAt(state, "s1", "a"), undefined);
+  assert.equal(revealNoteAt(state, "s1", "b")?.reason, "not-found");
+});
+
+test("a reveal refusal never lands in the FILE cache, so it cannot read as a read error", () => {
+  /*
+   * The distinction `osActionError` exists for. A path may read perfectly well and still be refused a
+   * reveal (a non-Darwin platform, a launcher that is gone), so recording the refusal as `fileFailed`
+   * would make the pane claim the file's contents could not be read. Asserted on both sides, because
+   * either alone could pass while the other regressed.
+   */
+  let state = initialFilesState();
+  state = reduceFiles(state, {
+    kind: "fileLoaded",
+    sessionId: "s1",
+    path: "a.bin",
+    bytes: 4,
+    content: { kind: "text", text: "ok" },
+  });
+  state = reduceFiles(state, {
+    kind: "revealFailed",
+    sessionId: "s1",
+    path: "a.bin",
+    reason: "unsupported-platform",
+    message: "showing a file in the file manager is a macOS feature",
+  });
+  assert.equal(fileAt(state, "s1", "a.bin").status, "loaded", "the file still reads fine");
+  assert.equal(directoryAt(state, "s1", "a.bin").status, "unloaded", "and no directory was claimed either");
+  assert.equal(revealNoteAt(state, "s1", "a.bin")?.reason, "unsupported-platform");
+});
+
+test("a successful reveal records NOTHING, because there is nothing it can claim", () => {
+  // ADR-0014 rule 6: a zero exit from `open` means launchd accepted the request, not that Finder showed
+  // anything. So the test asserts that starting an attempt produces no state at all — a `revealSucceeded`
+  // arm would be the app asserting an outcome it cannot observe.
+  const before = initialFilesState();
+  const after = reduceFiles(before, { kind: "revealRequested", sessionId: "s1", path: "a.txt" });
+  assert.equal(after, before, "a clean retry is a no-op object, so it cannot re-render the tree");
+  assert.equal(revealNoteAt(after, "s1", "a.txt"), undefined);
+});
+
+test("forgetting a session drops its reveal notes with its tree", () => {
+  // A stopped session's refusals must go with it: a new session reusing the id would otherwise inherit a
+  // note about a path it never tried, and the note is keyed by session for the same reason the tree is.
+  let state = initialFilesState();
+  state = reduceFiles(state, { kind: "revealFailed", sessionId: "s1", path: "a", reason: "not-found", message: "gone" });
+  state = reduceFiles(state, { kind: "revealFailed", sessionId: "s2", path: "a", reason: "not-found", message: "gone" });
+  const forgotten = reduceFiles(state, { kind: "forgetSession", sessionId: "s1" });
+  assert.equal(revealNoteAt(forgotten, "s1", "a"), undefined, "the forgotten session's note is gone");
+  // And the neighbouring session keeps its own, which is what a prefix-insensitive drop would break — the
+  // same defect `forgetSession`'s own test covers for directories.
+  assert.equal(revealNoteAt(forgotten, "s2", "a")?.reason, "not-found");
 });
