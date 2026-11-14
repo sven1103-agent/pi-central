@@ -25,6 +25,7 @@
  * stray `Enter` — from a reader who was typing in the composer a moment ago — into an irreversible delete.
  */
 import { useEffect, useRef } from "react";
+import { DELETE_CHORD, chordOf } from "../shortcuts.ts";
 
 export function ConfirmDelete({
   /** The session's display label, from `nameLabel`/`displayName` — never a handle if a prompt explains it. */
@@ -54,6 +55,25 @@ export function ConfirmDelete({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onCancel]);
+
+  /*
+   * The chord that OPENED this dialog confirms it, so a run of finished sessions is one gesture each rather than
+   * key-then-pointer. Safe for the reason this dialog already documents: focus is on `Keep it`, so a stray Enter
+   * cancels, and the key must be pressed twice on a dialog that states what will be removed.
+   *
+   * Capture phase, and stopped there: the shell's own listener would otherwise open the NEXT dialog from the same
+   * keystroke.
+   */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (chordOf(event) !== DELETE_CHORD) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onConfirm();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [onConfirm]);
 
   return (
     <div className="modal-backdrop" onClick={onCancel} role="presentation">

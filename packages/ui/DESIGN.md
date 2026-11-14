@@ -687,8 +687,12 @@ States per component (minimum): `default · hover · focus-visible · active · 
   browser is looking at and is never sent to the orchestrator (C2). It must not be routed through the
   `session` upsert, whose focus rule is the opposite one — "never steal focus from a session the user
   is reading" — and which therefore cannot move focus at all once it is set (issue #40).
-- **Enter** in the composer sends per §4. **⌘Enter** also sends. **Shift+Enter** newline. **↑** on an empty composer recalls the last sent message (per session).
-- **⌘N** new session · **⌘⇧O** open-in-directory · **⌘K** jump-to-session (optional) · **/** focus filter · **Esc** per the §4.3 ladder · **⌘.** abort · **⌘\\** toggle rail.
+- **Enter** in the composer sends per §4. **Shift+Enter** newline. **Alt+Enter** queues for after this run. **⌥Q** shows the queue. **Esc** per the §4.3 ladder.
+- **The full key list lives in `src/shortcuts.ts`, and the `?` control in the left bar opens it.** That sentence is the whole rule, and it replaced a hand-written list here that had rotted: it promised `⌘K`, `⌘.`, `⌘\` and `/`, and only `/` was ever implemented — a documented key that does nothing reads as a broken app rather than as a stale note. So the chords are data: one registry, rendered by `ShortcutSheet`, dispatched by `App` **by binding id** (never by `event.key`), and `shortcuts.test.mjs` holds the two together by name. A key cannot be documented without existing, or exist without being documented.
+
+  Current bindings: **⌘N** new session · **⌘⇧O** open-in-directory · **⌘.** stop the focused session, and again in the dialog to confirm · **⌘⌫** delete its transcript, likewise (suppressed inside a text field, where it is delete-to-line-start) · **⌥↓/⌥↑** next/previous row in the rail, in the order shown · **⌘1/⌘2** Sessions/History · **⌘,** Settings · **⌘/** this sheet.
+
+  Shortcuts are macOS notation (`⌘⇧O`) and spelled out everywhere else (`Ctrl+Shift+O`), from the event's own modifiers rather than from the platform — a Mac is not punished for a browser that reports Ctrl, and a Windows reader is never shown a glyph their keyboard lacks.
 - **Panel modes.** The right panel shows `Session` (the auditable facts) or `Files` (the working
   directory). A tab strip, so it reads like the topbar's `Sessions|History`. Both bodies stay mounted
   under one stable `role="tabpanel"` id — remounting on switch would lose the document's scroll

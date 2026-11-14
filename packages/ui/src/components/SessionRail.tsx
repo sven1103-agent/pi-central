@@ -7,7 +7,8 @@
  * pane with its own search, because two orderings in one scrolling column cannot both be
  * legible.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { chordOf, isEditableTarget, nextRowKey, type TargetLike } from "../shortcuts.ts";
 import type { LiveSession } from "@pi-central/protocol";
 import { displayName, formatContext, isNearFull, nameLabel, shortenPath, whereLine } from "../format.ts";
 import { stateLabel } from "../store.ts";
@@ -41,6 +42,8 @@ export function SessionRail({
   retryAvailable,
   onStartSession,
   onOpenDirectory,
+  onSelectGroup,
+  modalOpen = false,
   home,
   historyTotal,
   firstPromptFor,
@@ -84,6 +87,26 @@ export function SessionRail({
   retryAvailable: boolean;
   onStartSession: () => void;
   onOpenDirectory: () => void;
+  /**
+   * Select every row of a group, for one bulk delete.
+   *
+   * Only the `stopped` group offers this, and the constraint is not cosmetic: a RUNNING session cannot be deleted at
+   * all — the orchestrator refuses, because the process holds the file open — so a group action over `Running` would
+   * be a button whose only possible outcome is an error. `stopped` is exactly the set of rows where the operation is
+   * legal, which is why the control lives on that heading and on no other.
+   *
+   * Absent means the affordance is not rendered: a shell that cannot delete does not offer a way to start deleting.
+   */
+  onSelectGroup?: ((rows: RosterRow[]) => void) | undefined;
+  /**
+   * A dialog is covering the app, so this surface must not act on the keyboard.
+   *
+   * `⌥↓` is a window listener — it has to be, or the key would only work while a row already had focus, which defeats
+   * the point of a shortcut. But a window listener also fires while a confirmation or Settings is in front, and moving
+   * the focus behind a dialog changes what its own buttons are about. The shell knows when a modal is open; the rail
+   * cannot, so it is told.
+   */
+  modalOpen?: boolean;
   home: string | undefined;
   /** Total sessions on disk, which may exceed the number loaded. */
   historyTotal: number;
@@ -119,6 +142,36 @@ export function SessionRail({
   }, [rows, filter]);
 
   const sections = useMemo(() => groupRows(filtered), [filtered]);
+
+  /*
+   * `⌥↑` / `⌥↓` move the focus one row, in the order the reader SEES.
+   *
+   * Owned by the rail, not by the shell, and the registry says so (`shell: false`): the rendered order depends on the
+   * filter and on the attention grouping, both of which are this component's. The shell could not compute "next" without
+   * duplicating `groupRows` and the filter — and a second definition of the visible order is how the keys and the list
+   * come to disagree.
+   *
+   * `preventDefault` so the keystroke does not also scroll the list, which would move the reader's place in one
+   * direction while focus moved in the other.
+   */
+  useEffect(() => {
+    if (modalOpen) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const chord = chordOf(event);
+      if (chord !== "alt+arrowdown" && chord !== "alt+arrowup") return;
+      // A surface that already claimed the key, or a field the reader is typing in, keeps it.
+      if (event.defaultPrevented || isEditableTarget(event.target as TargetLike | null)) return;
+      const keys = sections.flatMap((section) => section.rows.map(rowKey));
+      const next = nextRowKey(keys, focusedId, chord === "alt+arrowdown" ? 1 : -1);
+      if (next === undefined) return;
+      const row = sections.flatMap((section) => section.rows).find((candidate) => rowKey(candidate) === next);
+      if (row === undefined) return;
+      event.preventDefault();
+      onFocusRow(row);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [sections, focusedId, onFocusRow, modalOpen]);
 
   return (
     <nav
@@ -160,7 +213,26 @@ export function SessionRail({
           sections.map((section) => (
             <section key={section.group} aria-label={labelOf(section.group)}>
               <h3 className="group-header">
-                <span>{labelOf(section.group)}</span>
+                {/*
+                  The heading STATES the group, and for Stopped it also ACTS on it.
+
+                  A bulk action needs a scope, and "every finished session" is the scope a reader actually means: the
+                  group is already the answer to "which ones are finished", so the control belongs on the group's own
+                  heading rather than in a toolbar that would have to re-derive the same set. The count stays beside it,
+                  because a control that selects N things must say N.
+                */}
+                {section.group !== "stopped" || onSelectGroup === undefined ? (
+                  <span>{labelOf(section.group)}</span>
+                ) : (
+                  <button
+                    type="button"
+                    className="group-select"
+                    title={`Select all ${section.rows.length} stopped session${section.rows.length === 1 ? "" : "s"} in the list, then delete them in one confirmation`}
+                    onClick={() => onSelectGroup(section.rows)}
+                  >
+                    {labelOf(section.group)}
+                  </button>
+                )}
                 <span className="count">{section.rows.length}</span>
               </h3>
               {section.rows.map((row) => (

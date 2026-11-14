@@ -691,6 +691,26 @@ button { font: inherit; color: inherit; }
 .group-header .count { font-family: var(--mono); }
 
 /*
+ * A group heading that is also a bulk-selection control (the Stopped heading).
+ *
+ * Styled as the heading it replaces, plus a hover/focus affordance — because an underlined link in a heading row would
+ * promise navigation, and this selects rows. The count beside it is unchanged, so "select all 7" says how many before
+ * the reader presses it.
+ */
+.group-select {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  padding: 0 2px;
+  margin: 0 -2px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.group-select:hover { color: var(--text); background: var(--panel-3); border-color: var(--line-strong); }
+.group-select:focus-visible { outline: none; box-shadow: var(--focus); }
+
+/*
  * Row: 3 lines, state on the left border, no card.
  *
  * ## The rounded corner is what separates rows, and it was missing
@@ -4600,7 +4620,69 @@ select.btn { font-family: var(--sans); }
 .settings-nav-item:focus-visible { outline: none; box-shadow: var(--focus); }
 .settings-content { min-width: 0; }
 
-/* --- The panel: a region with modes, and a draggable edge (issue #8, reworked) ------------------
+/* --- The keyboard sheet -----------------------------------------------------------------------
+
+   Two columns per row: chords on the left at a FIXED width, the action on the right. The fixed chord column is what
+   makes the sheet scannable — a reader looking for `⌘.` scans one vertical strip instead of hunting the right edge of
+   every row. Widened beyond `Settings` because `Ctrl+Shift+O` is nearly twice `⌘⇧O`, and the two must not shift the
+   description column by a different amount.
+
+   The column is 148px because the LONGEST chord must fit: `Ctrl+Backspace` is 14 characters at `--fs-xs` mono
+   (~6.6px each = 92px) plus the border and padding, and `Ctrl+Shift+O` is the widest modifier run. A column narrower
+   than the widest chord wraps it onto two lines in one row only, which breaks the vertical strip that makes the list
+   scannable — the failure mode is invisible in the short chords at the top of the sheet.
+*/
+.keys { max-width: 640px; width: min(640px, calc(100vw - 32px)); }
+.keys-lede { margin-bottom: var(--sp-4) !important; }
+.keys-group { margin-top: var(--sp-4); }
+.keys-group h4 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.keys-list { margin: 0; }
+.keys-row {
+  display: grid;
+  grid-template-columns: 148px 1fr;
+  gap: var(--sp-3);
+  align-items: baseline;
+  padding: 3px 0;
+  border-top: 1px solid var(--line);
+}
+.keys-row:first-child { border-top: 0; }
+.keys-chord { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.keys-combo { display: inline-flex; align-items: center; gap: 4px; }
+.keys-or { font-size: var(--fs-2xs); color: var(--dim); }
+/*
+ * The chord boxes fall back to the fonts that actually CARRY the symbols.
+ *
+ * Measured on this machine, over the 88 installed fonts' cmaps: `⌫` (U+232B) is declared by 11 of them and by neither
+ * `SFMono`/`Menlo`/`Monaco` (`--mono`) nor `SFCompact` — the face `-apple-system` resolves to. `⌘` and `⌥` are in
+ * SFCompact, which is why the rail's `⌘⇧O` has always rendered while `⌫` has already been reported as an empty box
+ * (`SessionControlBar` records that attempt). So the symbolic keys name the two faces every macOS install has, and the
+ * mono face keeps doing what it is good at — aligning the Latin ones.
+ */
+.keys-chord kbd {
+  /*
+   * `--mono` FIRST, and that is not a preference: it is what aligns the Latin keys (`Enter`, `Tab`, `Esc`) into a
+   * column. The two symbolic faces come after it, so they are consulted only for the codepoints it lacks.
+   */
+  font-family: var(--mono), "Apple Symbols", "Keyboard";
+  font-size: var(--fs-xs);
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  padding: 1px 5px;
+  /* Never shrink a chord into an ellipsis: half a shortcut is worse than none. */
+  white-space: nowrap;
+}
+.keys-what { display: flex; flex-direction: column; gap: 1px; font-size: var(--fs-sm); color: var(--text); }
+.keys-note { font-size: var(--fs-xs); color: var(--dim); }
+
 
    This was the inspector: a fixed 320px column. A real window showed why that fails once it hosts a
    document — the text was clipped mid-word with a horizontal scrollbar. So the region has modes and
@@ -4758,8 +4840,7 @@ select.btn { font-family: var(--sans); }
    place you work. Wider than the confirm modal: it holds filesystem paths, and a path wrapped at
    440px is a path nobody reads. */
 
-.settings { max-width: 620px; width: min(620px, calc(100vw - 32px)); }
-.settings section { margin-top: var(--sp-4); }
+.settings { max-width: 620px; width: min(620px, calc(100vw - 32px)); }.settings section { margin-top: var(--sp-4); }
 .settings h4 {
   margin: 0 0 var(--sp-2);
   font-size: var(--fs-xs);

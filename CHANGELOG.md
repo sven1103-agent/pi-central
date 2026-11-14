@@ -15,6 +15,9 @@ They are kept because each one is the reason a constraint or an invariant test e
 ### Added
 
 - ADR-0014 proposes one bounded OS action: reveal a resolved path in Finder, so a PDF, an archive or a video is reachable without a renderer per format ([#254]).
+- `⌘.` stops the focused session and `⌘⌫` deletes its transcript, each confirming at the second press ([#253]).
+- The Stopped heading selects its whole group, so finished sessions are cleared in one confirmation ([#253]).
+- `⌘/` opens every keyboard shortcut, reachable from the app bar's `?` control ([#253]).
 
 ## [0.11.1] — 2026-11-11
 
@@ -754,4 +757,5 @@ The spike that answered whether this was worth building.
 [#163]: https://github.com/sven1103-agent/pi-central/issues/163
 [#164]: https://github.com/sven1103-agent/pi-central/issues/164
 [#251]: https://github.com/sven1103-agent/pi-central/issues/251
+[#253]: https://github.com/sven1103-agent/pi-central/issues/253
 [#254]: https://github.com/sven1103-agent/pi-central/issues/254

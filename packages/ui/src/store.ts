@@ -229,6 +229,15 @@ export type LocalAction =
    */
   | { kind: "dismissError" }
   /**
+   * Report something the UI itself refused to do, in the app's one error surface.
+   *
+   * A local action because the sender is a keystroke rather than the orchestrator: pressing `⌘⌫` on a session
+   * that is still running cannot be sent at all (the orchestrator would refuse it, correctly), and silently doing
+   * nothing would make the key look broken. The words mirror the orchestrator's own refusal, because the same
+   * refusal must not be described two ways depending on which half noticed it first.
+   */
+  | { kind: "noteError"; message: string }
+  /**
    * Move the focus to another session. **A view change, not a data change.**
    *
    * This exists because there was no way to switch sessions at all. The rail dispatched a `session`
@@ -315,6 +324,9 @@ export function reduce(
     // difference between "dismiss" and "clear everything", and keeps a second error from being hidden by a
     // click aimed at the first.
     return state.errors.length === 0 ? state : { ...state, errors: state.errors.slice(1) };
+  }
+  if (event.kind === "noteError") {
+    return { ...state, errors: [event.message, ...state.errors].slice(0, MAX_ERRORS) };
   }
   if (event.kind === "loadRoster") {
     return { ...state, roster: event.entries, forgotten: event.forgotten ?? [] };

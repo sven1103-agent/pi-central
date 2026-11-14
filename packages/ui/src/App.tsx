@@ -54,8 +54,18 @@ import {
   reduce,
   transcriptFor,
 } from "./store.ts";
-import { SessionRail, rowLabel } from "./components/SessionRail.tsx";
+import { SessionRail } from "./components/SessionRail.tsx";
 import { rosterLabel } from "./roster.ts";
+import { ShortcutSheet } from "./components/ShortcutSheet.tsx";
+import {
+  STOP_CHORD,
+  chordOf,
+  detectPlatform,
+  displayChord,
+  isEditableTarget,
+  resolveShortcut,
+  type TargetLike,
+} from "./shortcuts.ts";
 import { FollowToggle } from "./components/FollowToggle.tsx";
 import {
   parseTraceOrder,
@@ -174,10 +184,19 @@ export function App() {
    */
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | undefined>(undefined);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /**
+   * The keyboard reference (`⌘/`), and the only surface whose content is the `shortcuts.ts` registry.
+   *
+   * A shell concern rather than a page: the keys work on every page, so the list of them must be reachable
+   * from every page — including one where nothing is focused and the rail is a drawer.
+   */
+  const [keysOpen, setKeysOpen] = useState(false);
   // Focus RETURNS to the trigger on close. Without this, closing a surface opened from the keyboard
   // drops focus to the document body, and the next Tab starts from the top of the page — so a
   // keyboard user pays for having looked at the version.
   const settingsTriggerRef = useRef<HTMLButtonElement>(null);
+  /** The bar's `?`: where focus goes when the keys sheet closes, so the keyboard is not dropped at the page top. */
+  const keysTriggerRef = useRef<HTMLButtonElement>(null);
 
   // Drafts are per session and in memory, so switching focus never loses typing. Never cleared
   // by Esc: that keystroke belongs to the agent.
@@ -1116,24 +1135,6 @@ export function App() {
   const home = state.home;
   const unisolated = hasUnisolatedSession(state);
 
-  // --- keyboard shortcuts -----------------------------------------------------------------
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const meta = event.metaKey || event.ctrlKey;
-      // ⌘N is the primary action: a session with no path, in one keystroke (US-1).
-      if (meta && event.key.toLowerCase() === "n") {
-        event.preventDefault();
-        send({ kind: "start" });
-      }
-      if (meta && event.shiftKey && event.key.toLowerCase() === "o") {
-        event.preventDefault();
-        setSheetOpen(true);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [send]);
-
   /*
    * The roster, persisted (issue #89).
    *
@@ -1278,6 +1279,155 @@ export function App() {
     [focused, send],
   );
 
+  // --- the keyboard -------------------------------------------------------------------------
+
+  /**
+   * Stop the focused session, through the confirmation.
+   *
+   * The SAME dialog the header's stop button opens — `⌘.` must not grow a second, faster path that skips the question.
+   * Nothing here sends `stop`: `ConfirmStop` does, so there is exactly one place where a run is ended.
+   *
+   * A focus that is a roster PATH rather than a handle is the stopped-session view: it may still have a live session
+   * object (C3), so the lookup is by file as well as by handle.
+   */
+  const requestStop = useCallback(() => {
+    const session =
+      focusedSession(state) ?? state.live.find((live) => live.sessionFile === state.focusedId);
+    if (session === undefined) return false;
+    /*
+     * `hasProcess`, not "is it not stopped": `failed` and `registered` have nothing to stop, and a confirmation
+     * whose only possible outcome is a refusal teaches the reader that the key is unreliable.
+     */
+    if (!hasProcess(session)) {
+      dispatch({ kind: "noteError", message: `There is nothing to stop: “${displayName(session)}” is not running.` });
+      return true;
+    }
+    setConfirmStop(session);
+    return true;
+  }, [state]);
+
+  /**
+   * Ask to delete the focused session's transcript (issue #150, by keyboard).
+   *
+   * ## Why the running case is refused HERE as well as in the orchestrator
+   *
+   * The orchestrator's refusal (`transport.ts`, `deleteSession`) is the authority and stays: deletion is keyed on the
+   * file, and it will not unlink one a process is writing to. But it is an ANSWER, and a key that produces only an
+   * error strip is a key that looks broken — the reader pressed something and nothing happened except a complaint.
+   *
+   * So the same rule is applied before the dialog: a session with a process is told, in the same words the
+   * orchestrator would use, to stop it first. One rule stated twice is a drift risk, and it is taken knowingly —
+   * the alternative is a confirmation dialog for an action that is known to be impossible.
+   */
+  const requestDeleteFocused = useCallback(() => {
+    /*
+     * Two shapes, because a focused row is one of two things: a live session, or a roster entry with no process. The
+     * row wins when there is no live session, which is exactly the stopped-session view. Both are read to a common
+     * `{file, label, cwd}` here so the rest of the function has one case, not two.
+     */
+    const target = focusedSession(state);
+    const row = focusedStoppedRow(state);
+    let named: PendingDelete | undefined;
+    if (target?.sessionFile !== undefined) {
+      named = { paths: [target.sessionFile], label: displayName(target), cwd: target.cwd };
+    } else if (row !== undefined) {
+      named = {
+        paths: [row.entry.path],
+        label: rosterLabel(row.entry, stoppedHistory?.firstMessage),
+        ...(row.entry.cwd === undefined ? {} : { cwd: row.entry.cwd }),
+      };
+    }
+    if (named === undefined) return false;
+
+    if (hasProcess(target)) {
+      dispatch({
+        kind: "noteError",
+        message:
+          `Cannot delete this transcript: it is open in the running session “${named.label}”. ` +
+          `Stop it first, then delete it — deleting now would remove a file the process is still writing to.`,
+      });
+      return true;
+    }
+
+    setPendingDelete(named);
+    return true;
+  }, [state, stoppedHistory]);
+
+  /**
+   * The shell's bindings, keyed by the registry's ID.
+   *
+   * ## Why a map of ids rather than a `switch` on the event
+   *
+   * `shortcuts.ts` is the single list of chords, and this map must answer every id it marks `shell: true`. That
+   * pairing is what `shortcuts.test.mjs` asserts by NAME, so a binding added to the registry cannot arrive without a
+   * handler, and a handler cannot survive the removal of its chord. A `switch (event.key)` would make the registry a
+   * description of the code rather than the thing the code obeys.
+   */
+  const shellShortcuts: Readonly<Record<string, () => void>> = useMemo(
+    () => ({
+      "session.start": onStartSession,
+      "session.openDirectory": () => setSheetOpen(true),
+      "session.stop": () => {
+        requestStop();
+      },
+      "session.delete": () => {
+        /*
+         * Gated exactly like the buttons that offer it: an orchestrator too old to delete must not be asked, because
+         * the refusal would be `bad control: unknown kind 'deleteSession'` — a symptom with no fix in it.
+         */
+        if (!supportsDelete(state.install?.protocol)) {
+          dispatch({ kind: "noteError", message: "This orchestrator cannot delete sessions. Restart it to update it." });
+          return;
+        }
+        requestDeleteFocused();
+      },
+      "page.sessions": () => setTab("sessions"),
+      "page.history": () => setTab("history"),
+      "settings.open": () => setSettingsOpen(true),
+      "keys.show": () => setKeysOpen((open) => !open),
+    }),
+    [onStartSession, requestStop, requestDeleteFocused, state.install?.protocol],
+  );
+
+  /**
+   * The one window listener that resolves registry chords.
+   *
+   * What it does is deliberately thin. The DECISION — is this a chord, is it the shell's, is a dialog in the way, is
+   * the caret in a field — is `resolveShortcut`'s, because that is a ladder whose order is the behaviour and an order
+   * inline in an effect can only be tested by mounting the whole app over a socket. What is left here is the wiring:
+   * read the arguments, look up the handler by the registry's id, act.
+   *
+   * Capture phase, so the shell sees the keystroke BEFORE the composer and the escape ladder — which is what lets
+   * `⌘.` and `⌘⌫` mean the same thing no matter where the caret is.
+   */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      /*
+       * The whole guard ladder is `resolveShortcut`'s, not this listener's: it is a sequence of conditions that must
+       * stay in one order, and an order that lives inside an effect can only be tested by mounting the app and opening
+       * a socket. `shortcuts.test.mjs` drives every step of it directly.
+       */
+      const shortcut = resolveShortcut(event, {
+        modalOpen: pendingDelete !== undefined || confirmStop !== undefined || settingsOpen,
+        keysOpen,
+        sheetOpen,
+        inField: isEditableTarget(event.target as TargetLike | null),
+      });
+      if (shortcut === undefined) return;
+      const handler = shellShortcuts[shortcut.id];
+      // A registry entry with no handler is a declaration nobody obeys. The type cannot express this (the ids are
+      // strings), so `shortcuts.test.mjs` asserts it by name and this line is only the last resort.
+      if (handler === undefined) return;
+      event.preventDefault();
+      handler();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [shellShortcuts, pendingDelete, confirmStop, settingsOpen, keysOpen, sheetOpen]);
+
+  const platform = detectPlatform(typeof navigator === "undefined" ? undefined : navigator.userAgent);
+
   return (
     <div className="app">
       <header className="topbar">
@@ -1408,6 +1558,30 @@ export function App() {
             { id: "activity-left-history", label: "History", glyph: "↺", active: tab === "history", onSelect: () => setTab("history") },
           ]}
         >
+          {/*
+            Keyboard help, in the bar's footer beside Settings — the two things a reader looks up rather than does.
+
+            The request was explicit that the keys must be DISPLAYABLE somewhere in the app, and a sheet reachable only
+            by the chord that opens it is not: a reader who does not know the chord cannot learn any of them.
+
+            The glyph is `?` and NOT `⌨` (U+2328). That codepoint is in the Technical block, the same block whose `⌫`
+            already rendered as an empty box on this machine — `SessionControlBar` records that failure, and repeating
+            it in a bar where a tofu square is the ONLY mark would read as a broken button. `?` is ASCII, carries the
+            meaning every app gives it in this corner, and the chord is on the tooltip so the key is learned from the
+            control that opens the list.
+          */}
+          <button
+            type="button"
+            className="navrail-item"
+            title={`Keyboard shortcuts (${displayChord("mod+/", platform)})`}
+            aria-label="Keyboard shortcuts"
+            ref={keysTriggerRef}
+            onClick={() => setKeysOpen(true)}
+          >
+            <span className="navrail-glyph" aria-hidden="true">
+              ?
+            </span>
+          </button>
           <button
             type="button"
             className="navrail-item"
@@ -1473,6 +1647,40 @@ export function App() {
             setRailOpen(false);
           }}
           onForgetRow={(row) => dispatch({ kind: "forget", path: row.entry.path })}
+          /*
+            A whole group, selected with one click, then deleted with one confirmation.
+
+            This is the answer to the reported chore: *"stopping several finished sessions and deleting it, both with
+            manual dialog confirmations"* means the reader is looking at a list of finished work and wants to clear
+            it. The Group heading is the only place that knows which rows those are, so the control lives there and
+            hands the exact list back — no second definition of "finished" to drift from `groupOf`.
+
+            The dialog is the SAME one every other delete uses (`PendingDelete`), which is what makes the bulk path
+            safe rather than a second, less careful implementation of the irreversible action.
+          */
+          {...(supportsDelete(state.install?.protocol)
+            ? {
+                onSelectGroup: (rows: RosterRow[]) => {
+                  const paths = rows
+                    .map((row) => row.entry.path)
+                    // A row with no durable file cannot be deleted by path: the orchestrator addresses transcripts,
+                    // and `live:s3` is a render key, not a file. Filtered rather than passed on to fail there.
+                    .filter((path) => path.startsWith("/"));
+                  if (paths.length === 0) return;
+                  setPendingDelete({
+                    paths,
+                    label: `${paths.length} stopped session${paths.length === 1 ? "" : "s"}`,
+                  });
+                },
+              }
+            : {})}
+          /*
+            The dialogs the shell owns are the ones the rail cannot see. Naming the same three conditions here is a
+            deliberate second mention rather than a shared helper: the shell's own dispatcher computes them inline for
+            `resolveShortcut`, and a helper that both call would be the third place to update when a modal is added —
+            this line and that call site are each one line, and the test asserts both stand down.
+          */
+          modalOpen={pendingDelete !== undefined || confirmStop !== undefined || settingsOpen || keysOpen}
           retryAvailable={supportsRetry(state.install?.protocol)}
           onRetryRow={(row) => {
             // Only a live session has a handle to retry with; a row that is not running has no process to
@@ -1841,6 +2049,21 @@ export function App() {
           onClose={() => {
             setSettingsOpen(false);
             settingsTriggerRef.current?.focus();
+          }}
+        />
+      )}
+
+      {/*
+        Focus RETURNS to the trigger on close, the same rule Settings follows: a surface you can enter with the keyboard
+        and not leave with it drops focus to the document body, and the next Tab starts from the top of the page.
+        `keysTriggerRef` is the bar's `?`, because the chord is not a focusable trigger to return to.
+      */}
+      {keysOpen && (
+        <ShortcutSheet
+          platform={platform}
+          onClose={() => {
+            setKeysOpen(false);
+            keysTriggerRef.current?.focus();
           }}
         />
       )}
@@ -2321,6 +2544,28 @@ function ConfirmStop({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onCancel]);
+
+  /*
+   * The chord that OPENED this dialog confirms it.
+   *
+   * Requested from use: *"stopping several finished sessions and deleting it, both with manual dialog confirmations"* —
+   * the chore is not the dialog, it is returning to the pointer for every one of them. `⌘.` `⌘.` is one gesture, and
+   * it stays safe for the reason this dialog already gives: focus is on `Keep running`, so a stray Enter cancels and
+   * the key has to be pressed TWICE, deliberately, on a dialog that names the session.
+   *
+   * Registered on the CAPTURE phase and stopped there, because the shell's own `⌘.` is on the window: without it one
+   * keystroke would both confirm this dialog and open the next one.
+   */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (chordOf(event) !== STOP_CHORD) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onConfirm();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [onConfirm]);
 
   return (
     <div className="modal-backdrop" onClick={onCancel} role="presentation">
