@@ -1,11 +1,5 @@
 # AGENTS.md
 
-Instructions for coding agents working in this repository. Human contributors should read
-[CONTRIBUTING.md](CONTRIBUTING.md); this file exists because an agent will otherwise do the
-reasonable-looking thing and be wrong.
-
----
-
 ## The changelog is a summary, not a transcript
 
 **One line per change, and the issue number it addresses.**
@@ -44,26 +38,16 @@ Everything the changelog is not allowed to contain is still worth writing down �
 | What | Where |
 | --- | --- |
 | Why the change is shaped this way | the **commit message** |
-| The full argument, alternatives rejected, evidence | the **PR body** |
 | A decision with lasting architectural weight | a new **ADR** in `docs/decisions/` |
 | A hard limit discovered by breaking it | **`docs/CONSTRAINTS.md`** (C1–C20) |
 | How a defect escaped and what now prevents it | the **test's own header comment** |
 
 The commit message is the natural home for a paragraph like *"the worker applied the inverse of the
-server's rule…"*. That is exactly the content that used to bloat the changelog.
-
-### Why this is written down twice
-
-The rule already lived in [docs/RELEASING.md](docs/RELEASING.md#the-changelog-is-a-summary-not-a-transcript),
-and the `Unreleased` section still grew to 1,795 lines for 68 changes — 1,915 characters per entry —
-because the rule was in a file nobody reads while appending an entry. A released changelog that has
-to be compressed again is the signal that this section was ignored.
+server's rule…"*. 
 
 ---
 
 ## Also worth knowing before you start
-
-These are the mistakes that are cheap to avoid and expensive to find:
 
 - **Read `docs/CONSTRAINTS.md` first** (C1–C20). Most "obvious" designs are ruled out there, and the
   constraint usually explains why in one paragraph.
@@ -78,3 +62,8 @@ These are the mistakes that are cheap to avoid and expensive to find:
   check:version` enforces it — point at `docs/RELEASING.md` instead.
 - **One writer per working directory.** Do not run Pi Central from a checkout an agent is editing;
   see [docs/DOGFOODING.md](docs/DOGFOODING.md).
+
+---
+
+## Version control and GitHub
+- Make a PR body concise. Reference the issue if one exists. State the motivation shortly, key changes and list relevant observations
