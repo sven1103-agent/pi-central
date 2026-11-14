@@ -138,34 +138,38 @@ doing the opening.
 Run against `/usr/bin/open` on this machine. Each one changes a line of code, which is why they are
 recorded rather than assumed.
 
-### 4.1 `open` can exit 0 after failing
+### 4.1 `open` exits 0 without having acted
+
+Every genuine failure measured — a missing path, a bundle identifier that does not resolve, an
+invalid flag — exited **1** with a message:
 
 ```
-$ open -R /tmp/osact-test/-e
-LSCopyApplicationURLsForBundleIdentifier() failed while trying to determine the application with
-bundle identifier com.apple.TextEdit.
-$ echo $?
-0
+$ open -R -- /nope-xyz            → exit 1, "The file /nope-xyz does not exist."
+$ open -b com.apple.NoSuchXYZ -- f → exit 1, "LSCopyApplicationURLsForBundleIdentifier() failed …"
+$ open -R -Z                      → exit 1, "open: invalid option -- Z"
 ```
 
-A leading dash is parsed as flags. The argument was rejected, an application was resolved instead,
-and the process still exited 0.
+What it will *also* do is return 0 having achieved nothing: it hands the request to `launchd` and
+exits, and a dock that is slow, a Finder that is busy, or a reveal that is silently discarded all look
+identical from the exit code. **So 0 means the request was accepted, never that anything was shown.**
 
-**Consequence:** exit status MUST NOT be used to claim success. The refusal is decided **before the
-spawn** (`realpath`, containment, `lstat`), and the child's exit code is used only to report a
-*confirmed* failure. A reveal that silently did nothing is a stated limitation (§7.6), not a claim
-that it worked.
+**Consequence:** the refusal is decided **before** the spawn (`realpath`, containment, `lstat`, platform).
+A non-zero exit is a *confirmed* failure and is reported; a zero exit is not reported as success. A
+reveal that silently did nothing is a stated limitation (§7.6), not a claim that it worked.
 
-### 4.2 The `--` separator is mandatory
+### 4.2 The `--` separator is defence in depth, not the boundary
 
 ```
-$ open -R -- "/tmp/osact-test/-e"   → exit=0
+$ open -R -e                → exit=1, parsed as the TextEdit flag, not as a file named -e
+$ open -R -- "-e"          → exit=0, the file named -e is revealed
 ```
 
-**Consequence:** argv is exactly `["-g", "-R", "--", path]`. Without `--`, a file named `-e` asks
-the OS to open TextEdit — a file *name* would be choosing an application. This is the same rule
-`policy.ts` already documents for spawns: a fixed binary and fixed argument shapes, with the path
-as the only free value.
+**Consequence:** argv is exactly `["-g", "-R", "--", path]`. It is written down as a fixed shape
+rather than as the thing that stops a filename selecting an application, because §4.5 already means
+the argument is an absolute path: `-e` can never reach the argv through the real call path. The `--`
+is kept so that a later change to §4.5 cannot turn a filename into an application choice, and the test
+asserts the literal array so removing it fails. This is the same rule `policy.ts` documents for spawns:
+a fixed binary and fixed argument shapes, with the path as the only free value.
 
 ### 4.3 A failure is immediate, so the spawn cannot block the event loop
 
@@ -262,9 +266,10 @@ The body, in order, and the order is the security property:
    on Linux in CI and C10 already makes macOS the only supported platform for the sandboxed mode;
    refusing with a reason is better than an `ENOENT` from `spawn` that reads as a missing file.
 4. `spawn(options.openPath ?? "/usr/bin/open", ["-g", "-R", "--", abs], { stdio: "ignore", detached: true })`
-   followed by `.unref()`. Only a synchronous spawn error (`ENOENT`, `EACCES`) is a refusal; a
-   non-zero exit is logged and **not** reported as a failure the reader must act on, because §4.1
-   shows the exit status is not evidence.
+   followed by `.unref()`. A **synchronous** spawn error cannot exist to catch: `spawn` reports
+   `ENOENT`/`EACCES` on an asynchronous `error` event, so a refusal needs a listener, not a return
+   check. A non-zero exit is a **confirmed** failure and is reported; a zero exit means `launchd`
+   accepted the request, which is not a claim that Finder displayed anything.
 
 A file header comment stating: why this is not reached from `places.ts` (that module's boundary is
 "directories inside fixed roots, no contents"; this one is "one path inside a session's cwd, acted
@@ -367,15 +372,16 @@ the added control shrinks the name and must be `flex: none`. That is the C20 rea
 > manager. Concretely:
 >
 > 1. **One action, one binary, one argv shape.** `open` with `["-g", "-R", "--", path]`. No `-a`,
->    `-b`, `-t`, `-u`; no shell; no application name; no URL form. A file **name** must never be
->    able to select an application (§4.2).
+>    `-b`, `-t`, `-u`; no shell; no application name; no URL form. The `--` is defence in depth:
+>    rule 2 already makes the argument absolute (§4.2).
 > 2. **The path is the resolved one**, from `resolveWithin`. Never a client spelling.
 > 3. **Containment is reused, not re-implemented.** The action takes `(root, relative)` and calls
 >    `resolveWithin` exactly as a read does, so `escapes-cwd` and its siblings keep one meaning.
 > 4. **The action is scoped to a session.** `sessionId` → `cwd` via the supervisor, the same single
 >    source reads use.
 > 5. **It reveals; it does not open.** Guardrail 5 stays true verbatim.
-> 6. **The exit status is not evidence** (§4.1). Refusals happen before the spawn.
+> 6. **The exit status reports the launch, not the reveal** (§4.1). Refusals happen before the spawn;
+>    non-zero is a confirmed failure; zero is not a claim that anything was shown.
 >
 > ### Consequences
 >
@@ -407,7 +413,7 @@ the added control shrinks the name and must be `flex: none`. That is the C20 rea
 > ### Falsifiers
 >
 > - A path that escapes the cwd can be revealed → the containment reuse is wrong.
-> - A file whose name begins with `-` selects an application → the `--` rule was not implemented.
+> - An argv element can select an application → the fixed argv shape was not implemented.
 > - The action works in the browser tab but the app stops working in the shell → the capability was
 >   put in the wrong process.
 > - `open -R` on a **deleted** file produces a misleading success → the pre-spawn `lstat` is
@@ -444,11 +450,11 @@ fail, and that column is not optional.
 |---|---|---|---|
 | 1 | an escaping relative path is refused with `escapes-cwd` and nothing is spawned | new `os-actions.test.ts` in the orchestrator's `test` | replace `resolveWithin` with `resolve(join(root, relative))` — the test must then see a spawn |
 | 2 | a symlink pointing out of the tree is refused | same | drop the `realpath` containment pass |
-| 3 | a path beginning with `-` is passed after `--` | same (fake binary records argv) | remove `"--"` from the argv array |
-| 4 | argv is exactly `["-g","-R","--",abs]`, and contains no application flag | same | add `-a` or drop `-g` |
+| 3 | argv is exactly `["-g","-R","--",abs]`: no application flag, and the path is the resolved one | same (fake binary records argv) | remove `"--"`, add `-a`, or pass the client's spelling |
+| 4 | a file whose name begins with `-` is revealed rather than parsed as a flag | same (fake binary records argv) | remove `"--"` from the argv array |
 | 5 | a file deleted between listing and reveal is `not-found`, with no spawn | same | delete the pre-spawn `lstat` |
 | 6 | a non-darwin platform is `unsupported-platform`, not an ENOENT | same (`platform: "linux"`) | remove the platform check |
-| 7 | a spawn `ENOENT` (fake binary path) is a refusal, not a crash | same | let the error escape the promise |
+| 7 | a spawn `ENOENT` (fake binary path) is a refusal, not a crash | same | drop the `error` listener and let it become an unhandled rejection |
 | 8 | the transport echoes `path` as the client sent it, and broadcasts `osActionError` only on failure | `packages/orchestrator/test/*transport*.test.ts` | echo the resolved path |
 | 9 | a second attempt clears the first refusal | `packages/ui/test/files.test.ts` | drop `revealRequested` |
 | 10 | the tree renders a separate labelled button per row, not a nested one | `packages/ui/test/components.test.mjs` | render the control inside `.filetree-row` — the assertion counts `<button` per row |
@@ -478,10 +484,10 @@ Two things worth stating about the test design:
 - `docs/DECISIONS`-adjacent prose in `packages/ui/src/files.ts` — nothing.
 - `CHANGELOG.md` — **at merge time, not in the worktree** (§1.2). One line:
   `- A file can be shown in Finder, for every format the viewer cannot draw ([#N]).`
-- A new constraint **C21**, only if the measurement in §4.1 is judged to be a hard limit rather than
-  an implementation note. It reads like one: *"`open` exits 0 after failing to act, so a launcher's
-  exit status is not evidence"* — the same shape as C17/C18, which are both "a tool that reports
-  success and did not". I would add it, and the ADR cites it.
+- A new constraint **C21**, if the measurement in §4.1 is judged to be a hard limit rather than an
+  implementation note. Candidate wording: *"`open` returns 0 when `launchd` accepts a request, so a
+  launcher's exit status reports acceptance and never that anything was displayed"* — the same shape
+  as C17/C18. It is **not** in this change, and the ADR does not cite it.
 
 ---
 
@@ -496,15 +502,16 @@ Two things worth stating about the test design:
 >
 > So the action goes where the filesystem already is. `resolveWithin` is reused rather than
 > re-implemented — two containment implementations is how the weaker one eventually wins — and the
-> argv is `-g -R --` for three measured reasons: `--` because a file named `-e` otherwise asks the OS
-> to open TextEdit; `-g` because revealing must not steal focus from the composer; `-R` because
-> `open` without it delegates to an application this app does not choose, which would amend
-> ADR-0007's guardrail 5 rather than extend ADR-0007.
+> argv is `-g -R --` for three reasons: `--` as defence in depth, so a filename can never be read as
+> a flag if the path rule changes; `-g` because revealing must not steal focus from the composer; `-R`
+> because `open` without it hands the bytes to an application this app does not choose, which would
+> amend ADR-0007's guardrail 5 rather than extend ADR-0007.
 >
-> One measured trap is worth naming in the record: `open` exits **0** after failing to act. So the
-> refusal is decided before the spawn and the exit status is never used to claim success; a reveal
-> that silently did nothing is a stated limitation, not a claim. That is C21 if this lands with the
-> constraint list.
+> One measured trap is worth naming: every genuine failure exits **1**, so non-zero is a confirmed
+> failure — but `open` also returns **0** when it has merely handed the request to `launchd`. So the
+> refusal is decided before the spawn, a zero exit is never used to claim success, and a reveal that
+> silently did nothing is a stated limitation rather than a claim. That is a candidate C21 if the
+> constraint list grows one.
 
 ---
 
