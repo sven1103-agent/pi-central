@@ -481,9 +481,7 @@ Two things worth stating about the test design:
 - `docs/ARCHITECTURE.md` — one line in the diagram's caption: the orchestrator reads **and takes one
   OS action**, because the diagram currently says it runs sandboxed sessions and relays.
 - `docs/decisions/README.md` — the ADR-0014 row.
-- `docs/DECISIONS`-adjacent prose in `packages/ui/src/files.ts` — nothing.
-- `CHANGELOG.md` — **at merge time, not in the worktree** (§1.2). One line:
-  `- A file can be shown in Finder, for every format the viewer cannot draw ([#N]).`
+- `CHANGELOG.md` — one line under `Unreleased`, with its `[#254]` definition.
 - A new constraint **C21**, if the measurement in §4.1 is judged to be a hard limit rather than an
   implementation note. Candidate wording: *"`open` returns 0 when `launchd` accepts a request, so a
   launcher's exit status reports acceptance and never that anything was displayed"* — the same shape
