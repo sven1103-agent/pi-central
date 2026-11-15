@@ -25,7 +25,7 @@
  * stray `Enter` — from a reader who was typing in the composer a moment ago — into an irreversible delete.
  */
 import { useEffect, useRef } from "react";
-import { DELETE_CHORD, chordOf } from "../shortcuts.ts";
+import { DELETE_CHORD, matchesChord } from "../shortcuts.ts";
 
 export function ConfirmDelete({
   /** The session's display label, from `nameLabel`/`displayName` — never a handle if a prompt explains it. */
@@ -82,7 +82,7 @@ export function ConfirmDelete({
    */
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (chordOf(event) !== DELETE_CHORD) return;
+      if (!matchesChord(event, DELETE_CHORD)) return;
       event.preventDefault();
       event.stopPropagation();
       confirmOf.current();

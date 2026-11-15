@@ -8,7 +8,7 @@
  * legible.
  */
 import { useEffect, useMemo, useState } from "react";
-import { chordOf, isEditableTarget, nextRowKey, type TargetLike } from "../shortcuts.ts";
+import { isEditableTarget, matchesChord, nextRowKey, type TargetLike } from "../shortcuts.ts";
 import type { LiveSession } from "@pi-central/protocol";
 import { displayName, formatContext, isNearFull, nameLabel, shortenPath, whereLine } from "../format.ts";
 import { stateLabel } from "../store.ts";
@@ -157,12 +157,17 @@ export function SessionRail({
   useEffect(() => {
     if (modalOpen) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
-      const chord = chordOf(event);
-      if (chord !== "alt+arrowdown" && chord !== "alt+arrowup") return;
+      /*
+       * `matchesChord` rather than `chordOf(event) === "alt+arrowdown"`: the arrow keys are named, so a layout never
+       * forces Shift onto them, but keeping one predicate for "did this keystroke mean this chord" is what stops the
+       * next layout-dependent key from being added here as a raw comparison and quietly failing.
+       */
+      const nextRow = matchesChord(event, "alt+arrowdown");
+      if (!nextRow && !matchesChord(event, "alt+arrowup")) return;
       // A surface that already claimed the key, or a field the reader is typing in, keeps it.
       if (event.defaultPrevented || isEditableTarget(event.target as TargetLike | null)) return;
       const keys = sections.flatMap((section) => section.rows.map(rowKey));
-      const next = nextRowKey(keys, focusedId, chord === "alt+arrowdown" ? 1 : -1);
+      const next = nextRowKey(keys, focusedId, nextRow ? 1 : -1);
       if (next === undefined) return;
       const row = sections.flatMap((section) => section.rows).find((candidate) => rowKey(candidate) === next);
       if (row === undefined) return;

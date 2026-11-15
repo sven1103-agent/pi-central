@@ -153,7 +153,18 @@ export const SHORTCUTS: readonly ShortcutDefinition[] = [
   {
     id: "keys.show",
     group: "pages",
-    keys: ["mod+/"],
+    /*
+     * `⌘K`, not `⌘/`.
+     *
+     * `/` is not a key every layout has unmodified: on a German keyboard it is Shift+7, and a US `⌘/` therefore could
+     * not be pressed there at all. Reported from use — *"the shortcut to open the shortcut dialog is ill-placed for
+     * DE-Keyboard layouts"* — and the report was right, though the fault was worse than placement: `chordOf` reported
+     * `mod+shift+/` and the binding never fired. `resolveChord` now tolerates that Shift, so `⌘/` would work today, but
+     * a LETTER is still the better key: it needs no layout assumption whatsoever, and `⌘K` is the convention for a
+     * keyboard reference in this class of app. It was also free — `DESIGN.md` had only ever floated `⌘K` for a
+     * hypothetical jump-to-session palette, which was never built.
+     */
+    keys: ["mod+k"],
     label: "All keyboard shortcuts",
     note: "This list.",
     shell: true,
@@ -266,6 +277,62 @@ export function shortcutForChord(chord: string): ShortcutDefinition | undefined 
   return SHORTCUTS.find((shortcut) => shortcut.keys.includes(chord));
 }
 
+/**
+ * Is `key` a single character the KEYBOARD LAYOUT may need Shift to produce?
+ *
+ * Letters are excluded on purpose, and that exclusion is the whole reason this is a function: `⌘O` and `⌘⇧O` are two
+ * different bindings in this app, and collapsing Shift for letters would make one of them unreachable. Digits and
+ * punctuation are included because on several layouts they are Shift-ed characters — see `resolveChord`.
+ */
+function isLayoutShiftedKey(key: string): boolean {
+  if (key.length !== 1) return false; // a named key (`backspace`, `arrowup`) is never typed through the layout
+  return !/[a-z]/.test(key);
+}
+
+/**
+ * The chord to match `chordOf(event)` against, tolerating a Shift the LAYOUT required.
+ *
+ * ## The defect this fixes
+ *
+ * `⌘/` was chosen for the keys sheet, and it **never fired on a German keyboard**. On DE, `/` is Shift+7, so pressing
+ * it produces `{ key: "/", shiftKey: true }` and `chordOf` reported `mod+shift+/` — which is not the registered
+ * `mod+/`. The key was documented, listed on the sheet, printed in a tooltip, and dead for every reader whose layout
+ * puts `/` behind a modifier. The same fault made `⌘1`/`⌘2` dead on AZERTY, where the digits are Shift-ed.
+ *
+ * Reported from use: *"the shortcut to open the shortcut dialog is ill-placed for DE-Keyboard layouts"*. It was worse
+ * than ill-placed — it did not work at all.
+ *
+ * ## The rule
+ *
+ * For a key the layout produces through Shift, an EXTRA Shift is not a different chord: the reader pressed the key the
+ * sheet told them to press. So the exact chord is tried first, then the same chord with Shift removed.
+ *
+ * One direction only. A binding that EXPLICITLY asks for Shift is not satisfied by pressing it without Shift — that
+ * would let `⌘⇧O` be triggered by `⌘O`. And letters never take the tolerant path, so those two stay distinct.
+ *
+ * Returns the chord to match, which is the input unchanged when no tolerance applies.
+ */
+export function resolveChord(chord: string): string[] {
+  const parts = chord.split("+");
+  const key = parts[parts.length - 1] ?? "";
+  if (!parts.includes("shift") || !isLayoutShiftedKey(key)) return [chord];
+  // The unshifted form is a SEPARATE candidate, after the exact one: an explicit `mod+shift+/` binding still wins.
+  return [chord, parts.filter((part) => part !== "shift").join("+")];
+}
+
+/**
+ * Did this keystroke mean `binding`'s chord? Layout-tolerant, and the ONLY way any surface should ask.
+ *
+ * Every caller that compared `chordOf(event) !== SOME_CHORD` directly had the German-keyboard bug: on a layout where
+ * the key needs Shift, the raw chord carries `shift` and the comparison silently fails. One predicate means the shell
+ * and the three dialogs that answer their own chords cannot disagree about what a keystroke meant.
+ */
+export function matchesChord(event: KeyEventLike, binding: string): boolean {
+  const chord = chordOf(event);
+  if (chord === undefined) return false;
+  return resolveChord(chord).includes(binding);
+}
+
 /** The ids the shell must handle, derived from the registry so the sheet cannot promise a key nobody reads. */
 export const SHELL_SHORTCUT_IDS: readonly string[] = SHORTCUTS.filter((shortcut) => shortcut.shell).map(
   (shortcut) => shortcut.id,
@@ -276,6 +343,15 @@ export const STOP_CHORD: string = chordForId("session.stop");
 
 /** The chord that starts a delete, likewise. */
 export const DELETE_CHORD: string = chordForId("session.delete");
+
+/**
+ * The chord that opens the keys sheet, for the tooltip on the control that also opens it.
+ *
+ * Read from the registry rather than written at the call site. The bar's tooltip had a literal `"mod+/"` in it while
+ * this file said `mod+/` too — two copies of one fact, which is precisely how the binding came to be documented on a
+ * keyboard that could not press it.
+ */
+export const KEYS_CHORD: string = chordForId("keys.show");
 
 /**
  * The (first) chord for a binding id.
@@ -464,7 +540,15 @@ export interface ShellGate {
 export function resolveShortcut(event: KeyEventLike, gate: ShellGate): ShortcutDefinition | undefined {
   const chord = chordOf(event);
   if (chord === undefined) return undefined;
-  const shortcut = shortcutForChord(chord);
+  /*
+   * Every candidate form of the chord, not just the literal one: a layout that types this key through Shift produces a
+   * chord with `shift` in it, and that extra Shift must not hide the binding (see `resolveChord`).
+   */
+  let shortcut: ShortcutDefinition | undefined;
+  for (const candidate of resolveChord(chord)) {
+    shortcut = shortcutForChord(candidate);
+    if (shortcut !== undefined) break;
+  }
   if (shortcut === undefined || !shortcut.shell) return undefined;
   if (gate.modalOpen && !gate.keysOpen) return undefined;
   if (gate.sheetOpen) return undefined;

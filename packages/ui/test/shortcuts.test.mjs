@@ -34,6 +34,7 @@ import { renderToString } from "react-dom/server";
 
 import {
   DELETE_CHORD,
+  KEYS_CHORD,
   SHELL_SHORTCUT_IDS,
   SHORTCUTS,
   SHORTCUT_GROUPS,
@@ -42,7 +43,9 @@ import {
   detectPlatform,
   displayChord,
   isEditableTarget,
+  matchesChord,
   nextRowKey,
+  resolveChord,
   resolveShortcut,
   shortcutForChord,
   shortcutSections,
@@ -106,8 +109,11 @@ test("the stop key is the platform's own interrupt, and the delete key is not on
 test("each destructive dialog is confirmable by the key that opened it", () => {
   // "Hotkey support" that stops at the dialog still needs the mouse, which is the complaint. The dialog owns the
   // second press because only it knows it is open; the shell stands down while a modal is up (asserted below).
-  assert.match(code(confirmDelete), /chordOf\(event\) !== DELETE_CHORD/, "Delete's dialog answers its own chord");
-  assert.match(code(app), /chordOf\(event\) !== STOP_CHORD/, "Stop's dialog answers its own chord");
+  // `matchesChord`, not `chordOf(event) !== CHORD`: the latter was the German-keyboard bug in miniature — it compares
+  // the raw chord, so a layout that types the key through Shift reports `mod+shift+…` and the dialog ignores its own
+  // key. One predicate, so the shell and every dialog agree about what a keystroke meant.
+  assert.match(code(confirmDelete), /matchesChord\(event, DELETE_CHORD\)/, "Delete's dialog answers its own chord");
+  assert.match(code(app), /matchesChord\(event, STOP_CHORD\)/, "Stop's dialog answers its own chord");
   // Registered on the CAPTURE phase so the window listener cannot also act on the same keystroke.
   assert.match(
     code(confirmDelete),
@@ -154,6 +160,53 @@ test("only a chord with a modifier can be a binding", () => {
   assert.equal(chordOf({ key: "ArrowDown", altKey: true }), "alt+arrowdown", "named keys keep their name");
   // ⌘ and Ctrl are the same modifier: one list of bindings is worth more than a platform split.
   assert.equal(chordOf({ key: "n", metaKey: true }), chordOf({ key: "n", ctrlKey: true }));
+});
+
+test("a key a LAYOUT produces through Shift still reaches its binding", () => {
+  /*
+   * The German-keyboard bug, as a test.
+   *
+   * `⌘/` was the keys-sheet binding. On a DE layout `/` is Shift+7, so the browser reports `{ key: "/", shiftKey:
+   * true }` and `chordOf` answered `mod+shift+/` — not the registered `mod+/`. The key was on the sheet, in a tooltip,
+   * and dead. AZERTY has the same fault on the digits, so `⌘1`/`⌘2` were dead there.
+   *
+   * The rule is one-directional on purpose: an EXTRA Shift on a Shift-ed key is not a different chord, but a binding
+   * that asks for Shift is never satisfied without it, and letters are excluded so `⌘O`/`⌘⇧O` stay distinct.
+   */
+  // A punctuation key typed through Shift resolves to the binding that names it unshifted.
+  assert.equal(resolveChord("mod+shift+/").includes("mod+/"), true, "DE `⌘/` reaches `mod+/`");
+  assert.equal(resolveChord("mod+shift+1").includes("mod+1"), true, "AZERTY `⌘1` reaches `mod+1`");
+  // A LETTER keeps Shift significant, or the two open-directory-style pairs would collapse into one.
+  assert.equal(resolveChord("mod+shift+o").includes("mod+o"), false, "`⌘⇧O` is not `⌘O`");
+  assert.equal(resolveChord("mod+o").includes("mod+shift+o"), false, "and not the other way round");
+  // Nothing to tolerate: a plain chord is returned unchanged, so callers can treat it as a list.
+  assert.deepEqual(resolveChord("mod+k"), ["mod+k"]);
+  // A NAMED key is never typed through the layout, so Shift on it is a real modifier.
+  assert.equal(resolveChord("mod+shift+backspace").includes("mod+backspace"), false, "Shift+⌫ is not ⌫");
+
+  // And the end-to-end path: the event a German keyboard emits now reaches the binding that names the key unshifted.
+  // Tested against a chord that IS registered, because `⌘/` no longer is — it moved to `⌘K`. The tolerance is a property
+  // of the resolver, not of that one key.
+  const gate = { modalOpen: false, keysOpen: false, sheetOpen: false, inField: false };
+  assert.equal(
+    resolveShortcut({ key: ",", metaKey: true, shiftKey: true }, gate)?.id,
+    "settings.open",
+    "a Shift-ed punctuation key still fires the chord registered without Shift",
+  );
+  // The predicate every surface now uses agrees with it, so a dialog cannot ignore its own key either.
+  assert.equal(matchesChord({ key: ",", metaKey: true, shiftKey: true }, "mod+,"), true);
+  assert.equal(matchesChord({ key: "o", metaKey: true, shiftKey: true }, "mod+o"), false);
+});
+
+test("the keys sheet is on a letter, so no layout can hide it", () => {
+  // `⌘/` worked once the Shift tolerance landed, but a letter needs no assumption at all — and `⌘K` is the convention.
+  const binding = SHORTCUTS.find((shortcut) => shortcut.id === "keys.show");
+  assert.ok(binding, "there is a keys-sheet binding");
+  assert.deepEqual(binding.keys, ["mod+k"], "⌘K, not ⌘/ — see the registry's comment");
+  assert.equal(KEYS_CHORD, "mod+k", "and the bar's tooltip is read from it, not written beside it");
+  // `⌘K` must not already mean something else.
+  const others = SHORTCUTS.filter((shortcut) => shortcut.id !== "keys.show");
+  assert.equal(others.some((shortcut) => shortcut.keys.includes("mod+k")), false, "and it is free");
 });
 
 test("every registered chord resolves back to its own binding", () => {
@@ -223,7 +276,8 @@ test("next/previous session walks the rows in the order they are SHOWN", () => {
     railCode.indexOf("const onKeyDown = (event: KeyboardEvent)"),
     railCode.indexOf("return ("),
   );
-  assert.match(listener, /chord !== "alt\+arrowdown" && chord !== "alt\+arrowup"/, "it listens for the two chords");
+  assert.match(listener, /matchesChord\(event, "alt\+arrowdown"\)/, "it listens for the down key");
+  assert.match(listener, /matchesChord\(event, "alt\+arrowup"\)/, "and the up key");
   assert.match(listener, /event\.preventDefault\(\)/, "and claims the key, so the list does not also scroll");
   assert.match(listener, /onFocusRow\(row\)/, "and it moves the focus, which is the whole behaviour");
   // A window listener also fires while a dialog is in front, and moving focus behind a dialog changes what its own
@@ -244,7 +298,7 @@ test("next/previous session walks the rows in the order they are SHOWN", () => {
 // --- 3. The list is reachable, and shows what the app does ---------------------------------------
 
 test("the keys sheet is reachable without already knowing a key", () => {
-  // A sheet whose only door is `⌘/` cannot teach `⌘/`. The discovery control is in the app's own navigation bar,
+  // A sheet whose only door is a chord cannot teach that chord. The discovery control is in the app's own navigation bar,
   // beside Settings — the two things a reader looks up rather than does.
   const bar = code(app).slice(code(app).indexOf('side="left"'), code(app).indexOf('side="right"'));
   assert.match(bar, /aria-label="Keyboard shortcuts"/, "a labelled control in the left bar");

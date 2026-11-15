@@ -17,11 +17,13 @@ They are kept because each one is the reason a constraint or an invariant test e
 - ADR-0014 proposes one bounded OS action: reveal a resolved path in Finder, so a PDF, an archive or a video is reachable without a renderer per format ([#254]).
 - `⌘.` stops the focused session and `⌘⌫` deletes its transcript, each confirming at the second press ([#253]).
 - The Stopped heading selects its whole group, so finished sessions are cleared in one confirmation ([#253]).
-- `⌘/` opens every keyboard shortcut, reachable from the app bar's `?` control ([#253]).
+- `⌘K` opens every keyboard shortcut, reachable from the app bar's `?` control ([#253]).
 
 ### Fixed
 
 - The keys sheet and both destructive confirmations take focus once on open, instead of on every shell re-render ([#253]).
+- A shortcut on a key the reader's layout types with Shift now fires, so `⌘1`/`⌘2` work on AZERTY ([#253]).
+- The keys sheet is bounded by the window and scrolls its list, so its `Close` button is reachable ([#253]).
 
 ## [0.11.1] — 2026-11-11
 

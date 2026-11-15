@@ -288,6 +288,44 @@ test("the sheet takes focus on open, and Escape closes it without stopping a run
   unmount();
 });
 
+test("the sheet cannot grow past the window, because `Close` is at the BOTTOM", () => {
+  /*
+   * Reported from use, with a screenshot: at the chords' new size the sheet *"is spanning the vertical space of the
+   * screen and cutting off the bottom"*. The cause is documented in this stylesheet already, for the directory sheet:
+   * `.modal-backdrop` is `place-items: center` with no scroller, so a dialog taller than the window loses its top AND
+   * its bottom — and the bottom is where the only button is.
+   *
+   * Two properties, and both are needed. A bounded dialog alone would still cut off by scrolling the TITLE out of view
+   * (so a reader halfway down has no heading), and a scrolling body alone would grow the dialog past the window and
+   * lose the footer. Together they make exactly one region scroll, between a fixed head and a fixed foot.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rule = (selector) => {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const matches = [...css.matchAll(new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`, "g"))];
+    assert.ok(matches.length > 0, `${selector} must have a rule`);
+    return matches[0][1];
+  };
+
+  const dialog = rule(".keys");
+  // `max-height` (a ceiling) rather than `height`: a three-group list should not always occupy 760px.
+  assert.match(dialog, /max-height:\s*min\(/, "the dialog is capped by a measured ceiling");
+  assert.match(dialog, /100dvh|100vh/, "and tied to the window, not to a pixel guess");
+  assert.match(dialog, /overflow:\s*hidden/, "the dialog itself does not scroll, or there would be two scrollers");
+  assert.match(dialog, /display:\s*flex/, "it is a column, so head and foot can be pinned");
+
+  // The body is the ONE scroller. `min-height: 0` is load-bearing: a flex child defaults to `min-height: auto`, which
+  // refuses to shrink below its content and so silently defeats every `max-height` above it.
+  const body = rule(".keys-body");
+  assert.match(body, /overflow-y:\s*auto/, "the list scrolls");
+  assert.match(body, /min-height:\s*0/, "or it cannot shrink inside the capped dialog");
+  assert.match(body, /flex:\s*1/, "and takes whatever height the head and foot leave");
+
+  // The head and foot keep their size, so neither the title nor `Close` can be pushed out.
+  assert.match(rule(".keys-head"), /flex:\s*none/, "the title does not shrink away");
+  assert.match(rule(".keys .dialog-actions"), /flex:\s*none/, "and neither does the button");
+});
+
 // --- The group control -----------------------------------------------------------------------
 
 test("the rail's Stopped heading selects the group, and hands back exactly those rows", () => {
@@ -365,6 +403,44 @@ test("the symbolic keys fall back to a face that has them", () => {
   assert.ok(family, "and declares a font stack");
   assert.match(family[1], /var\(--mono\)/, "mono first, so the Latin keys align");
   assert.match(family[1], /Apple Symbols/, "and a face that carries the symbols after it");
+});
+
+test("the chords are the most legible text on the sheet, not the least", () => {
+  /*
+   * Reported from use, with a screenshot: *"It is a little bit hard to read, since the icons are very small."*
+   *
+   * The measurement behind that: the chords were set at `--fs-xs` (11px) — the app's second-smallest size — while the
+   * sheet's own introduction was `--fs-base` (13px) and the action labels were `--fs-sm` (12px). So on a sheet that
+   * exists to teach keys, the keys were the SMALLEST text and the sentence explaining them was the largest. The
+   * screenshot shows the consequence: the glyphs float in a wide empty column, unreadably small, beside their labels.
+   *
+   * This asserts the RELATIONSHIP, not a pixel value, so the sheet may be re-scaled as long as the ordering holds: a
+   * chord is at least as large as the action it performs, and larger than the note under that action.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const sizeOf = (selector) => {
+    const rule = new RegExp(`${selector} \\{([^}]*)\\}`).exec(css);
+    assert.ok(rule, `${selector} must have its own rule`);
+    const size = /font-size:\s*var\(--fs-([a-z0-9]+)\)/.exec(rule[1]);
+    assert.ok(size, `${selector} must size itself from the type scale`);
+    return size[1];
+  };
+  const scale = ["2xs", "xs", "sm", "base", "md", "lg"];
+  const rank = (name) => {
+    const at = scale.indexOf(name);
+    assert.notEqual(at, -1, `${name} is a real step on the type scale`);
+    return at;
+  };
+
+  const chord = rank(sizeOf("\\.keys-chord kbd"));
+  const label = rank(sizeOf("\\.keys-what"));
+  const note = rank(sizeOf("\\.keys-note"));
+  const lede = rank(sizeOf("\\.keys-lede"));
+
+  assert.ok(chord >= label, "a key is at least as legible as the action it performs");
+  assert.ok(chord > note, "and larger than the note explaining it");
+  // The regression that prompted this: the keys were smaller than the sheet's own introduction.
+  assert.ok(chord >= lede, "and not smaller than the paragraph that introduces the list");
 });
 
 test("⌥↓ moves the focus down the rail, and stands still while a dialog is up", () => {

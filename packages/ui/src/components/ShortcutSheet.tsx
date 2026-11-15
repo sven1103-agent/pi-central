@@ -1,5 +1,5 @@
 /**
- * All keyboard shortcuts, on one sheet (`⌘/`).
+ * All keyboard shortcuts, on one sheet (`⌘K`).
  *
  * ## Why a sheet and not a menu of hints
  *
@@ -84,49 +84,60 @@ export function ShortcutSheet({
         aria-labelledby="keys-title"
         onClick={(event) => event.stopPropagation()}
       >
-        <h3 id="keys-title">Keyboard shortcuts</h3>
-        {/*
-          An honest scope, because the first draft of this sentence was "everything the keyboard can do" — which the
-          list below is not. It leaves out the platform's own editing keys, the panel's resize arrows, and the
-          trace's traversal, all of which work and none of which this app invented. Claiming them would make the sheet
-          a promise it cannot keep in step; saying what it is beats a completeness the surface does not have.
-        */}
-        <p className="keys-lede">
-          Every shortcut Pi Central defines. Ordinary keys still work as they do everywhere — typing, arrow keys in
-          a field, <kbd>Tab</kbd> between controls. Session actions apply to the <strong>focused</strong> session.
-        </p>
+        <div className="keys-head">
+          <h3 id="keys-title">Keyboard shortcuts</h3>
+          {/*
+            An honest scope, because the first draft of this sentence was "everything the keyboard can do" — which the
+            list below is not. It leaves out the platform's own editing keys, the panel's resize arrows, and the
+            trace's traversal, all of which work and none of which this app invented. Claiming them would make the sheet
+            a promise it cannot keep in step; saying what it is beats a completeness the surface does not have.
+          */}
+          <p className="keys-lede">
+            Every shortcut Pi Central defines. Ordinary keys still work as they do everywhere — typing, arrow keys in
+            a field, <kbd>Tab</kbd> between controls. Session actions apply to the <strong>focused</strong> session.
+          </p>
+        </div>
 
-        {sections.map((section) => (
-          <section key={section.id} className="keys-group">
-            <h4>{section.title}</h4>
-            <dl className="keys-list">
-              {section.rows.map((row) => (
-                <div key={row.id} className="keys-row">
-                  {/*
-                    The keys FIRST, in a fixed-width column, so the eye can scan one column of chords instead of
-                    hunting each row's right edge — the reason a shortcut list is readable at all.
-                  */}
-                  <dt className="keys-chord">
-                    {row.keys.map((key, index) => (
-                      <span key={key} className="keys-combo">
-                        {index > 0 && (
-                          <span className="keys-or" aria-hidden="true">
-                            or
-                          </span>
-                        )}
-                        <kbd>{key}</kbd>
-                      </span>
-                    ))}
-                  </dt>
-                  <dd className="keys-what">
-                    {row.label}
-                    {row.note !== undefined && <span className="keys-note">{row.note}</span>}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-        ))}
+        {/*
+          The list is the ONLY scrolling region, so the title stays readable and `Close` stays reachable.
+
+          Reported from use: at the chords' new size the sheet grew past the window and its bottom was cut off. That is
+          this app's documented modal failure — `.modal-backdrop` is `place-items: center` with no scroller, so a dialog
+          taller than the window loses its top AND its bottom, and the bottom is where the one button is.
+        */}
+        <div className="keys-body">
+          {sections.map((section) => (
+            <section key={section.id} className="keys-group">
+              <h4>{section.title}</h4>
+              <dl className="keys-list">
+                {section.rows.map((row) => (
+                  <div key={row.id} className="keys-row">
+                    {/*
+                      The keys FIRST, in a fixed-width column, so the eye can scan one column of chords instead of
+                      hunting each row's right edge — the reason a shortcut list is readable at all.
+                    */}
+                    <dt className="keys-chord">
+                      {row.keys.map((key, index) => (
+                        <span key={key} className="keys-combo">
+                          {index > 0 && (
+                            <span className="keys-or" aria-hidden="true">
+                              or
+                            </span>
+                          )}
+                          <kbd>{key}</kbd>
+                        </span>
+                      ))}
+                    </dt>
+                    <dd className="keys-what">
+                      {row.label}
+                      {row.note !== undefined && <span className="keys-note">{row.note}</span>}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          ))}
+        </div>
 
         <div className="dialog-actions">
           <button type="button" className="btn" ref={closeRef} onClick={onClose}>

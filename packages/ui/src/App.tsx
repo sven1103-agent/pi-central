@@ -58,11 +58,12 @@ import { SessionRail } from "./components/SessionRail.tsx";
 import { rosterLabel } from "./roster.ts";
 import { ShortcutSheet } from "./components/ShortcutSheet.tsx";
 import {
+  KEYS_CHORD,
   STOP_CHORD,
-  chordOf,
   detectPlatform,
   displayChord,
   isEditableTarget,
+  matchesChord,
   resolveShortcut,
   type TargetLike,
 } from "./shortcuts.ts";
@@ -185,7 +186,7 @@ export function App() {
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | undefined>(undefined);
   const [settingsOpen, setSettingsOpen] = useState(false);
   /**
-   * The keyboard reference (`⌘/`), and the only surface whose content is the `shortcuts.ts` registry.
+   * The keyboard reference (`⌘K`), and the only surface whose content is the `shortcuts.ts` registry.
    *
    * A shell concern rather than a page: the keys work on every page, so the list of them must be reachable
    * from every page — including one where nothing is focused and the rail is a drawer.
@@ -1573,7 +1574,7 @@ export function App() {
           <button
             type="button"
             className="navrail-item"
-            title={`Keyboard shortcuts (${displayChord("mod+/", platform)})`}
+            title={`Keyboard shortcuts (${displayChord(KEYS_CHORD, platform)})`}
             aria-label="Keyboard shortcuts"
             ref={keysTriggerRef}
             onClick={() => setKeysOpen(true)}
@@ -2575,7 +2576,7 @@ function ConfirmStop({
    */
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (chordOf(event) !== STOP_CHORD) return;
+      if (!matchesChord(event, STOP_CHORD)) return;
       event.preventDefault();
       event.stopPropagation();
       confirmOf.current();
