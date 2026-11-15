@@ -271,6 +271,11 @@ File access runs **directly at the user's UID** — no sidecar, no sandbox in th
       an archive and a video all reach the application the reader already trusts for them.
       A refusal is stated in the tree with its reason, and a success states nothing at all — `open` exits
       0 once `launchd` accepts the request, which is not evidence that Finder displayed anything.
+      The workspace itself has a labelled control in the panel's header, not only a per-row one: the rows are
+      the workspace's CHILDREN, so a per-row control could never reach the folder the panel is about, and an
+      empty directory renders no rows at all — which is exactly when opening the folder is the only thing
+      left to do. It sends the empty path, which `resolveWithin` normalizes to the root, so the workspace
+      goes through the same gatekeeper as any file rather than a second one written for it.
       Out of scope by decision: `open` without `-R`, and a reveal for a place or a transcript reference.
 - [ ] File operations: create file/dir, rename, move, delete — destructive actions behind
       explicit confirmation, never an implicit recursive delete.

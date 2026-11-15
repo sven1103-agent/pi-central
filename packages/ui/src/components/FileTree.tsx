@@ -69,22 +69,51 @@ export function FileTree({
   return (
     <div className="filetree">
       <div className="filetree-head">
+        {/*
+          The label states WHOSE view this is, not the folder's name (ADR-0007): the browser reads at the
+          user's UID and can reach files the agent cannot, so "Working directory" is a claim the panel has
+          to keep making. The folder itself is named in `title`, and the tree's `aria-label` names the path.
+        */}
         <span className="filetree-scope" title={cwd}>
           Working directory
         </span>
         {/*
-          The toggle says what it will DO, not what is currently true — a button labelled by its
-          state is read as a status, and then clicked twice by anyone who reads it as one.
+          Two controls, and the reveal is deliberately NOT per row only.
+
+          The tree's rows are the CHILDREN of the workspace, so the workspace itself had no reveal at all — and
+          an EMPTY directory renders no rows, so *Show in Finder* was missing exactly when "open this folder"
+          was the only thing left to do. Here it is always present, for the folder the whole panel is about.
+
+          The empty string IS the cwd: `resolveWithin(root, "")` normalizes it to the root and the containment
+          check runs against it like any other path, so this goes through one gatekeeper rather than a second
+          one for the workspace.
         */}
-        <button
-          type="button"
-          className="btn btn-quiet"
-          onClick={onToggleHidden}
-          aria-pressed={hidden}
-          title={hidden ? "Hide dotfiles" : "Show dotfiles"}
-        >
-          {hidden ? "Hide dotfiles" : "Show dotfiles"}
-        </button>
+        <span className="filetree-head-actions">
+          {onReveal !== undefined && (
+            <button
+              type="button"
+              className="btn btn-quiet"
+              onClick={() => onReveal("")}
+              title={`Show ${cwd} in Finder`}
+              aria-label={`Reveal the working directory in Finder`}
+            >
+              Show in Finder
+            </button>
+          )}
+          {/*
+            The toggle says what it will DO, not what is currently true — a button labelled by its
+            state is read as a status, and then clicked twice by anyone who reads it as one.
+          */}
+          <button
+            type="button"
+            className="btn btn-quiet"
+            onClick={onToggleHidden}
+            aria-pressed={hidden}
+            title={hidden ? "Hide dotfiles" : "Show dotfiles"}
+          >
+            {hidden ? "Hide dotfiles" : "Show dotfiles"}
+          </button>
+        </span>
       </div>
 
       {root.status === "unloaded" ? (
@@ -228,8 +257,14 @@ function TreeNode({
           Under the row, not in a tooltip or a status strip: the refusal is about THIS path, and a
           reader who clicked twice needs to see that the answer changed. A success has no note at all
           (ADR-0014 rule 6) — absence means no stated problem, never "it worked".
+
+          `depth` is 0 rather than this node's depth, and that is the C20 reading of the same addition:
+          the note is a child of the same `<li>` that already carries this row's indentation, so passing
+          `depth` would add it a SECOND time and set the note one step right of the row it describes
+          (measured in the rendered markup: row at 12px, note at 24px, for a row at depth 1). The note
+          aligns with its row when it adds no indentation of its own.
         */
-        <FileErrorNote path={path} reason={revealNote.reason} code={revealNote.code} message={revealNote.message} depth={depth} />
+        <FileErrorNote path={path} reason={revealNote.reason} code={revealNote.code} message={revealNote.message} />
       )}
 
       {children !== undefined && (

@@ -77,7 +77,9 @@ Concretely:
    `resolveWithin` exactly as a read does. Two containment implementations is how the weaker one
    eventually wins, and `escapes-cwd` and its siblings keep one meaning.
 4. **The action is scoped to a session.** `sessionId` → `cwd` through the supervisor, the same single
-   source reads use.
+   source reads use. The workspace itself is addressed as the empty relative path, which
+   `resolveWithin` normalizes to the root — so revealing the folder the session works in is not an
+   exception to this rule or a second code path, it is the same call with the path that names the root.
 5. **It reveals; it does not open.** `-R` selects the item in Finder. It hands the bytes to no
    application, so ADR-0007's guardrail 5 — *"nothing discovered by browsing is executed, sourced, or
    interpreted"* — stays true verbatim rather than by amendment.

@@ -4074,6 +4074,15 @@ select.btn { font-family: var(--sans); }
   gap: var(--sp-2); margin-bottom: 6px;
 }
 .filetree-scope { color: var(--dim); font-size: var(--fs-xs); }
+/*
+   The header's controls share a line, and this wrapper is the C20 reading of the button added for #255.
+   `.filetree-head` is `justify-content: space-between`, which distributes free space across WHATEVER children
+   exist — so a second button as a bare sibling would have moved the first to the middle of the bar. Grouping
+   them makes the label and the group the only two things `space-between` has to place, which is what it was
+   written for. `flex: none` keeps a long label from squeezing the buttons; the label ellipsises instead.
+*/
+.filetree-head-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.filetree-head .filetree-scope { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .filetree-head .btn-quiet { font-size: var(--fs-xs); padding: 2px 6px; }
 
 /* The lists are reset — this is a tree, not a document. `role=tree`/`treeitem` carries the structure

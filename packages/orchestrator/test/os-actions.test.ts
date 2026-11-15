@@ -164,14 +164,25 @@ test("a file deleted between listing and reveal is `not-found`, with no spawn", 
   const root = makeRoot("deleted");
   write(root, "gone.txt");
   const open = recorder(root);
-  // Resolved first so `resolveWithin` succeeds, then removed: the window between listing and clicking.  assert.equal(revealInFileManager(root, "gone.txt", { openPath: open.path, platform: "darwin" }).ok, true);
+  // Revealed once while the file is there, so the refused call below is about the window between the
+  // listing and the click — not about a path that never existed.
+  assert.equal(revealInFileManager(root, "gone.txt", { openPath: open.path, platform: "darwin" }).ok, true);
+  assert.deepEqual(await settled(open.argv), ["-g", "-R", "--", join(root, "gone.txt")]);
+
   rmSync(join(root, "gone.txt"));
   // A second file keeps the root resolvable, so the refusal is about the entry rather than the root.
   write(root, "still-here.txt");
-  const second = revealInFileManager(root, "gone.txt", { openPath: open.path, platform: "darwin" });
+  // A recorder OF ITS OWN for the refused call. The first one rewrites its log on every run, so reuse
+  // would leave four identical lines whether or not a second spawn happened — an assertion that could
+  // not fail. An empty log is the only form of "no spawn" this can prove.
+  const refused = recorder(root);
+  const second = revealInFileManager(root, "gone.txt", { openPath: refused.path, platform: "darwin" });
   assert.equal(second.ok, false);
   assert.equal(second.ok === false && second.error.reason, "not-found");
   assert.equal(second.ok === false && second.error.code, "ENOENT");
+  // Waited out rather than checked immediately, because a spawn would be asynchronous if it happened.
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.deepEqual(refused.argv(), [], "a deleted path must not reach the launcher");
 });
 
 test("a non-darwin platform is `unsupported-platform`, not an ENOENT", () => {

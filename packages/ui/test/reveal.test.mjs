@@ -124,16 +124,55 @@ test("the reveal control is labelled with the entry's name, not the word 'Reveal
   assert.match(html, /title="Show in Finder"/);
 });
 
+test("the WORKSPACE can be shown in Finder, so an empty folder is not a dead end", () => {
+  /*
+   * Reported from a screenshot: a session whose workspace held only `.idea` — and an empty workspace, which
+   * renders NO ROWS at all — had no way to open the folder it was browsing. The rows are the CHILDREN of the
+   * workspace, so the workspace itself was the one directory in the panel with no reveal, and an empty
+   * directory removed the only control that could have helped.
+   *
+   * The empty state is the fixture that matters: it is the case where nothing else is on screen, and the one
+   * the per-row control can never cover however carefully it is styled.
+   */
+  const html = renderTree(stateWith([]));
+  assert.match(html, /This directory is empty\./, "the empty state must still be stated");
+
+  // The control is in the HEADER, named in words rather than as a glyph, because it is the panel's own
+  // subject rather than one row among forty.
+  const button = /<button[^>]*aria-label="Reveal the working directory in Finder"[^>]*>([^<]*)</.exec(html);
+  assert.ok(button !== null, `the empty workspace must offer the reveal: ${html}`);
+  assert.equal(button[1], "Show in Finder", "the visible label says what it does, not where it goes");
+  // And the path, so a reader with two windows open knows which folder this button belongs to.
+  assert.match(html, /title="Show \/work in Finder"/);
+});
+
+test("the workspace's reveal is a different control from a row's, not a duplicate of one", () => {
+  /*
+   * The header control is `.btn.btn-quiet` and the per-row one is `.filetree-reveal`, so a reader meets one
+   * worded affordance for the folder and one glyph for each file. Asserted as a pair: collapsing them into a
+   * single class would silently make the header button inherit `flex: none`/18px from a rule written for a
+   * row glyph, which is C20 in the other direction — a rule correct for one child, applied to a second.
+   */
+  const html = renderTree(stateWith([{ name: "src", kind: "directory", hidden: false, mtimeMs: 1 }]));
+  assert.match(html, /class="btn btn-quiet"[^>]*aria-label="Reveal the working directory in Finder"/);
+  assert.match(html, /class="filetree-reveal"[^>]*aria-label="Reveal src in Finder"/);
+});
+
 test("no handler means NO control, so a peer that predates `reveal` is not offered it", () => {
   /*
    * The version gate, asserted at the render: a v9 orchestrator answers `bad control: unknown kind
    * 'reveal'`, which surfaces as a bug rather than as a version skew. Withholding the control is the
    * honest form — and the assertion has to be the ABSENCE of the class, not merely a different label.
+   *
+   * BOTH controls are checked. The header button is `.btn.btn-quiet` rather than `.filetree-reveal`, so a
+   * check on the row class alone would have left the newer control ungated — the exact way this gate would
+   * rot as more affordances are added.
    */
   const html = renderTree(stateWith([{ name: "src", kind: "directory", hidden: false, mtimeMs: 1 }]), {
     reveal: false,
   });
-  assert.ok(!/filetree-reveal/.test(html), "no handler must mean no control");
+  assert.ok(!/filetree-reveal/.test(html), "no handler must mean no per-row control");
+  assert.ok(!/in Finder/.test(html), `no handler must mean no header control either: ${html}`);
   // The row itself is untouched: withholding one affordance must not remove the tree.
   assert.match(html, /class="filetree-row"/);
 });
@@ -173,6 +212,35 @@ test("a path with no refusal carries no note, and its row is not dimmed", () => 
   // an error frame or as a disabled row. (It is also not "it worked" — see the state module.)
   const html = renderTree(stateWith([{ name: "a.txt", kind: "file", hidden: false, size: 1, mtimeMs: 1 }]));
   assert.ok(!/filetree-error/.test(html), "a row that was never refused must not look refused");
+});
+
+test("a refusal is indented with its OWN row, not one step further in", () => {
+  /*
+   * C20 again, in its measured form: the note is a child of the `<li>` that already carries the row's
+   * indentation, so any padding of its own is applied TWICE, and the refusal appears one level deeper
+   * than the file it is about. This shipped in the first draft of the slice — row at 12px, note at 24px,
+   * for a row at depth 1 — and no existing assertion could see it, because every one of them asked what
+   * the note SAYS rather than where it sits.
+   *
+   * The nested-row fixture is what makes the defect visible at all: at depth 0 the doubled padding is 0px
+   * and the bug is invisible, which is why the tests above (all on the root) stayed green.
+   */
+  const state = stateWith([{ name: "src", kind: "directory", hidden: false, mtimeMs: 1 }]);
+  state.expanded["s1\u0000src"] = true;
+  state.directories["s1\u0000src"] = {
+    status: "loaded",
+    truncated: false,
+    entries: [{ name: "a.txt", kind: "file", hidden: false, size: 1, mtimeMs: 1 }],
+  };
+  state.revealNotes["s1\u0000src/a.txt"] = { reason: "not-found", message: "gone" };
+
+  const html = renderTree(state);
+  // The `<li>` carries the row's indentation; the note must add none of its own.
+  const note = /<p class="filetree-note filetree-error"[^>]*style="padding-left:(\d+)px"/.exec(html);
+  assert.ok(note !== null, `the note must be rendered: ${html}`);
+  assert.equal(Number(note[1]), 0, "the note sits inside the row's own indentation and must not repeat it");
+  // And the row it belongs to IS indented, so this is not asserting that nothing is ever indented.
+  assert.match(html, /<li class="filetree-node" role="treeitem" style="padding-left:12px">/);
 });
 
 test("the platform refusal has its OWN label, so it does not read as a read failure", () => {
