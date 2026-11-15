@@ -63,6 +63,59 @@ export function versionsIn(text) {
 }
 
 /**
+ * Products whose version this repository records but does not control.
+ *
+ * The list is closed on purpose. A version literal is exempt from the "current version" rule only
+ * when one of these names immediately precedes it, so adding a name is a deliberate edit that says
+ * "this number belongs to somebody else" — not a pattern that could absorb an accident.
+ *
+ * `Safehouse` and `Pi` are the two the documents actually record (C11, ADR-0010, the Phase 0
+ * result), and both are also the two that have already collided or come close to it: Safehouse
+ * 0.12.0 became this project's 0.12.0 on 2026-11-15. `node`, `TypeScript` and the rest are here for
+ * the same reason — `docs/STACK.md` and `docs/CONSTRAINTS.md` name their versions, and those records
+ * only mean anything if they can be written down.
+ */
+const THIRD_PARTY_NAMES = [
+  "Agent Safehouse",
+  "Safehouse",
+  "safehouse",
+  "Pi",
+  "pi",
+  "node",
+  "Node",
+  "npm",
+  "TypeScript",
+  "Electron",
+  "Vite",
+  "React",
+];
+
+/**
+ * Does the text immediately before this occurrence attribute it to somebody else?
+ *
+ * Attributed per OCCURRENCE rather than per line, and that distinction is load-bearing: the obvious
+ * fix — skip a line that mentions Safehouse — would also silence `Safehouse 0.12.0 runs Pi Central
+ * 0.12.0`, which is exactly the kind of sentence that should still fail. A per-line rule protects
+ * the innocent and the guilty together, so it is not a fix.
+ *
+ * The match window is short (a name, optional backtick or `v`, optional copula) because attribution
+ * is a local fact: `Verified against Safehouse `0.12.0`` and `Safehouse 0.12.0,` both count, while a
+ * number three clauses later is not attributed by a name that far away.
+ *
+ * @param {string} before the text preceding the version literal on its line
+ */
+function isAttributedElsewhere(before) {
+  const tail = before.slice(-40);
+  return THIRD_PARTY_NAMES.some((name) => {
+    // `Safehouse 0.12.0`, `Safehouse `0.12.0``, `Safehouse v0.12.0`, `Safehouse is 0.12.0`
+    const near = new RegExp(
+      "(?:^|[^\\w])" + name + "\\b[^\\w]{0,3}(?:is |was |at |of )?[\\s\u0060]*v?$",
+    );
+    return near.test(tail);
+  });
+}
+
+/**
  * Lines of a Markdown file that state the CURRENT version.
  *
  * `CHANGELOG.md` is exempt because that is where the current version belongs: its `## [x.y.z]`
@@ -79,10 +132,20 @@ export function currentVersionClaims(file, currentVersion) {
   if (isChangelog(file.path)) return [];
   const claims = [];
   for (const [index, line] of file.text.split("\n").entries()) {
-    for (const version of versionsIn(line)) {
-      if (version === currentVersion) {
-        claims.push({ path: file.path, line: index + 1, version, text: line.trim().slice(0, 100) });
-      }
+    for (const match of line.matchAll(VERSION_PATTERN)) {
+      const version = match[1];
+      if (version !== currentVersion) continue;
+      /*
+       * A number that belongs to a product this repository does not control is a record, not a claim.
+       *
+       * Without this, the rule held only while our version happened to differ from every third-party
+       * version in the docs — which is not a rule, it is an alignment. On 2026-11-15 a 0.12.0 release
+       * collided with the recorded Agent Safehouse 0.12.0 and six true statements became violations.
+       * The header above always said third-party literals were allowed; the implementation compared
+       * strings and could not tell whose number it was looking at.
+       */
+      if (isAttributedElsewhere(line.slice(0, match.index))) continue;
+      claims.push({ path: file.path, line: index + 1, version, text: line.trim().slice(0, 100) });
     }
   }
   return claims;
