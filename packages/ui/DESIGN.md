@@ -687,8 +687,16 @@ States per component (minimum): `default · hover · focus-visible · active · 
   browser is looking at and is never sent to the orchestrator (C2). It must not be routed through the
   `session` upsert, whose focus rule is the opposite one — "never steal focus from a session the user
   is reading" — and which therefore cannot move focus at all once it is set (issue #40).
-- **Enter** in the composer sends per §4. **⌘Enter** also sends. **Shift+Enter** newline. **↑** on an empty composer recalls the last sent message (per session).
-- **⌘N** new session · **⌘⇧O** open-in-directory · **⌘K** jump-to-session (optional) · **/** focus filter · **Esc** per the §4.3 ladder · **⌘.** abort · **⌘\\** toggle rail.
+- **Enter** in the composer sends per §4. **Shift+Enter** newline. **Alt+Enter** queues for after this run. **⌥Q** shows the queue. **Esc** per the §4.3 ladder.
+- **The full key list lives in `src/shortcuts.ts`, and the `?` control in the left bar opens it.** That sentence is the whole rule, and it replaced a hand-written list here that had rotted: it promised `⌘K`, `⌘.`, `⌘\` and `/`, and of those only `/` was ever implemented — a documented key that does nothing reads as a broken app rather than as a stale note. So the chords are data: one registry, rendered by `ShortcutSheet`, dispatched by `App` **by binding id** (never by `event.key`), and `shortcuts.test.mjs` holds the two together by name. A key cannot be documented without existing, or exist without being documented.
+
+  Current bindings: **⌘N** new session · **⌘⇧O** open-in-directory · **⌘.** stop the focused session, and again in the dialog to confirm · **⌘F** forget the focused session (removes the row, keeps the transcript, so it asks nothing) · **⌘⌫** delete its transcript, likewise (suppressed inside a text field, where it is delete-to-line-start) · **⌥↓/⌥↑** next/previous row in the rail, in the order shown · **⌘1/⌘2** Sessions/History · **⌘,** Settings · **⌘K** this sheet.
+
+  **⌘F is claimed deliberately, not by oversight.** It is find-in-page elsewhere, and this app has never had a find: no shell accelerator, nothing in the shell's menu. The rail's own filter field is how you find a session, and `⌘F` pointing at it would be defensible — it was rejected because a key that focuses a field is not what `⌘F` promises, and the request was for forget.
+
+  **Bindings avoid keys a layout may not have unmodified.** `⌘/` opened this sheet first, and on a German keyboard `/` is Shift+7 — so the key was listed, tooltipped and dead. `⌘1`/`⌘2` had the same fault on AZERTY. Two fixes, both kept: the sheet moved to **⌘K**, a letter, which needs no layout assumption; and `resolveChord` now treats a Shift the LAYOUT required as not part of the chord, so a punctuation or digit binding survives being Shift-ed. Letters are excluded from that tolerance on purpose — `⌘O` and `⌘⇧O` are different bindings here — and an explicit Shift is never satisfied without it.
+
+  Shortcuts are macOS notation (`⌘⇧O`) and spelled out everywhere else (`Ctrl+Shift+O`), from the event's own modifiers rather than from the platform — a Mac is not punished for a browser that reports Ctrl, and a Windows reader is never shown a glyph their keyboard lacks.
 - **Panel modes.** The right panel shows `Session` (the auditable facts) or `Files` (the working
   directory). A tab strip, so it reads like the topbar's `Sessions|History`. Both bodies stay mounted
   under one stable `role="tabpanel"` id — remounting on switch would lose the document's scroll

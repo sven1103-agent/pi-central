@@ -25,6 +25,7 @@
  * stray `Enter` — from a reader who was typing in the composer a moment ago — into an irreversible delete.
  */
 import { useEffect, useRef } from "react";
+import { DELETE_CHORD, matchesChord } from "../shortcuts.ts";
 
 export function ConfirmDelete({
   /** The session's display label, from `nameLabel`/`displayName` — never a handle if a prompt explains it. */
@@ -46,14 +47,49 @@ export function ConfirmDelete({
   onConfirm: () => void;
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
+  /*
+   * The latest callbacks, read through refs so the listeners below can be registered once.
+   *
+   * `App` passes inline arrows, so a dependency on them re-runs those effects on every render of the shell — and a
+   * socket event re-renders it. The focus effect moves focus to `Keep it`, so each re-render would pull the reader back
+   * off the control they had tabbed to, on the one dialog where confusing which button is focused is irreversible.
+   */
+  const cancelOf = useRef(onCancel);
+  cancelOf.current = onCancel;
+  const confirmOf = useRef(onConfirm);
+  confirmOf.current = onConfirm;
+
   useEffect(() => {
+    // Mount-only, for the same reason: "focus enters on open" is a mount, not an update.
     cancelRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onCancel();
+      if (event.key === "Escape") cancelOf.current();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onCancel]);
+  }, []);
+
+  /*
+   * The chord that OPENED this dialog confirms it, so a run of finished sessions is one gesture each rather than
+   * key-then-pointer. Safe for the reason this dialog already documents: focus is on `Keep it`, so a stray Enter
+   * cancels, and the key must be pressed twice on a dialog that states what will be removed.
+   *
+   * Capture phase, and stopped there: the shell's own listener would otherwise open the NEXT dialog from the same
+   * keystroke.
+   */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!matchesChord(event, DELETE_CHORD)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      confirmOf.current();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, []);
 
   return (
     <div className="modal-backdrop" onClick={onCancel} role="presentation">

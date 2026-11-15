@@ -10,17 +10,25 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { resolveInstallationRoot } from "../src/installation-root.ts";
 import { isOwnInstallation } from "@pi-central/protocol";
 
 test("the walk finds THIS repository, from the real module URL", () => {
   // The one assertion that cannot be satisfied by a wrong implementation: whatever the checkout is
   // called and wherever it sits, the answer must be the root this test file lives under.
+  //
+  // Compared against the path DERIVED from `import.meta.url` rather than against a list of directory
+  // names, which is what this asserted first (`…/pi-central-dev` or `…/pi-central`). That form passed only
+  // in the two checkouts the author happened to have: it failed for every worktree, and this repository is
+  // worked in worktrees by design (the one-writer rule in DOGFOODING.md leaves no other option). The
+  // invariant was always "the walk finds the root above this file", so that is what is now written.
   const root = resolveInstallationRoot();
   assert.ok(root, "the installation root must be identifiable in a real checkout");
   // `packages/orchestrator/test/…` → `packages/orchestrator` → the root.
-  assert.ok(root.endsWith("/pi-central-dev") || root.endsWith("/pi-central"), `unexpected root: ${root}`);
+  const expected = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+  assert.equal(root, expected, "the walk must find the root this test file lives under");
   // And the answer is usable by the predicate the UI and supervisor share.
   assert.equal(isOwnInstallation(join(root, "packages", "ui"), root), true);
 });

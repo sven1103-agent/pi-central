@@ -691,6 +691,26 @@ button { font: inherit; color: inherit; }
 .group-header .count { font-family: var(--mono); }
 
 /*
+ * A group heading that is also a bulk-selection control (the Stopped heading).
+ *
+ * Styled as the heading it replaces, plus a hover/focus affordance — because an underlined link in a heading row would
+ * promise navigation, and this selects rows. The count beside it is unchanged, so "select all 7" says how many before
+ * the reader presses it.
+ */
+.group-select {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  padding: 0 2px;
+  margin: 0 -2px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.group-select:hover { color: var(--text); background: var(--panel-3); border-color: var(--line-strong); }
+.group-select:focus-visible { outline: none; box-shadow: var(--focus); }
+
+/*
  * Row: 3 lines, state on the left border, no card.
  *
  * ## The rounded corner is what separates rows, and it was missing
@@ -4599,6 +4619,143 @@ select.btn { font-family: var(--sans); }
 .settings-nav-item.is-active { background: var(--panel-2); color: var(--text); font-weight: 600; }
 .settings-nav-item:focus-visible { outline: none; box-shadow: var(--focus); }
 .settings-content { min-width: 0; }
+
+/* --- The keyboard sheet -----------------------------------------------------------------------
+
+   Two columns per row: chords on the left at a FIXED width, the action on the right. The fixed chord column is what
+   makes the sheet scannable — a reader looking for `⌘.` scans one vertical strip instead of hunting the right edge of
+   every row. Widened beyond `Settings` because `Ctrl+Backspace` is nearly twice `⇧Enter`, and the two must not shift the
+   description column by a different amount.
+
+   ## The type sizes are the point, not a detail
+
+   Reported from use, with a screenshot: *"It is a little bit hard to read, since the icons are very small."* The
+   chords were set at `--fs-xs` (11px) — the app's second-smallest size — while the sheet's own introduction paragraph
+   was `--fs-base` (13px). So the keys, which are the entire content of a KEYBOARD sheet, were smaller than the
+   sentence explaining them, and smaller than the action labels beside them. That is backwards: a list whose purpose is
+   to teach keys has to make the keys the most legible thing on it.
+
+   The chords are now `--fs-base` (the app's body size) and the labels match them, so a key and its meaning read as one
+   line rather than as a caption under a glyph. The notes stay one step down at `--fs-sm`, which keeps the
+   label/note hierarchy the rest of the app uses.
+
+   The column is 136px. It was 148px, which fit `Ctrl+Backspace` with room to spare on a Mac — where the widest chord
+   is `⇧Enter` — and left ~120px of empty column in every single row. That void is not neutral: it pushes the key so far
+   from its label that the eye stops pairing them, which reads as "the glyphs float by themselves". At 13px mono,
+   `Ctrl+Backspace` is 14 characters ≈ 109px plus padding and border, so 136px still fits the longest chord without
+   wrapping it onto two lines — the failure mode that is invisible in the short chords at the top of the sheet.
+*/
+/*
+ * The dialog is a COLUMN: a fixed head, ONE scrolling body, a fixed footer.
+ *
+ * This replaced a single flat block of content, and the reason is the second report from use: *"it is spanning the
+ * vertical space of the screen and cutting off the bottom"*. `.modal-backdrop` is `place-items: center` with no
+ * scroller, so a dialog taller than the window loses its top AND its bottom — and the bottom is where `Close` is, the
+ * one way out of a modal that also traps Escape only for a reader who knows it.
+ *
+ * Bounding the height alone would not be enough: the list is the part that grows, so the list has to be the part that
+ * scrolls. A `max-height` on the dialog with `overflow: auto` would put the TITLE under the scroller too, so a reader
+ * halfway down the list is looking at a list with no heading and no button.
+ *
+ * `100dvh` rather than `100vh`, matching `.modal-sheet`: on a mobile browser `vh` is the height WITHOUT the address
+ * bar, so `100vh` overflows by exactly the chrome height — the same cut-off this is fixing, at a smaller scale.
+ */
+.keys {
+  max-width: 640px;
+  width: min(640px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  /*
+   * 760px is a CEILING, not a height, so a short list still produces a short dialog — the reason it is `max-height`
+   * rather than the fixed `height` `.modal-sheet` uses (that dialog is a file browser, where a stable box is the point).
+   * Whatever the pixel value, the `calc(100dvh - …)` term is what guarantees the dialog fits the window.
+   */
+  max-height: min(760px, calc(100dvh - 2 * var(--sp-4)));
+  /* `hidden` here and `auto` on the body: nothing in the dialog itself may scroll, or there would be two scrollers
+     fighting for the same wheel events. */
+  overflow: hidden;
+}
+.keys-head { flex: none; }
+.keys-body {
+  /* The ONLY scroller in the sheet — see `.keys`. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* Padding-right so the chords do not sit under the thumb, and the negative margin keeps the rows at the dialog's
+     own measure rather than shifting everything left when the bar appears. */
+  padding-right: var(--sp-3);
+  margin-right: calc(-1 * var(--sp-3));
+  /* The app's one slim overlay, so every scroller in Pi Central dresses alike. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.keys-body::-webkit-scrollbar { width: 10px; }
+.keys-body::-webkit-scrollbar-track { background: transparent; }
+.keys-body::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 5px;
+}
+.keys .dialog-actions {
+  flex: none;
+  /* `margin-top` on the footer rather than a border: the scrolled content already has a soft edge, and a rule there
+     would read as the end of the list rather than the end of the dialog. */
+  margin-top: var(--sp-3);
+}
+.keys-lede { margin-bottom: var(--sp-2) !important; font-size: var(--fs-base); }
+.keys-group { margin-top: var(--sp-4); }
+.keys-group h4 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.keys-list { margin: 0; }
+.keys-row {
+  display: grid;
+  grid-template-columns: 136px 1fr;
+  gap: var(--sp-3);
+  align-items: baseline;
+  /* 6px rather than 3: rows of 11px text needed air between them more than they needed a hairline. */
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+.keys-row:first-child { border-top: 0; }
+.keys-chord { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.keys-combo { display: inline-flex; align-items: center; gap: 4px; }
+.keys-or { font-size: var(--fs-xs); color: var(--dim); }
+/*
+ * The chord boxes fall back to the fonts that actually CARRY the symbols.
+ *
+ * Measured on this machine, over the 88 installed fonts' cmaps: `⌫` (U+232B) is declared by 11 of them and by neither
+ * `SFMono`/`Menlo`/`Monaco` (`--mono`) nor `SFCompact` — the face `-apple-system` resolves to. `⌘` and `⌥` are in
+ * SFCompact, which is why the rail's `⌘⇧O` has always rendered while `⌫` has already been reported as an empty box
+ * (`SessionControlBar` records that attempt). So the symbolic keys name the two faces every macOS install has, and the
+ * mono face keeps doing what it is good at — aligning the Latin ones.
+ */
+.keys-chord kbd {
+  /*
+   * `--mono` FIRST, and that is not a preference: it is what aligns the Latin keys (`Enter`, `Tab`, `Esc`) into a
+   * column. The two symbolic faces come after it, so they are consulted only for the codepoints it lacks.
+   */
+  font-family: var(--mono), "Apple Symbols", "Keyboard";
+  /* Body size, not `--fs-xs`: see this section's header. The symbols are the content of the sheet. */
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  /* 2px/6px rather than 1px/5px: the box has to look like a key a finger could land on, not like a footnote marker. */
+  padding: 2px 6px;
+  /* Never shrink a chord into an ellipsis: half a shortcut is worse than none. */
+  white-space: nowrap;
+}
+.keys-what { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-base); color: var(--text); }
+.keys-note { font-size: var(--fs-sm); color: var(--dim); }
 
 /* --- The panel: a region with modes, and a draggable edge (issue #8, reworked) ------------------
 
