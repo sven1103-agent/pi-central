@@ -87,6 +87,50 @@ test("a third-party version in prose is not ours, and is allowed", () => {
   assert.deepEqual(claims, []);
 });
 
+test("a third-party version that COLLIDES with ours is still a third-party version", () => {
+  /*
+   * The collision case, which the test above cannot reach.
+   *
+   * The rule this policy documents is that third-party version literals are allowed in prose; only a
+   * claim about *Pi Central's own* version is banned. `docs/CONSTRAINTS.md` records what was verified
+   * (Pi, Safehouse, node), and that record is only useful if it names the versions.
+   *
+   * The implementation ignored attribution entirely and compared version strings, so the rule held
+   * exactly as long as our number differed from every third-party number. On 2026-11-15 a release of
+   * 0.12.0 collided with the recorded Agent Safehouse 0.12.0 and six true statements across five
+   * documents became "violations" — the release gate failed on facts.
+   *
+   * The test above passed throughout, because it pinned the current version to 0.2.0 and therefore
+   * never produced a collision. It was written to guard this rule and was structurally unable to
+   * falsify it.
+   */
+  const claims = currentVersionClaims(
+    file("docs/CONSTRAINTS.md", "Verified against Safehouse `0.12.0` (`bin/safehouse`):\n"),
+    "0.12.0",
+  );
+  assert.deepEqual(claims, []);
+});
+
+test("an attributed third-party version does not mask a real claim elsewhere on the line", () => {
+  // The narrow fix would be "ignore any line mentioning Safehouse". It would also stop catching a
+  // line that states our version in the same breath, which is the sentence most likely to exist.
+  const claims = currentVersionClaims(
+    file("docs/STACK.md", "Safehouse `0.12.0` runs Pi Central 0.12.0 here.\n"),
+    "0.12.0",
+  );
+  assert.equal(claims.length, 1, "the unattributed occurrence is still a claim");
+  assert.equal(claims[0].version, "0.12.0");
+});
+
+test("a bare current version in prose is still caught, with no attribution to excuse it", () => {
+  // The other direction of the same fix: nothing about it may weaken the original rule.
+  const claims = currentVersionClaims(
+    file("docs/STACK.md", "The current release is 0.12.0.\n"),
+    "0.12.0",
+  );
+  assert.equal(claims.length, 1);
+});
+
 test("CHANGELOG.md is exempt, because that is where the current version belongs", () => {
   // Its `## [0.2.0]` heading IS the release. Flagging it would demand the notes not name the thing
   // they are notes about.
