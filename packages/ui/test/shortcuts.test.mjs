@@ -198,6 +198,41 @@ test("a key a LAYOUT produces through Shift still reaches its binding", () => {
   assert.equal(matchesChord({ key: "o", metaKey: true, shiftKey: true }, "mod+o"), false);
 });
 
+test("forgetting is a key, and it is not the same key as deleting", () => {
+  /*
+   * Reported from use: *"what is missing is a shortcut to forget sessions. Command + F would be suitable."*
+   *
+   * The registry is the assertion rather than the source text, for this file's usual reason: a key that exists in a
+   * handler but not in the list is a key nobody can discover.
+   */
+  const forget = SHORTCUTS.find((shortcut) => shortcut.id === "session.forget");
+  assert.ok(forget, "there is a Forget binding");
+  assert.equal(forget.shell, true, "answered by the shell, so it works from anywhere");
+  assert.deepEqual(forget.keys, ["mod+f"], "⌘F, as asked for");
+
+  // Housekeeping keeps its two actions apart. One key doing both would make the destructive one a slip of the other.
+  assert.notDeepEqual(forget.keys, SHORTCUTS.find((shortcut) => shortcut.id === "session.delete")?.keys);
+  // And it must NOT stand down in a field the way delete does: `⌘F` is not a native text-editing chord on macOS
+  // (that is ⌃F), so suppressing it here would disable the key for a reader who happened to click the composer.
+  assert.equal(forget.avoidInEditable, undefined, "no text-editing conflict, so it is not suppressed");
+});
+
+test("forget asks nothing, because the transcript survives it", () => {
+  // The distinction that decides whether a dialog is owed: `forget` removes the row and KEEPS the file (the store's
+  // `forget` case), and a running session un-forgets itself on its next broadcast. Stop and delete are irreversible,
+  // which is why they confirm and this does not — a dialog around a reversible act trains a reader to dismiss dialogs.
+  const body = code(app).slice(code(app).indexOf("const requestForgetFocused"));
+  const fn = body.slice(0, body.indexOf("const shellShortcuts"));
+  assert.match(fn, /kind: "forget"/, "it dispatches the store's forget, the same action the buttons use");
+  assert.doesNotMatch(fn, /setPendingDelete|setConfirmStop/, "and opens no confirmation");
+
+  // It reads the SAME two lookups the delete path does, so the key and the buttons cannot mean different sessions.
+  assert.match(fn, /focusedSession\(state\)/, "a live session with a file");
+  assert.match(fn, /focusedStoppedRow\(state\)/, "or a roster row with no process");
+  // Nothing focused is answered, not ignored — a key that silently does nothing reads as broken.
+  assert.match(fn, /noteError/, "and says why when there is nothing to forget");
+});
+
 test("the keys sheet is on a letter, so no layout can hide it", () => {
   // `⌘/` worked once the Shift tolerance landed, but a letter needs no assumption at all — and `⌘K` is the convention.
   const binding = SHORTCUTS.find((shortcut) => shortcut.id === "keys.show");

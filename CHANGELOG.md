@@ -17,6 +17,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - ADR-0014 proposes one bounded OS action: reveal a resolved path in Finder, so a PDF, an archive or a video is reachable without a renderer per format ([#254]).
 - `⌘.` stops the focused session and `⌘⌫` deletes its transcript, each confirming at the second press ([#253]).
 - The Stopped heading selects its whole group, so finished sessions are cleared in one confirmation ([#253]).
+- `⌘F` forgets the focused session: the row leaves the list, the transcript stays ([#253]).
 - `⌘K` opens every keyboard shortcut, reachable from the app bar's `?` control ([#253]).
 
 ### Fixed

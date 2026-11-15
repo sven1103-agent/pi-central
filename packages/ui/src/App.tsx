@@ -1355,6 +1355,41 @@ export function App() {
   }, [state, stoppedHistory]);
 
   /**
+   * Forget the focused session (issue #253, by keyboard).
+   *
+   * ## Why this one has no dialog
+   *
+   * Stop and delete each ask, and this does not, and the difference is the action rather than a matter of taste.
+   * `forget` removes the ROW and keeps the transcript (the store's `forget` case says so in full), a running session
+   * un-forgets itself on its next broadcast, and History still lists the file — so the action can be undone by resuming
+   * it, and there is nothing irreversible to confirm. A dialog here would be friction around a reversible act, which is
+   * exactly the pattern that trains a reader to dismiss dialogs without reading them.
+   *
+   * ## Why it routes through the same two lookups as the buttons
+   *
+   * A focused row is one of two things — a live session, or a roster entry with no process — and the three Forget
+   * buttons in this file each reach for a different one. Rather than pick, this takes whichever exists, in the same
+   * order `requestDeleteFocused` does, so the key and the buttons cannot disagree about WHICH session they mean.
+   */
+  const requestForgetFocused = useCallback(() => {
+    const target = focusedSession(state);
+    const path = target?.sessionFile ?? focusedStoppedRow(state)?.entry.path;
+    if (path === undefined) {
+      /*
+       * Says why nothing happened, in the app's one error surface. A key that silently does nothing reads as broken,
+       * and the reason here is not obvious: with no session focused there is nothing to forget, and the reader may
+       * have believed the rail's highlighted page was a selection.
+       */
+      dispatch({
+        kind: "noteError",
+        message: "There is nothing to forget: no session is focused. Choose one in the list, then press ⌘F again.",
+      });
+      return;
+    }
+    dispatch({ kind: "forget", path });
+  }, [state]);
+
+  /**
    * The shell's bindings, keyed by the registry's ID.
    *
    * ## Why a map of ids rather than a `switch` on the event
@@ -1382,12 +1417,13 @@ export function App() {
         }
         requestDeleteFocused();
       },
+      "session.forget": requestForgetFocused,
       "page.sessions": () => setTab("sessions"),
       "page.history": () => setTab("history"),
       "settings.open": () => setSettingsOpen(true),
       "keys.show": () => setKeysOpen((open) => !open),
     }),
-    [onStartSession, requestStop, requestDeleteFocused, state.install?.protocol],
+    [onStartSession, requestStop, requestDeleteFocused, requestForgetFocused, state.install?.protocol],
   );
 
   /**

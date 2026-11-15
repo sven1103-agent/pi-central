@@ -105,6 +105,30 @@ export const SHORTCUTS: readonly ShortcutDefinition[] = [
     shell: true,
   },
   {
+    id: "session.forget",
+    group: "sessions",
+    /*
+     * `⌘F`, and the pairing with `⌘⌫` is the point: the two housekeeping actions sit together, the reversible one
+     * first and the irreversible one after it.
+     *
+     * `⌘F` is normally find-in-page, and that was the argument against it. Three things settled it. This app has never
+     * had a find (no shell accelerator, nothing in the shell's menu), so the key is not taking something away — it is
+     * claiming something nobody implemented. The rail ALREADY has a filter field, so "find a session" exists and is
+     * reached by its own control; `⌘F` pointing at that would be defensible and was rejected because the report asked
+     * for forget and a key that focuses a field is not what `⌘F` promises. And unlike `⌘/` on a German keyboard, `F` is a
+     * letter: no layout can hide it.
+     *
+     * No confirmation, unlike stop and delete. `forget` removes the row and KEEPS the transcript (see the store's
+     * `forget` case), and a running session un-forgets itself on its next broadcast — so the action is reversible and a
+     * dialog would be friction around nothing. The cost is stated where it is offered: the button's title says "the
+     * session file is not deleted".
+     */
+    keys: ["mod+f"],
+    label: "Forget the focused session",
+    note: "Removes the row from the list. The transcript is kept, and History still finds it.",
+    shell: true,
+  },
+  {
     id: "session.delete",
     group: "sessions",
     keys: ["mod+backspace"],
