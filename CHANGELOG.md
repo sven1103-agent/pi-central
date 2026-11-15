@@ -12,6 +12,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
+## [0.12.0] — 2026-11-15
+
 ### Added
 
 - ADR-0014 proposes one bounded OS action: reveal a resolved path in Finder, so a PDF, an archive or a video is reachable without a renderer per format ([#254]).
