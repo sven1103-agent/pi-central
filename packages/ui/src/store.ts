@@ -700,6 +700,11 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
     case "places":
     case "placeListing":
     case "placeError":
+    // The reveal refusal (issue #255, ADR-0014) joins them, and for the sharper version of the same reason:
+    // it is a statement about an ATTEMPT rather than about what is known, so it belongs to the file tree's
+    // own store (`files.ts#revealNotes`) and writing it here would make a refusal about a path look like a
+    // fact about the session.
+    case "osActionError":
     // The installation facts (issue #220) are the same shape of no-op, and deliberately so: see the
     // `installFacts` event's docstring. It carries no session data, so there is nothing here for it to replace —
     // and folding it into this state would make it a second, narrower author of what a snapshot owns (C14).

@@ -1,6 +1,6 @@
 # ADR-0014 — The orchestrator may take one bounded OS action on a path it resolved
 
-- **Status:** Proposed
+- **Status:** Accepted (implemented in #255)
 - **Date:** 2026-11-14
 - **Amends:** [ADR-0007](0007-filesystem-access-model.md) (a third filesystem-adjacent capability, with its own boundary)
 - **Opened by:** the file viewer's format gap — see [Context](#context)
@@ -77,7 +77,9 @@ Concretely:
    `resolveWithin` exactly as a read does. Two containment implementations is how the weaker one
    eventually wins, and `escapes-cwd` and its siblings keep one meaning.
 4. **The action is scoped to a session.** `sessionId` → `cwd` through the supervisor, the same single
-   source reads use.
+   source reads use. The workspace itself is addressed as the empty relative path, which
+   `resolveWithin` normalizes to the root — so revealing the folder the session works in is not an
+   exception to this rule or a second code path, it is the same call with the path that names the root.
 5. **It reveals; it does not open.** `-R` selects the item in Finder. It hands the bytes to no
    application, so ADR-0007's guardrail 5 — *"nothing discovered by browsing is executed, sourced, or
    interpreted"* — stays true verbatim rather than by amendment.
@@ -151,4 +153,14 @@ Each of these is a test, and each can fail:
 - A path outside the session's `cwd` can be revealed → the containment reuse is wrong.
 - An argv element can select an application → the fixed argv shape was not implemented.
 - The action is unavailable from a plain browser tab → the capability was put in the wrong process.
-- Revealing a deleted file reports success → the pre-spawn `lstat` is missing.
+- Revealing a deleted file reports success → the pre-spawn existence check is missing.
+
+**One correction, measured while implementing (#255).** The last falsifier was written as "the pre-spawn
+`lstat` is missing", and `lstat` is not what provides that guarantee: `resolveWithin`'s `realpathSync`
+already fails with `ENOENT` for a path that is gone, so the deleted-file test passes with or without the
+`lstat`, and reverting the `lstat` does not turn the decision over. The `lstat` is kept — it closes the
+narrower window between that `realpath` and the spawn, and it means a future change to `resolveWithin`
+(a cached realpath, say) cannot silently remove the guarantee this record believed it had — but it is
+recorded as defence in depth rather than as the falsifier it was described as. This is the same
+correction the `--` rule needed above, and for the same reason: a falsifier that cannot be triggered by
+reverting the line it names is a claim, not evidence.

@@ -168,6 +168,22 @@ class FakeSupervisor extends EventEmitter {
     this.calls.push({ method: "readFile", args: [id, path] });
     return this.readFileImpl(id, path);
   }
+
+  /** Substitutable, so a test can make a reveal refuse with a real `OsActionError`. */
+  revealImpl: (
+    id: string,
+    path: string,
+    options?: { onLaunchError?: (error: { reason: string; code?: string; message: string }) => void },
+  ) => { ok: true } | { ok: false; error: { reason: string; code?: string; message: string } } = () => ({ ok: true });
+
+  reveal(
+    id: string,
+    path: string,
+    options?: { onLaunchError?: (error: { reason: string; code?: string; message: string }) => void },
+  ) {
+    this.calls.push({ method: "reveal", args: [id, path] });
+    return this.revealImpl(id, path, options);
+  }
 }
 
 function makeSession(id: string, cwd: string, name?: string): LiveSession {
@@ -974,6 +990,90 @@ test("a permission failure carries its errno, so it is not reported as a missing
     client.send({ kind: "readFile", sessionId: "s1", path: "k" });
     const event = await client.next("fileError");
     assert.equal(event.kind === "fileError" && event.code, "EACCES");
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+// --- The one OS action (issue #255, ADR-0014) ----------------------------------------------------
+
+test("a SUCCESSFUL reveal reports nothing at all, because a launch is not a reveal", async () => {
+  /*
+   * ADR-0014 rule 6: `open` returns 0 once launchd has accepted the request, which is not evidence that
+   * Finder displayed anything. So there is no success event, and the assertion is the ABSENCE of one — a
+   * `files`-like echo here would be the app claiming an outcome it cannot see.
+   *
+   * The control is still routed, which is what the recorded call proves: silence without forwarding would
+   * also be silent.
+   */
+  const supervisor = new FakeSupervisor();
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "reveal", sessionId: "s1", path: "src/a.txt" });
+    await assert.rejects(client.next(undefined, 300), /timed out/, "a successful reveal must send no event");
+    assert.deepEqual(supervisor.calls.at(-1), { method: "reveal", args: ["s1", "src/a.txt"] });
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("a REFUSED reveal is `osActionError`, never a `fileError` in a cache it does not belong to", async () => {
+  /*
+   * `fileError` carries `request: "list" | "read"`, and the client routes by it into `filesFailed` or
+   * `fileFailed`. A reveal refusal belongs to no cache — it is a statement about an ATTEMPT — so reusing
+   * that event would write the refusal into a place that describes what is known about a path.
+   */
+  const supervisor = new FakeSupervisor();
+  supervisor.revealImpl = () => ({
+    ok: false,
+    error: { reason: "escapes-cwd", message: '"../secret" resolves outside the working directory' },
+  });
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "reveal", sessionId: "s1", path: "../secret" });
+    const event = await client.next("osActionError");
+    assert.equal(event.kind === "osActionError" && event.action, "reveal");
+    assert.equal(event.kind === "osActionError" && event.reason, "escapes-cwd");
+    assert.equal(event.kind === "osActionError" && event.sessionId, "s1");
+    // The path is echoed as the CLIENT sent it, so the refusal is filed under the row that asked — the
+    // reason `readFile` echoes the client's spelling, applied to the per-row note this event feeds.
+    assert.equal(event.kind === "osActionError" && event.path, "../secret");
+    assert.match(event.kind === "osActionError" ? event.message : "", /outside the working directory/);
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("a failure known only AFTER the spawn is broadcast too, so silence is not mistaken for success", async () => {
+  /*
+   * The launcher can be missing, or exit non-zero, and both are decided after `spawn` returns — the refusal
+   * arrives on a callback rather than as a return value. If the transport dropped it, the reader would see
+   * exactly the same nothing as a successful reveal, which is the one thing ADR-0014 says must not be
+   * claimed.
+   */
+  const supervisor = new FakeSupervisor();
+  supervisor.revealImpl = (_id, _path, options) => {
+    options?.onLaunchError?.({ reason: "unreadable", message: "the launcher refused to show \"a.txt\" (exit 1)" });
+    return { ok: true };
+  };
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "reveal", sessionId: "s1", path: "a.txt" });
+    const event = await client.next("osActionError");
+    assert.equal(event.kind === "osActionError" && event.path, "a.txt");
+    assert.match(event.kind === "osActionError" ? event.message : "", /exit 1/);
     client.close();
   } finally {
     await transport.close();

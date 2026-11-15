@@ -40,8 +40,10 @@ import {
   PROTOCOL_VERSION,
   INSTALL_FACTS_SINCE_PROTOCOL,
   RETRY_SINCE_PROTOCOL,
+  REVEAL_SINCE_PROTOCOL,
   supportsInstall,
   supportsRetry,
+  supportsReveal,
 } from "../src/envelopes.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -172,4 +174,23 @@ test("the cheap re-check's two kinds are in the pinned surface, so neither can s
   // it — which for a re-check means a stale page that never learns it is stale.
   assert.ok(kindsOf("Control").includes("install"));
   assert.ok(kindsOf("Event").includes("installFacts"));
+});
+
+test("supportsReveal gates on the version that introduced the control, not on equality", () => {
+  // The consequence of getting this wrong is a control that answers `bad control: unknown kind 'reveal'` — a
+  // sentence that names a symptom rather than a version skew, for a gesture the reader believes worked.
+  assert.equal(supportsReveal(9), false, "v9 has no reveal control");
+  assert.equal(supportsReveal(REVEAL_SINCE_PROTOCOL), true, "the version that introduced it");
+  assert.equal(supportsReveal(REVEAL_SINCE_PROTOCOL + 1), true, "a later version still has it");
+  // Unknown is "the handshake has not finished", not "old" — the convention `supportsRetry` documents.
+  assert.equal(supportsReveal(undefined), true);
+  assert.equal(REVEAL_SINCE_PROTOCOL, 10);
+});
+
+test("reveal's two kinds are in the pinned surface, so neither can slip in unbumped", () => {
+  // `reveal` is a CONTROL and `osActionError` an EVENT. Adding either alone is a wire change (v9 → v10), and
+  // the two failures differ: a v9 orchestrator answers `unknown kind`, while a v9 UI would ignore the refusal
+  // and leave a silently-failing control on screen.
+  assert.ok(kindsOf("Control").includes("reveal"), "the reveal control must be in the surface");
+  assert.ok(kindsOf("Event").includes("osActionError"), "the refusal event must be in the surface");
 });

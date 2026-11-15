@@ -1,5 +1,5 @@
 {
-  "version": 9,
+  "version": 10,
   "control": [
     "abort",
     "answerDialog",
@@ -16,6 +16,7 @@
     "rename",
     "resume",
     "retry",
+    "reveal",
     "setModel",
     "setThinkingLevel",
     "start",
@@ -31,6 +32,7 @@
     "installFacts",
     "models",
     "modelsError",
+    "osActionError",
     "placeError",
     "placeListing",
     "places",

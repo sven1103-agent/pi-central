@@ -26,7 +26,7 @@ import {
   noteProtocolAgreement,
   type StorageLike,
 } from "../src/update-check.ts";
-import { PROTOCOL_VERSION } from "@pi-central/protocol";
+import { INSTALL_FACTS_SINCE_PROTOCOL, PROTOCOL_VERSION } from "@pi-central/protocol";
 
 /** A `sessionStorage` stand-in that records what the decision did with it. */
 function fakeStorage(initial: Record<string, string> = {}): StorageLike & { map: Map<string, string> } {
@@ -159,7 +159,11 @@ test("an orchestrator that predates the control is not asked, so no error strip 
   // A refused send is an `error` event, and this runs on every alt-tab. Silence, not a fallback to `list`: the
   // point of the slice is that a focus event should not cost a discovery, and a stale page on an old
   // orchestrator is caught by the snapshot a reconnect delivers anyway.
-  assert.deepEqual(recheckOnReturn(PROTOCOL_VERSION - 1), { action: "none" });
+  // Asked as "the version BEFORE the control existed", not as `PROTOCOL_VERSION - 1`: those were the same
+  // number until v10 moved the version and left `install` at v9, and this test failed on that bump — which is
+  // exactly the latent assumption it had. The wrong question ("one behind the current version") would also
+  // start passing for a peer that DOES have `install` as soon as the surface moves twice.
+  assert.deepEqual(recheckOnReturn(INSTALL_FACTS_SINCE_PROTOCOL - 1), { action: "none" });
   assert.deepEqual(recheckOnReturn(1), { action: "none" });
   // `undefined` is "not reported yet", not "old" — the convention `supportsRetry` documents.
   assert.deepEqual(recheckOnReturn(undefined), { action: "request", control: { kind: "install" } });
@@ -215,7 +219,7 @@ test("an old peer is not asked, but a skew is still reported and still reloads o
    * which the connection consumes before any control is sent, so the gate only removes the per-focus question —
    * not the warning, and not the one-shot reload that follows it.
    */
-  assert.deepEqual(recheckOnReturn(PROTOCOL_VERSION - 1), { action: "none" }, "not asked");
+  assert.deepEqual(recheckOnReturn(INSTALL_FACTS_SINCE_PROTOCOL - 1), { action: "none" }, "not asked");
 
   const storage = fakeStorage();
   const skew = "protocol mismatch: the orchestrator speaks v8 and this UI speaks v9. Reload the UI; if that fails, restart the orchestrator.";

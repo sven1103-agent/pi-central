@@ -28,6 +28,7 @@ import {
   isBrokenLink,
   isEnterable,
   isExpanded,
+  revealNoteAt,
   showsHidden,
   type DirectoryState,
   type FilesState,
@@ -43,6 +44,7 @@ export function FileTree({
   onCollapse,
   onToggleHidden,
   onOpenFile,
+  onReveal,
 }: {
   sessionId: string;
   state: FilesState;
@@ -52,6 +54,14 @@ export function FileTree({
   onCollapse: (path: string) => void;
   onToggleHidden: () => void;
   onOpenFile: (path: string) => void;
+  /**
+   * Ask the orchestrator to select this path in Finder (issue #255, ADR-0014).
+   *
+   * `undefined` withholds the control entirely, for a peer that predates `reveal` (`supportsReveal`). A
+   * visible control that answers `bad control: unknown kind` is worse than no control: it reads as a bug
+   * rather than as a version skew, and the reader cannot tell which it is.
+   */
+  onReveal?: ((path: string) => void) | undefined;
 }) {
   const hidden = showsHidden(state, sessionId);
   const root = directoryAt(state, sessionId, "");
@@ -59,22 +69,51 @@ export function FileTree({
   return (
     <div className="filetree">
       <div className="filetree-head">
+        {/*
+          The label states WHOSE view this is, not the folder's name (ADR-0007): the browser reads at the
+          user's UID and can reach files the agent cannot, so "Working directory" is a claim the panel has
+          to keep making. The folder itself is named in `title`, and the tree's `aria-label` names the path.
+        */}
         <span className="filetree-scope" title={cwd}>
           Working directory
         </span>
         {/*
-          The toggle says what it will DO, not what is currently true — a button labelled by its
-          state is read as a status, and then clicked twice by anyone who reads it as one.
+          Two controls, and the reveal is deliberately NOT per row only.
+
+          The tree's rows are the CHILDREN of the workspace, so the workspace itself had no reveal at all — and
+          an EMPTY directory renders no rows, so *Show in Finder* was missing exactly when "open this folder"
+          was the only thing left to do. Here it is always present, for the folder the whole panel is about.
+
+          The empty string IS the cwd: `resolveWithin(root, "")` normalizes it to the root and the containment
+          check runs against it like any other path, so this goes through one gatekeeper rather than a second
+          one for the workspace.
         */}
-        <button
-          type="button"
-          className="btn btn-quiet"
-          onClick={onToggleHidden}
-          aria-pressed={hidden}
-          title={hidden ? "Hide dotfiles" : "Show dotfiles"}
-        >
-          {hidden ? "Hide dotfiles" : "Show dotfiles"}
-        </button>
+        <span className="filetree-head-actions">
+          {onReveal !== undefined && (
+            <button
+              type="button"
+              className="btn btn-quiet"
+              onClick={() => onReveal("")}
+              title={`Show ${cwd} in Finder`}
+              aria-label={`Reveal the working directory in Finder`}
+            >
+              Show in Finder
+            </button>
+          )}
+          {/*
+            The toggle says what it will DO, not what is currently true — a button labelled by its
+            state is read as a status, and then clicked twice by anyone who reads it as one.
+          */}
+          <button
+            type="button"
+            className="btn btn-quiet"
+            onClick={onToggleHidden}
+            aria-pressed={hidden}
+            title={hidden ? "Hide dotfiles" : "Show dotfiles"}
+          >
+            {hidden ? "Hide dotfiles" : "Show dotfiles"}
+          </button>
+        </span>
       </div>
 
       {root.status === "unloaded" ? (
@@ -103,6 +142,7 @@ export function FileTree({
               onExpand={onExpand}
               onCollapse={onCollapse}
               onOpenFile={onOpenFile}
+              onReveal={onReveal}
             />
           ))}
         </ul>
@@ -128,6 +168,7 @@ function TreeNode({
   onExpand,
   onCollapse,
   onOpenFile,
+  onReveal,
 }: {
   sessionId: string;
   parent: string;
@@ -137,6 +178,7 @@ function TreeNode({
   onExpand: (path: string) => void;
   onCollapse: (path: string) => void;
   onOpenFile: (path: string) => void;
+  onReveal?: ((path: string) => void) | undefined;
 }) {
   const path = childPath(parent, entry.name);
   // Whether the entry can be expanded is a question about what it means, so it is answered in the
@@ -145,6 +187,7 @@ function TreeNode({
   const isDirectory = isEnterable(entry);
   const open = isDirectory && isExpanded(state, sessionId, path);
   const children = isDirectory && open ? directoryAt(state, sessionId, path) : undefined;
+  const revealNote = revealNoteAt(state, sessionId, path);
 
   return (
     <li
@@ -153,34 +196,76 @@ function TreeNode({
       aria-expanded={isDirectory ? open : undefined}
       style={{ paddingLeft: `${depth * 12}px` }}
     >
-      <button
-        type="button"
-        className="filetree-row"
-        onClick={() => {
-          if (isDirectory) {
-            if (open) onCollapse(path);
-            else onExpand(path);
-          } else {
-            onOpenFile(path);
-          }
-        }}
-        // The full path, because the tree is indented and a name alone is ambiguous when two
-        // directories hold the same one.
-        title={path}
-      >
-        <span className="filetree-mark" aria-hidden="true">
-          {isDirectory ? (open ? "▾" : "▸") : entry.kind === "symlink" ? "↗" : "·"}
-        </span>
-        <span className={`filetree-name${entry.hidden ? " is-hidden" : ""}`}>{entry.name}</span>
-        {entry.kind === "symlink" && !isBrokenLink(entry) && <span className="filetree-kind">link</span>}
-        {isBrokenLink(entry) && (
-          // Said, rather than shown as an ordinary file: clicking it would produce "not found" from
-          // the orchestrator, which reads as a bug in the app rather than as a broken link on disk.
-          <span className="filetree-kind filetree-bad">broken</span>
+      {/*
+        The row and its reveal control are SIBLINGS, not nested.
+
+        The row's click opens or expands, so an affordance inside it would be an interactive element
+        inside another one — invalid HTML, and unreachable by keyboard because the outer button consumes
+        the Enter/Space that would reach it. Two buttons side by side is the composition that a keyboard
+        and a screen reader can both use, and it is what the component test counts.
+      */}
+      <div className="filetree-line">
+        <button
+          type="button"
+          className="filetree-row"
+          onClick={() => {
+            if (isDirectory) {
+              if (open) onCollapse(path);
+              else onExpand(path);
+            } else {
+              onOpenFile(path);
+            }
+          }}
+          // The full path, because the tree is indented and a name alone is ambiguous when two
+          // directories hold the same one.
+          title={path}
+        >
+          <span className="filetree-mark" aria-hidden="true">
+            {isDirectory ? (open ? "▾" : "▸") : entry.kind === "symlink" ? "↗" : "·"}
+          </span>
+          <span className={`filetree-name${entry.hidden ? " is-hidden" : ""}`}>{entry.name}</span>
+          {entry.kind === "symlink" && !isBrokenLink(entry) && <span className="filetree-kind">link</span>}
+          {isBrokenLink(entry) && (
+            // Said, rather than shown as an ordinary file: clicking it would produce "not found" from
+            // the orchestrator, which reads as a bug in the app rather than as a broken link on disk.
+            <span className="filetree-kind filetree-bad">broken</span>
+          )}
+          {entry.unreadable && <span className="filetree-kind filetree-bad">unreadable</span>}
+          {entry.size !== undefined && <span className="filetree-size">{formatBytes(entry.size)}</span>}
+        </button>
+
+        {onReveal !== undefined && (
+          /*
+            Labelled for a screen reader with the NAME, not "Reveal": forty rows reading "Reveal" are
+            indistinguishable in a list of controls. The visible glyph carries the same information in
+            words on hover, so a sighted reader is not guessing from an icon either.
+          */
+          <button
+            type="button"
+            className="filetree-reveal"
+            onClick={() => onReveal(path)}
+            aria-label={`Reveal ${entry.name} in Finder`}
+            title="Show in Finder"
+          >
+            <span aria-hidden="true">⤴</span>
+          </button>
         )}
-        {entry.unreadable && <span className="filetree-kind filetree-bad">unreadable</span>}
-        {entry.size !== undefined && <span className="filetree-size">{formatBytes(entry.size)}</span>}
-      </button>
+      </div>
+
+      {revealNote !== undefined && (
+        /*
+          Under the row, not in a tooltip or a status strip: the refusal is about THIS path, and a
+          reader who clicked twice needs to see that the answer changed. A success has no note at all
+          (ADR-0014 rule 6) — absence means no stated problem, never "it worked".
+
+          `depth` is 0 rather than this node's depth, and that is the C20 reading of the same addition:
+          the note is a child of the same `<li>` that already carries this row's indentation, so passing
+          `depth` would add it a SECOND time and set the note one step right of the row it describes
+          (measured in the rendered markup: row at 12px, note at 24px, for a row at depth 1). The note
+          aligns with its row when it adds no indentation of its own.
+        */
+        <FileErrorNote path={path} reason={revealNote.reason} code={revealNote.code} message={revealNote.message} />
+      )}
 
       {children !== undefined && (
         <ChildList
@@ -192,6 +277,7 @@ function TreeNode({
           onExpand={onExpand}
           onCollapse={onCollapse}
           onOpenFile={onOpenFile}
+          onReveal={onReveal}
         />
       )}
     </li>
@@ -215,6 +301,7 @@ function ChildList({
   onExpand,
   onCollapse,
   onOpenFile,
+  onReveal,
 }: {
   files: FilesState;
   directory: DirectoryState;
@@ -224,6 +311,7 @@ function ChildList({
   onExpand: (path: string) => void;
   onCollapse: (path: string) => void;
   onOpenFile: (path: string) => void;
+  onReveal?: ((path: string) => void) | undefined;
 }) {
   if (directory.status === "loading" || directory.status === "unloaded") {
     return (
@@ -264,6 +352,7 @@ function ChildList({
             onExpand={onExpand}
             onCollapse={onCollapse}
             onOpenFile={onOpenFile}
+            onReveal={onReveal}
           />
         ))}
       </ul>

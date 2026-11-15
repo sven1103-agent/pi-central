@@ -1,6 +1,7 @@
 # Pi Central — the orchestrator takes bounded OS actions: slice plan
 
-**Status:** Proposed. Nothing here is implemented.
+**Status:** Implemented in #255. The plan is kept as written for the reasoning in it; where implementation
+contradicted it, the correction is recorded here rather than by editing the body.
 **Baseline:** commit `15fd42d`, plus the uncommitted work described in §1.
 **Governing record:** the ADR drafted in §7. It must be accepted before code is written — see §2.
 **Scope:** one new orchestrator capability, one new control, one new event, one event handler, one file-tree affordance. Not a framework change, not a viewer change.

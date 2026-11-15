@@ -50,6 +50,12 @@ Rules that follow from this:
 3. The UI is a **client** of the orchestrator. If the orchestrator binds a port, that port
    is the attack surface and must be loopback-only with an explicit check.
 4. Model output reaches the UI as a **string** for display, never as a command.
+5. The orchestrator takes **exactly one** OS action — select a resolved path in the platform file
+   manager (`open -g -R --`) — because the file viewer delegates formats it cannot draw to the OS
+   rather than rendering them ([ADR-0014](decisions/0014-os-actions.md)). It is a fixed binary with a
+   fixed argv shape, on a path it has already resolved and containment-checked, and it hands the
+   bytes to no application. It reads **and takes one bounded OS action**; a second action is a new
+   decision rather than a new case.
 
 ## Session supervision
 
@@ -187,8 +193,10 @@ Two different actors, two different privileges — conflating them is a design e
 The sandbox exists to constrain **model-generated actions**, not to constrain the person.
 The orchestrator is a user-level application acting for the user on the user's files, and
 is deliberately unsandboxed so it can spawn sandboxed agents (C1). File navigation and
-file operations therefore run directly at the user's UID. See
-[ADR-0007](decisions/0007-filesystem-access-model.md).
+file operations therefore run directly at the user's UID, and so does the one OS action the
+orchestrator may take on those files. See
+[ADR-0007](decisions/0007-filesystem-access-model.md) and, for that action,
+[ADR-0014](decisions/0014-os-actions.md).
 
 ## Binding constraint on all of the above
 

@@ -28,7 +28,7 @@
  * permission, escape. Each arrives as `error` with a closed `reason`, so a component must handle it
  * rather than print whatever prose it was handed.
  */
-import type { FileEntry, FileErrorReason } from "@pi-central/protocol";
+import type { FileEntry, FileErrorReason, OsActionFailureReason } from "@pi-central/protocol";
 
 /** What is known about one directory. */
 export type DirectoryState =
@@ -164,10 +164,32 @@ export interface FilesState {
    * project is not what you read in another. Absent means WRAPPED — see `showsWrapped`.
    */
   wrapLines: Record<string, boolean>;
+  /**
+   * Why the last "show in Finder" attempt for a path was refused (issue #255, ADR-0014).
+   *
+   * ## Why this is its own record and not `files[].status === "error"`
+   *
+   * The file map says what is KNOWN about a path's contents; this says that an ATTEMPT failed. They
+   * answer different questions and must not share a slot: a reveal refusal is not evidence about the
+   * bytes, and writing one into `files` would make a file that reads perfectly well display as a read
+   * error. That is precisely why the protocol answers with `osActionError` rather than `fileError`.
+   *
+   * Keyed per path, so the refusal is stated under the row it belongs to. Absent means "no attempt, or
+   * the last attempt was not refused" — and a success reports nothing at all (ADR-0014 rule 6), so
+   * absent after a click is not a claim that Finder showed anything.
+   */
+  revealNotes: Record<string, RevealNote>;
+}
+
+/** A refused "show in Finder" attempt, in the shape the refusal note already renders. */
+export interface RevealNote {
+  reason: OsActionFailureReason;
+  code?: string | undefined;
+  message: string;
 }
 
 export function initialFilesState(): FilesState {
-  return { directories: {}, files: {}, expanded: {}, openFile: {}, showHidden: {}, wrapLines: {} };
+  return { directories: {}, files: {}, expanded: {}, openFile: {}, showHidden: {}, wrapLines: {}, revealNotes: {} };
 }
 
 /**
@@ -193,9 +215,20 @@ export function directoryAt(state: FilesState, sessionId: string, path: string):
   return state.directories[fileKey(sessionId, path)] ?? { status: "unloaded" };
 }
 
-/** The file state for a path, defaulting to `unloaded`. */
+/** The state for a path, defaulting to `unloaded`. */
 export function fileAt(state: FilesState, sessionId: string, path: string): FileState {
   return state.files[fileKey(sessionId, path)] ?? { status: "unloaded" };
+}
+
+/**
+ * The refusal to render under a row, if its last reveal attempt was refused.
+ *
+ * `undefined` means "no refusal", which is deliberately NOT "it worked": a successful reveal produces no
+ * event at all (ADR-0014 rule 6), so the absence of a note is the absence of a stated problem rather than
+ * a confirmation.
+ */
+export function revealNoteAt(state: FilesState, sessionId: string, path: string): RevealNote | undefined {
+  return state.revealNotes[fileKey(sessionId, path)];
 }
 
 /** Is this directory expanded in the tree? */
@@ -310,6 +343,17 @@ export type FilesAction =
   | { kind: "fileFailed"; sessionId: string; path: string; reason: FileErrorReason; code?: string | undefined; message: string }
   /** Toggle a directory open/closed. Collapsing keeps the cached listing, so reopening is instant. */
   | { kind: "toggleExpanded"; sessionId: string; path: string }
+  /**
+   * A "show in Finder" attempt was sent (issue #255, ADR-0014).
+   *
+   * Clears any previous refusal for THAT path and nothing else. A second attempt must not display the
+   * first attempt's refusal — the reader has just retried, and a stale note reads as a failure of the
+   * attempt they can see. It is per path rather than a global clear because a refusal under one row is
+   * still true while a different row is retried.
+   */
+  | { kind: "revealRequested"; sessionId: string; path: string }
+  /** A "show in Finder" attempt was refused, and the refusals are per path. */
+  | { kind: "revealFailed"; sessionId: string; path: string; reason: OsActionFailureReason; code?: string | undefined; message: string }
   | { kind: "setExpanded"; sessionId: string; path: string; expanded: boolean }
   | { kind: "openFile"; sessionId: string; path: string }
   | { kind: "closeFile"; sessionId: string }
@@ -490,6 +534,29 @@ export function reduceFiles(state: FilesState, action: FilesAction): FilesState 
       return changed ? { ...state, directories } : state;
     }
 
+    case "revealRequested": {
+      const key = fileKey(action.sessionId, action.path);
+      // No-op returns the SAME object: this runs on every click, and a fresh object would re-render the
+      // whole tree (and every memoised turn, through `previewsFor`) to remove a note that is not there.
+      if (state.revealNotes[key] === undefined) return state;
+      const revealNotes = { ...state.revealNotes };
+      delete revealNotes[key];
+      return { ...state, revealNotes };
+    }
+
+    case "revealFailed":
+      return {
+        ...state,
+        revealNotes: {
+          ...state.revealNotes,
+          [fileKey(action.sessionId, action.path)]: {
+            reason: action.reason,
+            ...(action.code === undefined ? {} : { code: action.code }),
+            message: action.message,
+          },
+        },
+      };
+
     case "invalidateFile": {
       const key = fileKey(action.sessionId, action.path);
       if (state.files[key] === undefined) return state;
@@ -512,6 +579,9 @@ export function reduceFiles(state: FilesState, action: FilesAction): FilesState 
         openFile,
         showHidden,
         wrapLines,
+        // A stopped session's refusals go with its tree: a new session reusing the id must not inherit a
+        // note about a path it never tried.
+        revealNotes: drop(state.revealNotes),
       };
     }
   }
