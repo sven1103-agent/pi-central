@@ -3583,6 +3583,149 @@ select.btn { font-family: var(--sans); }
    a few characters. */
 .picker-select-narrow { max-width: 10ch; }
 
+/* --- The reader's model list (issue #265) ------------------------------------------------------
+   The picker offers the models a reader named, and this is the surface where they say which. It is
+   deliberately QUIETER than the select beside it: the select is the control used every hour, and an
+   equal-weight button next to it would read as the way to change models rather than as the way to
+   describe the list. */
+.picker-scope { padding: 2px 6px; font-size: var(--fs-2xs); }
+
+/*
+ * The list dialog, laid out as a column with ONE flexible region.
+ *
+ * `max-height` and `overflow: hidden` on the dialog are the same trade `.keys` and `.modal-sheet`
+ * document: `.modal-backdrop` is `place-items: center` with no scroller, so a dialog taller than the
+ * window loses its top and its bottom, and the bottom is where `Done` is.
+ */
+.model-list {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, calc(100vw - 2 * var(--sp-5)));
+  max-width: none;
+  max-height: min(720px, calc(100dvh - 2 * var(--sp-4)));
+  overflow: hidden;
+}
+.model-list-head { flex: none; }
+/* The lede is a `.modal p`, which is `0` margin; the search field needs air above it. */
+.model-list-lede { margin: var(--sp-1) 0 var(--sp-3) !important; font-size: var(--fs-base); }
+.model-list-search {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  padding: 6px 10px;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: var(--fs-base);
+}
+.model-list-search:focus-visible { outline: none; box-shadow: var(--focus); border-color: var(--accent); }
+/*
+ * The ONLY scroller. A second one anywhere in the dialog would fight this one for the wheel, and a
+ * dialog that scrolls as a whole loses its title and its button (the failure `.keys-body` records).
+ */
+.model-list-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: var(--sp-3);
+  margin-right: calc(-1 * var(--sp-3));
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.model-list-body::-webkit-scrollbar { width: 10px; }
+.model-list-body::-webkit-scrollbar-track { background: transparent; }
+.model-list-body::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 5px;
+}
+/* A section heading reads as a label, not as a second title: `.keys-group h4`'s treatment, so the two
+   long lists in this app look like the same kind of thing. */
+.model-group { margin-top: var(--sp-4); }
+.model-group h4 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.model-count {
+  font-size: var(--fs-2xs);
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 0 6px;
+  letter-spacing: 0;
+}
+/* The provider, as a mono grouping label: it is an id, and the rows beneath it are ids too. */
+.model-subgroup h5 {
+  margin: var(--sp-3) 0 var(--sp-1);
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  font-weight: 400;
+  color: var(--dim);
+}
+.model-rows { list-style: none; margin: 0; padding: 0; }
+/*
+ * ONE row grammar: the name (and its id/provider) on the left, the star on the right.
+ *
+ * The star is a sibling of the name rather than a child of it, because a button inside a button is
+ * invalid — and because the two are different actions (choose a model, describe the list) that must
+ * both be reachable by Tab.
+ */
+.model-row { display: flex; align-items: center; gap: var(--sp-2); border-radius: var(--r-1); }
+.model-row:hover { background: var(--panel-2); }
+.model-pick {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  padding: 5px 6px;
+  border-radius: var(--r-1);
+  cursor: pointer;
+}
+.model-pick:focus-visible { outline: none; box-shadow: var(--focus); }
+.model-pick:disabled { opacity: 0.6; cursor: not-allowed; }
+.model-pick:hover:not(:disabled) .model-name { color: var(--accent-text); }
+.model-name, .model-meta { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-name { font-size: var(--fs-sm); }
+.model-meta { font-size: var(--fs-2xs); color: var(--dim); }
+/* The mark is WORDS, not a colour: the project's no-colour-alone rule, and the reason a stale entry
+   says "not available from Pi" beside its name rather than going red. */
+.model-pick.is-unavailable { cursor: default; }
+.model-pick.is-unavailable .model-meta { color: var(--warn-text); }
+.model-star {
+  flex: none;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--fs-md);
+  line-height: 1;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+.model-star:hover { color: var(--text); background: var(--panel-3); border-color: var(--line); }
+.model-star.is-in { color: var(--accent-text); }
+.model-star:focus-visible { outline: none; box-shadow: var(--focus); }
+.model-empty { margin: var(--sp-2) 0 0; color: var(--dim); font-size: var(--fs-xs); }
+.model-list-foot { flex: none; display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-3); }
+.model-list-note { flex: 1 1 auto; margin: 0 !important; font-size: var(--fs-2xs) !important; color: var(--dim); }
+
 /* --- The composer's mode strip (issue #3) ------------------------------------------------------- */
 
 /* Only rendered while a run is in progress, where the choice between steering and following up is

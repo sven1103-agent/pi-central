@@ -21,11 +21,27 @@
  * must work before it is pretty: a `<select>` is keyboard- and screen-reader-correct with no code,
  * groups natively via `<optgroup>`, and cannot be broken by a focus bug. It is the honest v1, and a
  * popover is a cosmetic follow-up rather than a behavioural one.
+ *
+ * ## The scope, and why it narrows the `<select>` rather than replacing it (issue #265)
+ *
+ * The catalogue is 426 models across three providers in the report this comes from, and 406 across the two that
+ * answered when the count was reproduced while this landed — either way it is not a list, it is a catalogue, and a
+ * `<select>` of that size cannot be searched or narrowed by typing a letter. So the reader names the models they use
+ * (`model-scope.ts`) and this control offers those. Three rules follow from the requirement rather than from taste:
+ *
+ *   - the full catalogue stays ONE labelled affordance away, because scoping narrows a list and must never become a
+ *     filter that hides models the app is still willing to offer;
+ *   - an EMPTY scope renders this component exactly as it rendered before the feature existed, so nobody's current
+ *     list changes underneath them;
+ *   - `models.length === 0` is still "no models available". A scope must not become a third, indistinguishable empty
+ *     state — `supervisor.ts:877-882` keeps "there are none" and "the question failed" apart, and this is the same
+ *     distinction one level up.
  */
 import type { LiveSession, ModelOption } from "@pi-central/protocol";
 import { useEffect, useRef, useState } from "react";
 import { truncateMiddle } from "../format.ts";
-import { isCurrentModel, modelsByProvider } from "../store.ts";
+import { emptyScope, refKey, scopeIsSet, scopeView, type ModelScope } from "../model-scope.ts";
+import { isCurrentModel, modelControlUsable, modelsByProvider } from "../store.ts";
 
 /**
  * How many characters the closed control shows before the middle is elided.
@@ -61,6 +77,26 @@ export interface ModelPickerProps {
   onRequest: () => void;
   onSelect: (provider: string, modelId: string) => void;
   /**
+   * The reader's own list (issue #265). Absent means empty, which renders the whole catalogue — today's behaviour.
+   *
+   * Passed in rather than read from `localStorage` here: it is a per-MACHINE preference, and two pickers that each read
+   * storage would disagree the moment one of them wrote.
+   */
+  scope?: ModelScope | undefined;
+  /**
+   * Open the surface that edits the list.
+   *
+   * Absent means "this host has nowhere to show it", and the control that would open it is not rendered: a control that
+   * cannot act is worse than no control, which is the rule the Retry button's comment states too.
+   *
+   * The editor itself is NOT rendered here (issue #265). The picker lives in the transcript's 340px sticky companion,
+   * and `.transcript-shell` declares `container-type: inline-size` — which makes it the containing block for fixed
+   * descendants, so a `.modal-backdrop` rendered here would cover the conversation and claim an `aria-modal` modality it
+   * does not have over the rail or the panel. The shell renders the dialog instead, the same way it renders `Settings`
+   * and `ShortcutSheet`.
+   */
+  onManageModels?: (() => void) | undefined;
+  /**
    * The thinking-level control, rendered on the MODEL's row (issue #163).
    *
    * Passed in rather than imported: the two are coupled — the levels are per-model, so a change to one invalidates
@@ -70,7 +106,16 @@ export interface ModelPickerProps {
   thinking?: React.ReactNode;
 }
 
-export function ModelPicker({ session, models, error, onRequest, onSelect, thinking }: ModelPickerProps) {
+export function ModelPicker({
+  session,
+  models,
+  error,
+  onRequest,
+  onSelect,
+  scope = emptyScope(),
+  onManageModels,
+  thinking,
+}: ModelPickerProps) {
   const selectRef = useRef<HTMLSelectElement | null>(null);
   /**
    * A click that arrived before the catalogue did, waiting for it.
@@ -115,10 +160,42 @@ export function ModelPicker({ session, models, error, onRequest, onSelect, think
   };
   // `starting` and `stopped`/`failed` have no live Pi process to ask or command, so the control is
   // disabled with a reason. A disabled control with no explanation is worse than no control.
-  const usable = session.state !== "starting" && session.state !== "stopped" && session.state !== "failed";
+  const usable = modelControlUsable(session);
   // "Loading" is derived here rather than passed in: it means "this control asked and has no answer
   // and no failure yet", which is a fact only this component knows.
   const loading = requested && models === undefined && error === undefined;
+
+  /** Whether the reader has a list, and so whether the picker offers that instead of the catalogue. */
+  const scoped = scopeIsSet(scope);
+  /*
+   * The scoped view, or `undefined` when the catalogue is what should be shown.
+   *
+   * `models.length > 0` is load-bearing: an EMPTY catalogue is Pi answering "there are none", and rendering a scope
+   * against it would turn a definitive answer into "your list is empty", which is the conflation the whole empty-state
+   * rule exists to prevent. So the empty catalogue keeps its own `no models available` option below, scope or no scope.
+   */
+  const view = scoped && models !== undefined && models.length > 0 ? scopeView(scope, models) : undefined;
+  /*
+   * The session's model, when the reader's list does not contain it.
+   *
+   * Without this the scoped `<select>` would have no option matching `session.model`, and a control whose value is not
+   * among its options renders blank — so the header would stop saying which model the session is on, which is the one
+   * fact this control must never lose. It is labelled as in use rather than merged into the reader's list, because it is
+   * NOT in it: scope narrows what the picker offers, and the model in force is always one of the things it offers.
+   */
+  const currentModel = models?.find((model) => isCurrentModel(session, model));
+  const currentOutsideScope =
+    view !== undefined &&
+    currentModel !== undefined &&
+    !view.models.some((model) => model.provider === currentModel.provider && model.id === currentModel.id);
+
+  /** One `<option>`, so the scoped and unscoped lists cannot render a model two different ways. */
+  const optionFor = (model: ModelOption) => (
+    <option key={refKey(model)} value={refKey(model)}>
+      {model.name ?? model.id}
+      {model.reasoning ? " · thinking" : ""}
+    </option>
+  );
 
   if (error !== undefined) {
     return (
@@ -153,9 +230,9 @@ export function ModelPicker({ session, models, error, onRequest, onSelect, think
 
   // The full label for the current model, matching whatever the corresponding `<option>` says so the
   // overlay and the list cannot disagree: a loaded catalogue shows the friendly `name`, and before it
-  // arrives the raw `provider/id` is all there is.
-  const selected = models?.find((model) => isCurrentModel(session, model));
-  const fullLabel = selected ? (selected.name ?? selected.id) : current;
+  // arrives the raw `provider/id` is all there is. `currentModel` is the same lookup the scoped list
+  // uses, so the two cannot name different models.
+  const fullLabel = currentModel ? (currentModel.name ?? currentModel.id) : current;
   /*
    * The MODEL on its own, and the provider moved out of the label (issue #163).
    *
@@ -166,7 +243,7 @@ export function ModelPicker({ session, models, error, onRequest, onSelect, think
    * The provider is emitted as its own field with its own label, because it is a fact the user configured and gave
    * a name to. `truncateMiddle` stays: a long model id must not push the controls out of the header.
    */
-  const modelLabel = truncateMiddle(selected ? (selected.name ?? selected.id) : (session.model ?? "—"), LABEL_MAX);
+  const modelLabel = truncateMiddle(currentModel ? (currentModel.name ?? currentModel.id) : (session.model ?? "—"), LABEL_MAX);
 
   /*
    * TWO ROWS, ONE LABEL COLUMN, and only one control under each label.
@@ -264,22 +341,69 @@ export function ModelPicker({ session, models, error, onRequest, onSelect, think
               it here put it on two lines. The full identity is on the overlay's and the select's `title`.
             */}
             {models === undefined && <option value="">{session.model ?? "—"}</option>}
+            {/*
+              An EMPTY catalogue keeps its own answer, scope or no scope. "Pi reports no models" is a definitive reply;
+              showing the reader an empty list because their scope was measured against it would turn that reply into
+              "your list is empty", which is a different problem with a different fix.
+            */}
             {models !== undefined && models.length === 0 && <option value="">no models available</option>}
             {/* Full names, deliberately: this list is where a model is chosen, and the overlay covers the closed
                 control only. Truncating here would put the elision where the decision is made. */}
-            {models !== undefined &&
-              modelsByProvider(models).map((group) => (
-                <optgroup key={group.provider} label={group.provider}>
-                  {group.models.map((model) => (
-                    <option key={`${model.provider}/${model.id}`} value={`${model.provider}/${model.id}`}>
-                      {model.name ?? model.id}
-                      {model.reasoning ? " · thinking" : ""}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
+            {models !== undefined && view === undefined && modelsByProvider(models).map((group) => (
+              <optgroup key={group.provider} label={group.provider}>
+                {group.models.map(optionFor)}
+              </optgroup>
+            ))}
+            {view !== undefined && (
+              <>
+                {/* The model in force, when the reader's list does not name it. See `currentOutsideScope`. */}
+                {currentOutsideScope && currentModel !== undefined && (
+                  <optgroup label="in use">
+                    {optionFor(currentModel)}
+                  </optgroup>
+                )}
+                {modelsByProvider(view.models).map((group) => (
+                  <optgroup key={group.provider} label={group.provider}>
+                    {group.models.map(optionFor)}
+                  </optgroup>
+                ))}
+                {/*
+                  Kept and marked, never pruned: a provider that is unreachable for a minute must not erase the
+                  reader's list. `disabled` because Pi does not report these models at all, so there is nothing for
+                  `set_model` to accept — the entry stays visible and removable from the list dialog instead of
+                  becoming a request that cannot succeed.
+                */}
+                {view.unavailable.length > 0 && (
+                  <optgroup label="not available from Pi">
+                    {view.unavailable.map((ref) => (
+                      <option key={refKey(ref)} value={refKey(ref)} disabled>
+                        {ref.id} · {ref.provider}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </>
+            )}
           </select>
         </span>
+        {/*
+          ONE labelled affordance to everything Pi offers (issue #265).
+
+          The word is what makes scoping honest rather than a hidden filter: with a list in force the count says how
+          many models are being withheld, and with no list the label says what the control is FOR, which is the only
+          way to discover that a list can be made at all. Not rendered without `onManageModels` — see the prop.
+        */}
+        {onManageModels !== undefined && models !== undefined && models.length > 0 && (
+          <button
+            type="button"
+            className="btn btn-quiet picker-scope"
+            aria-haspopup="dialog"
+            title="Choose the models the picker offers. Every model Pi reports stays available."
+            onClick={onManageModels}
+          >
+            {scoped ? `All ${models.length} models` : "Choose my models"}
+          </button>
+        )}
         {/* Thinking sits on the model's line: the levels are per-model, so a change to one invalidates the other,
             and the provider is the only thing here that needs a line of its own. */}
         {thinking}
@@ -297,6 +421,16 @@ export function ModelPicker({ session, models, error, onRequest, onSelect, think
       {loading && (
         <span className="picker-note" data-picker-row="note">
           reading the model list…
+        </span>
+      )}
+      {/* The list says it, not just the control that shows it: an entry that is marked but never explained leaves the
+          reader wondering whether the model is gone or the app is. `warn` because it is a fact they may have to act on.
+          Only when there IS one — a standing note about a condition that does not hold is noise. */}
+      {view !== undefined && view.unavailable.length > 0 && (
+        <span className="picker-note warn" data-picker-row="note">
+          {view.unavailable.length === 1
+            ? "1 model in your list is not available from Pi."
+            : `${view.unavailable.length} models in your list are not available from Pi.`}
         </span>
       )}
     </>
