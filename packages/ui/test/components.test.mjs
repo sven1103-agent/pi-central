@@ -2523,6 +2523,84 @@ test("an UNMEASURED context draws no bar at all", () => {
   assert.ok(!/context-bar/.test(html), "not even an empty track");
 });
 
+// --- Manual compaction, in the header and the composer (issue #263) -------------------------------
+//
+// Compaction is MANUAL: Pi already compacts automatically at a threshold, and this control exists so the reader can
+// decide for a reason of their own. It is therefore offered on every LIVE session whatever the context says — 79%,
+// 80% and `null` all offer it — and withheld only when there is no process (or the orchestrator is older than v11).
+// The tests below pin those two halves, so a future "helpful" near-full gate cannot come back unnoticed.
+
+/** The header's control bar, alone, so the markup is the control's rather than the whole header's. */
+async function controlBarHtml(percent, extra = {}) {
+  const { SessionControlBar } = await server.ssrLoadModule("/src/components/SessionControlBar.tsx");
+  return renderToString(createElement(SessionControlBar, {
+    session: session({ contextPercent: percent, ...extra }),
+    onCompact() {},
+  }));
+}
+
+/** The composer with the compact command offered, at `percent`. */
+function composerWithCompact(percent, extra = {}) {
+  return renderToString(createElement(Composer, {
+    session: session({ contextPercent: percent }), state: initialState(),
+    unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
+    onRestored() {}, draft: "", onDraftChange() {}, onCompact() {}, ...extra,
+  }));
+}
+
+test("the header's compact control is offered for a live session at any context", async () => {
+  // 79% is the case the automatic threshold does NOT act on, and `null` is a session Pi has not measured. Both are
+  // live processes, and both are exactly where a manual control is worth having.
+  for (const percent of [79, 80, null]) {
+    const html = await controlBarHtml(percent);
+    assert.match(html, /aria-label="Compact context"/, `a live session offers compaction at ${percent}`);
+    assert.match(html, /This spends a model call/, "and it states what pressing it costs");
+  }
+  const stopped = await controlBarHtml(84, { state: "stopped" });
+  assert.ok(!/Compact context/.test(stopped), `a stopped session has no process to compact: ${stopped}`);
+});
+
+test("a session that is already compacting says so, and the control is disabled rather than repeated", async () => {
+  const html = await controlBarHtml(84, { compacting: true });
+  assert.match(html, /aria-label="Compacting context"/);
+  assert.match(html, /disabled/);
+  // The composer has room for a word, so it states the same fact in the button's text.
+  assert.match(composerWithCompact(84, { session: session({ contextPercent: 84, compacting: true }) }), /Compacting…/);
+});
+
+test("the session rail carries no compact action, so its rendering is unchanged", () => {
+  // Asked for explicitly: the rail's three-line row is a dense, aligned rendering, and a fourth line for a rarely
+  // used action destroyed it. Compaction lives in the header, the composer and the session panel instead.
+  const html = renderToString(createElement(SessionRail, {
+    rows: rowsOf([session({ contextPercent: 84 })]),
+    focusedId: undefined, onFocusRow() {}, onForgetRow() {}, onRetryRow() {}, retryAvailable: true,
+    onStartSession() {}, onOpenDirectory() {}, home: undefined, historyTotal: 0,
+  }));
+  assert.ok(!/Compact/.test(text(html)), `no compact action on the rail: ${html}`);
+});
+
+test("the composer's command list offers compact on every live session", () => {
+  for (const percent of [79, 80, null]) {
+    const html = composerWithCompact(percent);
+    assert.match(html, /class="composer-commands"/, `the manual command is present at ${percent}`);
+    assert.match(text(html), /Compact context/);
+  }
+  const stopped = composerWithCompact(84, { session: session({ contextPercent: 84, state: "stopped" }) });
+  assert.ok(!/composer-commands/.test(stopped), "a stopped session has no process to compact");
+});
+
+test("with no callback the composer renders nothing, rather than a control that cannot work", () => {
+  // The shell passes `onCompact` only when the connected orchestrator understands it (`supportsCompact`). A surface
+  // that drew the button anyway would answer `bad control: unknown kind 'compact'` for a v10 peer — the same failure
+  // `retryAvailable` exists to prevent.
+  const composer = renderToString(createElement(Composer, {
+    session: session({ contextPercent: 84 }), state: initialState(),
+    unavailableReason: undefined, onSend() {}, onClearQueueAndStop() {}, restored: [],
+    onRestored() {}, draft: "", onDraftChange() {},
+  }));
+  assert.ok(!/composer-commands/.test(composer));
+});
+
 test("each row's meter is named for its session, so ten of them are distinguishable", () => {
   // The header's single meter is labelled "Context usage". Ten of those in a list are indistinguishable to a
   // screen-reader user moving through the rail, so the rail passes the session's own name.

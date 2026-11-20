@@ -117,6 +117,18 @@ export type Command =
   | { type: "set_model"; provider: string; modelId: string }
   | { type: "get_available_thinking_levels" }
   | { type: "set_thinking_level"; level: string }
+  /**
+   * Compact the context on request (issue #263).
+   *
+   * A long-running command: Pi summarizes the conversation with the model before responding, so its
+   * response arrives at the END of the compaction, not at the start. `compaction_start` and
+   * `compaction_end` on the event stream are what say it is in progress; see `Supervisor#compact`.
+   *
+   * `customInstructions` is deliberately absent from this union. Pi accepts it, and the control
+   * that exposes compaction offers no field for it: a free string that changes a summary is a
+   * settings surface, not a button.
+   */
+  | { type: "compact" }
   | { type: "prompt"; message: string; streamingBehavior?: "steer" | "followUp" }
   | { type: "steer"; message: string }
   | { type: "follow_up"; message: string }

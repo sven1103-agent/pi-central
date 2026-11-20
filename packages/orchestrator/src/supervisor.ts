@@ -54,6 +54,15 @@ import { ownInstallationWarning } from "@pi-central/protocol";
  * did instead of what they did not type.
  */
 export const EMPTY_PROMPT_WITH_IMAGES = "See the attached image.";
+
+/**
+ * How long a manual `compact` may take before its command is considered unanswered (issue #263).
+ *
+ * Much longer than the state and stats timeouts because this is not a state read: Pi summarizes the conversation with
+ * the model, and the response arrives at the END. A 20s deadline would abandon a compaction that is still running and
+ * would have produced a perfectly good summary a few seconds later.
+ */
+const COMPACT_TIMEOUT_MS = 5 * 60_000;
 import { interpretRecord } from "./state.ts";
 import { RefreshCoalescer, applyStats, readStats } from "./stats.ts";
 
@@ -115,6 +124,23 @@ export class Supervisor extends EventEmitter {
    * inside one round trip.
    */
   #stats = new RefreshCoalescer();
+  /**
+   * Compactions Pi has announced but not finished, by session id (issue #263).
+   *
+   * Kept separately from `LiveSession.state` on purpose. A compaction is not a run: it can start while the session is
+   * idle, `agent_end` does not end it (C8), and a retry can follow it. Reading `state === "streaming"` as "a
+   * compaction is running" would therefore refuse a legitimate manual compaction on an idle session, and reading
+   * `state !== "streaming"` as "nothing is compacting" would allow a second one while the first is still summarizing.
+   */
+  #compacting = new Set<string>();
+  /**
+   * Manual `compact` commands sent, but not yet answered, by session id (issue #263).
+   *
+   * Pi's `compact` responds only after the summary has been produced, so this covers the window BEFORE
+   * `compaction_start` arrives. A request timeout does not clear the announced set: Pi may still be working, and
+   * sending a second compaction into that state is exactly what the guard exists to prevent.
+   */
+  #compactRequests = new Set<string>();
   /**
    * Which sessions were open, so a restart can reopen them (issue #185).
    *
@@ -546,6 +572,7 @@ export class Supervisor extends EventEmitter {
     rpc.on("failed", (error: Error) => {
       session.state = "failed";
       session.error = error.message;
+      this.#clearCompacting(session.id);
       this.#patch(session.id);
       this.emit("error", session.id, error.message);
     });
@@ -554,6 +581,7 @@ export class Supervisor extends EventEmitter {
       session.state = "failed";
       session.error = describeExitFailure(code, signal, stderr);
       session.dialogs = [];
+      this.#clearCompacting(session.id);
       this.#patch(session.id);
       this.emit("error", session.id, session.error);
     });
@@ -723,6 +751,16 @@ export class Supervisor extends EventEmitter {
   #onRecord(id: string, record: PiRecord): void {
     const session = this.#sessions.get(id);
     if (!session) return;
+
+    /*
+     * A compaction is tracked from Pi's OWN announcement, so an AUTOMATIC one (overflow or threshold) is guarded
+     * exactly like a manual one: a second manual command while either is running would be a second summarization of
+     * the same context. The record is also the only place that can clear the mark on a compaction this process did
+     * not start, and `compaction_end` arrives for a failure too (`aborted` / `errorMessage`).
+     */
+    if (record.type === "compaction_start") this.#compacting.add(id);
+    if (record.type === "compaction_end") this.#compacting.delete(id);
+    session.compacting = this.#isCompacting(id);
 
     // The decision is pure (state.ts) so it is testable without a spawned process; the
     // supervisor only applies it.
@@ -968,6 +1006,67 @@ export class Supervisor extends EventEmitter {
     await this.#refreshState(id);
   }
 
+  /**
+   * Compact this session's context on request (issue #263).
+   *
+   * ## Why the guard is the compaction, not the run
+   *
+   * A second press while a compaction is outstanding is REFUSED here, and the guard is the two sets below rather
+   * than `session.state`: compaction can begin on an idle session and `agent_end` does not finish it (C8), so the run
+   * state answers a different question. `#compactRequests` covers the window before Pi announces `compaction_start`;
+   * `#compacting` covers the window after, including an AUTOMATIC compaction the reader did not ask for.
+   *
+   * ## Why the send is awaited
+   *
+   * Pi answers `compact` only after the summary has been generated, with `success: false` and a reason when there is
+   * nothing to compact or the provider refuses. Awaiting that answer is what lets a refusal become an `error` event
+   * naming the reason, exactly as `setModel` does, instead of a button that appears to work. The timeout is therefore
+   * generous: a summary is a model call, not a state read.
+   *
+   * ## What it deliberately does not do
+   *
+   * It does not refresh stats, set `idle`, or touch `session.state`. `compaction_end` is the one stats refresh point
+   * (`state.ts`), and a compaction is not completion. `contextPercent` becomes `null` when Pi says it is unknown
+   * after the compaction, which the meter renders as `—`, never `0%`.
+   */
+  async compact(id: string): Promise<void> {
+    const rpc = this.#processes.get(id);
+    const session = this.#sessions.get(id);
+    if (!session) throw new Error(`no such session: ${id}`);
+    if (!rpc || !rpc.running) {
+      throw new Error("this session is not running, so there is nothing to compact");
+    }
+    if (this.#isCompacting(id)) {
+      throw new Error("a compaction is already running for this session");
+    }
+
+    this.#compactRequests.add(id);
+    session.compacting = true;
+    this.#patch(id);
+    try {
+      await rpc.send({ type: "compact" }, COMPACT_TIMEOUT_MS);
+    } finally {
+      this.#compactRequests.delete(id);
+      // Pi emits `compaction_end` before its response, so this is normally already false. If an event was missed or
+      // the command timed out, the ANNOUNCED set still wins: a compaction Pi has not finished stays guarded.
+      session.compacting = this.#isCompacting(id);
+      this.#patch(id);
+    }
+  }
+
+  /** Is a compaction outstanding for this session? Requests count before Pi announces the start (issue #263). */
+  #isCompacting(id: string): boolean {
+    return this.#compacting.has(id) || this.#compactRequests.has(id);
+  }
+
+  /** Drop both compaction marks for a session that is going away, and say so on its next update. */
+  #clearCompacting(id: string): void {
+    this.#compacting.delete(id);
+    this.#compactRequests.delete(id);
+    const session = this.#sessions.get(id);
+    if (session) session.compacting = false;
+  }
+
   async stop(id: string): Promise<void> {
     const session = this.#sessions.get(id);
     const rpc = this.#processes.get(id);
@@ -978,6 +1077,8 @@ export class Supervisor extends EventEmitter {
     // see `stopAll` — because "I am updating Pi Central" and "I am done with this conversation"
     // are different statements, and only the second should empty the rail.
     if (this.#rememberOpenSessions) this.#open.forget(session.sessionFile);
+    // A stopped session has no compaction to guard: leaving the mark would refuse the next one after a resume.
+    this.#clearCompacting(id);
     this.#patch(id);
     await rpc.stop();
     this.#processes.delete(id);
@@ -1004,6 +1105,7 @@ export class Supervisor extends EventEmitter {
         if (!session || !rpc) return;
         session.state = "stopped";
         session.dialogs = [];
+        this.#clearCompacting(id);
         this.#patch(id);
         await rpc.stop();
         this.#processes.delete(id);

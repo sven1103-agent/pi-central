@@ -10,6 +10,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+### Added
+
+- A live session can be compacted on request from the session header, the composer or the session panel, whether or not Pi's automatic threshold has been reached, and the control says what a compaction costs while it runs ([#263]).
+
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
 ## [0.12.0] — 2026-11-15
@@ -771,3 +775,4 @@ The spike that answered whether this was worth building.
 [#253]: https://github.com/sven1103-agent/pi-central/issues/253
 [#254]: https://github.com/sven1103-agent/pi-central/issues/254
 [#255]: https://github.com/sven1103-agent/pi-central/issues/255
+[#263]: https://github.com/sven1103-agent/pi-central/issues/263

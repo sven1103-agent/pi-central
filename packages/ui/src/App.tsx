@@ -9,7 +9,7 @@
  * rather than inferring "streaming" from having seen a delta (C8).
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { PROTOCOL_VERSION, supportsDelete, supportsPlaces, supportsRetry, supportsReveal, type Control, type HistoricalSession, type InstallFacts, type LiveSession, type ModelOption } from "@pi-central/protocol";
+import { PROTOCOL_VERSION, supportsCompact, supportsDelete, supportsPlaces, supportsRetry, supportsReveal, type Control, type HistoricalSession, type InstallFacts, type LiveSession, type ModelOption } from "@pi-central/protocol";
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
 import { ActivityBar } from "./components/ActivityBar.tsx";
 import { ConfirmDelete } from "./components/ConfirmDelete.tsx";
@@ -1900,6 +1900,18 @@ export function App() {
               */
               controls={{
                 onStop: () => setConfirmStop(focusedSession(state) ?? undefined),
+                // The same gate the rail uses, and the header only offers the control when `isNearFull` agrees. A
+                // v10 orchestrator would answer `bad control: unknown kind 'compact'`, so the option is not passed
+                // at all — never a button that fails when pressed.
+                ...(supportsCompact(state.install?.protocol)
+                  ? {
+                      onCompact: () => {
+                        const target = focusedSession(state);
+                        if (target === undefined) return;
+                        send({ kind: "compact", sessionId: target.id });
+                      },
+                    }
+                  : {}),
                 onResume: () => {
                   const target = focusedSession(state);
                   if (target?.sessionFile === undefined) return;
@@ -2083,6 +2095,13 @@ export function App() {
               }}
               onRetry={() => focused && send({ kind: "retry", sessionId: focused.id })}
               retryAvailable={supportsRetry(state.install?.protocol)}
+              {...(supportsCompact(state.install?.protocol)
+                ? {
+                    onCompact: () => {
+                      if (focused) send({ kind: "compact", sessionId: focused.id });
+                    },
+                  }
+                : {})}
               onForget={() => {
                 if (focused?.sessionFile) dispatch({ kind: "forget", path: focused.sessionFile });
               }}
@@ -2532,6 +2551,7 @@ function SessionView({
               unavailableReason={composerMode(session).reason}
               onSend={onSend}
               onClearQueueAndStop={onClearQueueAndStop}
+              onCompact={controls?.onCompact}
               restored={restored}
               onRestored={onRestored}
               draft={draft}

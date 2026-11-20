@@ -43,6 +43,14 @@ export interface SessionControlCaps {
   retryAvailable?: boolean | undefined;
   onForget?: (() => void) | undefined;
   onDelete?: (() => void) | undefined;
+  /**
+   * Compact this session's context (issue #263).
+   *
+   * Absent when the connected orchestrator speaks an older protocol. The near-full test is NOT here: it lives in
+   * `sessionControlsFor`, so the rail, this bar and the composer's command list cannot disagree about when the
+   * affordance exists.
+   */
+  onCompact?: (() => void) | undefined;
 }
 
 /**
@@ -99,6 +107,17 @@ function ControlIcon({ control }: { control: string }) {
           <path d="M7 7v3.5M9 7v3.5" />
         </svg>
       );
+    case "compact":
+      /*
+       * Two arrows pressing toward a centre line: context being made smaller. A silhouette rather than a glyph, for
+       * the same reason every other icon here is inline — `⌫` once rendered as an empty box on macOS.
+       */
+      return (
+        <svg {...common}>
+          <path d="M8 2.5v4M5.5 4.5 8 7l2.5-2.5" />
+          <path d="M8 13.5v-4M5.5 11.5 8 9l2.5 2.5" />
+        </svg>
+      );
     case "forget":
       /*
        * A list with a minus, NOT an eye with a slash.
@@ -134,6 +153,7 @@ export function SessionControlBar({
   retryAvailable = true,
   onForget,
   onDelete,
+  onCompact,
 }: { session: LiveSession } & SessionControlCaps) {
   /*
    * Built from `sessionControlsFor`, so WHICH actions exist is decided in one place and stays a tested pure function.
@@ -146,6 +166,7 @@ export function SessionControlBar({
     retryAvailable,
     ...(onForget === undefined ? {} : { onForget }),
     ...(onDelete === undefined ? {} : { onDelete }),
+    ...(onCompact === undefined ? {} : { onCompact }),
   });
 
   if (controls.length === 0) return null;

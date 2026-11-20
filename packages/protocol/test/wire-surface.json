@@ -1,9 +1,10 @@
 {
-  "version": 10,
+  "version": 11,
   "control": [
     "abort",
     "answerDialog",
     "clearQueue",
+    "compact",
     "deleteSession",
     "install",
     "list",

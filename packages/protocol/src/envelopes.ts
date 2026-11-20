@@ -104,6 +104,19 @@ export interface LiveSession {
    * would duplicate the whole transcript. Exposed so that property is directly testable.
    */
   transcriptLoaded?: boolean | undefined;
+  /**
+   * Whether a context compaction is in flight for this session (issue #263).
+   *
+   * A fact about the COMPACTION, not about the run: `agent_end` does not end it (C8), and the
+   * session may be idle before the command is accepted and streaming after it while a retry
+   * follows. It is exposed so the control that started it can say "Compacting…" and be
+   * disabled rather than sending a second command — the orchestrator refuses that second
+   * command anyway, but a control that invites a refusal is not a control.
+   *
+   * Absent means "no compaction", the same convention as every other optional field here; an
+   * older orchestrator simply never sends it.
+   */
+  compacting?: boolean | undefined;
   messageCount: number;
   pending: number;
   contextPercent: number | null;
@@ -232,6 +245,34 @@ export type Control =
   | { kind: "listModels"; sessionId: string }
   /** Change the thinking level. Only levels `listThinkingLevels` reported should be offered. */
   | { kind: "setThinkingLevel"; sessionId: string; level: string }
+  /**
+   * Compact this session's context now (issue #263).
+   *
+   * ## Why this is not `abort` and not a stop
+   *
+   * Compaction is work Pi does TO the context: the transcript keeps its messages, the session
+   * stays live, and a retry or a queued turn can follow it. `agent_end` still does not settle
+   * the session (C8), and this control must not change that.
+   *
+   * ## Why it takes no instructions
+   *
+   * Pi's `compact` accepts `customInstructions`, and this deliberately does not expose them: a
+   * text field whose value changes a summary is a settings surface, and this slice is one
+   * button. The wire shape stays open for a later control with a stated reason, rather than
+   * smuggling a free string through this one now.
+   *
+   * A session with no live process is REFUSED with a stated reason rather than silently
+   * ignored, and a second press while a compaction is outstanding is refused the same way —
+   * both travel as the ordinary `error` event, which is the surface `setModel`'s refusal uses.
+   *
+   * ## `set_auto_compaction` is deliberately NOT here
+   *
+   * Pi offers the toggle, and this slice leaves it unexposed: an auto-compaction switch is a settings surface (where
+   * does it live, what is its default, what happens to a run that is already compacting when it is turned off?) and
+   * opening one to ship a button would be a different slice wearing this one's control. Recorded in the code so a
+   * later reader sees a decision rather than an omission.
+   */
+  | { kind: "compact"; sessionId: string }
   /** Ask which thinking levels the CURRENT model supports. */
   | { kind: "listThinkingLevels"; sessionId: string }
   | { kind: "answerDialog"; sessionId: string; dialogId: string; answer: { value: string } | { confirmed: boolean } | { cancelled: true } }
@@ -820,8 +861,16 @@ export interface PlaceListingInfo {
  * receiving `reveal` would answer `bad control: unknown kind 'reveal'`, and the tree's control would look broken
  * rather than unsupported. The asymmetry is why the UI gates the send on `supportsReveal` — but gating alone would
  * leave a reader with a control that does nothing, so the refusal is also stated.
+ *
+ * v11 (issue #263): the `compact` control, and `LiveSession.compacting`.
+ *
+ * The control is a new KIND, so `wire-surface.test.ts` catches this one. The bump is not optional: a v10 orchestrator
+ * receiving `compact` would answer `bad control: unknown kind 'compact'`, which reads as a broken button rather than
+ * as a version skew. `compacting` is an ADDED FIELD that the fingerprint cannot see — a v10 UI talking to a v11
+ * orchestrator simply ignores it, and a v11 UI talking to v10 would never offer the control in the first place
+ * because `supportsCompact` gates it.
  */
-export const PROTOCOL_VERSION = 10 as const;
+export const PROTOCOL_VERSION = 11 as const;
 
 /**
  * The first protocol version that understands the `retry` control (issue #11).
@@ -889,6 +938,21 @@ export function supportsInstall(protocol: number | undefined): boolean {
  * feature, `docs/ROADMAP.md` records that the capability is delegated to the OS rather than rendered.
  */
 export const REVEAL_SINCE_PROTOCOL = 10;
+
+/**
+ * The first protocol version that understands the `compact` control (issue #263).
+ *
+ * The same reasoning as `REVEAL_SINCE_PROTOCOL`: an unsupported send answers `bad control: unknown kind 'compact'`,
+ * which is a symptom rather than a version skew. The control is withheld instead, so the reader is not shown a
+ * button that cannot work.
+ */
+export const COMPACT_SINCE_PROTOCOL = 11;
+
+/** Whether a peer speaking `protocol` can be asked to compact a session's context. */
+export function supportsCompact(protocol: number | undefined): boolean {
+  // `undefined` is "not reported yet", not "old" — the same convention `supportsRetry` documents.
+  return protocol === undefined ? true : protocol >= COMPACT_SINCE_PROTOCOL;
+}
 
 /** Whether a peer speaking `protocol` can be asked to reveal a path in the file manager. */
 export function supportsReveal(protocol: number | undefined): boolean {

@@ -105,6 +105,7 @@ const CONTROL_KINDS: Record<Control["kind"], true> = {
   listModels: true,
   setThinkingLevel: true,
   listThinkingLevels: true,
+  compact: true,
   answerDialog: true,
   resume: true,
   retry: true,
@@ -647,6 +648,15 @@ export class Transport {
       }
       case "setThinkingLevel":
         await this.#supervisor.setThinkingLevel(control.sessionId, control.level);
+        return;
+      case "compact":
+        /*
+         * Not caught here, for the same reason as `setModel`: `#dispatch` reports a throw as an `error` event, and
+         * that is exactly what a refusal from Pi (nothing to compact, a provider that will not summarize) or from
+         * the supervisor (no live process, a compaction already running) must become. A swallowed refusal would be
+         * a button that appears to work.
+         */
+        await this.#supervisor.compact(control.sessionId);
         return;
       case "answerDialog":
         this.#supervisor.answerDialog(control.sessionId, control.dialogId, control.answer);

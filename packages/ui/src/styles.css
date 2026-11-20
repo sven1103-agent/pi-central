@@ -932,6 +932,13 @@ button { font: inherit; color: inherit; }
 /* Retry is the same idea for a failed run: it starts something again. */
 .session-control-retry { color: var(--ok); }
 .session-control-retry:hover { color: var(--ok); background: var(--ok-tint); border-color: var(--ok); }
+/*
+ * Compact is not a stop and not destructive: the transcript keeps its messages and the session stays live.
+ * Accent rather than amber, so it does not read as an ending. It is the one control that spends money when pressed,
+ * and its title says so — colour is not asked to carry that.
+ */
+.session-control-compact { color: var(--accent-text); }
+.session-control-compact:hover { color: var(--accent-text); background: var(--panel-2); border-color: var(--accent); }
 /* Stop ends a run. Amber rather than red: the transcript survives, so this is not destruction. */
 .session-control-stop { color: var(--warn-text); }
 .session-control-stop:hover { color: var(--warn-text); background: var(--warn-tint); border-color: var(--warn); }
@@ -1932,6 +1939,28 @@ button { font: inherit; color: inherit; }
 }
 /* The hint takes the room; the toggle keeps its width. */
 .composer-hint { flex: 1; min-width: 0; font-size: var(--fs-xs); color: var(--dim); }
+
+/*
+ * The composer's command list (issue #263).
+ *
+ * A GROUP rather than a lone button, so a second command can arrive without a second layout — and so the list has a
+ * name for assistive tech. It holds one entry today, and that entry is absent unless `isNearFull` agrees with the
+ * rail and the header: the same 80%, measured on the same number.
+ */
+.composer-commands { display: flex; align-items: center; gap: var(--sp-2); }
+.composer-command {
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--accent-text);
+  background: var(--panel-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  padding: 1px var(--sp-2);
+  cursor: pointer;
+}
+.composer-command:hover { border-color: var(--accent); }
+.composer-command:focus-visible { outline: none; box-shadow: var(--focus); }
+.composer-command:disabled { opacity: 0.55; cursor: default; }
 
 /*
  * The follow toggle: a SWITCH with its label beside it.
