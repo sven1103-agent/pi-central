@@ -27,6 +27,7 @@ import { canSend, type Attachment } from "../attachments.ts";
 import { imageFilesFrom } from "../paste.ts";
 import { MentionPicker } from "./MentionPicker.tsx";
 import { apply, complete, mentionAt, moveSelection, type Completion, type Entry } from "../mentions.ts";
+import { hasProcess } from "../roster.ts";
 
 export type QueueBehavior = "steer" | "followUp";
 
@@ -57,6 +58,7 @@ export function Composer({
   notice,
   listDirectory,
   directoryEntries,
+  onCompact,
   follow,
 }: {
   session: LiveSession | undefined;
@@ -110,6 +112,15 @@ export function Composer({
    * same one `files.ts` protects for the directory tree.
    */
   directoryEntries?: ((path: string) => readonly Entry[] | undefined) | undefined;
+  /**
+   * Compact the session's context now (issue #263).
+   *
+   * Rendered as the composer's command list — the one place a reader is already composing the next turn and can
+   * act without moving the pointer to the header. It is MANUAL: absent only when the orchestrator cannot compact or
+   * the session has no process, never merely because the context is below the automatic threshold. Pi's automatic
+   * compaction is the threshold mechanism; this is the reader's own decision.
+   */
+  onCompact?: (() => void) | undefined;
   /**
    * The follow toggle, rendered in the composer's own chrome row.
    *
@@ -529,6 +540,28 @@ export function Composer({
             </>
           )}
         </span>
+        {/*
+          THE COMPOSER'S COMMANDS. Today this list has one entry, and that is the honest shape: the command exists
+          because the context is nearly full, not because a menu was wanted. Keeping it a LIST (a group with a label)
+          rather than a lone button is what lets a second command arrive without a second layout.
+        */}
+        {onCompact !== undefined && session !== undefined && hasProcess(session) && (
+            <div className="composer-commands" role="group" aria-label="Composer commands">
+              <button
+                type="button"
+                className="composer-command"
+                disabled={session.compacting === true}
+                title={
+                  session.compacting === true
+                    ? "A compaction is already running. It spends a model call and may take a minute."
+                    : "Summarize this session's context now. This spends a model call and may take a minute."
+                }
+                onClick={onCompact}
+              >
+                {session.compacting === true ? "Compacting…" : "Compact context"}
+              </button>
+            </div>
+          )}
         {follow !== undefined && follow}
       </div>
 

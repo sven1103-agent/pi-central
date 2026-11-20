@@ -38,9 +38,11 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   PROTOCOL_VERSION,
+  COMPACT_SINCE_PROTOCOL,
   INSTALL_FACTS_SINCE_PROTOCOL,
   RETRY_SINCE_PROTOCOL,
   REVEAL_SINCE_PROTOCOL,
+  supportsCompact,
   supportsInstall,
   supportsRetry,
   supportsReveal,
@@ -185,6 +187,24 @@ test("supportsReveal gates on the version that introduced the control, not on eq
   // Unknown is "the handshake has not finished", not "old" — the convention `supportsRetry` documents.
   assert.equal(supportsReveal(undefined), true);
   assert.equal(REVEAL_SINCE_PROTOCOL, 10);
+});
+
+test("supportsCompact gates on the version that introduced the control, not on equality", () => {
+  // The consequence of getting this wrong is a control that answers `bad control: unknown kind 'compact'` — a
+  // sentence that names a symptom rather than a version skew, for the one action a reader presses BECAUSE the
+  // context is nearly full. Withholding it is the honest fallback.
+  assert.equal(supportsCompact(10), false, "v10 has no compact control");
+  assert.equal(supportsCompact(COMPACT_SINCE_PROTOCOL), true, "the version that introduced it");
+  assert.equal(supportsCompact(COMPACT_SINCE_PROTOCOL + 1), true, "a later version still has it");
+  // Unknown is "the handshake has not finished", not "old" — the convention `supportsRetry` documents.
+  assert.equal(supportsCompact(undefined), true);
+  assert.equal(COMPACT_SINCE_PROTOCOL, 11);
+});
+
+test("the compact control is in the pinned surface, so it cannot slip in unbumped", () => {
+  // No event accompanies it: the refusal is the ordinary `error` event, which already exists, and a compaction is
+  // reported by Pi's own `compaction_start`/`compaction_end` records. So there is exactly ONE new kind to pin.
+  assert.ok(kindsOf("Control").includes("compact"), "the compact control must be in the surface");
 });
 
 test("reveal's two kinds are in the pinned surface, so neither can slip in unbumped", () => {

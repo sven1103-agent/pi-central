@@ -141,6 +141,14 @@ class FakeSupervisor extends EventEmitter {
     this.calls.push({ method: "setThinkingLevel", args: [id, level] });
   }
 
+  /** Substitutable so a test can make the compaction refuse, as Pi does for a session with nothing to compact. */
+  compactImpl: (id: string) => Promise<void> = async () => undefined;
+
+  async compact(id: string): Promise<void> {
+    this.calls.push({ method: "compact", args: [id] });
+    await this.compactImpl(id);
+  }
+
   async listThinkingLevels(id: string) {
     this.calls.push({ method: "listThinkingLevels", args: [id] });
     return { ok: true as const, levels: ["off", "low", "high"] };
@@ -849,6 +857,50 @@ test("listModels broadcasts the catalogue, and a failure as modelsError", async 
     const failure = await client.next("modelsError");
     assert.equal(failure.kind === "modelsError" && failure.message, "session is not running");
     assert.equal(failure.kind === "modelsError" && failure.sessionId, "s2");
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+// --- Manual compaction (issue #263) --------------------------------------------------------------
+
+test("a compact control reaches the supervisor with the session id, and nothing else", async () => {
+  // The piece the rest of the slice depends on: the control must not be routed to `abort`, to
+  // `set_auto_compaction`, or dropped at the allowlist. The fake records the method and its exact arguments, so a
+  // handler that invented a second argument would fail here too.
+  const supervisor = new FakeSupervisor();
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "compact", sessionId: "s1" });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.deepEqual(supervisor.calls.at(-1), { method: "compact", args: ["s1"] });
+    client.close();
+  } finally {
+    await transport.close();
+  }
+});
+
+test("a REFUSED compaction is broadcast as an error naming the reason", async () => {
+  // Pi refuses with a sentence ("Nothing to compact (session too small)", "No API key for …"). The acceptance is the
+  // same as `setModel`'s: the reason reaches the reader, verbatim, on the app's one error surface — never a silent
+  // no-op and never a generic "compaction failed" that erases the cause.
+  const supervisor = new FakeSupervisor();
+  supervisor.compactImpl = async () => {
+    throw new Error("Nothing to compact (session too small)");
+  };
+  const transport = new Transport(supervisor as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "compact", sessionId: "s1" });
+    const event = await client.next("error");
+    assert.equal(event.kind, "error");
+    assert.match(event.message, /Nothing to compact \(session too small\)/);
     client.close();
   } finally {
     await transport.close();

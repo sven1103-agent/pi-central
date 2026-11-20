@@ -8,7 +8,7 @@
  */
 import type { LiveSession } from "@pi-central/protocol";
 import { formatCost, formatTokens, shortenPath } from "../format.ts";
-import { isRunning } from "../roster.ts";
+import { hasProcess, isRunning } from "../roster.ts";
 import { CopyButton } from "./CopyButton.tsx";
 
 /** One control in the Actions section. */
@@ -54,6 +54,8 @@ export function sessionControlsFor(
     retryAvailable: boolean;
     onForget?: (() => void) | undefined;
     onDelete?: (() => void) | undefined;
+    /** Compact this session's context now (issue #263). Absent when the orchestrator cannot. */
+    onCompact?: (() => void) | undefined;
   },
 ): SessionControl[] {
   const controls: SessionControl[] = [];
@@ -95,6 +97,32 @@ export function sessionControlsFor(
   }
 
   if (isRunning(session)) {
+    /*
+     * COMPACTION is MANUAL, and this is where it lives (issue #263).
+     *
+     * Pi compacts on its own when the context crosses a threshold. That is the automatic mechanism, and it is not the
+     * only reason a reader wants a summary: a long session may be cheaper to compact before starting another task,
+     * and an idle session at 60% still has a context worth thinning. So the trigger is not gated on `isNearFull` —
+     * that predicate colours the number and warns, and the reader decides whether to act before Pi would.
+     *
+     * `hasProcess` rather than `isRunning`: `isRunning` includes `failed` so a failed row keeps its Retry, and a
+     * dead process cannot compact anything. The orchestrator refuses it with a stated reason, but a control whose
+     * only possible outcome is a refusal should not be drawn.
+     */
+    if (caps.onCompact !== undefined && hasProcess(session)) {
+      const compacting = session.compacting === true;
+      controls.push({
+        key: "compact",
+        label: compacting ? "Compacting context" : "Compact context",
+        // The cost is stated on the control: this spends a model call, and the reader deciding whether to do it
+        // deserves to know that before the click rather than in a bill afterwards.
+        title: compacting
+          ? "A compaction is already running. It spends a model call and may take a minute."
+          : "Summarize this session's context now. This spends a model call and may take a minute.",
+        onSelect: caps.onCompact,
+        disabled: compacting,
+      });
+    }
     if (caps.onStop !== undefined) {
       controls.push({ key: "stop", label: "Stop session", title: "Stop this session. Its transcript stays on disk.", onSelect: caps.onStop });
     }
@@ -124,6 +152,7 @@ export function Inspector({
   retryAvailable = true,
   onForget,
   onDelete,
+  onCompact,
 }: {
   session: LiveSession | undefined;
   home: string | undefined;
@@ -136,6 +165,8 @@ export function Inspector({
   retryAvailable?: boolean;
   onForget?: (() => void) | undefined;
   onDelete?: (() => void) | undefined;
+  /** Compact this session's context now (issue #263). Absent when the orchestrator cannot. */
+  onCompact?: (() => void) | undefined;
 }) {
   if (!session) {
     return (
@@ -285,6 +316,7 @@ export function Inspector({
             retryAvailable,
             ...(onForget === undefined ? {} : { onForget }),
             ...(onDelete === undefined ? {} : { onDelete }),
+            ...(onCompact === undefined ? {} : { onCompact }),
           }).map((control) => (
             <button
               key={control.key}
