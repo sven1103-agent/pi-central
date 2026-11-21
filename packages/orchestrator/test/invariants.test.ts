@@ -152,3 +152,76 @@ test("every command the supervisor sends is in the closed union", () => {
     );
   }
 });
+
+/**
+ * Every `security` subcommand this codebase must never run.
+ *
+ * `show-keychain-info` reads settings and nothing else, and it is the only verb the probe uses. The list
+ * below is a PROHIBITION rather than a preference: C13 and ADR-0010 §6 forbid Pi Central from creating a
+ * keychain, unlocking one with a stored password, or writing the user-wide search list. Creating a keychain
+ * has been observed to drop `login.keychain-db` from that list and break the user's own shell access, so the
+ * prior art needed a restore trap to survive it — this code must not need one because it must not do it.
+ *
+ * `unlock-keychain` is prohibited even in its argument-free, prompting form. Any keychain read already
+ * raises the dialog Pi Central needs (issue #269), so the verb buys nothing, and `-p` would mean a stored
+ * password: a credential worse than the one it protects. Neither is worth leaving available to a future
+ * "convenience" fix.
+ */
+const FORBIDDEN_SECURITY_VERBS = [
+  "create-keychain",
+  "delete-keychain",
+  "unlock-keychain",
+  "lock-keychain",
+  "set-keychain-settings",
+  "set-keychain-password",
+  "list-keychains",
+  "default-keychain",
+  "login-keychain",
+  "add-generic-password",
+  "delete-generic-password",
+  "set-generic-password-partition-list",
+];
+
+test("nothing in the orchestrator mutates a keychain or the search list (C13, ADR-0010 §6)", () => {
+  // Asserted over the SOURCE, because the failure this prevents is a future edit that looks helpful: a
+  // "just unlock it for me" branch, or a search-list repair for an absent keychain. Both would be invisible
+  // to a test that only exercised the happy path.
+  const offenders: string[] = [];
+  for (const file of files) {
+    const text = readFileSync(file, "utf8");
+    for (const line of text.split("\n")) {
+      const code = line.trim();
+      // Comments may NAME the prohibited commands — `keychain.ts` explains why they are forbidden, and a scan
+      // that failed on prose would be turned off instead of read.
+      if (code.startsWith("*") || code.startsWith("//") || code.startsWith("/*")) continue;
+      for (const verb of FORBIDDEN_SECURITY_VERBS) {
+        // A quoted literal, i.e. an argument actually being built: `"unlock-keychain"` or `'unlock-keychain'`.
+        // Prose and identifiers do not match.
+        if (new RegExp(`["'\`]${verb}["'\`]`).test(code)) offenders.push(`${relative(SRC, file)}: ${code}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], `a keychain-mutating command was found:\n${offenders.join("\n")}`);
+});
+
+test("the keychain probe builds exactly one verb, and it is the read-only one", () => {
+  // The scan above proves nothing FORBIDDEN is used; this proves the one command that IS used cannot grow into
+  // one that mutates. Both halves are needed: a probe that gained a second verb would pass a denylist.
+  const keychain = readFileSync(join(SRC, "keychain.ts"), "utf8");
+  const argv = /export function keychainProbeArgv\(path: string\): string\[\] \{\s*return \[([^\]]*)\]/.exec(keychain);
+  assert.ok(argv, "keychainProbeArgv must exist and return a literal array");
+  const literals = [...argv[1]!.matchAll(/"([^"]*)"/g)].map((m) => m[1]!);
+  assert.equal(literals.length, 1, `exactly one verb literal is allowed, found ${JSON.stringify(literals)}`);
+  assert.equal(literals[0], "show-keychain-info", "the only verb may be the read-only one");
+});
+
+test("keychain code never passes a password on a command line", () => {
+  // `security … -p <password>` would put a credential in an argv, which is the class of exposure ADR-0010's
+  // storage layer exists to avoid. Asserted separately because it is a one-character difference.
+  const keychain = readFileSync(join(SRC, "keychain.ts"), "utf8");
+  for (const line of keychain.split("\n")) {
+    const code = line.trim();
+    if (code.startsWith("*") || code.startsWith("//") || code.startsWith("/*")) continue;
+    assert.ok(!/["']-p["']/.test(code), `a password flag appears in code: ${code}`);
+  }
+});

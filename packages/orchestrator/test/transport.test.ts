@@ -1595,3 +1595,57 @@ test("`list` still refreshes history and the rail, unchanged by this slice (issu
     await transport.close();
   }
 });
+
+// --- The keychain's lock state reaches the UI (issue #269) ---------------------------------------
+
+test("the snapshot carries the keychain state the launch found, with its path", async () => {
+  /*
+   * Why this travels at all: after a reboot the only place a locked keychain surfaced was a failed model call,
+   * which reads as a UI bug. The state and its PATH have to arrive together — macOS's dialog names neither Pi
+   * Central nor the file, so a state without a path leaves the reader unable to tell which keychain is asking.
+   *
+   * Passed as the launch's own answer (`keychainCheck`) rather than derived: the transport did not ask, so it
+   * must not appear to have. `undefined` is the "not reported" case and is covered by the absence below.
+   */
+  const transport = new Transport(new FakeSupervisor() as never, emptyConfig(), {
+    uiDir: null,
+    keychainCheck: () => ({
+      needed: true,
+      report: {
+        state: "locked",
+        path: "/agent/agent.keychain-db",
+        detail: "its password prompt was dismissed, so it is still locked",
+        code: 128,
+        probed: true,
+      },
+    }),
+  });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    const snapshot = await client.next();
+    assert.equal(snapshot.kind, "snapshot");
+    const keychain = snapshot.install?.keychain;
+    assert.ok(keychain, "a locked keychain must be reported, not omitted");
+    assert.equal(keychain.state, "locked");
+    assert.equal(keychain.path, "/agent/agent.keychain-db");
+    assert.equal(keychain.needed, true);
+  } finally {
+    await transport.close();
+  }
+});
+
+test("a launch that never asked reports NO keychain, rather than an unlocked one", async () => {
+  // The C13 mistake in one line: an unasked question must not look answered. `undefined` renders as silence,
+  // and a fabricated `unlocked` would be a claim nothing verified.
+  const transport = new Transport(new FakeSupervisor() as never, emptyConfig(), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    const snapshot = await client.next();
+    assert.equal(snapshot.kind, "snapshot");
+    assert.equal(snapshot.install?.keychain, undefined, "no answer means no claim");
+  } finally {
+    await transport.close();
+  }
+});

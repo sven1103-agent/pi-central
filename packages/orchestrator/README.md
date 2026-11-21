@@ -16,6 +16,7 @@ decoration.
 | `capabilities.ts` | Is the agent credential store usable? Provisioned vs unreachable | C15a, ADR-0010 |
 | `signing.ts` | Is the agent's commit/tag signing **configured**, not merely keyed? | C15b, ADR-0010 §4, Amendment 2 |
 | `fragment.ts` | The appended policy fragment: the credential denies | C15c, ADR-0010 §4, Amendment 3 |
+| `keychain.ts` | The agent keychain's lock state, asked once per launch | C13, C13a, ADR-0010 §2, Amendment 4 |
 | `transport.ts` | WebSocket + serve the built UI from one origin | ADR-0006, C5 |
 | `static-ui.ts` | Serve `packages/ui/dist`, with containment and the CSP header | ADR-0006, C5 |
 | `cli.ts` | Smoke command: start, prompt, observe | ROADMAP Phase 1 |
@@ -29,6 +30,11 @@ is gone.
 **2. The orchestrator imports no Pi runtime.** `@earendil-works/pi-coding-agent` is a
 `devDependency`, imported with `import type` only (ADR-0005, ADR-0009). The sole runtime
 contact with Pi is the `pi --mode rpc` child process. A test asserts this.
+
+**3. The keychain is asked exactly once per launch, and only read.** The state is
+process-wide (C13a), so a probe anywhere on the spawn path turns one password prompt into one
+per session. `keychainProbeArgv` is fixed at `show-keychain-info`, and a test fails on any
+keychain-mutating command anywhere in `src/` (ADR-0010 §6).
 
 ## Running
 

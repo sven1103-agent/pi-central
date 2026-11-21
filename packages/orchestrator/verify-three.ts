@@ -23,6 +23,7 @@ import { Supervisor } from "./src/supervisor.ts";
 import { KEYCHAIN_FILE, inspectProviderAuth, readStore } from "./src/agent-store.ts";
 import { assessAgentCapabilities } from "./src/capabilities.ts";
 import { renderPolicyFragment } from "./src/fragment.ts";
+import { describeKeychainCheck } from "./src/keychain.ts";
 import type { LiveSession } from "@pi-central/protocol";
 
 const KEEP = process.argv.includes("--keep");
@@ -231,6 +232,16 @@ async function main(): Promise<number> {
   const problems: string[] = [];
   supervisor.on("error", (id, message) => problems.push(`${id}: ${message}`));
 
+  /*
+   * Ask the keychain once, before the fleet spawns (issue #269) — the same call the entry point makes.
+   *
+   * Not cosmetic: without it each sandboxed session's own provider lookup asks a locked keychain for itself, so
+   * this harness would raise one password dialog per session behind its own output, and a locked keychain would
+   * look like a hanging model call. Doing it here also means the assessment below is the SAME assessment the
+   * dashboard produces, rather than a slightly different one reached by a different path.
+   */
+  const keychain = await supervisor.ensureKeychainState();
+
   // Report credential provisioning, since it changes what the checks below can prove. A missing
   // keychain is no longer fatal on its own: the grant follows the provider configuration, which
   // may resolve keys through the user-wide search list (ADR-0010 §6).
@@ -239,6 +250,7 @@ async function main(): Promise<number> {
     ownership: config.agentRootManaged ? "managed" : "external",
   });
   info("agent root", `${config.agentRoot} (${config.agentRootManaged ? "managed" : "external"})`);
+  info("keychain", describeKeychainCheck(keychain));
   if (store.exists) {
     info("identity", store.identity.email ?? "(no user.email set)");
     info("has", Object.entries(store.has).filter(([, v]) => v).map(([k]) => k).join(", ") || "(nothing)");
@@ -294,6 +306,7 @@ async function main(): Promise<number> {
     }),
     providerAuth,
     keychainPath: join(config.agentRoot, KEYCHAIN_FILE),
+    ...(supervisor.keychainCheck() === undefined ? {} : { keychainState: supervisor.keychainCheck() }),
   });
   for (const warning of assessment.warnings) {
     info("capability", warning);

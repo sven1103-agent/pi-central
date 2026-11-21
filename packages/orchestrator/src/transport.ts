@@ -43,6 +43,7 @@ import { discover, sessionAt } from "./registry.ts";
 import { abbreviate, listPlace, nameOf, placesFor } from "./places.ts";
 import { deleteSessionFile } from "./delete-session.ts";
 import type { Config } from "./config.ts";
+import type { KeychainCheck } from "./keychain.ts";
 import { createUiRequestHandler, resolveUiDistDir, servedUiIdentity } from "./static-ui.ts";
 
 export interface TransportOptions {
@@ -70,6 +71,18 @@ export interface TransportOptions {
    * there is no second discovery implementation to keep in step.
    */
   discoverSessions?: typeof discover;
+  /**
+   * How the transport learns the launch's keychain state (issue #269).
+   *
+   * **Supplied by the entry point, never derived here.** The state is a fact about the LAUNCH — established
+   * once, before the fleet restored — rather than about the transport or the snapshot, so the transport
+   * reports what it was told and nothing else. Absent means "not reported", which the snapshot renders as
+   * silence rather than as a healthy keychain: the transport cannot invent a state the launch did not find.
+   *
+   * A function rather than a value for the same reason `ui` is read per snapshot: a connection that arrives
+   * before the launch has answered would otherwise freeze `undefined` for the life of the process.
+   */
+  keychainCheck?: () => KeychainCheck | undefined;
 }
 
 export interface TransportAddress {
@@ -150,13 +163,14 @@ export class Transport {
    * The resolved options, with the discovery seam kept OUT: it has its own field, because it is a function to
    * call rather than a value to read, and folding it in here would make `Required<…>` promise a non-null one.
    */
-  #options: Required<Omit<TransportOptions, "discoverSessions">>;
+  #options: Required<Omit<TransportOptions, "discoverSessions" | "keychainCheck">>;
   #server: Server | undefined;
   #wss: WebSocketServer | undefined;
   #clients = new Set<WebSocket>();
   #address: TransportAddress | undefined;
-  #install: InstallFacts | undefined;
+  #install: Omit<InstallFacts, "keychain"> | undefined;
   #discover: typeof discover;
+  #keychainCheck: () => KeychainCheck | undefined;
 
   constructor(supervisor: Supervisor, config: Config, options: TransportOptions = {}) {
     this.#supervisor = supervisor;
@@ -168,6 +182,7 @@ export class Transport {
       uiDir: options.uiDir === undefined ? resolveUiDistDir() : options.uiDir,
     };
     this.#discover = options.discoverSessions ?? discover;
+    this.#keychainCheck = options.keychainCheck ?? (() => undefined);
   }
 
   get address(): TransportAddress | undefined {
@@ -251,8 +266,13 @@ export class Transport {
    * Computed once and cached: `findOwnPackage` walks the directory tree, and this is sent on every
    * connection. The version cannot change while the process runs, so recomputing it per connection
    * would be work done to produce a value already known to be identical.
+   *
+   * The keychain facts are NOT cached with the rest, and the reason is the same one that applies to `ui`: they
+   * are established by the launch rather than by the build, so freezing them into the cached facts would keep
+   * `undefined` for the life of the process if the first snapshot was built before the probe answered (issue
+   * #269).
    */
-  #installFacts(): InstallFacts {
+  #installFacts(): Omit<InstallFacts, "keychain"> {
     if (this.#install !== undefined) return this.#install;
     const own = findOwnPackage();
     this.#install = {
@@ -278,10 +298,45 @@ export class Transport {
    * stale `ui` here would be the one value issue #184 exists for, reported wrong.
    */
   #snapshotInstallFacts(): InstallFacts {
-    const facts = this.#installFacts();
+    const keychain = this.#keychainFacts();
+    const facts: InstallFacts = keychain === undefined ? this.#installFacts() : { ...this.#installFacts(), keychain };
     if (this.#options.uiDir === null) return facts;
     const ui = servedUiIdentity(this.#options.uiDir);
     return ui === undefined ? facts : { ...facts, ui };
+  }
+
+  /**
+   * The launch's keychain state, in the shape the wire carries — or `undefined` when there is none to report.
+   *
+   * Three absences, and they are kept apart because they mean different things:
+   *
+   *   - **nothing was established** — either the orchestrator never asked, or the entry point did not pass a
+   *     source. Reported as nothing at all: a fabricated `unlocked` would be a claim nothing verified.
+   *   - **nothing needed asking** — no provider key is resolved by a command (C13). Reported as `needed: false`
+   *     with no lock state, because "nobody asked" and "asked, and it is open" are different facts.
+   *   - **asked and answered** — reported as found, including `unknown`, which a broken probe produces and which
+   *     must not be dressed up as healthy.
+   */
+  #keychainFacts(): InstallFacts["keychain"] {
+    const check = this.#keychainCheck();
+    if (check === undefined) return undefined;
+    if (!check.needed) {
+      return {
+        path: this.#config.agentRoot,
+        state: "unknown",
+        detail: "no provider key is resolved by a command, so no keychain was read",
+        needed: false,
+      };
+    }
+    if (check.report === undefined) {
+      return {
+        path: this.#config.agentRoot,
+        state: "unknown",
+        detail: "the keychain probe produced no answer",
+        needed: true,
+      };
+    }
+    return { path: check.report.path, state: check.report.state, detail: check.report.detail, needed: true };
   }
 
   async #sendSnapshot(socket: WebSocket): Promise<void> {

@@ -376,6 +376,23 @@ export interface PromptImage {
 }
 
 /**
+ * The agent keychain, as the launch left it (issue #269).
+ *
+ * The states are the probe's own (`keychain.ts`), not a boolean: `absent` and `locked` have different repairs,
+ * and `unknown` exists so a broken probe cannot be presented as a healthy keychain.
+ */
+export interface AgentKeychainFacts {
+  /** The keychain's path, so the reader can tell it from their login keychain's own prompt. */
+  path: string;
+  /** `unlocked` / `locked` / `absent` / `unknown`, from the probe's exit status rather than a guess. */
+  state: "unlocked" | "locked" | "absent" | "unknown";
+  /** One sentence: what produced that state. */
+  detail: string;
+  /** False when nothing was asked, because no provider key is resolved by a command (C13). */
+  needed: boolean;
+}
+
+/**
  * Facts about the running installation, for the Settings surface (issue #58).
  *
  * These are things the browser cannot discover for itself — the orchestrator is a local process that
@@ -398,6 +415,19 @@ export interface InstallFacts {
   agentRoot: string;
   /** True when Pi Central manages that root itself, rather than using an external one. */
   agentRootManaged: boolean;
+  /**
+   * The agent keychain's lock state, as the launch found it (issue #269).
+   *
+   * Optional, and — following the convention `ui` and `install` already set — **a new optional field is
+   * deliberately not a protocol-version change**: an older orchestrator omits it and the surface renders
+   * nothing rather than inventing a state.
+   *
+   * Why it travels at all: a locked keychain is invisible until a model call fails, which is exactly how the
+   * reported "prompted indefinitely, one password is not enough" looked like a UI bug. After a reboot the
+   * reader should be able to look at ONE place and see that the keychain is the reason sessions cannot think
+   * (C13). `undefined` means the orchestrator does not report lock state, or has not asked yet — never "fine".
+   */
+  keychain?: AgentKeychainFacts | undefined;
   /**
    * The wire version the orchestrator speaks.
    *

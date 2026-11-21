@@ -410,3 +410,77 @@ test("the signing warning names no HOST credential path as the remedy", () => {
   }
   assert.match(signing[0]!.message, new RegExp(root.replace(/[/.]/g, "\\$&")));
 });
+
+// --- The keychain's LOCK state (issue #269) ------------------------------------------------------
+
+test("a LOCKED keychain is 'unreachable', and the warning is not a provisioning step", () => {
+  // C13's lesson applied to the lock rather than to the grant: a session whose keychain is locked starts,
+  // reports `idle`, and cannot think. The policy can be perfect and the file readable — after a reboot it is
+  // simply locked, and that is the state the reader has to be told about BEFORE a model call fails.
+  const root = makeTree({ gitconfig: true, gh: true, ssh: true, keychain: true });
+  const assessment = assessAgentCapabilities({
+    store: readStore(root, { ownership: "external" }),
+    sandboxed: true,
+    fragment: renderPolicyFragment({ agentRoot: root, keychain: true, keychainPath: agentKeychainPath(root) }),
+    providerAuth: { path: "/a/auth.json", readable: true, providers: ["litellm"], commandProviders: ["litellm"], needsKeychain: true },
+    keychainPath: agentKeychainPath(root),
+    keychainState: {
+      needed: true,
+      report: {
+        state: "locked",
+        path: agentKeychainPath(root),
+        detail: "its password prompt was dismissed, so it is still locked",
+        code: 128,
+        probed: true,
+      },
+    },
+  });
+  const finding = find(assessment, "keychain");
+  assert.ok(finding, "a locked keychain must produce a finding");
+  assert.equal(finding.state, "unreachable");
+  assert.match(finding.message, /is locked/);
+  assert.match(finding.message, /unable to reach a model/);
+  // The repair is answering the prompt or unlocking it — NOT provisioning a credential. Sending the reader to
+  // create something that already exists is the misdiagnosis issue #28 exists to prevent.
+  assert.match(finding.message, /password prompt|Keychain Access/);
+  assert.ok(!/Provision it/.test(finding.message), "a locked keychain is not an unprovisioned one");
+});
+
+test("an UNLOCKED keychain produces no finding, so a healthy launch is silent", () => {
+  const root = makeTree({ gitconfig: true, gh: true, ssh: true, keychain: true });
+  const assessment = assessAgentCapabilities({
+    store: readStore(root, { ownership: "external" }),
+    sandboxed: true,
+    fragment: renderPolicyFragment({ agentRoot: root, keychain: true, keychainPath: agentKeychainPath(root) }),
+    providerAuth: { path: "/a/auth.json", readable: true, providers: ["litellm"], commandProviders: ["litellm"], needsKeychain: true },
+    keychainPath: agentKeychainPath(root),
+    keychainState: {
+      needed: true,
+      report: { state: "unlocked", path: agentKeychainPath(root), detail: "it answered", code: 0, probed: true },
+    },
+  });
+  assert.equal(find(assessment, "keychain"), undefined, "no news is the correct reading of an unlocked keychain");
+});
+
+test("an ABSENT keychain is not reported as locked, and an unchecked one is not reported as unlocked", () => {
+  // Two different silences, and conflating them is how a check becomes a formality. `absent` may still work
+  // through the user-wide search list (C13), and `undefined` means nobody asked — neither may be dressed up
+  // as a lock to clear.
+  const root = makeTree({ gitconfig: true, gh: true, ssh: true });
+  const base: Parameters<typeof assessAgentCapabilities>[0] = {
+    store: readStore(root, { ownership: "external" }),
+    sandboxed: true,
+    fragment: renderPolicyFragment({ agentRoot: root, keychain: true, keychainPath: agentKeychainPath(root) }),
+    providerAuth: { path: "/a/auth.json", readable: true, providers: ["litellm"], commandProviders: ["litellm"], needsKeychain: true },
+    keychainPath: agentKeychainPath(root),
+  };
+  assert.equal(find(assessAgentCapabilities({ ...base }), "keychain"), undefined, "no lock state reported means nothing to say");
+  const absent = assessAgentCapabilities({
+    ...base,
+    keychainState: {
+      needed: true,
+      report: { state: "absent", path: agentKeychainPath(root), detail: "no keychain", probed: false },
+    },
+  });
+  assert.equal(find(absent, "keychain"), undefined, "absent is a setup fact, not a lock");
+});
