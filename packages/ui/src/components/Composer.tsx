@@ -506,6 +506,19 @@ export function Composer({
         disabled={unavailable}
         aria-label="Prompt"
         /*
+          The keys are stated on the field ITSELF, not only in the hint row below it.
+
+          The hint row folds away in reading focus (issue #275, second slice), and a mode that removed the only written
+          `Enter`/`Shift+Enter` explanation would trade a line of chrome for a piece of discoverability. `title` costs no
+          height, is read where the reader is already typing, and is the same two facts in the same words — so the mode
+          changes where they are stated, not whether they are.
+        */
+        title={
+          streaming
+            ? "Enter steers · Alt+Enter queues for after this run · Esc stops the run"
+            : "Enter to send · Shift+Enter for a new line"
+        }
+        /*
          * THREE LINES, FIXED. A longer prompt scrolls inside the field rather than growing the composer.
          *
          * `rows` is the fallback for a browser that ignores the stylesheet's `height`; the CSS is the authority, because

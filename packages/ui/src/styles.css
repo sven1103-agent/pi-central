@@ -633,6 +633,104 @@ button { font: inherit; color: inherit; }
   gap: var(--sp-2);
 }
 
+/* ------------------------------------------------------------------ reading focus */
+
+/*
+ * READING FOCUS (issue #275, second slice).
+ *
+ * The report that opened #275 was about the rail; the screenshot that followed it asked a different question, and the
+ * Llama UI answered it: with the fleet list away, the *window* should be the conversation. This mode is that preference
+ * expressed as CSS, and it is deliberately one class on the app root (`rail-prefs.ts#appClass`) rather than a prop
+ * threaded through four components — what changes here is which surfaces are laid out at all.
+ *
+ * ## What it removes, and the rule each removal follows
+ *
+ * Everything below is CHROME — a surface that describes the fleet or the session rather than being either. Nothing that
+ * *is* the conversation, and nothing that changes a decision, is touched:
+ *
+ *   - the conversation keeps its lane, its `--reading-measure` and its own scroller, untouched;
+ *   - the composer keeps its place and its field; only its permanent hint row folds away;
+ *   - warnings, dialog docks, the queue rail and the error strip stay — they are decisions, not descriptions;
+ *   - the activity bars stay, because they are the only way back to everything this mode hides.
+ *
+ * ## Why the header LEAVES rather than shrinks
+ *
+ * The session header exists twice already: a 340px companion box beside the prose, and the Session panel, which states
+ * the same facts with room to read them. Focus mode drops the box and leaves the panel — so the facts are one click
+ * away rather than gone, which is the difference between a mode and a trap. The height it frees goes to the
+ * conversation, and that is the whole intent.
+ *
+ * The rule is reversible in one keystroke (`⌘⇧.`), which is what makes hiding something this large acceptable.
+ */
+.app.is-focus .topbar {
+  /*
+   * The topbar keeps the two things that are not descriptions of the fleet: the product mark, which is the window's
+   * identity, and the connection dot, which is whether the app is working at all. The fleet counts go — they are the
+   * rail's business, and the rail is either on screen or one press from it.
+   */
+  padding-inline: var(--sp-3);
+  gap: var(--sp-2);
+  background: var(--bg);
+  border-bottom-color: transparent;
+}
+/* The fleet counts are the RAIL's business, and the rail is either on screen or one press from it. */
+.app.is-focus .topbar .fleet {
+  display: none;
+}
+/*
+ * The connection dot alone, so "connected" is still answerable at a glance while its sentence folds away.
+ *
+ * The dot stays deliberately: whether the app is working at all is not a description of the fleet, and a window that
+ * could not say "disconnected" would leave the reader typing into a field with nothing behind it.
+ */
+.app.is-focus .topbar .conn > span:not(.conn-dot) {
+  display: none;
+}
+
+.app.is-focus .navrail {
+  /* The bars are chrome, so they narrow rather than disappear: they are the only way back from this mode. */
+  width: 36px;
+}
+.app.is-focus .navrail-item {
+  width: 30px;
+  height: 30px;
+  font-size: 14px;
+}
+
+.app.is-focus .transcript-header {
+  /*
+   * The companion leaves the reading row entirely, so the prose lane takes the room it had.
+   *
+   * `display: none` rather than a narrower box: a 340px column of facts squeezed to 200px would be the "clipped
+   * mid-word" defect `panel.ts` records, and the panel states the same facts properly. The `has-header` row rule is
+   * overridden so the prose is centred in the FULL column instead of sharing it with an empty track.
+   */
+  display: none;
+}
+.app.is-focus .transcript-wrap.has-header {
+  /* One box in the row now, so there is nothing to pair-centre: the column centres itself. */
+  justify-content: center;
+  gap: 0;
+}
+.app.is-focus .transcript-wrap.has-header .transcript-main { order: 0; }
+
+.app.is-focus .composer-hint {
+  /*
+   * The permanent "Enter to send · Shift+Enter for a new line" line folds away.
+   *
+   * Not because it is wrong — it is the only place the keys are stated without opening a sheet — but because it is a
+   * line of the window's height reserved for something a reader learns once. `⌘K` still lists them, and the field's own
+   * title carries them.
+   */
+  display: none;
+}
+.app.is-focus .composer-chrome {
+  /* With the hint gone the row is the commands and the follow toggle, so it may collapse to nothing when both are
+     absent rather than leaving a gap where a sentence used to be. */
+  justify-content: flex-end;
+}
+.app.is-focus .composer-chrome:empty { display: none; }
+
 /* ------------------------------------------------------------------ rail */
 
 .rail {

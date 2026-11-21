@@ -601,6 +601,7 @@ function RailPanel({
             prefs.width === RAIL_DEFAULT_WIDTH &&
             prefs.density === "full" &&
             !prefs.hidden &&
+            !prefs.focus &&
             !prefs.collapsed.idle &&
             !prefs.collapsed.stopped
           }
@@ -668,6 +669,24 @@ function RailPanel({
         </span>
         <span />
       </label>
+
+      <label className="reading-row">
+        <span>Reading focus</span>
+        <span style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+          <input
+            type="checkbox"
+            checked={prefs.focus}
+            aria-label="Give the conversation the window"
+            onChange={(event) => onChange((c) => ({ ...c, focus: event.target.checked }))}
+          />
+          {prefs.focus ? "The conversation has the window" : "Step the chrome back around the conversation"}
+        </span>
+        <span />
+      </label>
+      <p className="settings-note">
+        Folds the window's own chrome — not the conversation. The session's identity and controls move into the panel,
+        so open it from the right bar when you need them.
+      </p>
 
       <label className="reading-row">
         <span>Fold small groups</span>

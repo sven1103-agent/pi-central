@@ -175,6 +175,25 @@ export const SHORTCUTS: readonly ShortcutDefinition[] = [
     shell: true,
   },
   {
+    id: "view.focus",
+    group: "pages",
+    /*
+     * `⌘⇧.` — and the pair with `⌘.` is the reason for it.
+     *
+     * `⌘.` stops the run: the most consequential keystroke in the app. A view MODE should not sit one modifier away from
+     * it by accident, so this takes the Shift: "the same corner, a different thing", and pressing the wrong one costs a
+     * confirmation rather than a silent stop.
+     *
+     * `.` rather than a letter because the mode is about the WINDOW, and the window's keys in this registry are the
+     * punctuation ones (`⌘,` settings, `⌘.` stop). It is also layout-safe on the layouts this app is used on — unlike
+     * `/`, which is Shift+7 on a German keyboard and was the reason `⌘K` replaced `⌘/`.
+     */
+    keys: ["mod+shift+."],
+    label: "Reading focus",
+    note: "Gives the conversation the window, and puts the chrome back when pressed again.",
+    shell: true,
+  },
+  {
     id: "keys.show",
     group: "pages",
     /*

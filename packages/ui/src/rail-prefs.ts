@@ -94,6 +94,17 @@ export interface RailPrefs {
    */
   hidden: boolean;
   /**
+   * Reading focus: the window *is* the conversation (issue #275, second slice).
+   *
+   * On, and the surfaces that exist to describe the fleet rather than the session step out of the way: the topbar
+   * collapses to its connection dot, the activity bars narrow, the session header stops being a band beside the prose,
+   * and the composer's hint row stops reserving a permanent line. The conversation keeps its lane, its measure and its
+   * composer — nothing about reading changes, which is the property that makes this a mode and not a redesign.
+   *
+   * Off by default, like every preference in this module, so a reader who never asks sees the shipped app.
+   */
+  focus: boolean;
+  /**
    * Which foldable sections are folded.
    *
    * Kept while the rail is hidden, exactly as `PanelPrefs` keeps its mode and width while collapsed: a control
@@ -106,7 +117,13 @@ export const RAIL_PREFS_KEY = "pi-central.rail";
 
 /** Everything expanded, full density, at the width the rail has always had. */
 export function defaultRailPrefs(): RailPrefs {
-  return { width: RAIL_DEFAULT_WIDTH, density: "full", hidden: false, collapsed: { idle: false, stopped: false } };
+  return {
+    width: RAIL_DEFAULT_WIDTH,
+    density: "full",
+    hidden: false,
+    focus: false,
+    collapsed: { idle: false, stopped: false },
+  };
 }
 
 /**
@@ -247,6 +264,7 @@ export function parseRailPrefs(raw: string | null, rowsOnDisk = 0): RailPrefs {
     density,
     // `... === true`, not a truthiness test: `"false"` is a reachable stored value and it must not mean hidden.
     hidden: record["hidden"] === true,
+    focus: record["focus"] === true,
     collapsed: {
       idle: folded["idle"] === true,
       stopped: folded["stopped"] === true,
@@ -267,4 +285,20 @@ export function serializeRailPrefs(prefs: RailPrefs): string {
  */
 export function railStyle(prefs: RailPrefs): Record<string, string> {
   return { "--rail-width": `${prefs.width}px` };
+}
+
+/**
+ * The class the shell puts on the app's root for a preference set.
+ *
+ * A class rather than another custom property, because what focus mode changes is *which surfaces are laid out at all*
+ * — a topbar that becomes a dot, a header that stops being a column, a hint row that stops reserving a line. Those are
+ * structural, and expressing them as one class keeps every rule in the stylesheet beside the layout it modifies, with
+ * one named switch. The alternative — the shell passing a prop through four components — would spread one preference
+ * over four files and make "what does focus mode do" unanswerable by reading the stylesheet.
+ *
+ * `hidden` is deliberately NOT in here: it is a preference about the rail, and the rail's own layout rules already
+ * carry it (ADR-0015's "the breakpoint is only a floor" section).
+ */
+export function appClass(base: string, prefs: RailPrefs): string {
+  return prefs.focus ? `${base} is-focus` : base;
 }

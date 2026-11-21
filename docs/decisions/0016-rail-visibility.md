@@ -53,6 +53,39 @@ Concretely:
 7. **A large roster starts folded, once.** The one place the app chooses for the reader: above four rows on disk, and
    only when no preference is stored, `Idle` and `Stopped` start folded.
 
+## Amendment — reading focus, and why the mode is not a second decision
+
+The report behind #275 was about the rail. The screenshot that followed it asked a larger question, and the Llama UI
+answered it: with the fleet list away, the **window** should be the conversation — a centred column, per-message actions
+and one composer, no bands.
+
+That is the same decision, one level up, so it is settled here rather than in a new record. The rail's presence and the
+window's chrome are one preference family — "how much of this screen is the fleet and how much is the
+conversation" — and separating them into two ADRs would invite two answers to one question.
+
+**`focus` is a stored boolean, off by default.** On, and the surfaces that DESCRIBE the fleet or the session step
+aside: the topbar keeps its mark and the connection dot and loses the fleet counts; the activity bars narrow from 48px
+to 36px; the session header's 340px companion leaves the reading row, so the prose gets its width; the composer's
+permanent hint line folds away, with the same two facts stated on the field's own `title`. The key is `⌘⇧.` — the Shift
+is the point, because `⌘.` stops the run.
+
+Four boundaries define the mode, and each is a test in `focus-mode.test.mjs` rather than a style choice:
+
+1. **Chrome only.** Nothing that IS the conversation is governed by the mode. No rule here touches the lane, the
+   measure, the scroller or the composer's field — a mode that narrowed the column in the mode named after it would be
+   the opposite of its purpose.
+2. **Not a trap.** What is hidden must exist elsewhere. The session's identity, model, thinking level, meter, cost and
+   controls are all stated in the Session panel, which the mode does not touch; the activity bars narrow rather than
+   disappear, because they are the way back to everything.
+3. **Nothing consequential goes.** Warnings, dialog docks, the queue rail and the error strip stay. They are decisions,
+   not descriptions — the same line the rail's foldable sections follow (`Needs you` and `Running` do not fold).
+4. **Stated once, not dropped.** The keys the hint row carried move to the field's `title`, in the same words. Trading a
+   line of chrome for a piece of discoverability is not a trade worth making.
+
+**Deliberately not in this amendment:** frame-less windows, hiding the product mark, a separate composer layout, or moving
+the model pickers INTO the composer. Each is defensible and none is required by "the conversation has the window" — and a
+mode that ships small enough to press twice is worth more than one that argues about its own edges.
+
 ## What #68 still means, and how folding pays for it
 
 The settled decision is quoted verbatim in the code: *"i now see directly when sth has finished without scrolling"*.

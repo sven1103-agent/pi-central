@@ -15,6 +15,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The session list's width, density and visibility are the reader's, remembered across restarts, with a resize handle and a Session list section in Settings ([#275]).
 - Idle and Stopped fold to their heading, keeping the count and opening themselves when a session arrives in them ([#275]).
 - ADR-0016 records the decision: the list's visibility is a reader preference and the 1024px breakpoint is only a floor ([#275]).
+- Reading focus (`⌘⇧.`) gives the conversation the window: the fleet counts, the session band and the composer's hint row step aside, and the panel keeps everything they stated ([#275]).
 
 ### Changed
 

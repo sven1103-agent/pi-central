@@ -63,6 +63,7 @@ import {
   clampRailWidth,
   defaultRailPrefs,
   parseRailPrefs,
+  appClass,
   railMaxWidth,
   railStyle,
   serializeRailPrefs,
@@ -1783,9 +1784,17 @@ export function App() {
       "page.sessions": () => setTab("sessions"),
       "page.history": () => setTab("history"),
       "settings.open": () => setSettingsOpen(true),
+      "view.focus": () => setRailPrefsAndPersist((current) => ({ ...current, focus: !current.focus })),
       "keys.show": () => setKeysOpen((open) => !open),
     }),
-    [onStartSession, requestStop, requestDeleteFocused, requestForgetFocused, state.install?.protocol],
+    [
+      onStartSession,
+      requestStop,
+      requestDeleteFocused,
+      requestForgetFocused,
+      setRailPrefsAndPersist,
+      state.install?.protocol,
+    ],
   );
 
   /**
@@ -1830,7 +1839,14 @@ export function App() {
   const platform = detectPlatform(typeof navigator === "undefined" ? undefined : navigator.userAgent);
 
   return (
-    <div className="app">
+    /*
+      The app root carries the reader's mode as ONE class (issue #275, second slice).
+      
+      `is-focus` is what "the window is the conversation" means, and it is a class rather than a prop threaded through
+      four components for one reason: what it changes is which surfaces are laid out at all, which is stylesheet
+      territory. Reading the stylesheet's focus section is then a complete answer to "what does the mode do".
+    */
+    <div className={appClass("app", railPrefs)}>
       <header className="topbar">
         {/*
           The MARK only, with the name kept as an accessible heading.
