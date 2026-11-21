@@ -814,25 +814,37 @@ button { font: inherit; color: inherit; }
  * swallow clicks aimed at the conversation behind it. That is the one hazard an overlay introduces and the one thing an
  * overlay must get right.
  */
+/* The tab's thickness, which is also the panel's offset from the trailing edge. One number, two readers. */
 .transcript-peek {
+  --peek-tab: 30px;
+  /*
+   * FULL BLEED over the wrap, and that is a fix rather than a preference.
+   *
+   * The first version was `right: 0` with no width, so this box was SHRINK-TO-FIT — 30px, the width of the tab. The
+   * panel's `max-width: 100%` then resolved against 30px and clamped a 340px panel to a 30px sliver, which is exactly
+   * what the screenshot showed: a light strip instead of the details.
+   *
+   * A `%` max-width is a percentage of the CONTAINING BLOCK, so a shrink-to-fit overlay cannot host one. `inset: 0` makes
+   * the containing block the whole reading column, which is what both the percentage and the panel's leftward offset need
+   * to mean.
+   */
   position: absolute;
-  top: 0;
-  bottom: 0;
-  /* The conversation's trailing edge, inside the wrap's own padding. */
-  right: 0;
+  inset: 0;
   z-index: 20;
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
   /* Nothing here may eat a click until the tab arms it. */
   pointer-events: none;
 }
 
 .session-peek {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  height: 100%;
+  /*
+   * The rail's own box, and it FULL-BLEEDS for one reason: it is the containing block for the absolutely positioned tab
+   * and panel, and a percentage `max-width` inside a shrink-to-fit box measures the box rather than the column.
+   *
+   * Both layers therefore cover the reading column, and the tab and the panel are placed inside it by `right` offsets.
+   * One containing block, two boxes positioned against it — no percentage of an incidental width anywhere.
+   */
+  position: absolute;
+  inset: 0;
   /* Re-armed for the rail's own children only. */
   pointer-events: none;
 }
@@ -846,16 +858,27 @@ button { font: inherit; color: inherit; }
  */
 .session-peek-tab {
   pointer-events: auto;
+  /*
+   * Pinned to the trailing edge of the full-bleed rail, so the tab sits where the conversation ends and the panel can
+   * open from its outer edge.
+   */
+  position: absolute;
+  right: 0;
+  top: var(--sp-4);
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   /*
-   * Vertical, and the padding is expressed in the BLOCK direction so the tab's thickness is one number: `--sp-2` on each
-   * side gives ~28px with the glyphs' own line height, which is the cost the report asked for.
+   * Vertical, so three stacked words fit in a strip that costs the conversation nothing horizontally.
+   *
+   * `writing-mode: vertical-rl` and the padding in the inline direction is what sets the tab's THICKNESS — one number,
+   * `--peek-tab`, which the panel's offset also reads.
    */
   writing-mode: vertical-rl;
   padding: var(--sp-2) 4px;
-  margin-top: var(--sp-4);
+  /* The tab's own thickness, so the panel's offset and the tab's width cannot disagree. */
+  width: var(--peek-tab);
+  box-sizing: border-box;
   background: var(--panel);
   border: 1px solid var(--line);
   border-right: none;
@@ -899,10 +922,25 @@ button { font: inherit; color: inherit; }
 .session-peek-panel {
   position: absolute;
   top: 0;
-  right: 100%;
+  /*
+   * Beside the tab, growing leftward over the prose.
+   *
+   * `right: var(--peek-tab)` and NOT `right: 100%`: the rail full-bleeds the column, so 100% would put the panel's right
+   * edge at the column's far LEFT — off-screen to the left of the conversation, which is the same class of mistake as the
+   * percentage that clamped it to a sliver. The offset is the tab's thickness, which is a length.
+   */
+  right: var(--peek-tab);
   height: 100%;
   width: var(--companion-width);
-  max-width: 100%;
+  /*
+   * The real limit is the COLUMN, expressed as a sum of lengths rather than a percentage.
+   *
+   * `max-width: 100%` was the bug: in an absolutely positioned box, a percentage resolves against its containing block,
+   * and the first version's containing block was a shrink-to-fit 30px rail — so a 340px panel became a 30px sliver. The
+   * rail full-bleeds now, but a percentage here would still be measuring something incidental. This measures the thing
+   * meant: never wider than the reading column, so the overlay cannot overhang the window.
+   */
+  max-width: calc(100% - var(--peek-tab));
   overflow-y: auto;
   background: var(--panel);
   border-left: 1px solid var(--line-strong);

@@ -52,8 +52,12 @@ test("the peek is an OVERLAY, so the prose does not move when it opens", () => {
    */
   const peek = rule(".transcript-peek") ?? "";
   assert.match(peek, /position:\s*absolute/, "out of flow");
-  assert.match(peek, /top:\s*0/, "anchored to the wrap's top");
-  assert.match(peek, /bottom:\s*0/, "and its full height");
+  /*
+   * `inset: 0` and not `right: 0` alone. Without the other three sides the box is SHRINK-TO-FIT — as wide as the tab —
+   * and the panel's percentage max-width then measured 30px instead of the column, clamping a 340px panel to a sliver.
+   * That shipped, as a light strip where the details should be.
+   */
+  assert.match(peek, /inset:\s*0\b/, "full-bleed, so a percentage inside it measures the COLUMN");
 
   const focusRow = /\.app\.is-focus:not\(\.is-panel-closed\) \.transcript-wrap\.has-header\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
   assert.ok(focusRow, "the focus-mode row exists");
@@ -124,4 +128,43 @@ test("the transcript picks ONE frame for the same content", () => {
   assert.match(source, /focusMode && \(/, "and the peek frame");
   const renders = [...source.matchAll(/\{details\}/g)].length;
   assert.equal(renders, 2, "the content is rendered in exactly two branches, found " + renders);
+});
+
+test("the panel is as wide as it claims, which a percentage max-width got wrong", () => {
+  /*
+   * THE shipped bug, and it produced no error anywhere:
+   *
+   *   .transcript-peek    { right: 0 }          ← shrink-to-fit, so it was 30px wide
+   *   .session-peek-panel { max-width: 100% }   ← 100% OF 30PX
+   *
+   * A percentage max-width resolves against the CONTAINING BLOCK, and a shrink-to-fit containing block is as wide as its
+   * content. So a 340px panel rendered as a 30px sliver. The screenshot shows a light strip where the details should be,
+   * with the tooltip text spilling out of it — which is what a 340px box of content inside a 30px frame looks like.
+   *
+   * The fix is structural: both layers full-bleed the reading column (`inset: 0`), and the panel is offset by the tab's
+   * own LENGTH rather than by a percentage. This test asserts the SHAPE, because a rendered test cannot see it — the
+   * markup and classes are correct, and only the resolved geometry is wrong.
+   *
+   * Falsified by restoring `right: 0` in place of `inset: 0`: the panel is clamped to the tab again.
+   */
+  assert.match(rule(".transcript-peek") ?? "", /inset:\s*0\b/, "the outer layer covers the column");
+  assert.match(rule(".session-peek") ?? "", /inset:\s*0\b/, "and so does the inner one");
+
+  const panel = rule(".session-peek-panel") ?? "";
+  // A LENGTH, not a percentage: whatever is inside, the width must not be derived from an incidental box.
+  assert.match(panel, /width:\s*var\(--companion-width\)/, "the panel is the companion width");
+  assert.match(
+    panel,
+    /max-width:\s*calc\(100% - var\(--peek-tab\)\)/,
+    "capped by the column minus the tab, as arithmetic over lengths",
+  );
+  // Offset from the trailing edge by the tab's thickness — again a length, so the two cannot disagree.
+  assert.match(panel, /right:\s*var\(--peek-tab\)/, "and it sits beside the tab");
+
+  /*
+   * The tab declares that thickness, so there is one number: `--peek-tab` is read by the tab's width AND the panel's
+   * offset. Two literals would drift the moment one moved.
+   */
+  assert.match(rule(".session-peek-tab") ?? "", /width:\s*var\(--peek-tab\)/, "the tab is that number wide");
+  assert.match(rule(".transcript-peek") ?? "", /--peek-tab:\s*\d+px/, "and the number is declared once");
 });
