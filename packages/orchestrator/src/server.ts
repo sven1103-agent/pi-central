@@ -14,6 +14,7 @@ import { Supervisor } from "./supervisor.ts";
 import { Transport } from "./transport.ts";
 import { describeBuiltUi, explainStartupError } from "./startup-error.ts";
 import { assertNotSandboxed, SandboxedEnvironmentError } from "./sandbox-guard.ts";
+import { describeKeychainCheck } from "./keychain.ts";
 import { hasBuiltUi, resolveUiDistDir } from "./static-ui.ts";
 import { VERIFY_INSTALL_HINT, findOwnPackage, PACKAGE_NAME } from "./package-meta.ts";
 
@@ -202,6 +203,21 @@ async function main(): Promise<number> {
   const supervisor = new Supervisor(config, { rememberOpenSessions: true });
 
   /*
+   * Ask the agent keychain ONCE whether it is unlocked, before anything spawns (issue #269).
+   *
+   * This is the fix for "after a reboot, the keychain password prompt appears indefinitely, once is not
+   * enough, and cancelling plus a restart is the only way out". A reboot locks the keychain, and every
+   * provider key is resolved by a separate `security find-generic-password` inside a session's sandbox
+   * (C13) — so N restored sessions meant N dialogs for one keychain, each asked before the first answer
+   * landed. One access here, while nothing else is running, means one prompt.
+   *
+   * BEFORE the restore, because a session that has already run `security` has already raised its own
+   * dialog; and before the `PI_CENTRAL_URL=` line, because the shell kills an orchestrator that takes
+   * longer than `URL_TIMEOUT_MS` (10 s) — which is why the probe's own bound is 8 s.
+   */
+  const keychain = await supervisor.ensureKeychainState();
+
+  /*
    * Reopen the sessions that were open when this process last ran (issue #185).
    *
    * BEFORE the transport listens, so the sessions are in the first snapshot a client receives and the
@@ -214,7 +230,14 @@ async function main(): Promise<number> {
    */
   const restored = await supervisor.restoreOpenSessions();
 
-  const transport = new Transport(supervisor, config, { port: options.port, uiDir: options.uiDir });
+  const transport = new Transport(supervisor, config, {
+    port: options.port,
+    uiDir: options.uiDir,
+    // The launch's keychain state, reported as found (issue #269). Bound to the supervisor rather than read
+    // once, so a client that connects later also sees it — and passed HERE, by the entry point, because the
+    // entry point is what establishes it.
+    keychainCheck: () => supervisor.keychainCheck(),
+  });
   transport.attach();
 
   const address = await transport.listen();
@@ -226,6 +249,7 @@ async function main(): Promise<number> {
   console.log(`  sessions root: ${config.sessionsRoot}`);
   console.log(`  default workspace: ${config.workspaceRoot}`);
   console.log(`  agent root: ${config.agentRoot}${config.agentRootManaged ? " (managed)" : " (external)"}`);
+  console.log(`  agent keychain: ${describeKeychainCheck(keychain)}`);
   console.log(`  isolation: ${options.mode}`);
   /*
    * What the restore did, said once and in full (issue #185).

@@ -52,6 +52,7 @@
 import { accessSync, constants } from "node:fs";
 import { join } from "node:path";
 import { KEYCHAIN_FILE, type ProviderAuth, type StoreSnapshot } from "./agent-store.ts";
+import type { KeychainCheck } from "./keychain.ts";
 import {
   allowedSignersPath,
   auditSigning,
@@ -105,6 +106,18 @@ export interface CapabilityInput {
   providerAuth: ProviderAuth;
   /** Where the agent keychain would be. */
   keychainPath: string;
+  /**
+   * What this launch found when it asked the keychain whether it is unlocked (issue #269).
+   *
+   * Absent means the question was never asked — an older caller, or a store nothing probes. That is
+   * deliberately NOT the same as `{ needed: false }`, which says it was asked and nothing needed it: a
+   * missing check must not read as a passing one.
+   *
+   * `locked` is what makes C13's warning reach the SESSION. Without it a rebooted machine's sessions
+   * report `idle` and then cannot think, and the reader is told nothing until a model call fails — which
+   * is the same defect C13 records, from the lock state instead of from the policy.
+   */
+  keychainState?: KeychainCheck | undefined;
 }
 
 /** Can this process read the file? Runs at the user's UID, which is what the session inherits for file access. */
@@ -158,7 +171,7 @@ function fragmentGrantsKeychain(fragment: string): boolean {
  * warnings do not shuffle between runs.
  */
 export function assessAgentCapabilities(input: CapabilityInput): CapabilityAssessment {
-  const { store, fragment, sandboxed, providerAuth, keychainPath } = input;
+  const { store, fragment, sandboxed, providerAuth, keychainPath, keychainState } = input;
   const findings: CapabilityFinding[] = [];
 
   const root = store.root;
@@ -312,6 +325,24 @@ export function assessAgentCapabilities(input: CapabilityInput): CapabilityAsses
         message:
           `the agent keychain exists at ${keychainPath} but is not readable by its owner. ` +
           `This is a permissions problem, not a missing setup step.`,
+      });
+    } else if (keychainState?.report?.state === "locked") {
+      // The policy is right and the file is readable — the keychain is simply locked, which no grant can
+      // fix (issue #269). Reported as `unreachable` rather than as a setup step: the reader did nothing
+      // wrong, and the repair (answer the dialog, or unlock it in Keychain Access) is not a provisioning
+      // step in the agent tree.
+      //
+      // This is the arm that makes C13 honest after a reboot. Without it every session would report
+      // `idle` and then fail on its first model call, with nothing said in advance.
+      findings.push({
+        id: "keychain",
+        state: "unreachable",
+        message:
+          `the agent keychain at ${keychainPath} is locked (${keychainState.report.detail}). Unlocking it ` +
+          `is what lets Pi run ${providerAuth.commandProviders.join(", ")}'s lookup, so this session ` +
+          `would start, report idle, and then be unable to reach a model (C13). It is not a permissions ` +
+          `problem and not a missing setup step: answer the password prompt, or unlock ${keychainPath} ` +
+          `in Keychain Access, and then retry this session.`,
       });
     }
   }

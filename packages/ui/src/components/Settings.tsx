@@ -35,7 +35,7 @@
  *      yet", which is six repetitions of one fact and buries the actionable part.
  */
 import { useEffect, useRef, useState } from "react";
-import { PROTOCOL_VERSION, type InstallFacts } from "@pi-central/protocol";
+import { PROTOCOL_VERSION, type AgentKeychainFacts, type InstallFacts } from "@pi-central/protocol";
 import { buildInfo, buildLabel } from "../build-info.ts";
 import {
   READING_MEASURE_DEFAULT,
@@ -89,6 +89,64 @@ function Fact({
         </span>
         {copyable && !missing && <CopyButton text={value} label={label.toLowerCase()} />}
         {note !== undefined && <span className="settings-note">{note}</span>}
+      </dd>
+    </>
+  );
+}
+
+/**
+ * The agent keychain's lock state (issue #269).
+ *
+ * Four states rather than a boolean, because they have different repairs and the difference is the point: `locked`
+ * means unlock it, `absent` means nothing needs unlocking here (the user-wide search list may still find the keys,
+ * C13), and `unknown` means the check itself did not answer — which must not be shown as healthy. `needed: false`
+ * says the provider configuration resolves no key through a command, so nothing was asked.
+ *
+ * Rendered as nothing at all when the orchestrator reports nothing. That is the convention the version skew already
+ * sets: an absent fact is silence, not a default. A fabricated "unlocked" is exactly the claim C13 records as the
+ * expensive mistake — a session that reports idle and then cannot think.
+ *
+ * The path is shown and copyable in every state, because the whole point of naming it is that macOS's own dialog
+ * names neither Pi Central nor the keychain, so the reader cannot otherwise tell which keychain is asking.
+ */
+function KeychainFact({ facts }: { facts: AgentKeychainFacts | undefined }) {
+  if (facts === undefined) return null;
+  if (!facts.needed) {
+    return (
+      <>
+        <dt>Agent keychain</dt>
+        <dd>
+          <span className="settings-absent">not needed</span>
+          <span className="settings-note">
+            no provider key is resolved by a command, so nothing reads a keychain (C13)
+          </span>
+        </dd>
+      </>
+    );
+  }
+  const consequence =
+    facts.state === "unlocked"
+      ? "provider keys can be read"
+      : facts.state === "locked"
+        ? "sessions cannot reach a model until it is unlocked — answer the password prompt, or unlock it in Keychain Access, then retry"
+        : facts.state === "absent"
+          ? "provider keys are looked up through the user-wide search list, if it lists one (C13)"
+          : "this build cannot tell whether provider keys are readable";
+  return (
+    <>
+      <dt>Agent keychain</dt>
+      <dd>
+        {/*
+          The state is rendered as a value (mono) because it is one, and `locked` carries its own class rather than
+          being merely stated: it is the one value here that means "this is why nothing works".
+        */}
+        <span className={facts.state === "locked" ? "settings-mono keychain-locked" : "settings-mono"}>{facts.state}</span>
+        <CopyButton text={facts.path} label="agent keychain path" />
+        {/* The path before the sentence: the sentence refers to "it", and a pronoun needs its referent first. */}
+        <span className="settings-note settings-mono">{facts.path}</span>
+        <span className="settings-note">
+          {facts.detail} — {consequence}
+        </span>
       </dd>
     </>
   );
@@ -269,6 +327,18 @@ export function Settings({
                             : "external — not created or modified by Pi Central"
                       }
                     />
+                    {/*
+                      The agent keychain's lock state (issue #269).
+
+                      After a reboot this is the answer to "why do my sessions say they cannot reach a model, and what
+                      is that password dialog for?". Until now the only place it surfaced was a failed model call, which
+                      read as a UI bug — so the state is stated HERE, with the path, beside the other paths the reader
+                      may need to unlock or inspect by hand.
+
+                      Inside the `<dl>` because it is one more `label: value` row, and a `<dt>`/`<dd>` pair outside a
+                      list is not a row — it is invalid markup a screen reader has to guess at.
+                    */}
+                    <KeychainFact facts={install?.keychain} />
                   </dl>
                 </section>
 

@@ -5005,6 +5005,10 @@ select.btn { font-family: var(--sans); }
   user-select: text;
 }
 .settings-note { color: var(--dim); font-size: var(--fs-xs); font-style: italic; }
+/* A locked keychain is the one value on this surface that explains why nothing else works (issue #269).
+   Warning hue rather than danger: it is a state to clear, not a failure that has already happened — and the
+   pairing on --panel is the measured 6.3:1 the palette records for --warn-text. */
+.settings .keychain-locked { color: var(--warn-text); font-weight: 600; }
 /* The placeholder is prose about an absence, so it is dim and NOT mono — see Settings.tsx. */
 .settings-absent { color: var(--dim); font-size: var(--fs-xs); font-style: italic; }
 /* One explanation for a whole surface of absent facts, so it is set apart from the rows rather than

@@ -166,6 +166,18 @@ model access. Pi resolves them through `auth.json` indirections such as
 A session with no reachable keychain **starts and then cannot reach a model** (C13), which is why
 this step is here rather than treated as optional.
 
+**After a reboot the keychain is locked again** — an unlock is state, not a guarantee. Pi Central asks
+once per launch, before any session restores, so this is one password prompt for the whole app rather
+than one per session; cancelling is a supported answer and leaves every session stating C13's warning
+(C13a). You can also unlock it first, so the launch asks nothing:
+
+```bash
+security unlock-keychain "$AGENT_ROOT/agent.keychain-db"   # prompts once, in YOUR terminal
+```
+
+The state a launch found is printed in the startup banner and shown in Settings under *Where things
+live*, with the keychain's path — macOS's own dialog names neither the application nor the file.
+
 ## Verify it, rather than trusting it
 
 With `HOME` pointed at an empty directory — proving nothing here depends on your own `~/.ssh`:
