@@ -3693,3 +3693,74 @@ test("a warning line does not outrank the session's name", () => {
   assert.match(warn, /font-family:\s*var\(--sans\)/, "and sans, so it reads as a note rather than a value");
   assert.match(warn, /display:\s*block/, "not the two-column gauge grid — this line has no gauge");
 });
+
+// --- Settings: the agent keychain's lock state (issue #269) --------------------------------------
+
+test("a LOCKED keychain is stated with its path and the thing to do about it", async () => {
+  // After a reboot this is the answer to "why can my sessions not reach a model?" — and until this row existed
+  // the only place it surfaced was a failed model call, which reads as a UI bug. The path matters as much as
+  // the state: macOS's own dialog names neither Pi Central nor the keychain, so without it the reader cannot
+  // tell which keychain is asking.
+  const html = renderToString(
+    createElement(Settings, {
+      install: installFacts({ keychain: { path: "/agent-root-witness/agent.keychain-db", state: "locked", detail: "its password prompt was dismissed, so it is still locked", needed: true } }),
+      ready: true,
+      onClose() {},
+      initialSection: "about",
+    }),
+  );
+  assert.match(html, /Agent keychain/);
+  assert.match(html, /locked/);
+  assert.match(html, /\/agent-root-witness\/agent\.keychain-db/);
+  assert.match(html, /cannot reach a model/, "the consequence is what makes it actionable (C13)");
+  assert.match(html, /Keychain Access|password prompt/, "and the repair, which is not a provisioning step");
+  assert.match(html, /keychain-locked/, "the one value that means 'this is why nothing works' is marked");
+});
+
+test("an UNLOCKED keychain is stated as a value, not as a warning", async () => {
+  const html = renderToString(
+    createElement(Settings, {
+      install: installFacts({ keychain: { path: "/agent-root-witness/agent.keychain-db", state: "unlocked", detail: "it answered its own settings without asking for a password", needed: true } }),
+      ready: true,
+      onClose() {},
+      initialSection: "about",
+    }),
+  );
+  assert.match(html, /unlocked/);
+  assert.ok(!/keychain-locked/.test(html), "a healthy keychain must not be styled as a problem");
+});
+
+test("an ABSENT keychain is not reported as locked, and 'not needed' is not reported as fine", async () => {
+  // Two different silences: absent means the search list may still find the keys (C13); not-needed means
+  // nothing resolves a key through a command. Conflating either with "unlocked" is how a check becomes a
+  // formality.
+  const absent = renderToString(
+    createElement(Settings, {
+      install: installFacts({ keychain: { path: "/a/agent.keychain-db", state: "absent", detail: "there is no keychain at /a/agent.keychain-db", needed: true } }),
+      ready: true,
+      onClose() {},
+      initialSection: "about",
+    }),
+  );
+  assert.match(absent, /absent/);
+  assert.ok(!/keychain-locked/.test(absent), "an absent keychain is not a lock to clear");
+
+  const notNeeded = renderToString(
+    createElement(Settings, {
+      install: installFacts({ keychain: { path: "/a/agent.keychain-db", state: "unknown", detail: "no provider key needs a keychain", needed: false } }),
+      ready: true,
+      onClose() {},
+      initialSection: "about",
+    }),
+  );
+  assert.match(notNeeded, /not needed/);
+  assert.ok(!/unlocked/.test(notNeeded), "nothing was asked, so nothing may be claimed");
+});
+
+test("an orchestrator that does not report the keychain produces NO row, rather than a guessed one", async () => {
+  // The convention the other optional facts already set: absence is silence. A fabricated "unlocked" is exactly
+  // the claim C13 records as the expensive mistake.
+  const html = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {}, initialSection: "about" }));
+  assert.ok(!/Agent keychain/.test(html), "no reported state means no row");
+  assert.ok(!/unlocked|locked/.test(html), `no state may be invented: ${html}`);
+});

@@ -13,6 +13,7 @@ import { defaultConfig, checkWorkspaceRoot } from "./config.ts";
 import { discover } from "./registry.ts";
 import { checkResumable } from "./resume.ts";
 import { Supervisor } from "./supervisor.ts";
+import { describeKeychainCheck } from "./keychain.ts";
 
 interface Options {
   cwd?: string;
@@ -125,6 +126,12 @@ async function resume(config: ReturnType<typeof defaultConfig>, options: Options
   const supervisor = new Supervisor(config);
   supervisor.on("error", (id: string, message: string) => console.error(`\n[session ${id} error] ${message}`));
 
+  // One keychain question per launch, before the spawn (issue #269): a locked keychain asked by the session
+  // instead would raise the dialog behind the CLI's own output, and a session that cannot reach a model looks
+  // like a hung prompt run rather than a locked keychain.
+  const keychain = await supervisor.ensureKeychainState();
+  if (keychain.report !== undefined) console.log(`agent keychain: ${describeKeychainCheck(keychain)}`);
+
   const result = supervisor.resume(match, { mode: options.mode });
   if (!result.ok) {
     console.error(`could not resume: ${result.message}`);
@@ -172,6 +179,11 @@ async function run(config: ReturnType<typeof defaultConfig>, options: Options): 
   supervisor.on("update", (session) => {
     process.stdout.write(`\r  state=${session.state} msgs=${session.messageCount} pending=${session.pending}   `);
   });
+
+  // The same one question the server asks (issue #269), for the same reason: the dialog must be raised by
+  // this process, once, before a session's own `security` lookup raises its own.
+  const keychain = await supervisor.ensureKeychainState();
+  if (keychain.report !== undefined) console.log(`agent keychain: ${describeKeychainCheck(keychain)}`);
 
   const result = supervisor.start({ ...(options.cwd ? { cwd: options.cwd } : {}), mode: options.mode });
   if (!result.ok) {

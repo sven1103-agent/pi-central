@@ -15,6 +15,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 - A live session can be compacted on request from the session header, the composer or the session panel, whether or not Pi's automatic threshold has been reached, and the control says what a compaction costs while it runs ([#263]).
 - The model picker offers the models a reader chose, with the full catalogue one labelled control away and a filter over it ([#265]).
 
+### Fixed
+
+- A reboot raises one keychain prompt for the whole launch rather than one per restored session, cancelling is a supported answer, and a locked keychain is stated in Settings and on each affected session ([#269]).
+
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
 ## [0.12.0] — 2026-11-15
@@ -778,3 +782,4 @@ The spike that answered whether this was worth building.
 [#255]: https://github.com/sven1103-agent/pi-central/issues/255
 [#263]: https://github.com/sven1103-agent/pi-central/issues/263
 [#265]: https://github.com/sven1103-agent/pi-central/issues/265
+[#269]: https://github.com/sven1103-agent/pi-central/issues/269

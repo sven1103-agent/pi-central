@@ -621,3 +621,76 @@ this amendment. The general answer is a **workdir policy** — warn, refuse, or 
 when a session's cwd is a credential-bearing root — which is a product decision rather than a
 fragment edit, and is tracked as **issue #49**. The validation already exists for the *workspace
 root* (`checkWorkspaceRoot`, D-5); it is simply never applied to a session's cwd.
+
+## Amendment 4 — the keychain's lock state is asked once per launch, by the orchestrator
+
+- **Date:** 2026-11-21
+- **Amends:** §2 (the concurrency problem it named and left unsolved) and §6 (what Pi Central may do
+  to a keychain)
+- **Status:** Accepted (implemented in #269)
+- **Trigger:** a report from real use, after a reboot
+
+### What was reported
+
+> when pi central starts again, after an OS restart, users get prompted with the pi agents keychain
+> password prompt indefinitely. Entering the correct password once is not enough. Users need to cancel
+> and restart the app to recover.
+
+§2 stated the problem in one sentence and moved on: *"Many sessions at once, whereas one unlock state
+and one search list are process-wide."* That sentence was the whole defect, and until now nothing
+centralised the unlock.
+
+### What it is
+
+A reboot **locks** the keychain; `no-timeout` is a setting, not a guarantee. Every provider key is
+resolved by its own `security find-generic-password` process inside a session's sandbox (C13), so a
+restore of N sessions made N requests to one locked keychain, and every dialog was raised before the
+first answer landed. "Entering the password once is not enough" is exactly what that produces, and
+"cancel, then restart" is the behaviour that follows: cancelling lets every queued lookup fail fast,
+so startup completes, and the one password that did land leaves the keychain unlocked next time.
+
+### The decision
+
+**One access, in the orchestrator, before any session spawns.** `Supervisor.ensureKeychainState()` runs
+`security show-keychain-info <agent keychain>` once per launch and memoises the answer, and the entry
+point calls it before `restoreOpenSessions()`. First access wins the dialog and unlocks the keychain;
+every later lookup, in every session, finds it open.
+
+- **The probe is read-only by construction.** `keychainProbeArgv` builds one verb, the invariant test
+  asserts it stays one, and a scanner over `packages/orchestrator/src` fails on any forbidden
+  keychain command. §6's prohibition stands verbatim: no creating, no unlocking with a stored
+  password, no search-list write — not even as a convenience fix, and a test states that as a rule
+  rather than a comment.
+- **The state is reported, not acted on.** `unlocked` / `locked` / `absent` / `unknown`, derived from
+  the exit status (`0` / `128`, `51` / `50` / anything else) rather than from a boolean. `unknown`
+  exists so a broken probe cannot be presented as a healthy keychain.
+- **A lock reaches the session's warnings.** `assessAgentCapabilities` gains the lock state, so a
+  locked keychain produces C13's warning on every affected session *before* a model call fails.
+  Without that, the session reports `idle` and cannot think — the failure C13 was written about.
+- **Cancelling is supported.** The sessions start, each carries the warning, and nothing needs a
+  restart. The warning names the keychain's path and the repair (answer the prompt, or unlock it in
+  Keychain Access), because this is not a provisioning step and sending the reader to create
+  something already present is the misdiagnosis #28 exists to prevent.
+- **The wait is bounded at 8 s.** The desktop shell kills an orchestrator that prints no URL within
+  10 s, and the probe runs before that line (ADR-0013). A bound at or above it would turn an
+  unanswered dialog into an app that never starts.
+- **Nothing is probed unless it matters.** No key is resolved by a command → no probe, no dialog
+  ([`packages/orchestrator/src/keychain.ts`](../../packages/orchestrator/src/keychain.ts)).
+
+### Verification
+
+- [x] `keychain.test.ts` — the four states read from what the command actually printed; the memo
+      (five concurrent asks = one run); the bound, exercised through a real child that hangs; the
+      note that fires while the dialog is up. **Falsified:** removing the memo fails "concurrent and
+      repeated probes run the command ONCE"; treating a dismissal as `unlocked` fails its own test.
+- [x] `supervisor-keychain.test.ts` — **one probe for a restore of five sessions**, asserted by
+      injection as the issue asks. **Falsified:** probing in `#spawn` (the naive fix) makes it three
+      failures, the count among them.
+- [x] `invariants.test.ts` — no source file builds a keychain-mutating command, and the probe's argv
+      has exactly one verb. **Falsified:** changing the argv to `unlock-keychain -p …` fails all three.
+- [x] The UI states the state once, with its path (`components.test.mjs`), and renders no row when the
+      orchestrator reports nothing — absence is silence, not `unlocked`.
+- [ ] **The reboot itself is manual.** The behaviour under test is macOS's prompt, which cannot be
+      raised in-process; a test that skipped there would read as a passing one. Procedure: reboot with
+      sessions open, count the prompts (one), answer once (no second prompt), then repeat and CANCEL
+      (the app is usable and each session states the warning).

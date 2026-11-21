@@ -331,6 +331,38 @@ Pi runs that command when the key is first needed. Two verified properties:
   login keychain, "which breaks YOUR shell's keychain access". Pi Central must never do this
   implicitly ([ADR-0010 §6](decisions/0010-agent-credential-identity.md)).
 
+### C13a — The lock state is process-wide, and a reboot locks it
+
+A keychain is **unlocked state, not unlocked forever**: after a reboot it is locked again, and
+the unlock is macOS's own password dialog — a TTY prompt, absent in a headless session
+([ADR-0010 §1](decisions/0010-agent-credential-identity.md)). Measured on the installed system:
+
+```
+$ security show-keychain-info ~/.agent/agent.keychain-db     # unlocked
+Keychain "/Users/x/.agent/agent.keychain-db" no-timeout      # exit 0
+$ security show-keychain-info <locked keychain>, prompt dismissed
+security: SecKeychainCopySettings …: User canceled the operation.   # exit 128
+$ security show-keychain-info <absent path>
+security: SecKeychainCopySettings …: The specified keychain could not be found.   # exit 50
+```
+
+The consequence that matters is **plurality**. Every provider key resolves through a separate
+`security` process inside a session's sandbox, so N sessions meet one locked keychain N times,
+and the dialogs are raised before the first answer lands. Observed as the reported "prompted
+indefinitely; entering the password once is not enough; cancel and restart to recover".
+
+- **One process-wide state cannot be fixed per session.** Ask once, in the unsandboxed
+  orchestrator, **before any session spawns** — first access wins, and every later lookup finds
+  it unlocked. A per-spawn check reproduces the defect exactly.
+- **Cancelling must be a supported outcome**, not a trap: the lookups fail fast (rc 51/128), the
+  sessions start, and each states this constraint's warning. An app that needs a restart to
+  recover from a dismissed dialog is the reported bug.
+- **The wait must be bounded, and shorter than the launcher's own budget.** The desktop shell
+  kills an orchestrator that prints no URL within 10 s, so a bound at or above that turns "a
+  dialog nobody answered" into "the app never starts" ([ADR-0013](decisions/0013-application-shell.md)).
+- **`dump-keychain` and `find-generic-password -w` prompt too**, and read more than the lock
+  state. `show-keychain-info` is the narrowest command that answers the question.
+
 ## C14 — A cached conversation is stale the moment it is taken
 
 Pi emits a session's history only to the client that asked for it, and never re-emits it. Any copy

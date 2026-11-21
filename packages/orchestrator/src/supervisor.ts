@@ -32,7 +32,8 @@ import { isScratch, scratchDirFor, type Config } from "./config.ts";
 import { agentRoutingEnv } from "./env.ts";
 import type { AcceptedImage } from "./prompt-images.ts";
 import { KEYCHAIN_FILE, inspectProviderAuth, readStore } from "./agent-store.ts";
-import { assessAgentCapabilities } from "./capabilities.ts";
+import { assessAgentCapabilities, agentKeychainPath } from "./capabilities.ts";
+import { createKeychainProbe, type KeychainCheck, type KeychainProbe } from "./keychain.ts";
 import { renderPolicyFragment } from "./fragment.ts";
 import {
   listDirectory,
@@ -160,8 +161,25 @@ export class Supervisor extends EventEmitter {
    * On for the long-running server, which is the thing a restart can lose.
    */
   #rememberOpenSessions: boolean;
+  /**
+   * The agent keychain's lock state, asked about at most once per launch (issue #269).
+   *
+   * Never probed here: `ensureKeychainState()` is what runs `security`, and it is called by the launch path
+   * (the entry point, and the CLI) BEFORE any session spawns. The memo inside the probe is the whole
+   * mechanism — without it every session would run its own `security`, and a locked keychain would raise one
+   * password dialog per session for one keychain (ADR-0010 §2, C13a).
+   */
+  #keychain: KeychainProbe;
+  /**
+   * What the probe found, once it has found it. Read synchronously by `#spawn`, so the spawn path can never
+   * start a dialog of its own — the same reason `report()` exists rather than a second `probe()` call.
+   */
+  #keychainCheck: KeychainCheck | undefined;
 
-  constructor(config: Config, options: { rememberOpenSessions?: boolean } = {}) {
+  constructor(
+    config: Config,
+    options: { rememberOpenSessions?: boolean; keychainProbe?: KeychainProbe } = {},
+  ) {
     super();
     this.#config = config;
     this.#open = new OpenSessionStore(config.stateRoot);
@@ -171,6 +189,58 @@ export class Supervisor extends EventEmitter {
     // Resolved from THIS module's URL rather than configured: a configured path would be right for
     // exactly one checkout — the author's — and silently wrong everywhere else (issue #25).
     this.#installationRoot = resolveInstallationRoot();
+    // Injectable for the same reason every other OS seam here is: a test cannot raise a real macOS
+    // password dialog, so the only way to assert the prompt COUNT is to count the probe calls.
+    this.#keychain =
+      options.keychainProbe ?? createKeychainProbe({ path: agentKeychainPath(config.agentRoot) });
+  }
+
+  /**
+   * Ask the agent keychain once whether it is unlocked (issue #269).
+   *
+   * ## Why this must run before any session spawns
+   *
+   * A reboot locks the keychain, and every provider key is resolved by a SEPARATE
+   * `security find-generic-password` process inside a session's sandbox (C13). N restored sessions mean N
+   * lookups meeting N locked-keychain requests, so the reader is prompted once per session and the one
+   * password they type arrives after the others have already asked. That is the reported
+   * "prompted indefinitely, entering the password once is not enough".
+   *
+   * One access from THIS process, before the fleet returns, turns that into one dialog: the answer unlocks
+   * the keychain for every session that follows. It also decides the honest REPORTING — a locked keychain
+   * makes each session unable to reach a model, which is C13's core lesson and must be said per session
+   * rather than hidden behind `state: idle`.
+   *
+   * ## Only when it matters
+   *
+   * No probe runs unless the provider configuration resolves at least one key through a command
+   * (`inspectProviderAuth`). A machine with inline keys needs no keychain, and probing anyway would raise a
+   * password dialog for a capability nothing is about to use — the noise that trains a reader to dismiss
+   * warnings.
+   *
+   * Never blocks indefinitely: the wait is bounded (`KEYCHAIN_PROBE_TIMEOUT_MS`) and an expired wait is
+   * reported as `locked`, so a dialog nobody answers leaves a usable app with sessions that say what is
+   * wrong, not an app that never starts.
+   */
+  async ensureKeychainState(): Promise<KeychainCheck> {
+    if (this.#keychainCheck !== undefined) return this.#keychainCheck;
+    const needed = inspectProviderAuth(this.#config.providerAgentDir).needsKeychain;
+    if (!needed) {
+      this.#keychainCheck = { needed: false };
+      return this.#keychainCheck;
+    }
+    this.#keychainCheck = { needed: true, report: await this.#keychain.probe() };
+    return this.#keychainCheck;
+  }
+
+  /**
+   * The keychain state as the spawn path needs it: the answer if it exists, `undefined` otherwise.
+   *
+   * Never probes. A spawn must not be able to raise a dialog — that is the defect this fix exists for, and
+   * the assertion that it cannot is what the prompt-count test measures.
+   */
+  keychainCheck(): KeychainCheck | undefined {
+    return this.#keychainCheck;
   }
 
   /**
@@ -530,6 +600,11 @@ export class Supervisor extends EventEmitter {
       ...(fragment !== undefined ? { fragment } : {}),
       providerAuth,
       keychainPath,
+      // Read-only, and read synchronously on purpose: `ensureKeychainState()` is the ONLY place that runs
+      // `security`, and it ran before the fleet restored (issue #269). Probing here would put one dialog per
+      // session back, which is the defect. `undefined` means nobody asked, and then the assessment stays silent
+      // about the keychain rather than claiming it is fine.
+      ...(this.#keychainCheck === undefined ? {} : { keychainState: this.#keychainCheck }),
     });
 
     const session: LiveSession = {
