@@ -10,6 +10,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+<!-- Empty at tag time: a release cannot ship undocumented changes. -->
+
+## [0.13.0] — 2026-11-21
+
 ### Added
 
 - A live session can be compacted on request from the session header, the composer or the session panel, whether or not Pi's automatic threshold has been reached, and the control says what a compaction costs while it runs ([#263]).
@@ -18,8 +22,6 @@ They are kept because each one is the reason a constraint or an invariant test e
 ### Fixed
 
 - A reboot raises one keychain prompt for the whole launch rather than one per restored session, cancelling is a supported answer, and a locked keychain is stated in Settings and on each affected session ([#269]).
-
-<!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
 ## [0.12.0] — 2026-11-15
 
