@@ -2093,7 +2093,12 @@ test("a collapsed panel leaves no panel track behind", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const rule = /\.panes\.is-collapsed\s*\{([^}]*)\}/.exec(css);
   assert.ok(rule, ".panes.is-collapsed must have a rule");
-  assert.match(rule[1], /grid-template-columns:\s*288px 1fr/, "two tracks, not three");
+  /*
+   * Two tracks, and the FIRST one is the reader's width (issue #275) rather than the literal `288px` it used to be.
+   * The property is unchanged — the panel's track is gone — so the assertion follows the number to the custom
+   * property that now owns it instead of pinning the value that made it specific.
+   */
+  assert.match(rule[1], /grid-template-columns:\s*var\(--rail-width,\s*288px\) 1fr/, "two tracks, not three");
 });
 
 test("the narrow-viewport query collapses the rail track for a hidden panel too", () => {
@@ -2101,10 +2106,15 @@ test("the narrow-viewport query collapses the rail track for a hidden panel too"
   // would LOSE to it and leave a 288px empty track where the hidden rail used to be. The query must
   // name both selectors to win.
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  /*
+   * The query must name every variant that would otherwise out-specify it — and there are two more than there were
+   * (issue #275): the rail can be absent by the reader's choice as well as by the breakpoint, which adds
+   * `.is-rail-less` in both its collapsed and uncollapsed forms.
+   */
   assert.match(
     css,
-    /\.panes,\s*\n\s*\.panes\.is-collapsed\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
-    "the ≤1023px query must list `.panes.is-collapsed` as well as `.panes`, and let the track shrink",
+    /\.panes,\s*\n\s*\.panes\.is-collapsed,\s*\n\s*\.panes\.is-rail-less,\s*\n\s*\.panes\.is-rail-less\.is-collapsed\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    "the ≤1023px query must list every panes variant, and let the track shrink",
   );
 });
 
@@ -2961,9 +2971,16 @@ test("the rail is reachable below the drawer breakpoint", () => {
     /\/\*[\s\S]*?\*\//g,
     "",
   );
+  /*
+   * The middle track must be `minmax(0, 1fr)`, and the rail's first track is now the READER's width (issue #275).
+   *
+   * Asserted as two properties rather than as one literal string, because the literal `288px` was doing two jobs: it
+   * was the rail's width AND it was the anchor that made this pattern specific. The property being protected is
+   * "the middle track can shrink below its content", which does not depend on what the first track says.
+   */
   assert.match(
     css,
-    /grid-template-columns:\s*288px minmax\(0,\s*1fr\)/,
+    /grid-template-columns:\s*var\(--rail-width,\s*288px\)\s+minmax\(0,\s*1fr\)/,
     "the workspace track must be allowed to shrink below its content's min-content width",
   );
 
@@ -2976,9 +2993,27 @@ test("the rail is reachable below the drawer breakpoint", () => {
    * `rail-toggle` here would have kept the test green while nothing opened the drawer.
    */
   assert.match(app, /id: "activity-left-sessions"/, "the left bar has a Sessions item");
-  assert.match(app, /expanded: railIsDrawer \? railOpen : undefined/, "…which states whether the drawer is open");
-  assert.match(app, /controls: railIsDrawer \? "session-rail" : undefined/, "…and what it controls");
-  assert.match(app, /setRailOpen\(\(open\) => !open\)/, "…and toggles it");
+  /*
+   * Issue #275 made the item a toggle at EVERY width, so the two claims are now separate:
+   *
+   *   - `expanded={railShown}` — the button states whether the list is on the page, which is the fact a reader needs
+   *     whether the window forced the drawer or the reader hid the column;
+   *   - `controls="session-rail"` — unconditional, because the id it names now always exists when the element does.
+   *
+   * The earlier form (`railIsDrawer ? railOpen : undefined`) was correct while only the breakpoint could hide the rail,
+   * and became false the moment hiding it was a preference — the bar would have claimed "not expanded, not a toggle"
+   * about a rail the reader had switched off themselves.
+   */
+  assert.match(app, /expanded: railShown/, "…which states whether the list is on the page");
+  assert.match(app, /controls: "session-rail"/, "…and what it controls");
+  /*
+   * ONE control, a three-step ladder (issue #275): dismiss a showing overlay, otherwise summon one, otherwise dock the
+   * column away. Collapsing steps two and three into a single toggle of `hidden` would make one press mean two things
+   * and leave a docked-column reader pressing a button that appears to do nothing.
+   */
+  assert.match(app, /if \(railOverlay\) \{\s*setRailOpen\(false\);/, "a showing overlay is dismissed first");
+  assert.match(app, /if \(railPrefs\.hidden \|\| railIsDrawer\) \{\s*setRailOpen\(true\);/, "a hidden one is summoned");
+  assert.match(app, /hidden: true/, "and a docked one is docked away");
   assert.match(app, /rail-backdrop/, "a backdrop must close it");
   assert.match(app, /setRailOpen\(false\)/, "Escape, the backdrop and a selection all close it");
 
@@ -3479,7 +3514,13 @@ test("a page shows its own list, not another page's", () => {
    * the guard and `<SessionRail` is whitespace, which is what makes "this conditional wraps that element" a
    * statement about the code rather than about the file's length.
    */
-  const beforeRail = src.slice(0, railAt);
+  const beforeRail = src.slice(0, railAt); // the guard immediately precedes the element
+  /*
+   * The guard became a NAME rather than a page test (issue #275): `railDocked || railOverlay`, where `railDocked` is
+   * "Sessions page, above the breakpoint, not hidden by the reader" and `railOverlay` is "Sessions page, summoned".
+   * Both facts are computed in one place instead of being re-derived inline — which is what makes the History page's
+   * exclusion a property of the value rather than of this one call site.
+   */
   const guardAt = beforeRail.lastIndexOf('{tab === "sessions" && (');
   assert.notEqual(guardAt, -1, "the rail must be rendered only on the Sessions page");
   const between = src.slice(guardAt, railAt);
@@ -3487,6 +3528,29 @@ test("a page shows its own list, not another page's", () => {
     between.replace(/[{}\s]/g, ""),
     'tab==="sessions"&&(',
     `the guard must wrap the rail, not merely precede it; found "${between.trim().slice(0, 60)}"`,
+  );
+  /*
+   * And it is mounted whether or not it is on SCREEN (issue #275). That is what keeps `⌥↑`/`⌥↓` working with the rail
+   * hidden — the keys are registered by the component, because only it knows the order the rows are shown in — and it
+   * keeps visibility one CSS decision instead of three rendering paths.
+   */
+  assert.ok(!/railShown && \(/.test(src), "the rail is not conditionally mounted on its own visibility");
+  const sheet = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(
+    sheet,
+    /\.panes\.is-rail-less:not\(\.is-rail-overlay\) \.rail \{/,
+    "the stylesheet hides it instead",
+  );
+  // And the name itself is bounded by the page, which is the property the original test protected.
+  assert.match(
+    src,
+    /const railDocked = tab === "sessions" && !railSummonable/,
+    "the docked rail belongs to the Sessions page",
+  );
+  assert.match(
+    src,
+    /const railOverlay = railSummonable && railOpen && tab === "sessions"/,
+    "and so does the summoned one",
   );
 
   // The context bar needs BOTH a live session and the Sessions page.

@@ -58,6 +58,19 @@ import {
 } from "./store.ts";
 import { SessionRail } from "./components/SessionRail.tsx";
 import { rosterLabel } from "./roster.ts";
+import {
+  RAIL_PREFS_KEY,
+  clampRailWidth,
+  defaultRailPrefs,
+  parseRailPrefs,
+  railMaxWidth,
+  railStyle,
+  serializeRailPrefs,
+  initialRailPrefs,
+  toggleFolded,
+  type RailPrefs,
+} from "./rail-prefs.ts";
+import { RailResizer } from "./components/RailResizer.tsx";
 import { ShortcutSheet } from "./components/ShortcutSheet.tsx";
 import {
   KEYS_CHORD,
@@ -86,6 +99,19 @@ import {
  * records for `FILES_SPLIT_MIN_WIDTH` in `panel.ts`.
  */
 export const RAIL_DRAWER_MAX_WIDTH = 1024;
+
+/**
+ * How many roster rows the rail opens with folded sections for (issue #275).
+ *
+ * The multiplication lives here rather than in `rail-prefs.ts` because only the shell knows how much of the roster
+ * is loaded: the roster holds up to `ROSTER_MAX` entries and `historyTotal` is the number on disk, so the larger of
+ * the two is the honest estimate of how many rows this reader keeps. Erring upward is deliberate — the cost of
+ * starting folded for someone who wanted them open is one click, and the cost of starting open for someone with
+ * thirty sessions is the wall this issue is about.
+ */
+function rosterEstimate(entries: number, historyTotal: number): number {
+  return Math.max(entries, historyTotal);
+}
 
 /**
  * A session about to be deleted, from either surface (issue #150).
@@ -324,18 +350,118 @@ export function App() {
   // transcript can survive.
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 1440 : window.innerWidth));
   //
-  // Is the session rail showing as a DRAWER?
+  // Is the session rail a COLUMN or a DRAWER? (Issue #275: the window decides the first case, the reader the second.)
   //
   // Below `RAIL_DRAWER_MAX_WIDTH` the columns cannot all fit, so the rail leaves the grid and becomes an overlay —
   // opened deliberately, closed by Escape, by the backdrop, or by choosing a session. Without this the rail was simply
   // `display: none` at those widths, and `.rail.open` was styled for a class nothing ever set: the session list became
   // unreachable, which is a worse failure than a cramped one.
+  //
+  // Above it the rail is a column UNLESS the reader has hidden it, and the two inputs are kept apart as
+  // `railIsDrawer` (the window's fact) and `railPrefs.hidden` (the reader's) so neither can write the other — a
+  // window narrowed once must not come back with the rail hidden.
   const [railOpen, setRailOpen] = useState(false);
   const railIsDrawer = viewportWidth < RAIL_DRAWER_MAX_WIDTH;
+
+  /**
+   * The reader's rail preferences (issue #275).
+   *
+   * Read BEFORE any snapshot arrives, so the estimate passed to the parser is normally zero: an existing reader — one
+   * with a stored value — gets exactly what they stored, and a reader with nothing stored gets the open default. The
+   * roster-size default is applied by the effect below, once, when the roster says how big it is.
+   */
+  const [railPrefs, setRailPrefs] = useState<RailPrefs>(() => {
+    try {
+      return parseRailPrefs(localStorage.getItem(RAIL_PREFS_KEY), 0);
+    } catch {
+      // Storage disabled or an opaque origin: the defaults still apply, the rail just does not remember.
+      return defaultRailPrefs();
+    }
+  });
+
+  /**
+   * Is the rail a summoned overlay rather than a column?
+   *
+   * TWO inputs, one shape: below the breakpoint the columns cannot all fit, and above it the reader may have chosen to
+   * keep the transcript's width for the transcript (issue #275). Conflating them into one boolean would also let the
+   * breakpoint write the preference — a window narrowed once would come back with the rail hidden.
+   */
+  const railSummonable = railIsDrawer || railPrefs.hidden;
+  /** A DOCKED rail: a column in the grid. Only above the breakpoint, only for a reader who has not hidden it. */
+  const railDocked = tab === "sessions" && !railSummonable;
+  /**
+   * A SUMMONED rail: the same element as an overlay, above the transcript.
+   *
+   * `railOpen` is that transient show state, at every width, so a reader who hides the column at 2000px gets the same
+   * behaviour as one whose window is 900px wide — one code path for one behaviour, which is the property the issue
+   * lists as the benefit of making the rail a drawer everywhere, obtained without making it the default.
+   */
+  const railOverlay = railSummonable && railOpen && tab === "sessions";
+  /** Is the list on the page at all? The one question the activity bar asks. */
+  const railShown = railDocked || railOverlay;
+
+  /**
+   * The workspace grid's class list.
+   *
+   * FOUR variants, counted rather than composed by feel (C20): a rail docked or not, a panel docked or not, and the
+   * two page-level forms. Named here rather than inline so the count is visible in one place — the failure C20 records
+   * is a rule that is correct for the number of children it had when it was written.
+   */
+  const panesClass =
+    "panes" +
+    (panel.collapsed ? " is-collapsed" : "") +
+    (tab === "history" ? " is-pageless" : "") +
+    (railDocked ? "" : " is-rail-less") +
+    (railOverlay ? " is-rail-overlay" : "");
+  const persistRail = useCallback((next: RailPrefs) => {
+    try {
+      localStorage.setItem(RAIL_PREFS_KEY, serializeRailPrefs(next));
+    } catch {
+      // Storage full or disabled. Losing the remembered width is not worth failing a render over.
+    }
+  }, []);
+
+  const setRailWidth = useCallback(
+    (width: number) => {
+      setRailPrefs((current) => ({ ...current, width: clampRailWidth(width, window.innerWidth) }));
+    },
+    [],
+  );
+
+  /**
+   * Fold or unfold one section, and remember which.
+   *
+   * Written on the change rather than in an effect: a fold is one deliberate click, not a value that needs
+   * reconciling with anything else.
+   */
+  const toggleRailFolded = useCallback(
+    (group: "idle" | "stopped") => {
+      setRailPrefs((current) => {
+        const next = toggleFolded(current, group);
+        persistRail(next);
+        return next;
+      });
+    },
+    [persistRail],
+  );
+
+  const setRailPrefsAndPersist = useCallback(
+    (change: (current: RailPrefs) => RailPrefs) => {
+      setRailPrefs((current) => {
+        const next = change(current);
+        persistRail(next);
+        return next;
+      });
+    },
+    [persistRail],
+  );
   useEffect(() => {
     const onResize = () => {
       setViewportWidth(window.innerWidth);
       setPanel((current) => ({ ...current, width: clampPanelWidth(current.width, window.innerWidth) }));
+      // The rail is clamped too, and for the same reason: its maximum is a fraction of the window, so a window
+      // narrowed after a drag must not leave a 480px rail beside a transcript that no longer has room.
+      setRailPrefs((current) => ({ ...current, width: clampRailWidth(current.width, window.innerWidth) }));
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
@@ -348,6 +474,24 @@ export function App() {
   useEffect(() => {
     if (!railIsDrawer) setRailOpen(false);
   }, [railIsDrawer]);
+
+  /*
+   * Escape closes a HIDDEN-BY-READER rail too, above the breakpoint (issue #275).
+   *
+   * The rail is an overlay in that state as well: it covers the transcript's left edge rather than sitting beside it.
+   * A reader who hid it, summoned it and then pressed Escape must get the state they were in — and one gesture for that
+   * is better than a second one because the window happens to be wider.
+   */
+  useEffect(() => {
+    if (!railOverlay) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      setRailOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, [railOverlay]);
 
   /*
    * Escape closes the drawer, and it is registered HERE rather than in the rail because the composer already owns
@@ -364,6 +508,32 @@ export function App() {
     window.addEventListener("keydown", onKeyDown, { capture: true });
     return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
   }, [railOpen]);
+
+  /**
+   * Start folded, once, for a roster that is already large (issue #275).
+   *
+   * `initialRailPrefs` cannot make this decision where the preferences are first read, because at that moment no
+   * snapshot has arrived and the honest estimate is zero. So it is made here, ONCE: the effect runs on every roster
+   * change but only the first one can write, because the first write stores a value and `localStorage` is then non-null
+   * for the guard below.
+   *
+   * The guard is a STORED-VALUE check rather than a boolean in state, deliberately: it is the same fact the reader's
+   * own choices are recorded in, so an upgraded app cannot think "nobody has chosen yet" after a restart and re-fold
+   * a rail the reader opened.
+   */
+  useEffect(() => {
+    let hasStored = true;
+    try {
+      hasStored = localStorage.getItem(RAIL_PREFS_KEY) !== null;
+    } catch {
+      // Storage unavailable: nothing can be remembered, so there is nothing to default differently either.
+      return;
+    }
+    if (hasStored) return;
+    const prefs = initialRailPrefs(rosterEstimate(state.roster.length, state.historyTotal));
+    setRailPrefs(prefs);
+    persistRail(prefs);
+  }, [state.roster.length, state.historyTotal, persistRail]);
 
   // Persisted on change, not on every render: the maps only change when a toggle is pressed.
   useEffect(() => {
@@ -1744,11 +1914,14 @@ export function App() {
         />
       )}
 
-      {railOpen && railIsDrawer && (
+      {railOverlay && (
         /*
           The backdrop is the drawer's close affordance for a pointer, and it is a real button so it is reachable by
           keyboard too. `aria-label` because an unlabelled button riding over the whole workspace announces as
           "button" and nothing else.
+
+          Rendered for a rail the READER hid as well as for one the window forced (issue #275), since both are the same
+          overlay.
         */
         <button
           type="button"
@@ -1770,20 +1943,52 @@ export function App() {
           items={[
             {
               id: "activity-left-sessions",
-              // "Sessions" is the only word in the whole bar, so the tooltip carries the extra fact that
-              // this is a toggle: below 1024 it opens the drawer, above it hides the column.
-              label: railIsDrawer ? (railOpen ? "Hide sessions" : "Show sessions") : "Sessions",
+              /*
+                "Sessions" is the only word in the whole bar, so the tooltip carries the extra fact that this is a
+                toggle, and WHICH toggle it is: below 1024 it opens the drawer, above it the rail is a column that
+                the reader may have hidden (issue #275) — so the same control shows and hides it at every width.
+              */
+              label: railShown ? "Hide sessions" : "Show sessions",
               // Not `▤`: that is the Files glyph in the context bar, and the same mark for "the session
               // list" and "this session's files" is a collision a reader has to resolve from position alone.
               glyph: "☰",
-              active: tab === "sessions" && (!railIsDrawer || railOpen),
-              expanded: railIsDrawer ? railOpen : undefined,
-              controls: railIsDrawer ? "session-rail" : undefined,
+              /*
+                Selected only while the list is actually VISIBLE.
+
+                It used to be `tab === "sessions" && (!railIsDrawer || railOpen)`, i.e. "this page is the sessions
+                page" — which was right while the rail was a permanent column and became a lie the moment hiding it was
+                a reader choice: the bar item would claim to be current while the thing it names was gone.
+              */
+              active: tab === "sessions" && railShown,
+              expanded: railShown,
+              controls: "session-rail",
               onSelect: () => {
                 if (tab !== "sessions") setTab("sessions");
-                // A drawer is toggled; a column is permanent, so choosing Sessions from another view
-                // must not hide the rail the reader is looking at.
-                if (railIsDrawer) setRailOpen((open) => !open);
+                /*
+                  ONE control, a three-step ladder, and the same ladder at every width.
+
+                  The states a rail can be in are "docked", "summoned over the transcript", and "away", and the button
+                  means the next sensible one from wherever it is:
+
+                    1. an overlay is showing        → dismiss it (this is the drawer's close gesture, wherever it came from)
+                    2. the column is hidden         → summon the overlay, which is the cheap look without changing the
+                                                      preference
+                    3. the column is docked         → dock it away
+
+                  The first version collapsed steps 2 and 3 into one toggle of `hidden`, which meant a reader whose column
+                  was docked pressed the button and NOTHING appeared to happen. Keeping the three apart is what makes
+                  "the thing that hides it is the thing that brings it back" true without making one press do two jobs —
+                  the rule `PanelToggle` records for the panel.
+                */
+                if (railOverlay) {
+                  setRailOpen(false);
+                  return;
+                }
+                if (railPrefs.hidden || railIsDrawer) {
+                  setRailOpen(true);
+                  return;
+                }
+                setRailPrefsAndPersist((current) => ({ ...current, hidden: true }));
               },
             },
             { id: "activity-left-history", label: "History", glyph: "↺", active: tab === "history", onSelect: () => setTab("history") },
@@ -1828,10 +2033,8 @@ export function App() {
         </ActivityBar>
 
       <div
-        className={
-          (panel.collapsed ? "panes is-collapsed" : "panes") + (tab === "history" ? " is-pageless" : "")
-        }
-        style={{ "--panel-width": `${panel.width}px` } as React.CSSProperties}
+        className={panesClass}
+        style={{ ...railStyle(railPrefs), "--panel-width": `${panel.width}px` } as React.CSSProperties}
       >
         {/*
           The rail is the SESSIONS page's list, not a permanent column.
@@ -1845,6 +2048,17 @@ export function App() {
           arrangement here is the same rule stated once: page-chosen lists go inside the page's own area.
           Below `RAIL_DRAWER_MAX_WIDTH` the drawer is how the list is reached on the Sessions page, and it is
           not reachable at all on History, which has its own search.
+        */}
+        {/*
+          The rail is MOUNTED on the Sessions page whether or not it is on screen (issue #275).
+          
+          Two reasons, and the second is the one that decided it:
+          
+            1. the grid needs the element to exist so `.panes.is-rail-less .rail { display: none }` can be the single
+               place that decides visibility — one rendering path, not three;
+            2. `⌥↑`/`⌥↓` are registered by the RAIL, because only it knows the order the rows are shown in. A rail that
+               was unmounted while hidden would silently take the only keyboard way to walk sessions with it, which is
+               exactly the loss the issue's constraint 2 forbids.
         */}
         {tab === "sessions" && (
         <SessionRail
@@ -1866,16 +2080,27 @@ export function App() {
           */
           firstPromptFor={rowPrompt}
           focusedId={state.focusedId}
-          openAsDrawer={railOpen}
+          openAsDrawer={railOverlay}
           onCloseDrawer={() => setRailOpen(false)}
-          onFocusRow={(row) => {
+          prefs={railPrefs}
+          onToggleFolded={toggleRailFolded}
+          onFocusRow={(row, viaKeyboard) => {
             // EVERY row is focusable, including one with no live session (issue #89). That is what makes the
             // composer usable for it, and the composer is how resume-on-send starts the session again.
             // Focus is local: a view change between rows, not a restart (C2).
             dispatch({ kind: "focusRow", key: rowKeyOf(row) });
             setTab("sessions");
-            // Choosing a session closes the overlay: leaving it open would cover the conversation just selected.
-            setRailOpen(false);
+            /*
+              What happens to a SUMMONED rail depends on how the row was chosen (issue #275).
+              
+                - a pointer selection closes the overlay: leaving it open would cover the conversation just selected;
+                - `⌥↑`/`⌥↓` keeps it open AND summons it if it was away — a list that vanished at every step would make
+                  the keys unusable, and stepping through rows nobody can see would be worse.
+
+              A DOCKED rail is untouched either way: it is beside the conversation, not over it.
+            */
+            if (viaKeyboard) setRailOpen(true);
+            else if (railOverlay) setRailOpen(false);
           }}
           onForgetRow={(row) => dispatch({ kind: "forget", path: row.entry.path })}
           /*
@@ -1924,6 +2149,22 @@ export function App() {
           home={home}
           historyTotal={state.historyTotal}
         />
+        )}
+
+        {/*
+          The rail's resize handle (issue #275), in the gutter it already shares with the transcript.
+
+          A child of the grid rather than of the rail: it has to sit OVER the 1px gutter, and `.panes` is the only
+          element positioned to do that. Rendered only for a DOCKED rail — an overlay has no edge to drag, and a handle
+          between an overlay and a transcript would offer a gesture with no meaning.
+        */}
+        {railDocked && (
+          <RailResizer
+            width={railPrefs.width}
+            viewportWidth={viewportWidth}
+            onWidth={setRailWidth}
+            onCommit={() => persistRail(railPrefs)}
+          />
         )}
 
         {tab === "history" ? (
@@ -2356,6 +2597,28 @@ export function App() {
         <Settings
           install={state.install}
           ready={state.ready}
+          /*
+            The rail's controls read and write the SHELL's preference state (issue #275), not their own copy.
+            
+            `reading.ts` can keep its controls' state in `Settings` because the effect it drives writes `:root` — the
+            preference is consumed by CSS alone. The rail's is consumed by React (which sections are folded, whether the
+            column exists at all), so a second copy would be a second answer to "is the rail hidden", and the shell
+            would keep rendering the old one.
+          */
+          railPrefs={railPrefs}
+          onRailPrefs={(change) =>
+            setRailPrefsAndPersist((current) => {
+              const next = change(current);
+              /*
+                Hiding the column from Settings also has to take the OVERLAY out of the way, or the reader unticks a box,
+                sees the list stay on screen, and concludes the setting does not work. The two facts are still kept
+                apart — `hidden` is the preference, `railOpen` the transient summon.
+              */
+              if (next.hidden) setRailOpen(false);
+              return next;
+            })
+          }
+          railMaxWidth={railMaxWidth(viewportWidth)}
           onClose={() => {
             setSettingsOpen(false);
             settingsTriggerRef.current?.focus();

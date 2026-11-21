@@ -12,6 +12,14 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Added
 
+- The session list's width, density and visibility are the reader's, remembered across restarts, with a resize handle and a Session list section in Settings ([#275]).
+- Idle and Stopped fold to their heading, keeping the count and opening themselves when a session arrives in them ([#275]).
+- ADR-0016 records the decision: the list's visibility is a reader preference and the 1024px breakpoint is only a floor ([#275]).
+
+### Changed
+
+- A row's metrics line is shown only when it can change a decision: a nearly-full context, queued work, or a failure ([#275]).
+- The session list can be hidden above the breakpoint, and the left bar's `☰` both hides it and brings it back ([#275]).
 - A running session can re-read its extensions, skills, prompt templates, MCP servers and context files without being stopped, and asks before abandoning a run in flight ([#274]).
 - Pi Central says whether a session's toolset has changed since it last read its resources, or that it cannot tell ([#274]).
 
@@ -789,3 +797,4 @@ The spike that answered whether this was worth building.
 [#265]: https://github.com/sven1103-agent/pi-central/issues/265
 [#269]: https://github.com/sven1103-agent/pi-central/issues/269
 [#274]: https://github.com/sven1103-agent/pi-central/issues/274
+[#275]: https://github.com/sven1103-agent/pi-central/issues/275

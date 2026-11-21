@@ -221,7 +221,7 @@ button { font: inherit; color: inherit; }
    *
    * `minmax(0, …)` lets the track shrink, which is what makes every narrower layout reachable at all.
    */
-  grid-template-columns: 288px minmax(0, 1fr) var(--panel-width, 320px);
+  grid-template-columns: var(--rail-width, 288px) minmax(0, 1fr) var(--panel-width, 320px);
   gap: 1px;
   background: var(--line);
   min-height: 0;
@@ -240,11 +240,25 @@ button { font: inherit; color: inherit; }
  * that `clampPanelWidth` would then have to rescue. The `gap: 1px` also stops producing a stray
  * divider, because with two tracks there is only one gap.
  */
-.panes.is-collapsed { grid-template-columns: 288px 1fr; }
+.panes.is-collapsed { grid-template-columns: var(--rail-width, 288px) 1fr; }
 
 /*
- * A page that has no list of its own: History is one full-width list (`DESIGN.md` §6), so the rail's 288px
- * track must not be reserved for a column that is not rendered. Two tracks, not three.
+ * The rail is NOT docked (issue #275), so its track goes with it.
+ *
+ * Two reasons reach this class and they are deliberately the same rule: below the breakpoint the columns cannot all
+ * fit, and above it the reader asked for the transcript's width. The 288px track must not be reserved for a column that
+ * is not rendered — a hole is a layout bug that reads as a loading bug, the same finding `is-pageless` records.
+ */
+.panes.is-rail-less { grid-template-columns: minmax(0, 1fr) var(--panel-width, 320px); }
+.panes.is-rail-less.is-collapsed { grid-template-columns: minmax(0, 1fr); }
+
+/*
+ * A page that has no list of its own: History is one full-width list (`DESIGN.md` §6), so the rail's track must not be
+ * reserved for a column that is not rendered. Two tracks, not three.
+ *
+ * Kept as its own class rather than folded into `is-rail-less` because the two MEAN different things and are only
+ * accidentally alike: one says "this page has no list", the other "this page has one and it is not on screen". A future
+ * page that has a list in its own area would need the first and not the second.
  */
 .panes.is-pageless { grid-template-columns: minmax(0, 1fr) var(--panel-width, 320px); }
 .panes.is-pageless.is-collapsed { grid-template-columns: minmax(0, 1fr); }
@@ -280,37 +294,85 @@ button { font: inherit; color: inherit; }
   /* Matches `RAIL_DRAWER_MAX_WIDTH` in `App.tsx` (1024, so `< 1024` is the same as `<= 1023`). The button that opens
      this drawer is rendered from JavaScript, so the two numbers have to agree; a test asserts it. */
   /* Both selectors, because `.panes.is-collapsed` out-specifies a bare `.panes` and would otherwise
-     win inside this query — leaving a 288px empty track where the hidden rail used to be. */
+     win inside this query — leaving an empty track where the hidden rail used to be. The rail-less variants are named
+     too, for the same cascade reason. */
   .panes,
-  .panes.is-collapsed { grid-template-columns: minmax(0, 1fr); }
-  /*
-   * The rail leaves the grid and becomes an OVERLAY drawer.
-   *
-   * It used to be `display: none` with a `.rail.open` rule for a class nothing ever set — so the session list was
-   * unreachable at these widths, which is a worse failure than a cramped layout.
-   *
-   * Absolute, not fixed: `.panes` is the containing block, so the drawer covers the workspace and not the topbar. The
-   * topbar keeps the control that closes it, which is where a reader will look for it.
-   */
-  .rail {
-    display: none;
-  }
-  .rail.open {
-    display: flex;
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 40;
-    /* 288px is the rail's own width; `min()` keeps it inside a very narrow window. */
-    width: min(288px, 86vw);
-    background: var(--panel);
-    border-right: 1px solid var(--line-strong);
-    box-shadow: var(--sh-2);
-  }
-  /* The rail needs the panes to be its positioning context. */
-  .panes { position: relative; }
+  .panes.is-collapsed,
+  .panes.is-rail-less,
+  .panes.is-rail-less.is-collapsed { grid-template-columns: minmax(0, 1fr); }
 }
+
+/*
+ * The rail as an OVERLAY rather than a column (issue #275).
+ *
+ * `is-rail-overlay` is set by the shell when the rail is summoned — either because the window is too narrow for the
+ * columns, or because the READER chose to keep the transcript's width. One rule for both, because it is one behaviour:
+ * that is the part of "make it a drawer at every width" that is worth having, obtained without making it the default.
+ *
+ * Outside the media query on purpose. The first version of this lived inside `@media (max-width: 1023px)`, which meant
+ * a reader who hid the rail on a 2000px window got no drawer at all — the control appeared to do nothing.
+ *
+ * It used to be `display: none` with a `.rail.open` rule for a class nothing ever set — so the session list was
+ * unreachable at narrow widths, which is a worse failure than a cramped layout.
+ *
+ * Absolute, not fixed: `.panes` is the containing block (see `position: relative` above), so the drawer covers the
+ * workspace and not the topbar. The bar keeps the control that closes it, which is where a reader will look for it.
+ */
+/*
+ * A rail that is neither docked nor summoned is not on screen.
+ *
+ * `display: none` rather than unmounting the component, and that is a decision rather than an optimisation (`App` says
+ * why at the call site): the rail owns `⌥↑`/`⌥↓`, which are the only keyboard way to walk sessions, and the order they
+ * walk is the component's own. A hidden rail that unmounted would take the keys with it.
+ *
+ * Safe to write plainly: `.panes.is-rail-overlay .rail` below re-states `display: flex` at a higher specificity, so the
+ * summoned case wins the cascade without an `!important`.
+ */
+.panes.is-rail-less:not(.is-rail-overlay) .rail {
+  display: none;
+}
+
+.panes.is-rail-overlay .rail {
+  display: flex;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 40;
+  /* The reader's own width, capped by `min()` so a 480px rail still fits a 400px window. */
+  width: min(var(--rail-width, 288px), 86vw);
+  background: var(--panel);
+  border-right: 1px solid var(--line-strong);
+  box-shadow: var(--sh-2);
+}
+
+/*
+ * The rail's resize handle (issue #275).
+ *
+ * The same shape as `.panel-resizer` and for the same measured reason: the gutter is one 1px line of `--line`, and a
+ * 1px target is not grabbable. It sits OVER the gutter — `left: -3px` on a 7px wide element — so the grid keeps its
+ * three tracks and the visual weight of the layout is untouched.
+ *
+ * Only rendered for a DOCKED rail: an overlay has no edge to drag.
+ */
+.rail-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* The rail's own width, less the gutter the handle straddles. */
+  left: calc(var(--rail-width, 288px) - 3px);
+  width: 7px;
+  cursor: col-resize;
+  z-index: 5;
+  background: transparent;
+  touch-action: none;
+}
+.rail-resizer:hover,
+.rail-resizer:focus-visible {
+  background: var(--accent);
+  opacity: 0.4;
+}
+.rail-resizer:focus-visible { outline: none; box-shadow: var(--focus); }
 
 /*
  * The rail toggle, and the backdrop behind it.
@@ -711,6 +773,60 @@ button { font: inherit; color: inherit; }
 .group-select:focus-visible { outline: none; box-shadow: var(--focus); }
 
 /*
+ * A heading that FOLDS its section (issue #275).
+ *
+ * The same shape as `group-select`, because both are "the heading acts": a reader who has learned one should not have
+ * to learn a second affordance. The difference is the disclosure mark, which says what pressing it does.
+ *
+ * The mark is a text glyph rather than a chevron character from the Technical block: `⌫` from that block rendered as an
+ * empty box on this machine (`SessionControlBar` records the measurement), and a tofu square where the ONLY affordance
+ * is would read as a broken control. `▸`/`▾` are Geometric Shapes, which the platform face has.
+ */
+.group-fold {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  padding: 0 2px;
+  margin: 0 -2px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.group-fold:hover { color: var(--text); background: var(--panel-3); border-color: var(--line-strong); }
+.group-fold:focus-visible { outline: none; box-shadow: var(--focus); }
+/*
+ * A fixed box for the mark, so the label's x does not shift when the section folds.
+ *
+ * Measured defect in the first version: `▸` and `▾` are different widths in a proportional face, so folding a section
+ * moved its own word sideways — the row of headings visibly jittered, which is the class of movement `roster.ts` rules
+ * out for rows.
+ */
+.group-fold-mark {
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+  font-size: var(--fs-2xs);
+}
+
+/*
+ * A folded heading says so, in words.
+ *
+ * The mark is a shape and the count is a number; neither says "there are rows behind this". The word is what makes the
+ * difference between "11 idle sessions" and "11 idle sessions, not shown" — and it is the second reading that stops a
+ * reader concluding their sessions vanished.
+ */
+.group-fold-note {
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 0 5px;
+}
+
+/*
  * Row: 3 lines, state on the left border, no card.
  *
  * ## The rounded corner is what separates rows, and it was missing
@@ -810,6 +926,23 @@ button { font: inherit; color: inherit; }
   gap: var(--sp-2);
 }
 .rail-row .ask { color: var(--warn-text); }
+
+/*
+ * CALM density (issue #275): the row as a SWITCHER, not a dashboard.
+ *
+ * At twelve sessions the rail rendered eleven rows of three lines — names, paths, and eleven gauges carrying percentages
+ * nobody could act on (`ctx 0%`, `ctx 3%`, `ctx 0%`, `ctx 5%`…). The deciding rule is not "hide the third line" but
+ * "show it only when it can change a decision", which `showsRowMetrics` owns; this rule is what makes the remaining
+ * lines read as a list rather than as an abbreviated table.
+ *
+ * What is deliberately NOT here: a smaller font, or dimmer text. A calm row is not a faded row — the name is the thing
+ * the reader is looking for, and it must not become the quietest part of the row in the mode whose whole purpose is
+ * scanning for a session.
+ */
+.rail-row.is-calm .r2 { opacity: 0.85; }
+/* A calm row with no metrics is one line of prose plus one of where: tighter, because there is less to separate. */
+.rail-row.is-calm { padding-top: 5px; padding-bottom: 5px; }
+
 
 /*
  * A rail row holds two controls (issue #89): the row itself, and the `⋯` menu of actions.

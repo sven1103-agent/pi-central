@@ -314,7 +314,14 @@ test("next/previous session walks the rows in the order they are SHOWN", () => {
   assert.match(listener, /matchesChord\(event, "alt\+arrowdown"\)/, "it listens for the down key");
   assert.match(listener, /matchesChord\(event, "alt\+arrowup"\)/, "and the up key");
   assert.match(listener, /event\.preventDefault\(\)/, "and claims the key, so the list does not also scroll");
-  assert.match(listener, /onFocusRow\(row\)/, "and it moves the focus, which is the whole behaviour");
+  assert.match(listener, /onFocusRow\(row, true\)/, "and it moves the focus, which is the whole behaviour");
+  /*
+   * The second argument says the move came from the KEYBOARD (issue #275), and the shell needs the difference: walking
+   * the list while the rail is summoned must keep it open, while a pointer selection closes the overlay over the
+   * conversation just chosen. Dropping the flag would make `⌥↓` dismiss the list one row along.
+   */
+  assert.match(code(app), /onFocusRow=\{\(row, viaKeyboard\)/, "the shell reads which surface asked");
+  assert.match(code(app), /if \(viaKeyboard\) setRailOpen\(true\);/, "and keeps a summoned rail open for the keys");
   // A window listener also fires while a dialog is in front, and moving focus behind a dialog changes what its own
   // buttons are about — so the rail stands down when the shell says a modal is up.
   assert.match(railCode, /if \(modalOpen\) return undefined;/, "a dialog in front stops the rail acting");
