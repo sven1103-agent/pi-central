@@ -112,42 +112,25 @@
   --reading-size: 15px;
   --reading-measure: 80ch;
   /*
-   * The same width as `--reading-measure`, as a LENGTH (issue #275 follow-up).
+   * The wide layout's three tracks, as tokens rather than literals (issue #275 follow-up).
    *
-   * `max-width: 80ch` says how wide the prose may be; it does not say how much ROOM the column needs, and a flex item
-   * narrower than its track hands the remainder to `justify-content`. That is how the composition came to be centred as
-   * a PAIR — prose plus companion — and why removing the rail left the prose ~180px left of the window's centre with a
-   * void beside it: there was nothing on the right any more, but the prose was still laid out as if there were.
+   * `--reading-measure` is a `max-width` on the prose: it says how wide the text may be, not how much ROOM the column
+   * needs. That distinction is the whole reported defect — a `max-width` item inside a flex row is narrower than its
+   * track, the remainder belongs to the container, and `justify-content: center` therefore centres the prose PLUS the
+   * companion rather than the prose. With the rail away the offset became visible: *"the transcript is not centered
+   * anymore"*.
    *
-   * A track needs a length, so this is one, and `reading.ts` derives both from the reader's single `measure` setting.
+   * So the lane gets a track of its own and the centring becomes arithmetic. `reading.ts#laneTracks` derives all three
+   * from the reader's one `measure` setting; the defaults below are what a reader who never opens Settings gets.
+   *
+   * The leading and trailing margins are SEPARATE tokens even though they hold the same value while centred, because
+   * they legitimately differ under `fill` (where the reader asked for the full width and a symmetric void would defeat
+   * it). Writing one `1fr` for the left and a literal `340px` on the right — which the first version did, with a
+   * comment claiming symmetry — lets one track absorb ALL the free space and push the prose to the trailing edge.
    */
-  --reading-lane: 80ch;
-  /*
-   * The track on EACH side of the lane — `minmax(0, 1fr)` while the prose is centred, `0px` under `fill`.
-   *
-   * Two equal flexible tracks is what centring means in a grid, and it is the fix for the reported defect. Under `fill`
-   * there is no free space to split, so a flexible margin would instead be granted a share of the row and push the
-   * companion past the edge. `reading.ts` decides both numbers together, because they are one piece of arithmetic.
-   */
-  --reading-margin: minmax(0, 1fr);
-
-  /*
-   * The companion's width, as a NUMBER rather than a literal repeated in a template and a width rule.
-   *
-   * It is needed as a term in arithmetic as well — see `--reading-lane` under `fill`, which has to leave exactly this
-   * much room plus the gap. Two declarations of 340 would drift the moment one moved, which is the class of defect this
-   * file collects (the gutter/panel-width pair, the gauge width, the two breakpoints).
-   */
-  --companion-width: 340px;
-
-  /*
-   * The gutter between the prose lane and the companion.
-   *
-   * `--sp-5` by value, promoted to its own token because `--reading-lane`'s `fill` arithmetic has to subtract it: a
-   * calculation that says `100% - 340px` and forgets the 24px gap leaves the companion 24px past the row's edge, which
-   * is a grid overflow rather than a visible gap — the least noticeable way to get this wrong.
-   */
-  --reading-gap: 24px;
+  --reading-leading: minmax(0, 1fr);
+  --reading-lane: minmax(0, 80ch);
+  --reading-trailing: minmax(0, 1fr);
   --fs-lg: 18px;
 
   --sh-1: 0 1px 0 rgba(255, 255, 255, 0.03);
@@ -747,25 +730,20 @@ button { font: inherit; color: inherit; }
 /*
  * With the companion hidden the lane keeps the MIDDLE track and stays exactly where it was (issue #275 follow-up).
  *
- * This is the case the reader reported: the header leaves, the row still reserved a trailing track for a box that is
- * `display: none`, and the prose sat left of centre with a void to its right. Dropping the track both centres the
- * prose again AND leaves it at the same x it had a moment before — the mode changes what is around the conversation,
- * never where the conversation is.
+ * The reported case: the header leaves, the row still reserved a trailing track for an element that is `display: none`,
+ * and the prose sat off centre beside a void. Making the trailing margin flexible on both sides — the same token as the
+ * leading one — both re-centres the prose and leaves it at the same x it had a moment earlier. The mode changes what is
+ * around the conversation, never where the conversation is.
  */
 .app.is-focus .transcript-wrap.has-header {
-  /*
-   * The companion's track becomes `0px` rather than disappearing, and that is what makes `fill` correct here.
-   *
-   * `--reading-lane` under `fill` is `calc(100% - var(--companion-width) - var(--reading-gap))` — the reader's "the
-   * column's width", computed against a line that HAS a companion. With the companion gone the same expression would
-   * leave 364px unused on a row that no longer needs it. Zeroing both terms here means the lane gets the whole width,
-   * which is what `fill` promises and what a reader in this mode is asking for.
-   */
-  grid-template-columns: var(--reading-margin) minmax(0, var(--reading-lane)) 0px;
-  --companion-width: 0px;
-  --reading-gap: 0px;
+  grid-template-columns:
+    var(--reading-leading)
+    var(--reading-lane)
+    var(--reading-leading);
   column-gap: 0;
+  --reading-trailing: var(--reading-leading);
 }
+.app.is-focus .transcript-wrap.has-header .transcript-main { grid-column: 2; }
 
 .app.is-focus .composer-hint {
   /*
@@ -4177,7 +4155,7 @@ select.btn { font-family: var(--sans); }
   padding: var(--sp-4) 0;
   /* Its own width, never shrunk into its own labels. */
   flex: none;
-  width: var(--companion-width);
+  width: 340px;
 }
 
 /* The block itself: a quiet raised surface, wide enough for the pickers on one line each. */
@@ -4196,7 +4174,7 @@ select.btn { font-family: var(--sans); }
  * subtle, it is broken.
  */
 .transcript-header .session-header {
-  width: var(--companion-width);
+  width: 340px;
   max-width: 100%;
   flex-direction: column;
   align-items: stretch;
@@ -4294,40 +4272,43 @@ select.btn { font-family: var(--sans); }
  * rest. `align-items: start` on the scroller would break the sticky child, so the row alignment is left alone.
  */
 /*
- * THE WIDE LAYOUT: [ 1fr ] [ reading lane ] [ companion ].
+ * THE WIDE LAYOUT: [ leading ][ reading lane ][ companion ].
  *
- * ## Why this is three tracks and not one centred row
+ * ## Why this is three tracks and not one centred flex row
  *
- * The previous version was `display: flex; justify-content: center` with the prose as a `max-width` item, and it
- * centred the prose PLUS the companion as a pair. That reads as correct while the companion is there and becomes
- * visibly wrong the moment it is not — which is exactly what a reader reported with the rail away: the conversation
- * sat ~180px left of the window's centre with a band of empty space on the right, because the pair's centre is half a
- * companion to the left of the prose's.
+ * The row was `display: flex; justify-content: center` over two boxes — the prose and a 340px companion — so what was
+ * centred was the PAIR. The prose's own centre is half a companion to the left of that, which nobody notices while the
+ * rail fills the void and everybody notices when it does not: *"without the session list, the transcript is not
+ * centered anymore"*.
  *
- * The defect is that a `max-width` item is NARROWER THAN ITS TRACK, and flex hands the remainder to `justify-content`.
- * A track is not something `justify-content` can centre. So the lane gets a track of its own, sized by the reader's
- * measure (`--reading-lane`, derived in `reading.ts` from the same setting that caps the prose), and the centring
- * becomes arithmetic instead of a wish: one `1fr` on each side.
+ * The mechanism is that a `max-width` item is NARROWER than its flex track, and the remainder belongs to the container.
+ * `justify-content` positions boxes; it cannot position an item inside its own track. A grid TRACK can, so the lane gets
+ * one, and the centring becomes arithmetic: the two margin tracks are the same token, therefore the same width.
  *
- * ## Why a grid rather than flex with two spacers
+ * ## The first version of this got the arithmetic wrong, which is why the shape is spelled out
  *
- * An earlier grid attempt (`minmax(0, 72ch)` + `justify-content: center`) computed the right thing on paper and
- * rendered pinned to the left edge (`img_30.png`) — the track resolved against the container's spare space. `1fr` has
- * no such ambiguity: the free space is split, both tracks get the same amount, and the lane cannot move.
+ * It wrote `minmax(0, 1fr) minmax(0, 80ch) 340px` with a comment claiming "one `1fr` on each side". The trailing track
+ * was a LITERAL, so the single flexible track absorbed all of the free space and pushed the prose to the right edge —
+ * a worse defect than the centring it replaced. Every track is a token now (`reading.ts#laneTracks`) and the two
+ * margins are one value while centred, so the two cannot disagree.
  *
- * ## And the companion no longer affects where the prose starts
+ * ## Why not `1fr` with two spacer children
  *
- * With the prose centred on the WINDOW (well, on the transcript column) the companion sits at the trailing edge. Adding
- * or hiding it no longer shifts the conversation by half its width, which is the property that made this worth changing
- * rather than patching: the reader's horizontal position is stable across every combination of rail, panel and header.
+ * Spacers are markup that exists to be ignored, and they would have to be rendered conditionally for the stacked
+ * layout. Tracks are the same idea with no DOM.
  */
 .transcript-wrap.has-header {
   display: grid;
-  grid-template-columns: var(--reading-margin) minmax(0, var(--reading-lane)) var(--companion-width);
-  /* The gap between the prose and the box is this one number, and it comes out of the trailing `1fr`, not out of the
-     lane: the lane is the reader's measure, and a gap inside it would silently narrow every paragraph. It is a token
-     because `--reading-lane`'s `fill` value has to subtract it — see `reading.ts#laneWidth`. */
-  column-gap: var(--reading-gap);
+  grid-template-columns:
+    var(--reading-leading)
+    var(--reading-lane)
+    var(--reading-trailing);
+  /*
+   * The gutter comes out of the TRAILING track's share, not out of the lane: `column-gap` is subtracted from the free
+   * space before the flexible tracks are resolved, so a gap here narrows the margins symmetrically rather than eating
+   * into the reader's measure.
+   */
+  column-gap: var(--sp-5);
   align-items: start;
   /* Let the row shrink on a narrow window instead of overflowing it. */
   min-width: 0;
@@ -4339,11 +4320,8 @@ select.btn { font-family: var(--sans); }
  *
  * The companion is the FIRST child in the DOM, which is right — a screen reader and a keyboard should meet the
  * session's identity before its conversation, and the tab order should follow the same path. The visual order is the
- * other way round, and in a grid that is said by naming the COLUMN rather than by `order`: one declaration per box,
- * no source-order arithmetic, and the leading `1fr` is obviously the margin on the left.
- *
- * (`order` was the flex version's tool and it would work here too. Column placement is preferred because it says where
- * a box GOES rather than where it sorts, and sorting is what silently reorders a stacked layout.)
+ * other way round, and a grid says that by naming the COLUMN rather than by `order`: it states where a box goes
+ * instead of where it sorts, and sorting is what silently reorders a stacked layout.
  */
 .transcript-wrap.has-header .transcript-main { grid-column: 2; }
 .transcript-wrap.has-header .transcript-header { grid-column: 3; }
@@ -4391,17 +4369,18 @@ select.btn { font-family: var(--sans); }
    * repositioning because flex places them in source order, which is already header then main.
    */
   .transcript-wrap.has-header {
-    /* One column, source order: the companion on top, then the reading column (issue #275 follow-up — this was written
-       for the flex version, where `flex-direction: column` was the whole change). */
+    /* One column, source order: the companion above the reading column. */
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto auto;
     column-gap: 0;
   }
   /*
-   * Both boxes go back to the ONE column.
+   * Both boxes return to the ONE column.
    *
-   * The wide form places them in tracks 2 and 3, and stacked there is no track 2 or 3 — naming a column that does not
-   * exist is how a grid silently invents an implicit one and produces a second column nobody asked for.
+   * The wide form places them in tracks 2 and 3, and there is no track 2 or 3 here — naming a column that does not
+   * exist is how a grid silently invents an implicit one and produces a second column nobody asked for. That is the
+   * same class of defect as the trailing `340px` track above: a declaration that is right for one shape and wrong for
+   * the other, in a rule that looks like it applies to both.
    */
   .transcript-wrap.has-header .transcript-main,
   .transcript-wrap.has-header .transcript-header { grid-column: 1; }

@@ -24,6 +24,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { READING_MEASURE_FILL, readingStyle } from "../src/reading.ts";
 
 const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
   /\/\*[\s\S]*?\*\//g,
@@ -126,62 +127,55 @@ test("the transcript keeps its own horizontal padding, and centres ONE lane", ()
     `per-child centring is #92's defect: a narrower child gets a different centre. Found: ${centred.join(", ")}`,
   );
 });
-test("the prose is centred on its OWN lane, not on the pair it forms with the companion", () => {
+test("the lane is centred by TWO EQUAL margins, and the companion does not steal one of them", () => {
   /*
-   * ## The reported defect this replaces a rule for
+   * The reported defect, and the bug in the first attempt at fixing it.
    *
-   * With the rail away the conversation sat ~180px left of the window’s centre, with a band of empty space beside it.
-   * The cause was the layout, not the rail: the row was `display: flex; justify-content: center` over TWO boxes —
-   * prose (a `max-width` item, therefore narrower than its track) and a 340px companion — so what was centred was the
-   * PAIR, and the prose’s own centre is half a companion to the left of the pair’s.
+   * The row used to be `display: flex; justify-content: center` over the prose and a 340px companion, so what was
+   * centred was the PAIR: the prose sat half a companion left of the window centre. That is invisible while the rail
+   * fills the void and obvious when it does not — *"without the session list, the transcript is not centered anymore"*.
    *
-   * A `max-width` item cannot be positioned by `justify-content`: the remainder belongs to the container’s spare space.
-   * A TRACK can. So the lane has a track of its own, sized by `--reading-lane` (derived in `reading.ts` from the same
-   * setting that caps the prose), and the centring is one `1fr` on each side of it.
+   * The first fix wrote `minmax(0, 1fr) minmax(0, 80ch) 340px` while its comment claimed "one 1fr on each side". A single
+   * flexible track takes ALL of the free space, so the prose was pushed to the trailing edge — a worse defect than the
+   * one being fixed, and reported immediately.
    *
-   * ## What is asserted, and what each half would catch
-   *
-   *   - the lane gets its own track and there are TWO `1fr`s, one per side — the symmetry is the centring;
-   *   - the companion does not sit in the leading track — that was `img_32.png`’s `[companion][conversation]`;
-   *   - the reader’s `--reading-lane` is what sizes it, so a wider measure widens the lane rather than making the prose
-   *     drift inside a fixed one;
-   *   - stacked, both boxes return to ONE column rather than leaving a named column that does not exist.
+   * The property is therefore SYMMETRY, and it is asserted as such: the template must name the same margin token twice
+   * while centred. A literal anywhere in the outer two tracks is the bug.
    */
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
     /\/\*[\s\S]*?\*\//g,
     "",
   );
-  const row = [...css.matchAll(/\.transcript-wrap\.has-header\s*\{([^}]*)\}/g)].map((m) => m[1]).find((body) => /display:\s*grid/.test(body)) ?? "";
-  assert.match(row, /display:\s*grid/, "a grid, so the centring is arithmetic rather than a wish");
-  /*
-   * One MARGIN track on each side of the lane, and the companion's own width on the right. The margin is a token rather
-   * than a literal `1fr` because under the reader's `fill` setting it must become `0px` — see `reading.ts#laneMargin`.
-   */
-  const tracks = /grid-template-columns:\s*var\(--reading-margin\)\s+minmax\(0,\s*var\(--reading-lane\)\)\s+var\(--companion-width\)/.exec(row);
-  assert.ok(tracks, "a margin track on EACH side of the lane, and the companion's width on the right");
+  const row = [...css.matchAll(/\.transcript-wrap\.has-header\s*\{([^}]*)\}/g)]
+    .map((m) => m[1])
+    .find((body) => /display:\s*grid/.test(body));
+  assert.ok(row, "the wide layout is a grid");
 
-  const lane = /\.transcript-wrap\.has-header \.transcript-main\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
-  const box = /\.transcript-wrap\.has-header \.transcript-header\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
-  assert.match(lane, /grid-column:\s*2/, "the prose is the middle track");
-  assert.match(box, /grid-column:\s*3/, "and the companion trails it");
-
-  // The reader’s setting owns the lane’s width, in ONE place: `reading.ts` derives both declarations.
-  const reading = readFileSync(new URL("../src/reading.ts", import.meta.url), "utf8");
-  assert.match(reading, /"--reading-lane":/, "the lane width is derived from the measure, not written in the stylesheet");
-  /*
-   * And `fill` becomes arithmetic rather than `none`: a grid track must be a length, and "the column's width" has to
-   * reserve the companion or it takes the whole line. Both terms are in `reading.ts`, which is the one place the row's
-   * arithmetic is decided — and the one place a test can reach it without a browser.
-   */
-  assert.match(reading, /calc\(100% - var\(--companion-width\) - var\(--reading-gap\)\)/, "fill reserves the companion");
+  const template = /grid-template-columns:\s*([^;]+);/.exec(row)?.[1]?.replace(/\s+/g, " ").trim() ?? "";
+  assert.equal(
+    template,
+    "var(--reading-leading) var(--reading-lane) var(--reading-trailing)",
+    "three NAMED tracks, so the stylesheet cannot hold an asymmetry the module does not",
+  );
 
   /*
-   * Stacked (the container query), both boxes return to the single column. Naming a column that no longer exists is
-   * how a grid invents an implicit one — a second column nobody asked for.
+   * And the module itself is where symmetry is decided — the leading and trailing margins are the same token while
+   * centred, and differ only under `fill`, where the reader asked for the left edge specifically.
    */
-  const stacked = /@container transcript[^{]*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
-  assert.match(stacked, /grid-template-columns:\s*minmax\(0,\s*1fr\)/, "one column when stacked");
-  assert.match(stacked, /grid-column:\s*1/, "and both boxes in it");
+  const centred = readingStyle({ sizePx: 15, measure: 80 });
+  assert.equal(centred["--reading-leading"], centred["--reading-trailing"], "equal margins ARE the centring");
+  assert.match(centred["--reading-leading"], /^minmax\(0, 1fr\)$/, "flexible, so the pair of them split the free space");
+  assert.match(centred["--reading-lane"], /^minmax\(0, \d+ch\)$/, "and the lane carries the reader\u2019s measure");
+
+  /*
+   * `fill` is the asymmetric case and must stay asymmetric: "use the column\u2019s width" means everything the companion
+   * does not need, not a symmetric void. The companion keeps its own track, so `.transcript-header` survives — a
+   * `100%` lane instead pushes it out of the grid along with Stop, Resume, Rename and both pickers.
+   */
+  const fill = readingStyle({ sizePx: 15, measure: READING_MEASURE_FILL });
+  assert.equal(fill["--reading-leading"], "0px", "no leading void under fill");
+  assert.equal(fill["--reading-trailing"], "var(--companion-width)", "and the companion still has its track");
+  assert.equal(fill["--reading-lane"], "minmax(0, 1fr)", "the lane takes the rest");
 });
 
 test("the composer's chrome shares the field's left edge, and its gap does not move with focus", () => {

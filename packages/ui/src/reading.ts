@@ -101,45 +101,6 @@ export function parseReadingPrefs(raw: string | null): ReadingPrefs {
   };
 }
 
-/**
- * The width of the grid track the prose sits in, for a given measure.
- *
- * ## Why this is arithmetic and not `${measure}ch`
- *
- * A grid track must be a LENGTH, and the two settings are not the same expression:
- *
- *   - a `ch` measure is already a length, so the lane's track is exactly the prose's cap and the margin tracks beside
- *     it are equal — the prose is centred, which is the whole point;
- *   - `fill` means "the column's width", which is NOT the container's. Writing `100%` there makes the middle track take
- *     the entire row and **pushes the companion out of the grid** — a reachable state (the `fill` checkbox is in
- *     Settings; the companion holds Stop, Resume, Rename and the pickers) in which asking for a wider line loses the run
- *     controls.
- *
- * So `fill` reserves everything except the companion and the gutter. `--companion-width` and `--reading-gap` are the
- * same two terms the row's template uses, which is why they are tokens rather than literals.
- */
-function laneWidth(measure: ReadingPrefs["measure"]): string {
-  if (measure !== READING_MEASURE_FILL) return `${measure}ch`;
-  return `calc(100% - var(--companion-width) - var(--reading-gap))`;
-}
-
-/**
- * The track that sits on each SIDE of the lane.
- *
- * ## Why this is a token and not a literal `1fr`
- *
- * Two equal tracks split the free space, and equal free space is what "centred" means here — that is the whole fix for
- * the reported defect. But under `fill` there IS no free space to split: the lane already occupies everything left of
- * the companion, so a flexible track on each side would resolve to zero-width *ideal* and then be given a share of the
- * row anyway, pushing the companion past the container's edge by however much they received.
- *
- * `minmax(0, 1fr)` (centred) and `0px` (filling) are therefore two different answers to the same question, and they
- * belong together with `laneWidth` — one place that decides the row's arithmetic, tested without a browser.
- */
-function laneMargin(measure: ReadingPrefs["measure"]): string {
-  return measure === READING_MEASURE_FILL ? "0px" : "minmax(0, 1fr)";
-}
-
 /** Serialize for `localStorage`. Beside `parseReadingPrefs` so the two cannot drift. */
 export function serializeReadingPrefs(prefs: ReadingPrefs): string {
   return JSON.stringify(prefs);
@@ -155,18 +116,55 @@ export function readingStyle(prefs: ReadingPrefs): Record<string, string> {
   return {
     "--reading-size": `${prefs.sizePx}px`,
     "--reading-measure": prefs.measure === READING_MEASURE_FILL ? "none" : `${prefs.measure}ch`,
-    /*
-     * The SAME width for the layout that has to reserve room for the lane.
-     *
-     * `--reading-measure` is a `max-width` on the prose, which a flex row cannot use: an item narrower than its track
-     * leaves the rest to `justify-content`, and that is exactly the "the pair is centred, the prose is not" defect
-     * (the prose sat ~180px left of the window's centre with the rail away). A LENGTH is what makes the lane's track
-     * measurable, so `[1fr] [lane] [1fr]` can put one `1fr` on each side of it.
-     *
-     * One preference, two declarations, both derived here — so the cap the prose obeys and the room the layout reserves
-     * cannot disagree. Two numbers kept in step by hand is how `--reading-measure` and a literal drifted before.
-     */
-    "--reading-lane": laneWidth(prefs.measure),
-    "--reading-margin": laneMargin(prefs.measure),
+    ...laneTracks(prefs.measure),
+  };
+}
+
+/**
+ * The three grid tracks the wide layout puts around the prose lane.
+ *
+ * ## The defect these exist to make impossible
+ *
+ * The composition used to be `display: flex; justify-content: center` over TWO boxes — prose and a 340px companion — so
+ * what was centred was the PAIR. The prose's own centre is therefore half a companion to the left of the pair's, which
+ * is invisible while the rail shares the void and obvious the moment it does not: reported as *"without the session
+ * list, the transcript is not centered anymore"*.
+ *
+ * A `max-width` item cannot be positioned inside its own flex track — the remainder belongs to the container — so the
+ * lane needs a TRACK of its own, and the centring has to be arithmetic: equal space on each side.
+ *
+ * ## Why the two margins are ONE function and not two declarations
+ *
+ * The first attempt at this wrote `minmax(0, 1fr)` for the leading track and the companion's literal width for the
+ * trailing one, with a comment claiming symmetry. One flexible track takes ALL of the free space, so the prose was
+ * pushed to the right edge — a worse defect than the one being fixed, and one a reading of the code should have caught.
+ * Both margins now come from `laneTracks`, so they cannot disagree, and `reading.test.ts` asserts the template names
+ * the same token twice rather than checking a literal.
+ *
+ * ## Why `fill` is the asymmetric case
+ *
+ * `fill` means "use the column's width", i.e. everything the companion does not need — so its leading margin collapses
+ * and the trailing track is exactly the companion. That is deliberately NOT centred: a reader who asked for the full
+ * width asked for it on the left, not for a symmetric void on both sides.
+ *
+ * The lane is `minmax(0, 1fr)` under `fill` rather than `100%`: a `100%` track takes the whole row and pushes the
+ * companion out of the grid entirely, which loses Stop, Resume, Rename and both pickers.
+ */
+function laneTracks(measure: ReadingPrefs["measure"]): Record<string, string> {
+  if (measure === READING_MEASURE_FILL) {
+    return {
+      "--reading-leading": "0px",
+      "--reading-lane": "minmax(0, 1fr)",
+      "--reading-trailing": "var(--companion-width)",
+    };
+  }
+  /*
+   * CENTRED: one flexible margin on each side, and the lane capped by the reader's measure. The two margins are the
+   * same token because they must be the same width — that equality IS the centring.
+   */
+  return {
+    "--reading-leading": "minmax(0, 1fr)",
+    "--reading-lane": `minmax(0, ${measure}ch)`,
+    "--reading-trailing": "minmax(0, 1fr)",
   };
 }
