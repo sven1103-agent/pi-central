@@ -4341,6 +4341,16 @@ select.btn { font-family: var(--sans); }
  */
 .transcript-header {
   /*
+   * THE DETAILS FRAME: one class, two placements.
+   *
+   * In the wide layout this is a sticky grid item beside the prose. In reading focus the same class names the box INSIDE
+   * the peek overlay, so the twenty-five `.transcript-header .…` rules that lay the content out apply in both frames — the
+   * alternative, a differently named wrapper, rendered the details as unstyled blocks (Provider and Model as bare text
+   * beside their selects, with no grouping).
+   *
+   * The wide-layout-only declarations are in the sibling rule below, scoped to being a child of the row. What stays here
+   * is what both frames need: the flex column, the padding, and the width cap.
+   *
    * Sticky, so it stays with the reader: the conversation scrolls past it while the identity, state, meter and model
    * remain in view.
    *
@@ -4348,16 +4358,15 @@ select.btn { font-family: var(--sans); }
    * stretched to the row's height has no room to move, and `sticky` silently behaves like `static`. Both are required;
    * neither is decoration.
    */
-  position: sticky;
-  top: 0;
   /*
-   * `align-self: start` for the grid, and it is the grid equivalent of the flex note above: an item stretched to the
-   * row's height has no room to move, and `sticky` silently behaves like `static`. (`flex-start` and `start` resolve to
-   * the same thing, but the row is a grid now and the axis this refers to is the block one.)
+   * The BOX, shared by both frames: a flex column, at the companion's width.
+   *
+   * `position: sticky` and `align-self` are NOT here — they are about being a grid item in the wide row, and in the peek
+   * overlay they would be inert at best and wrong at worst. They live in `.transcript-wrap.has-header > .transcript-header`
+   * below, which is the rule that says "this box is placed in the row".
    */
-  align-self: start;
-  height: min-content;
   display: flex;
+  flex-direction: column;
   justify-content: flex-start;
   padding: var(--sp-4) 0;
   /*
@@ -4375,6 +4384,28 @@ select.btn { font-family: var(--sans); }
   width: 100%;
   max-width: var(--companion-width);
   min-width: 0;
+}
+
+/*
+ * PLACEMENT: "this box is a grid item in the wide row".
+ *
+ * Split from the box's own declarations above so the peek overlay can reuse the same class for the same CONTENT without
+ * inheriting a column's placement. `sticky` needs a scroll container and a grid row; in an overlay it would either be
+ * inert or fight the panel's own scrolling.
+ *
+ * The child combinator matters: it names the row's own item, so the peek's copy — nested inside `.session-peek-panel` —
+ * is not matched.
+ */
+.transcript-wrap.has-header > .transcript-header {
+  position: sticky;
+  top: 0;
+  /*
+   * `align-self: start` and not the row's `align-items`: an item stretched to the row's height has no room to move and
+   * `sticky` silently behaves like `static`. Expressing it on the ITEM is what lets the row stretch, which is what the
+   * scroller needs — the two requirements live on different elements.
+   */
+  align-self: start;
+  height: min-content;
 }
 
 /* The block itself: a quiet raised surface, wide enough for the pickers on one line each. */

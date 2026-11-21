@@ -156,8 +156,26 @@ export function SessionPeek({
         and `inert` while closed, so a panel nobody can see cannot be tabbed into. `inert` rather than `hidden`: the
         content must keep its layout so the overlay does not jump a frame when it opens.
       */}
-      <div className="session-peek-panel" id="session-peek-panel" aria-hidden={!open} {...(open ? {} : { inert: true })}>
-        {children}
+      <div
+        className="session-peek-panel"
+        id="session-peek-panel"
+        aria-hidden={!open}
+        {...(open ? {} : { inert: true })}
+      >
+        {/*
+          THE SAME FRAME CLASS AS THE WIDE LAYOUT'S COLUMN, and that is a correctness fix rather than a shortcut.
+
+          Every rule that lays the details out inside their box — the picker grid's rows and gaps, the label column, the
+          stats row, the control bar, and the narrow-form overrides — is scoped to `.transcript-header .…`. The first
+          version wrapped the children in a differently named element, so all twenty-five of those selectors matched
+          nothing: the content rendered as unstyled blocks, Provider and Model as bare text beside their selects, with no
+          grouping and no widths. Reported from a screenshot as exactly that.
+
+          Naming this box `.transcript-header` makes the two frames share ONE set of layout rules, so a fact added to the
+          header cannot be laid out in the column and not here. The positioning differences (this is an overlay, that is a
+          grid item) live in `.session-peek-panel`, which composes with it — two classes, two concerns, no duplication.
+        */}
+        <div className="transcript-header">{children}</div>
       </div>
     </div>
   );

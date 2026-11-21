@@ -24,6 +24,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - A long transcript scrolls again, and the composer stays below it instead of being pushed behind the text ([#275]).
 - Reading focus keeps the session header while the panel is closed, so the session's controls are never unreachable ([#275]).
 - The details panel opens at its own width instead of collapsing to the width of its tab ([#275]).
+- The details keep their layout inside that panel, instead of rendering as unformatted text ([#275]).
 
 ### Changed
 

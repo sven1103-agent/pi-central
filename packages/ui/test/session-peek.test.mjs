@@ -168,3 +168,47 @@ test("the panel is as wide as it claims, which a percentage max-width got wrong"
   assert.match(rule(".session-peek-tab") ?? "", /width:\s*var\(--peek-tab\)/, "the tab is that number wide");
   assert.match(rule(".transcript-peek") ?? "", /--peek-tab:\s*\d+px/, "and the number is declared once");
 });
+
+test("the details are laid out by the SAME rules in both frames", () => {
+  /*
+   * THE reported bug, and it was invisible to every test I had written: the peek panel wrapped the session header in a
+   * differently named element, so all twenty-five `.transcript-header .…` selectors — the picker grid's rows and gaps, the
+   * label column, the stats row, the control bar — matched NOTHING. The content rendered as unstyled blocks: Provider and
+   * Model as bare text beside their selects, no grouping, no widths. The screenshot showed exactly that inside a
+   * correctly sized panel.
+   *
+   * Every structural assertion up to this point asked about the FRAME (width, position, pointer-events) and none about
+   * what was inside it, which is why a 340px panel full of unformatted text passed the suite.
+   *
+   * The rule this earns: the content-layout rules must be scoped to a class BOTH frames carry, so a fact laid out in the
+   * column cannot be unformatted in the tab. Asserted as a JOIN — the peek must render a descendant wearing that class.
+   */
+  const peek = read("components/SessionPeek.tsx");
+  assert.match(
+    peek,
+    /<div className="transcript-header">\{children\}<\/div>/,
+    "the panel gives its children the SAME frame class the wide layout uses",
+  );
+
+  /*
+   * And the count, so a later refactor that renames one side is caught: the details' layout lives in the scoped rules, and
+   * there are many — a handful would mean most of it had moved somewhere the overlay does not reach.
+   */
+  const scoped = [...css.matchAll(/^\s*\.transcript-header \./gm)].length;
+  assert.ok(scoped >= 10, "the details layout lives in " + scoped + " scoped rules; both frames must reach them");
+
+  /*
+   * The placement rules must be scoped NARROWER, to the row's own item, or the overlay inherits `position: sticky` and a
+   * sticky element inside a scrolling overlay fights the overlay's own scroll. Narrower means a child combinator, which
+   * the peek's copy — nested inside `.session-peek-panel` — is not matched by.
+   */
+  assert.match(
+    rule(".transcript-wrap.has-header > .transcript-header") ?? "",
+    /position:\s*sticky/,
+    "sticky belongs to the row's item",
+  );
+  assert.ok(
+    !/position:\s*sticky/.test(rule(".transcript-header") ?? ""),
+    "and not to the shared class, which the overlay also wears",
+  );
+});

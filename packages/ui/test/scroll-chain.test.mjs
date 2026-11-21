@@ -54,7 +54,21 @@ test("the sticky companion gets its room from ITSELF, not from the row", () => {
    *
    * Both halves are asserted, because either alone is a broken layout.
    */
-  assert.match(rule(".transcript-header") ?? "", /align-self:\s*(start|flex-start)/, "the companion opts out on its own");
+  /*
+   * `align-self` moved to the PLACEMENT rule, scoped to the row's own item, when the peek panel began reusing
+   * `.transcript-header` for the same content. The property is unchanged — "the companion opts out on its own" — but it
+   * now lives where it says what it means, so the overlay's copy of the class does not inherit a column's placement.
+   */
+  assert.match(
+    rule(".transcript-wrap.has-header > .transcript-header") ?? "",
+    /align-self:\s*(start|flex-start)/,
+    "the companion opts out on its own",
+  );
+  assert.match(
+    rule(".transcript-wrap.has-header > .transcript-header") ?? "",
+    /position:\s*sticky/,
+    "and it is the row's item that is sticky, not the class in general",
+  );
   assert.match(
     rule(".transcript-wrap.has-header") ?? "",
     /align-items:\s*stretch/,
