@@ -51,9 +51,21 @@ test("the shell puts the mode on the app root as ONE class", () => {
    *
    * Falsified by `appClass` returning the base unchanged: every rule below would be dead, and the mode a no-op.
    */
-  assert.equal(appClass("app", defaultRailPrefs()), "app");
-  assert.equal(appClass("app", { ...defaultRailPrefs(), focus: true }), "app is-focus");
-  assert.match(app, /className=\{appClass\("app", railPrefs\)\}/, "the shell is the one writer");
+  const focus = { ...defaultRailPrefs(), focus: true };
+  assert.equal(appClass("app", defaultRailPrefs(), true), "app", "off means the base class and nothing else");
+  /*
+   * `is-panel-closed` rides with the mode, and it is not cosmetic: focus mode hides the session header on the strength of
+   * "the panel states the same facts", and `panel.ts` defaults to COLLAPSED — so without this class the mode removed the
+   * only surface for Rename, Stop, Resume, Retry, Delete, the model and the thinking level. That shipped as *"i cant see
+   * the action bars … where are they"*.
+   */
+  assert.equal(appClass("app", focus, true), "app is-focus is-panel-closed");
+  assert.equal(appClass("app", focus, false), "app is-focus", "an open panel needs no exemption");
+  assert.match(
+    app,
+    /className=\{appClass\("app", railPrefs, panel\.collapsed\)\}/,
+    "the shell is the one writer, and it passes the panel's real state",
+  );
 });
 
 test("focus mode hides the CHROME, and nothing that is the conversation", () => {
@@ -67,7 +79,20 @@ test("focus mode hides the CHROME, and nothing that is the conversation", () => 
    * Falsified by adding `.app.is-focus .transcript-lane { max-width: … }` — the negative assertion reports it.
    */
   assert.match(rule(".app.is-focus .topbar .fleet") ?? "", /display:\s*none/, "the fleet counts fold away");
-  assert.match(rule(".app.is-focus .transcript-header") ?? "", /display:\s*none/, "the companion band leaves the row");
+  /*
+   * The companion band leaves the row — conditionally, and the condition is the whole point. `:not(.is-panel-closed)` is
+   * what stops the mode from removing the only surface that holds the session's controls.
+   */
+  assert.match(
+    rule(".app.is-focus:not(.is-panel-closed) .transcript-header") ?? "",
+    /display:\s*none/,
+    "the companion band leaves the row, but only when the panel is showing the same facts",
+  );
+  assert.equal(
+    rule(".app.is-focus .transcript-header"),
+    undefined,
+    "and there is no unconditional rule: an open panel is what earns the hiding",
+  );
   assert.match(rule(".app.is-focus .composer-hint") ?? "", /display:\s*none/, "and so does the permanent hint line");
 
   for (const forbidden of [".transcript-lane", ".transcript-main", ".composer", ".transcript", ".composer-input"]) {
@@ -110,7 +135,7 @@ test("focus mode keeps the lane where it was, and only takes the companion’s t
    * nothing in it, and under `fill` it leaves 364px of void.
    */
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-  const focusRow = /\.app\.is-focus \.transcript-wrap\.has-header\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  const focusRow = /\.app\.is-focus:not\(\.is-panel-closed\) \.transcript-wrap\.has-header\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
   assert.ok(focusRow, "the mode must re-declare the tracks");
   const template = /grid-template-columns:\s*([^;]+);/.exec(focusRow)?.[1]?.replace(/\s+/g, " ").trim() ?? "";
   assert.equal(

@@ -1846,7 +1846,7 @@ export function App() {
       four components for one reason: what it changes is which surfaces are laid out at all, which is stylesheet
       territory. Reading the stylesheet's focus section is then a complete answer to "what does the mode do".
     */
-    <div className={appClass("app", railPrefs)}>
+    <div className={appClass("app", railPrefs, panel.collapsed)}>
       <header className="topbar">
         {/*
           The MARK only, with the name kept as an accessible heading.

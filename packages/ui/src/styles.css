@@ -731,14 +731,25 @@ button { font: inherit; color: inherit; }
   font-size: 14px;
 }
 
-.app.is-focus .transcript-header {
-  /*
-   * The companion leaves the reading row entirely, so the prose lane takes the room it had.
-   *
-   * `display: none` rather than a narrower box: a 340px column of facts squeezed to 200px would be the "clipped
-   * mid-word" defect `panel.ts` records, and the panel states the same facts properly. The `has-header` row rule is
-   * overridden so the prose is centred in the FULL column instead of sharing it with an empty track.
-   */
+/*
+ * The companion leaves the reading row — BUT ONLY WHEN THE PANEL IS SHOWING THE SAME THINGS.
+ *
+ * ## The trap this fixes, and it was reachable in the shipped default
+ *
+ * `panel.ts` defaults to `collapsed: true`, so "the Session panel states the same facts" is FALSE out of the box. With
+ * focus mode on, the header hidden and the panel collapsed, there was no surface anywhere for Rename, Stop, Resume,
+ * Retry, Delete, the model picker, the thinking level, or the ctx/cost meters. Reported as *"i cant see the action
+ * bars … where are they"* — and answering "open the panel" is not an answer, because the mode also removed the only
+ * hint that they had moved.
+ *
+ * The rule is therefore conditional on the fact it depends on: `:not(.is-panel-closed)`. The shell writes that class
+ * from `panel.collapsed`, which it already owns, so this needs no new preference and no new control — the header simply
+ * stays for exactly as long as it is the only place those facts exist.
+ *
+ * `display: none` rather than a narrower box: a 340px column of facts squeezed to 200px would be the "clipped
+ * mid-word" defect `panel.ts` records.
+ */
+.app.is-focus:not(.is-panel-closed) .transcript-header {
   display: none;
 }
 /*
@@ -749,7 +760,12 @@ button { font: inherit; color: inherit; }
  * leading one — both re-centres the prose and leaves it at the same x it had a moment earlier. The mode changes what is
  * around the conversation, never where the conversation is.
  */
-.app.is-focus .transcript-wrap.has-header {
+/*
+ * With the header gone the lane keeps the MIDDLE track and stays exactly where it was, so hiding the companion cannot
+ * move the prose by a pixel. Scoped to the same condition that hides the header: when the header STAYS (because the
+ * panel is closed) this must not apply, or the row would have no track for it.
+ */
+.app.is-focus:not(.is-panel-closed) .transcript-wrap.has-header {
   grid-template-columns:
     var(--reading-leading)
     var(--reading-lane)
@@ -757,7 +773,7 @@ button { font: inherit; color: inherit; }
   column-gap: 0;
   --reading-trailing: var(--reading-leading);
 }
-.app.is-focus .transcript-wrap.has-header .transcript-main { grid-column: 2; }
+.app.is-focus:not(.is-panel-closed) .transcript-wrap.has-header .transcript-main { grid-column: 2; }
 
 .app.is-focus .composer-hint {
   /*
@@ -4347,7 +4363,30 @@ select.btn { font-family: var(--sans); }
    * into the reader's measure.
    */
   column-gap: var(--sp-5);
-  align-items: start;
+  /*
+   * `align-items: stretch` — the DEFAULT, and it is written out because the previous value was a regression that broke
+   * scrolling.
+   *
+   * The rule was `align-items: start`, copied from the flex version, where `start` was needed so the sticky companion
+   * had room to move (`focus-mode.test` and the note at the top of this section both say so). In a GRID row the same
+   * value sizes every row to its content, so `.transcript-main` became content-height instead of filling the column:
+   * the scroller had nothing to scroll, and the composer was pushed up behind the text. Reported as *"i cant scroll"*.
+   *
+   * The sticky companion does not need it here: `align-self: start` on `.transcript-header` gives THAT item room to
+   * move while the row stretches. One item's alignment is a property of the item, not of the row — which is exactly the
+   * mistake, and it is why the item carries its own `align-self`.
+   */
+  align-items: stretch;
+  /*
+   * `grid-template-rows: minmax(0, 1fr)` — ONE explicit row that absorbs the height, and the `minmax` is load-bearing
+   * for the same reason `minmax(0, 1fr)` is on the columns: a bare `1fr` is `minmax(auto, 1fr)`, whose minimum is the
+   * content's height, so a long transcript would size the row to its own text and `.transcript` (which is
+   * `overflow-y: auto`) would never get a bounded box to scroll inside. The pane would simply grow past the window.
+   *
+   * Implicit rows are `auto`, which has the same effect, so this has to be stated rather than left out. Together with
+   * `align-items: stretch` it is what makes "the transcript scrolls" true rather than assumed.
+   */
+  grid-template-rows: minmax(0, 1fr);
   /* Let the row shrink on a narrow window instead of overflowing it. */
   min-width: 0;
   flex: 1;

@@ -21,6 +21,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 ### Fixed
 
 - The session header stays on screen between 1080px and the width where the lane and the header both fit, instead of being drawn past the right edge ([#275]).
+- A long transcript scrolls again, and the composer stays below it instead of being pushed behind the text ([#275]).
+- Reading focus keeps the session header while the panel is closed, so the session's controls are never unreachable ([#275]).
 
 ### Changed
 

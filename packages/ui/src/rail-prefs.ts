@@ -299,6 +299,20 @@ export function railStyle(prefs: RailPrefs): Record<string, string> {
  * `hidden` is deliberately NOT in here: it is a preference about the rail, and the rail's own layout rules already
  * carry it (ADR-0015's "the breakpoint is only a floor" section).
  */
-export function appClass(base: string, prefs: RailPrefs): string {
-  return prefs.focus ? `${base} is-focus` : base;
+export function appClass(base: string, prefs: RailPrefs, panelCollapsed: boolean): string {
+  if (!prefs.focus) return base;
+  /*
+   * `is-panel-closed` is part of the SAME class list rather than a second stylesheet concern, and it is what keeps
+   * reading focus from being a trap.
+   *
+   * Focus mode hides the session header on the strength of "the Session panel states the same facts" — and the panel is
+   * COLLAPSED BY DEFAULT, so that sentence was false out of the box. With focus on, the header hidden and the panel
+   * closed, there was no surface for Rename, Stop, Resume, Retry, Delete, the model or the thinking level anywhere:
+   * *"i cant see the action bars … where are they"*.
+   *
+   * Deriving it here rather than from a preference means it cannot disagree with the panel's actual state: the caller
+   * passes `panel.collapsed`, which the shell already owns. The stylesheet then scopes the hiding to
+   * `:not(.is-panel-closed)`, so the header stays for exactly as long as it is the only place those facts exist.
+   */
+  return `${base} is-focus${panelCollapsed ? " is-panel-closed" : ""}`;
 }
