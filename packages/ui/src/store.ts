@@ -1021,6 +1021,21 @@ export function modelsByProvider(models: ModelOption[]): { provider: string; mod
 }
 
 /**
+ * Whether a control that COMMANDS the session can act on it at all.
+ *
+ * `starting` has no live Pi process yet and `stopped`/`failed` have none any more, so a command would have nothing to
+ * act on. One rule, in one place, because two surfaces now ask it — the model picker's select and the model list's rows
+ * (issue #265) — and two copies of a state list drift the moment a state is added.
+ *
+ * The label is deliberately about COMMANDS: a control that only edits the reader's own preferences (the model list
+ * itself) stays usable on a stopped session, because stopping a session says nothing about which models a reader uses.
+ */
+export function modelControlUsable(session: LiveSession | undefined): boolean {
+  if (session === undefined) return false;
+  return session.state !== "starting" && session.state !== "stopped" && session.state !== "failed";
+}
+
+/**
  * Is this model the one the session is currently on?
  *
  * Both parts are compared: the same model id can exist under two providers (a proxy and the

@@ -1427,7 +1427,7 @@ test("the closed model control shows a MIDDLE-elided name, not a trailing cut", 
     session: session({ model, provider: "litellm" }),
     models: undefined, error: undefined, onRequest() {}, onSelect() {},
   }));
-  const shown = /class="picker-display[^"]*"[^>]*>([^<]*)</.exec(html)?.[1];
+  const shown = /class="picker-display[^"]*"[^>]*>(?:<span class="picker-display-text">)?([^<]*)</.exec(html)?.[1];
   // Asserted as PROPERTIES, not as a literal: the cap moved once already (#74) and a hard-coded
   // string made a change of width look like a change of behaviour. What the test is about is that an
   // elision keeps both ends.
@@ -1487,7 +1487,7 @@ test("the OPTIONS are never truncated, because that is where the choice is made"
   }));
   assert.ok(html.includes(`>${long}<`) || html.includes(`>${long}<!-- -->`),
     "the option must carry the full name");
-  const shown = /class="picker-display[^"]*"[^>]*>([^<]*)</.exec(html)?.[1];
+  const shown = /class="picker-display[^"]*"[^>]*>(?:<span class="picker-display-text">)?([^<]*)</.exec(html)?.[1];
   assert.notEqual(shown, long, "and the closed label must still be shortened");
   // The overlay must shorten the FRIENDLY name, not the raw id. Asserting only that it differs from
   // the long name is too weak: shortening the raw id also differs, while showing a different string
@@ -2875,6 +2875,41 @@ test("Provider and Model share ONE label column, and Thinking is on the model's 
   assert.ok(modelCell, "the model row is a control cell");
   assert.ok(modelCell.querySelector(".thinking-probe"), "Thinking shares the model's row");
   assert.ok(modelCell.querySelector(".picker-field"), "…alongside the model field itself");
+});
+
+test("the companion's picker block groups each label with the control it names", () => {
+  /*
+   * The screenshot in #265's review: seven rows at ONE row gap, so "Provider" sat as far from its value as the value
+   * sat from "Model", and "Model" as far from its select as from "Thinking". A stack whose spacing is uniform has no
+   * grouping at all — it reads as a list of fields rather than three settings — and the block was the tallest thing in
+   * the companion for no reason.
+   *
+   * Asserted on the RULE rather than on a render, because this is spacing: jsdom has no layout, so the failure mode
+   * ("the block looks flat") is only expressible as the declarations that produce it. Reverting the gap to
+   * `var(--sp-2)` makes this fail.
+   */
+  const css = readCss();
+  const block = /\.transcript-header \.picker-grid \{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(block, /gap:\s*2px/, "a label sits 2px from the control it names");
+  assert.ok(!/gap:\s*var\(--sp-2\)/.test(block), "and not at the group spacing");
+  // A new pair starts a gap later: the model row, the note, and the thinking picker inside the model's cell.
+  const pairs = /\.transcript-header \.picker-grid > \[data-picker-row="model"\]\[data-picker-label\][\s\S]*?margin-top:\s*var\(--sp-2\)/.exec(css);
+  assert.ok(pairs, "the model pair is separated from the provider pair");
+  assert.match(css, /\.transcript-header \.picker-controls > \.picker \{ margin-top:\s*var\(--sp-2\)/, "and so is the thinking pair");
+});
+
+test("the catalogue affordance is compact, and quiet enough not to read as a third field", () => {
+  /*
+   * Reported with the same screenshot: "All 407 models" rendered as a full-width bordered button directly under the
+   * model select, so the block read as three controls of equal rank. It carries `btn btn-quiet`, and `.btn` is declared
+   * LATER in the stylesheet — same specificity — so the quiet half never applied and the button kept its chrome. This
+   * asserts the rule that owns the control, which is the only place the intent survives the cascade.
+   */
+  const css = readCss();
+  const rule = /\.picker-scope \{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(rule, /width:\s*fit-content/, "as wide as its words, not as wide as the box");
+  assert.match(rule, /border:\s*none/, "no chrome, so it does not compete with the select");
+  assert.match(rule, /background:\s*none/);
 });
 
 // --- The rail is for SELECTION; renaming belongs to the session you are looking at -----------------
