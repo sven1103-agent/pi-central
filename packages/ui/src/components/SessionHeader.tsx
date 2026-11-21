@@ -49,6 +49,8 @@ export function SessionHeader({
   modelError,
   onRequestModels,
   onSelectModel,
+  scope,
+  onManageModels,
   thinking,
   onRequestThinkingLevels,
   onSelectThinkingLevel,
@@ -64,6 +66,10 @@ export function SessionHeader({
   modelError: string | undefined;
   onRequestModels: () => void;
   onSelectModel: (provider: string, modelId: string) => void;
+  /** The reader's model list (issue #265), forwarded so the picker can narrow the catalogue it offers. */
+  scope: Parameters<typeof ModelPicker>[0]["scope"];
+  /** Open the list editor, which the SHELL renders — see `ModelPicker`'s prop for why it is not rendered here. */
+  onManageModels: Parameters<typeof ModelPicker>[0]["onManageModels"];
   thinking: { levels: string[] | undefined; error: string | undefined };
   onRequestThinkingLevels: () => void;
   onSelectThinkingLevel: (level: string) => void;
@@ -233,6 +239,8 @@ export function SessionHeader({
           error={modelError}
           onRequest={onRequestModels}
           onSelect={onSelectModel}
+          scope={scope}
+          onManageModels={onManageModels}
           thinking={
             // On the MODEL's row: the levels are per-model, so a change to one invalidates the other. The provider
             // is the only thing here that needs a line of its own, being a read-only fact.

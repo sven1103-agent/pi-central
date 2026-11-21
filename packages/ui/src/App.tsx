@@ -50,6 +50,8 @@ import {
   firstPromptFor,
   hasUnisolatedSession,
   initialState,
+  isCurrentModel,
+  modelControlUsable,
   pendingDialogCount,
   reduce,
   transcriptFor,
@@ -151,9 +153,17 @@ import {
   serializeChooserPrefs,
   type ChooserPrefs,
 } from "./chooser-prefs.ts";
+import {
+  MODEL_SCOPE_KEY,
+  loadModelScope,
+  refKey,
+  serializeModelScope,
+  type ModelScope,
+} from "./model-scope.ts";
 import { InlineRename } from "./components/InlineRename.tsx";
 import { ThinkingPicker } from "./components/ThinkingPicker.tsx";
 import { SessionHeader } from "./components/SessionHeader.tsx";
+import { ModelListDialog } from "./components/ModelListDialog.tsx";
 import { HistoryView } from "./components/History.tsx";
 import { displayName, formatContext, formatCost, formatTokens, headerLocation, nameLabel } from "./format.ts";
 import { stateLabel, type UiState } from "./store.ts";
@@ -470,6 +480,56 @@ export function App() {
     },
     [chooserStorage],
   );
+  /**
+   * The reader's model list (issue #265).
+   *
+   * Held HERE, in the shell, rather than inside `ModelPicker`: it is a per-MACHINE preference, and two pickers each
+   * reading `localStorage` on their own would disagree the moment one of them wrote. One piece of state and one writer
+   * is what makes "two sessions share the list" true rather than likely.
+   *
+   * `safeLocalStorage` because private mode and a full quota both throw on the first `setItem`; a picker that cannot
+   * remember a list must still open, and `model-scope.ts` degrades a stored value it cannot parse to "no list".
+   */
+  const scopeStorage = useMemo(() => safeLocalStorage(), []);
+  const [modelScope, setModelScope] = useState<ModelScope>(() =>
+    loadModelScope((key) => scopeStorage.getItem(key)),
+  );
+  const rememberModelScope = useCallback(
+    (next: ModelScope) => {
+      setModelScope(next);
+      scopeStorage.setItem(MODEL_SCOPE_KEY, serializeModelScope(next));
+    },
+    [scopeStorage],
+  );
+  /**
+   * Whether the model list editor is open.
+   *
+   * In the shell rather than in `ModelPicker` for the same reason `Settings` and `ShortcutSheet` are: the picker sits
+   * inside `.transcript-shell`, which is `container-type: inline-size` and therefore the containing block of any fixed
+   * descendant. A backdrop rendered there would cover the conversation only, while claiming to be modal over the whole
+   * window — a lie a keyboard reader would discover by tabbing into the rail behind it.
+   */
+  const [modelListOpen, setModelListOpen] = useState(false);
+  /**
+   * The control that opened the list, so closing returns focus to it.
+   *
+   * Handed over by the picker rather than captured here as `document.activeElement`: a pointer click does not focus a
+   * button in every browser, so the element that opened the surface is only known where it is rendered. This is the
+   * rule `Settings` and `ShortcutSheet` follow — a surface entered from the keyboard must be leaveable from it — and
+   * it matters more here, because the dialog now closes itself on a CHOICE: the reader lands back on the control beside
+   * the model that just changed, instead of at the top of the document.
+   */
+  const modelListTrigger = useRef<HTMLElement | null>(null);
+  const openModelList = useCallback((trigger: HTMLElement) => {
+    modelListTrigger.current = trigger;
+    setModelListOpen(true);
+  }, []);
+  const closeModelList = useCallback(() => {
+    setModelListOpen(false);
+    modelListTrigger.current?.focus();
+    modelListTrigger.current = null;
+  }, []);
+
   const filesRef = useRef(files);
   filesRef.current = files;
 
@@ -742,6 +802,28 @@ export function App() {
   }, []);
 
   const focused = focusedSession(state);
+
+  /**
+   * Change the focused session's model.
+   *
+   * Sent, not applied locally: the header must show what Pi reports back, and Pi validates the choice. An optimistic
+   * update would display a change that may have been refused. One callback because two surfaces choose a model now —
+   * the picker's own `<select>` and the full catalogue's rows in the list dialog (issue #265) — and two copies of
+   * "send setModel" would be two places that can start disagreeing about which session it targets.
+   */
+  const selectModel = (provider: string, modelId: string): void => {
+    if (focused) send({ kind: "setModel", sessionId: focused.id, provider, modelId });
+  };
+
+  /*
+   * The focused session's catalogue, and which of its models is in force.
+   *
+   * Derived rather than stored, and derived the same way `ModelPicker` derives it, so the list dialog's "in use" mark
+   * and the picker's selected option cannot name different models — which in a two-provider setup would mean the list
+   * highlighting the proxy while the header showed the upstream.
+   */
+  const focusedCatalogue = focused === undefined ? undefined : state.models[focused.id];
+  const focusedModel = focusedCatalogue?.find((model) => focused !== undefined && isCurrentModel(focused, model));
 
   /**
    * A window that comes back into view re-checks itself (issues #213, #220).
@@ -1487,7 +1569,9 @@ export function App() {
        * a socket. `shortcuts.test.mjs` drives every step of it directly.
        */
       const shortcut = resolveShortcut(event, {
-        modalOpen: pendingDelete !== undefined || confirmStop !== undefined || settingsOpen,
+        // The model list editor is a modal too (issue #265): a chord acting on the session behind it would be a
+        // keystroke aimed at a surface the reader is not looking at — the same rule as a delete confirmation.
+        modalOpen: pendingDelete !== undefined || confirmStop !== undefined || settingsOpen || modelListOpen,
         keysOpen,
         sheetOpen,
         inField: isEditableTarget(event.target as TargetLike | null),
@@ -1502,7 +1586,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [shellShortcuts, pendingDelete, confirmStop, settingsOpen, keysOpen, sheetOpen]);
+  }, [shellShortcuts, pendingDelete, confirmStop, settingsOpen, modelListOpen, keysOpen, sheetOpen]);
 
   const platform = detectPlatform(typeof navigator === "undefined" ? undefined : navigator.userAgent);
 
@@ -1758,7 +1842,7 @@ export function App() {
             `resolveShortcut`, and a helper that both call would be the third place to update when a modal is added —
             this line and that call site are each one line, and the test asserts both stand down.
           */
-          modalOpen={pendingDelete !== undefined || confirmStop !== undefined || settingsOpen || keysOpen}
+          modalOpen={pendingDelete !== undefined || confirmStop !== undefined || settingsOpen || keysOpen || modelListOpen}
           retryAvailable={supportsRetry(state.install?.protocol)}
           onRetryRow={(row) => {
             // Only a live session has a handle to retry with; a row that is not running has no process to
@@ -1947,12 +2031,9 @@ export function App() {
               onRequestModels={() => {
                 if (focused) send({ kind: "listModels", sessionId: focused.id });
               }}
-              onSelectModel={(provider, modelId) => {
-                // Sent, not applied locally: the header must show what Pi reports back, and Pi
-                // validates the choice. An optimistic update would display a change that may
-                // have been refused.
-                if (focused) send({ kind: "setModel", sessionId: focused.id, provider, modelId });
-              }}
+              onSelectModel={selectModel}
+              scope={modelScope}
+              onManageModels={openModelList}
               thinking={{
                 levels: focused ? state.thinkingLevels[focused.id] : undefined,
                 error: focused ? state.thinkingLevelErrors[focused.id] : undefined,
@@ -2142,6 +2223,27 @@ export function App() {
         </Panel>
         )}
       </div>
+      {/*
+        The model list editor (issue #265), at the shell rather than in the picker — the same reason `Settings` and
+        `ShortcutSheet` are here, and `ModelPicker`'s prop comment gives the measurement: a fixed backdrop inside
+        `.transcript-shell` is contained by it.
+
+        Guarded on a loaded, NON-EMPTY catalogue because that is the only state in which the picker offers to open it:
+        a dialog over an empty catalogue could say nothing true, and the edit surface is about choosing among models Pi
+        actually reports.
+      */}
+      {modelListOpen && focused !== undefined && focusedCatalogue !== undefined && focusedCatalogue.length > 0 && (
+        <ModelListDialog
+          catalogue={focusedCatalogue}
+          scope={modelScope}
+          currentKey={focusedModel === undefined ? undefined : refKey(focusedModel)}
+          canSelect={modelControlUsable(focused)}
+          onScopeChange={rememberModelScope}
+          onSelect={selectModel}
+          onClose={closeModelList}
+        />
+      )}
+
       {settingsOpen && (
         <Settings
           install={state.install}
@@ -2384,6 +2486,8 @@ function SessionView({
   controls,
   onRequestModels,
   onSelectModel,
+  scope,
+  onManageModels,
   thinking,
   onRequestThinkingLevels,
   onSelectThinkingLevel,
@@ -2433,6 +2537,10 @@ function SessionView({
   controls?: SessionControlCaps | undefined;
   onRequestModels: () => void;
   onSelectModel: (provider: string, modelId: string) => void;
+  /** The reader's model list (issue #265), forwarded to the header's picker. */
+  scope: ModelScope;
+  /** Open the list editor, handing over the trigger so the shell can return focus to it. See `ModelPicker`'s prop. */
+  onManageModels: (trigger: HTMLElement) => void;
   thinking: { levels: string[] | undefined; error: string | undefined };
   onRequestThinkingLevels: () => void;
   onSelectThinkingLevel: (level: string) => void;
@@ -2533,6 +2641,8 @@ function SessionView({
             modelError={modelError}
             onRequestModels={onRequestModels}
             onSelectModel={onSelectModel}
+            scope={scope}
+            onManageModels={onManageModels}
             thinking={thinking}
             onRequestThinkingLevels={onRequestThinkingLevels}
             onSelectThinkingLevel={onSelectThinkingLevel}
