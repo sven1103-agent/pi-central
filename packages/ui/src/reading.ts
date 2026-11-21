@@ -101,6 +101,45 @@ export function parseReadingPrefs(raw: string | null): ReadingPrefs {
   };
 }
 
+/**
+ * The width of the grid track the prose sits in, for a given measure.
+ *
+ * ## Why this is arithmetic and not `${measure}ch`
+ *
+ * A grid track must be a LENGTH, and the two settings are not the same expression:
+ *
+ *   - a `ch` measure is already a length, so the lane's track is exactly the prose's cap and the margin tracks beside
+ *     it are equal — the prose is centred, which is the whole point;
+ *   - `fill` means "the column's width", which is NOT the container's. Writing `100%` there makes the middle track take
+ *     the entire row and **pushes the companion out of the grid** — a reachable state (the `fill` checkbox is in
+ *     Settings; the companion holds Stop, Resume, Rename and the pickers) in which asking for a wider line loses the run
+ *     controls.
+ *
+ * So `fill` reserves everything except the companion and the gutter. `--companion-width` and `--reading-gap` are the
+ * same two terms the row's template uses, which is why they are tokens rather than literals.
+ */
+function laneWidth(measure: ReadingPrefs["measure"]): string {
+  if (measure !== READING_MEASURE_FILL) return `${measure}ch`;
+  return `calc(100% - var(--companion-width) - var(--reading-gap))`;
+}
+
+/**
+ * The track that sits on each SIDE of the lane.
+ *
+ * ## Why this is a token and not a literal `1fr`
+ *
+ * Two equal tracks split the free space, and equal free space is what "centred" means here — that is the whole fix for
+ * the reported defect. But under `fill` there IS no free space to split: the lane already occupies everything left of
+ * the companion, so a flexible track on each side would resolve to zero-width *ideal* and then be given a share of the
+ * row anyway, pushing the companion past the container's edge by however much they received.
+ *
+ * `minmax(0, 1fr)` (centred) and `0px` (filling) are therefore two different answers to the same question, and they
+ * belong together with `laneWidth` — one place that decides the row's arithmetic, tested without a browser.
+ */
+function laneMargin(measure: ReadingPrefs["measure"]): string {
+  return measure === READING_MEASURE_FILL ? "0px" : "minmax(0, 1fr)";
+}
+
 /** Serialize for `localStorage`. Beside `parseReadingPrefs` so the two cannot drift. */
 export function serializeReadingPrefs(prefs: ReadingPrefs): string {
   return JSON.stringify(prefs);
@@ -116,5 +155,18 @@ export function readingStyle(prefs: ReadingPrefs): Record<string, string> {
   return {
     "--reading-size": `${prefs.sizePx}px`,
     "--reading-measure": prefs.measure === READING_MEASURE_FILL ? "none" : `${prefs.measure}ch`,
+    /*
+     * The SAME width for the layout that has to reserve room for the lane.
+     *
+     * `--reading-measure` is a `max-width` on the prose, which a flex row cannot use: an item narrower than its track
+     * leaves the rest to `justify-content`, and that is exactly the "the pair is centred, the prose is not" defect
+     * (the prose sat ~180px left of the window's centre with the rail away). A LENGTH is what makes the lane's track
+     * measurable, so `[1fr] [lane] [1fr]` can put one `1fr` on each side of it.
+     *
+     * One preference, two declarations, both derived here — so the cap the prose obeys and the room the layout reserves
+     * cannot disagree. Two numbers kept in step by hand is how `--reading-measure` and a literal drifted before.
+     */
+    "--reading-lane": laneWidth(prefs.measure),
+    "--reading-margin": laneMargin(prefs.measure),
   };
 }

@@ -48,6 +48,20 @@ test("the defaults turn into the CSS that was hard-coded before", () => {
   assert.deepEqual(readingStyle(defaultReadingPrefs()), {
     "--reading-size": "15px",
     "--reading-measure": "80ch",
+    /*
+     * The same number again, as a LENGTH, for the layout that has to reserve a track for it (issue #275 follow-up).
+     *
+     * Two declarations from one setting on purpose: `--reading-measure` caps the prose, `--reading-lane` sizes the
+     * column the prose is centred in, and letting them be two hand-maintained numbers is how the cap and the room came
+     * to disagree — which is what put the conversation ~180px off centre once the rail was away.
+     */
+    "--reading-lane": "80ch",
+    /*
+     * And the track on each side of it: `minmax(0, 1fr)` while centred, so two equal flexible tracks split the free
+     * space. This is the third declaration derived from ONE setting, and the reason is the reported defect — the prose
+     * was centred as a pair with the companion, so it sat half a companion left of the window's centre.
+     */
+    "--reading-margin": "minmax(0, 1fr)",
   });
 });
 
@@ -72,6 +86,27 @@ test("`fill` means the column's width, which is `none` rather than a huge number
   // `none` lets the block take its container's width. A large `ch` value would look almost right and then be
   // wrong on a narrow window, where it would overflow instead of shrinking.
   assert.equal(readingStyle({ sizePx: 15, measure: READING_MEASURE_FILL })["--reading-measure"], "none");
+
+test("`fill` stays inside the row instead of pushing the companion out of it", () => {
+  /*
+   * The reachable state this guards: a reader ticks "use the full width" in Settings, and the session header — Stop,
+   * Resume, Rename, and both pickers — leaves the window. A grid whose middle track is `100%` takes the whole line;
+   * everything else is placed beyond it.
+   *
+   * The lane therefore reserves the companion and the gutter, and the MARGIN tracks collapse to zero: under `fill` there
+   * is no free space to split, so a `1fr` on each side would be granted a share of the row anyway and push the companion
+   * past the edge. Both numbers are decided together in `reading.ts`, which is why this test is about the PAIR.
+   *
+   * Falsified by returning `100%` from `laneWidth` or `minmax(0, 1fr)` from `laneMargin`.
+   */
+  const style = readingStyle({ sizePx: 15, measure: READING_MEASURE_FILL });
+  assert.equal(
+    style["--reading-lane"],
+    "calc(100% - var(--companion-width) - var(--reading-gap))",
+    "the lane takes what is left, not everything",
+  );
+  assert.equal(style["--reading-margin"], "0px", "and nothing is left over to split");
+});
 });
 
 test("a corrupt stored value falls back to the defaults", () => {

@@ -95,16 +95,33 @@ test("focus mode is not a trap: the way out and the way to the facts both surviv
   assert.equal(rule(".app.is-focus .panel"), undefined, "the panel is untouched, so the controls are one click away");
 });
 
-test("the row mode overrides the pairing, so the prose centres in the FULL column", () => {
+test("focus mode keeps the lane where it was, and only takes the companion’s track", () => {
   /*
-   * `.transcript-wrap.has-header` is a flex ROW that centres its two boxes as a PAIR. With the companion hidden it is a
-   * row with one box in it, and `justify-content: center` would centre that box in a track whose other half is empty —
-   * which looks like an oddly wide left margin rather than a centred column.
+   * The reader’s report, in one property: with the header hidden the conversation must stay at the same x. It had
+   * moved left, because the row still reserved the companion’s trailing track for an element that was `display: none`
+   * — so the pair-centring arithmetic still included a box nobody could see.
    *
-   * Falsified by dropping the override: on a 2000px window the conversation sits 170px right of centre.
+   * The rule is deliberately the same three tracks with a trailing `1fr` in place of the 340px: the lane keeps the
+   * MIDDLE track, so hiding the companion cannot move the prose by a single pixel. That is what makes this a mode
+   * around the conversation rather than a rearrangement of it.
+   *
+   * Falsified by dropping the override: the stylesheet’s wide rule still names `340px`, and the lane sits
+   * half-a-companion left of centre again — with 340px of nothing beside it.
    */
-  assert.match(rule(".app.is-focus .transcript-wrap.has-header") ?? "", /justify-content:\s*center/);
-  assert.match(rule(".app.is-focus .transcript-wrap.has-header .transcript-main") ?? "", /order:\s*0/);
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const focusRow = /\.app\.is-focus \.transcript-wrap\.has-header\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.ok(focusRow, "the mode must re-declare the tracks");
+  /*
+   * The same margin token and lane, with a `0px` where the companion was. Asserted structurally rather than by number:
+   * what must not come back is the pair-centring, and what must survive is the lane’s own width.
+   */
+  assert.match(focusRow, /var\(--reading-margin\)\s+minmax\(0,\s*var\(--reading-lane\)\)\s+0px/, "the companion’s track collapses to zero");
+  assert.match(focusRow, /--companion-width:\s*0px/, "and its width with it, so `fill` can take the whole row");
+  // And the conversation itself is still not governed by the mode. This is the file’s other half, kept adjacent so
+  // the pair reads together.
+  for (const forbidden of [".transcript-lane", ".transcript-main", ".composer", ".transcript", ".composer-input"]) {
+    assert.equal(rule(`.app.is-focus ${forbidden}`), undefined, `${forbidden} must not be governed by focus mode`);
+  }
 });
 
 test("the keys are still stated, on the field that consumed the line", () => {
