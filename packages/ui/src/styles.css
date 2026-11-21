@@ -3569,6 +3569,17 @@ select.btn { font-family: var(--sans); }
   overflow: hidden;
   pointer-events: none;
 }
+/*
+ * The label text, in its own element so it can be ellipsized.
+ *
+ * A flex container cannot clip its own text with an ellipsis: the text becomes an anonymous flex item and
+ * `text-overflow` applies to a block container. So the overlay clipped its string mid-glyph — a cut `1017` at the
+ * caret in the 340px companion, where `LABEL_MAX`'s 44ch is wider than the box. The child is the block container that
+ * can mark the cut, so a label too long for the control now ENDS in `…` instead of losing a character to the edge.
+ */
+/* `min-width: 0` is what lets the flex item shrink below its content width; without it the string keeps its full
+   width and the clip returns. */
+.picker-display-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* While the control cannot act, the overlay must look as inert as the select beneath it. A modifier
    class rather than `:has()`, which would make correctness depend on selector support. */
 .picker-display.is-disabled { opacity: 0.55; }
@@ -3588,7 +3599,32 @@ select.btn { font-family: var(--sans); }
    deliberately QUIETER than the select beside it: the select is the control used every hour, and an
    equal-weight button next to it would read as the way to change models rather than as the way to
    describe the list. */
-.picker-scope { padding: 2px 6px; font-size: var(--fs-2xs); }
+/*
+ * The catalogue affordance, quiet and compact.
+ *
+ * It carries `btn btn-quiet`, and `.btn` is declared LATER in this file at the same specificity — so it won the
+ * cascade and the "quiet" half never applied: the control drew as a bordered button the same weight as the `<select>`
+ * beside it. In the 340px companion, stretched to the full width by `align-items: stretch`, it read as a THIRD field
+ * in a block of two (the screenshot in the #265 review). `.session-control` documents the same trap and owns its
+ * chrome outright for the same reason.
+ *
+ * `width: fit-content` keeps it as wide as its words rather than as wide as the box — the stretch is what made it look
+ * like a field.
+ */
+.picker-scope {
+  /* Padding for the hover fill, pulled back so the WORD still starts at the control's left edge. */
+  padding: 2px 4px;
+  margin-left: -4px;
+  border: none;
+  background: none;
+  width: fit-content;
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  text-align: left;
+}
+/* `.btn-quiet`'s own hover, restated: the app's quiet controls darken and brighten rather than underline. */
+.picker-scope:hover { background: var(--panel-2); color: var(--text); }
+.picker-scope:focus-visible { outline: none; box-shadow: var(--focus); border-radius: var(--r-1); }
 
 /*
  * The list dialog, laid out as a column with ONE flexible region.
@@ -3896,21 +3932,33 @@ select.btn { font-family: var(--sans); }
  *
  * Stacking is the honest layout for this width: every label sits directly above the control it names, so there is no
  * column for anything to fall out of alignment with.
+ *
+ * The ROW GAP is 2px — the gap INSIDE a label-and-control pair — and a new pair starts with `--sp-2` above it. The
+ * first version used `--sp-2` for every row, so "Provider" sat as far from its value as the provider sat from "Model"
+ * and seven rows read as seven peers: the block had no grouping at all. Spacing is the only cue a stack has, so it has
+ * to carry the grouping.
  */
 .transcript-header .picker-grid {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: var(--sp-2);
+  gap: 2px;
   margin-left: 0;
 }
+/*
+ * A pair begins where a label follows a control: the model row, the note, and the thinking picker inside the model's
+ * cell. The provider's label is first in the box, so it starts nothing.
+ */
+.transcript-header .picker-grid > [data-picker-row="model"][data-picker-label],
+.transcript-header .picker-grid > [data-picker-row="note"],
+.transcript-header .picker-controls > .picker { margin-top: var(--sp-2); }
 .transcript-header .picker-controls {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: var(--sp-2);
+  gap: 2px;
 }
-/* The thinking picker is one of those rows: its own label, then its own select. */
+/* The thinking picker is a PAIR of its own inside the model's cell: its own label, its own select, its own gap. */
 .transcript-header .picker {
   display: flex;
   flex-direction: column;
@@ -4077,6 +4125,10 @@ select.btn { font-family: var(--sans); }
   .transcript-header .picker-grid { flex-direction: row; align-items: center; gap: var(--sp-2); margin-left: auto; }
   .transcript-header .picker-controls { flex-direction: row; align-items: center; gap: var(--sp-2); }
   .transcript-header .picker { flex-direction: row; align-items: center; gap: var(--sp-2); }
+  /* The pair gaps belong to the stacked box; in the row the gap alone spaces the controls. */
+  .transcript-header .picker-grid > [data-picker-row="model"][data-picker-label],
+  .transcript-header .picker-grid > [data-picker-row="note"],
+  .transcript-header .picker-controls > .picker { margin-top: 0; }
   /* Neither picker may stretch: two selects side by side have to share the line with the name. */
   .transcript-header .picker-field { flex: 0 1 auto; min-width: 0; }
   .transcript-header .picker-select { width: auto; max-width: 22ch; }

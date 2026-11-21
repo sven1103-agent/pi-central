@@ -510,6 +510,25 @@ export function App() {
    * window — a lie a keyboard reader would discover by tabbing into the rail behind it.
    */
   const [modelListOpen, setModelListOpen] = useState(false);
+  /**
+   * The control that opened the list, so closing returns focus to it.
+   *
+   * Handed over by the picker rather than captured here as `document.activeElement`: a pointer click does not focus a
+   * button in every browser, so the element that opened the surface is only known where it is rendered. This is the
+   * rule `Settings` and `ShortcutSheet` follow — a surface entered from the keyboard must be leaveable from it — and
+   * it matters more here, because the dialog now closes itself on a CHOICE: the reader lands back on the control beside
+   * the model that just changed, instead of at the top of the document.
+   */
+  const modelListTrigger = useRef<HTMLElement | null>(null);
+  const openModelList = useCallback((trigger: HTMLElement) => {
+    modelListTrigger.current = trigger;
+    setModelListOpen(true);
+  }, []);
+  const closeModelList = useCallback(() => {
+    setModelListOpen(false);
+    modelListTrigger.current?.focus();
+    modelListTrigger.current = null;
+  }, []);
 
   const filesRef = useRef(files);
   filesRef.current = files;
@@ -2014,7 +2033,7 @@ export function App() {
               }}
               onSelectModel={selectModel}
               scope={modelScope}
-              onManageModels={() => setModelListOpen(true)}
+              onManageModels={openModelList}
               thinking={{
                 levels: focused ? state.thinkingLevels[focused.id] : undefined,
                 error: focused ? state.thinkingLevelErrors[focused.id] : undefined,
@@ -2221,7 +2240,7 @@ export function App() {
           canSelect={modelControlUsable(focused)}
           onScopeChange={rememberModelScope}
           onSelect={selectModel}
-          onClose={() => setModelListOpen(false)}
+          onClose={closeModelList}
         />
       )}
 
@@ -2520,8 +2539,8 @@ function SessionView({
   onSelectModel: (provider: string, modelId: string) => void;
   /** The reader's model list (issue #265), forwarded to the header's picker. */
   scope: ModelScope;
-  /** Open the list editor. The SHELL renders it; see `ModelPicker`'s prop. */
-  onManageModels: () => void;
+  /** Open the list editor, handing over the trigger so the shell can return focus to it. See `ModelPicker`'s prop. */
+  onManageModels: (trigger: HTMLElement) => void;
   thinking: { levels: string[] | undefined; error: string | undefined };
   onRequestThinkingLevels: () => void;
   onSelectThinkingLevel: (level: string) => void;

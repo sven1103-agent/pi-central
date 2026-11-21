@@ -167,6 +167,7 @@ test("the labelled control asks the host to open the list, rather than rendering
   // block for a fixed descendant — a backdrop rendered inside the picker would cover the conversation and claim a
   // modality it does not have over the rail and the panel. So the picker only reports the intent.
   let opened = 0;
+  let trigger;
   const view = mount(
     createElement(ModelPicker, {
       session: session(),
@@ -175,11 +176,19 @@ test("the labelled control asks the host to open the list, rather than rendering
       onRequest() {},
       onSelect() {},
       scope: scoped(["openai", "gpt-5"]),
-      onManageModels: () => opened++,
+      onManageModels: (element) => {
+        opened++;
+        trigger = element;
+      },
     }),
   );
-  act(() => button(view.container, "All 4 models").click());
+  const control = button(view.container, "All 4 models");
+  act(() => control.click());
   assert.equal(opened, 1);
+  // The element is handed over so the shell can put focus back on it when the dialog closes — the rule `Settings` and
+  // `ShortcutSheet` follow. Capturing `document.activeElement` in the shell instead would depend on the browser
+  // focusing a clicked button, which Safari and Firefox do not.
+  assert.ok(trigger === control, "and the trigger is handed over, so closing can return focus to it");
   assert.equal(view.container.querySelector(".modal-backdrop"), null, "and nothing modal is rendered inside the picker");
   view.unmount();
 });
@@ -191,6 +200,7 @@ test("a model outside the list is chosen from the full catalogue, and set_model 
   // section, the click reaches `onSelect`, and the list is not touched by choosing a model.
   const selected = [];
   const scopes = [];
+  let closed = 0;
   const view = mount(
     createElement(ModelListDialog, {
       catalogue: CATALOGUE,
@@ -199,7 +209,7 @@ test("a model outside the list is chosen from the full catalogue, and set_model 
       canSelect: true,
       onScopeChange: (next) => scopes.push(next),
       onSelect: (provider, modelId) => selected.push(`${provider}/${modelId}`),
-      onClose() {},
+      onClose: () => closed++,
     }),
   );
   const row = button(view.container, "Use Claude X");
@@ -208,12 +218,41 @@ test("a model outside the list is chosen from the full catalogue, and set_model 
 
   assert.deepEqual(selected, ["anthropic/claude-x"], "choosing from the full list still reaches the session");
   assert.deepEqual(scopes, [], "and choosing a model is NOT the same act as scoping it");
+  // The change lands in the header BEHIND this dialog, so the dialog has to get out of the way — a modal that covers
+  // the result of the action it just performed reports nothing. A refusal is worse: Pi answers in the header too.
+  assert.equal(closed, 1, "and the choice dismisses the dialog, so the header shows what changed");
+  view.unmount();
+});
+
+test("a model in the reader's own list is chosen and closes the dialog", () => {
+  // The dialog renders two row types — the reader's list and the catalogue — and BOTH have to dismiss on a choice.
+  // Only the catalogue's was covered before, so a row in the reader's own list could have kept the dialog open over
+  // the header it changed.
+  const selected = [];
+  let closed = 0;
+  const view = mount(
+    createElement(ModelListDialog, {
+      catalogue: CATALOGUE,
+      scope: scoped(["openai", "gpt-5"], ["anthropic", "claude-x"]),
+      currentKey: "openai/gpt-5",
+      canSelect: true,
+      onScopeChange() {},
+      onSelect: (provider, modelId) => selected.push(`${provider}/${modelId}`),
+      onClose: () => closed++,
+    }),
+  );
+  const row = button(view.container, "Use Claude X");
+  assert.ok(row, "the scoped row is in the reader's own section");
+  act(() => row.click());
+  assert.deepEqual(selected, ["anthropic/claude-x"]);
+  assert.equal(closed, 1, "and it dismisses the dialog as well");
   view.unmount();
 });
 
 test("the star scopes a model and never changes the session's model", () => {
   const selected = [];
   const scopes = [];
+  let closed = 0;
   const view = mount(
     createElement(ModelListDialog, {
       catalogue: CATALOGUE,
@@ -222,7 +261,7 @@ test("the star scopes a model and never changes the session's model", () => {
       canSelect: true,
       onScopeChange: (next) => scopes.push(next),
       onSelect: (provider, modelId) => selected.push(`${provider}/${modelId}`),
-      onClose() {},
+      onClose: () => closed++,
     }),
   );
   // The catalogue's star, not the list's: this model is not in the reader's list yet.
@@ -236,6 +275,7 @@ test("the star scopes a model and never changes the session's model", () => {
     ["openai/gpt-5", "anthropic/claude-x"],
     "and it appends to the end of the list",
   );
+  assert.equal(closed, 0, "and starring leaves the dialog open: the list is the thing being edited");
   view.unmount();
 });
 
@@ -478,6 +518,19 @@ test("the shell stands the keyboard down while the list editor is open", () => {
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
   assert.match(app, /modalOpen=\{[^}]*modelListOpen/, "the rail's own binding must stand down");
   assert.match(app, /modalOpen: pendingDelete !== undefined[^,]*modelListOpen/, "and so must the shortcut ladder");
+});
+
+test("the shell puts focus back on the control that opened the list", () => {
+  /*
+   * The dialog closes ITSELF on a choice, so something has to own the landing place: without a restore the reader is
+   * dropped on `<body>` and the next Tab starts at the top of the document — the defect `Settings` and `ShortcutSheet`
+   * both fixed with a trigger ref. The dialog cannot reach the control, so the picker hands the element over with the
+   * open call and the shell focuses it on close. Revert either half and the reader loses their place.
+   */
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(app, /onManageModels=\{openModelList\}/, "the picker's open call reaches the shell");
+  assert.match(app, /modelListTrigger\.current\?\.focus\(\)/, "and closing puts focus back on the trigger");
+  assert.match(app, /onClose=\{closeModelList\}/, "on the same path the dialog closes through");
 });
 
 test("Escape closes the list, so a surface opened from the keyboard is closable from it", () => {

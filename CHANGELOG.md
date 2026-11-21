@@ -776,8 +776,5 @@ The spike that answered whether this was worth building.
 [#253]: https://github.com/sven1103-agent/pi-central/issues/253
 [#254]: https://github.com/sven1103-agent/pi-central/issues/254
 [#255]: https://github.com/sven1103-agent/pi-central/issues/255
-<<<<<<< HEAD
 [#263]: https://github.com/sven1103-agent/pi-central/issues/263
-=======
 [#265]: https://github.com/sven1103-agent/pi-central/issues/265
->>>>>>> 5c8513a (feat(ui): the model picker offers the reader's models, not all 406 (#265))

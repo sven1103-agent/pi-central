@@ -94,8 +94,12 @@ export interface ModelPickerProps {
    * descendants, so a `.modal-backdrop` rendered here would cover the conversation and claim an `aria-modal` modality it
    * does not have over the rail or the panel. The shell renders the dialog instead, the same way it renders `Settings`
    * and `ShortcutSheet`.
+   *
+   * The TRIGGER is handed over with the call, because the shell returns focus to it when the dialog closes — the rule
+   * `Settings` and `ShortcutSheet` follow. Capturing `document.activeElement` in the shell would be wrong: a pointer
+   * click does not focus a button in every browser, so the element that opened the surface is only known here.
    */
-  onManageModels?: (() => void) | undefined;
+  onManageModels?: ((trigger: HTMLElement) => void) | undefined;
   /**
    * The thinking-level control, rendered on the MODEL's row (issue #163).
    *
@@ -287,7 +291,10 @@ export function ModelPicker({
             * full value for a pointer, so no one has to decode an elision to find out which model is in use.
             */}
           <span className={`picker-display mono${usable ? "" : " is-disabled"}`} aria-hidden="true" title={fullLabel}>
-            {modelLabel}
+            {/* In its own element so the label can be ELLIPSIZED where the control is narrower than the cap: a flex
+                container cannot clip its own text with an ellipsis, so a long label in the 340px companion ended in a
+                cut glyph. See `.picker-display-text`. */}
+            <span className="picker-display-text">{modelLabel}</span>
           </span>
           <select
             id={`model-${session.id}`}
@@ -399,7 +406,7 @@ export function ModelPicker({
             className="btn btn-quiet picker-scope"
             aria-haspopup="dialog"
             title="Choose the models the picker offers. Every model Pi reports stays available."
-            onClick={onManageModels}
+            onClick={(event) => onManageModels(event.currentTarget)}
           >
             {scoped ? `All ${models.length} models` : "Choose my models"}
           </button>

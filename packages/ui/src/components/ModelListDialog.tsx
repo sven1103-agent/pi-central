@@ -37,6 +37,17 @@
  * Clicking a name sends `set_model`, exactly as the picker's own list does — the header then shows what Pi reports
  * back. Clicking the star only touches the stored list: it never changes the session's model, which is the requirement
  * that makes this surface safe to open while a run is in progress.
+ *
+ * ## A choice CLOSES the dialog, a star does not
+ *
+ * The choice changes the session, and the session's header is behind the backdrop. Reported from use: the model changed
+ * and nothing appeared to happen, because the only visible evidence was a row quietly marking itself "in use" while the
+ * header — the one place the change is legible — was covered. A refusal has the same problem: Pi reports it into the
+ * header, so a dialog left open would hide a failed selection and make it look like a successful one.
+ *
+ * So a choice closes the dialog and lets the header speak. That is what a native `<select>` does too, so the two
+ * surfaces that change a model end the same way. Starring stays open: it edits the reader's LIST, several models are
+ * usually marked in a row, and closing on each press would make the surface unusable for the job it is for.
  */
 import type { ModelOption } from "@pi-central/protocol";
 import { useEffect, useId, useRef, useState } from "react";
@@ -155,6 +166,18 @@ export function ModelListDialog({
     onScopeChange(toggleScope(scope, ref));
   };
 
+  /**
+   * Choose a model for the session, and close.
+   *
+   * See the header: the change lands in the header behind this dialog, so a dialog that stayed open would hide the
+   * result of the action it just performed. Closing IS the feedback — the reader returns to the header, where the model
+   * and any refusal Pi reports are both visible.
+   */
+  const choose = (ref: ModelRef): void => {
+    onSelect(ref.provider, ref.id);
+    closeOf.current();
+  };
+
   // Focus follows the pressed star into whichever section it lands in; see `pressed`.
   useEffect(() => {
     const key = pressed.current;
@@ -255,7 +278,7 @@ export function ModelListDialog({
                             type="button"
                             className="model-pick"
                             disabled={!canSelect}
-                            onClick={() => onSelect(entry.ref.provider, entry.ref.id)}
+                            onClick={() => choose(entry.ref)}
                             title={`Use ${label(entry.model)}`}
                           >
                             <span className="model-name">{label(entry.model)}</span>
@@ -300,7 +323,7 @@ export function ModelListDialog({
                           type="button"
                           className="model-pick"
                           disabled={!canSelect}
-                          onClick={() => onSelect(model.provider, model.id)}
+                          onClick={() => choose({ provider: model.provider, id: model.id })}
                           title={`Use ${label(model)}`}
                         >
                           <span className="model-name">{label(model)}</span>
