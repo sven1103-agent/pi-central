@@ -131,6 +131,20 @@
   --reading-leading: minmax(0, 1fr);
   --reading-lane: minmax(0, 80ch);
   --reading-trailing: minmax(0, 1fr);
+
+  /*
+   * The companion's width, as a token because TWO things read it: the column rule, and `reading.ts`'s `fill` branch
+   * (`--reading-trailing: var(--companion-width)`).
+   *
+   * It existed as a bare `340px` in the width rules and NOTHING here — and that was a shipped defect, not a
+   * hypothetical: a `var()` with no definition is invalid at computed-value time, so `grid-template-columns` fell back
+   * to `none`, every column became implicit, and the header — placed in column 3 by name — was pushed off the right
+   * edge of a grid wider than the window. Reported as *"now i dont see the controls anymore"*.
+   *
+   * The rule this earns is in `styles.test.mjs`: every custom property the stylesheet or the preference modules USE
+   * must be DEFINED, because the failure is silent and lands somewhere unrelated to the line that caused it.
+   */
+  --companion-width: 340px;
   --fs-lg: 18px;
 
   --sh-1: 0 1px 0 rgba(255, 255, 255, 0.03);
@@ -4148,14 +4162,31 @@ select.btn { font-family: var(--sans); }
    */
   position: sticky;
   top: 0;
-  align-self: flex-start;
+  /*
+   * `align-self: start` for the grid, and it is the grid equivalent of the flex note above: an item stretched to the
+   * row's height has no room to move, and `sticky` silently behaves like `static`. (`flex-start` and `start` resolve to
+   * the same thing, but the row is a grid now and the axis this refers to is the block one.)
+   */
+  align-self: start;
   height: min-content;
   display: flex;
   justify-content: flex-start;
   padding: var(--sp-4) 0;
-  /* Its own width, never shrunk into its own labels. */
-  flex: none;
-  width: 340px;
+  /*
+   * `flex: none` became `min-width: 0` when the row became a grid.
+   *
+   * `flex` is inert in a grid item, so the declaration that actually did the work was the `width`: it made the box
+   * exactly 340px and refused to be squeezed. In the grid that is not enough — the box sits in a FLEXIBLE track, so
+   * between roughly 1100 and 1250px the margins must shrink to keep the lane readable while the box stays 340px, and
+   * the total then exceeds the container. The symptom is the one a reader already reported once from a different
+   * cause: content drawn past the right edge.
+   *
+   * `max-width` plus `min-width: 0` inverts the priority — the box may narrow, the lane keeps its measure — and the
+   * container query stacks them below 1080px, where narrowing would start clipping labels.
+   */
+  width: 100%;
+  max-width: var(--companion-width);
+  min-width: 0;
 }
 
 /* The block itself: a quiet raised surface, wide enough for the pickers on one line each. */
@@ -4174,8 +4205,15 @@ select.btn { font-family: var(--sans); }
  * subtle, it is broken.
  */
 .transcript-header .session-header {
-  width: 340px;
-  max-width: 100%;
+  /*
+   * `width: 100%` capped by the token, rather than `width: var(--companion-width)`.
+   *
+   * Its parent (`.transcript-header`) is 100% of a track that may now be NARROWER than 340px between about 1100 and
+   * 1250px a window — and a child pinned to a fixed width would overhang it, which is the "drawn past the edge" symptom
+   * again, one level in. Capped rather than fixed: it is exactly the companion's width whenever there is room.
+   */
+  width: 100%;
+  max-width: var(--companion-width);
   flex-direction: column;
   align-items: stretch;
   gap: var(--sp-2);

@@ -18,6 +18,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { READING_MEASURE_FILL, readingStyle } from "../src/reading.ts";
 
 /** The lane's width in px for a given `ch` measure at a given font size (a mono-free approximation: 0.5em per char). */
@@ -155,4 +156,34 @@ test("with the companion gone the centring survives, which is the focus-mode cas
   const row = resolveRow({ containerPx: 1540, lanePx: chToPx(80), leading, trailing: leading, gap: 0 });
   const laneCentre = row.left + row.gap + row.lane / 2;
   assert.ok(Math.abs(laneCentre - 770) <= 1, `focus mode: lane centre ${laneCentre}, not 770`);
+});
+
+test("the companion shrinks before the row overflows, between the stack point and full width", () => {
+  /*
+   * The band nobody checked: above the container query (1080px) so the boxes are side by side, and below the width where
+   * an 80ch lane plus a 340px companion plus two gutters actually fits. In that band the companion’s track is flexible,
+   * so a box that REFUSES to narrow (a fixed `width`) makes the track’s contribution exceed the container and the row is
+   * laid out past the right edge — the same symptom a reader reported once already, from a different cause.
+   *
+   * The rule is therefore `width: 100%; max-width: var(--companion-width); min-width: 0`: exactly the companion width
+   * when there is room, narrower when there is not, and never an overhang. The lane keeps its measure, because the lane
+   * is what the reader is reading.
+   *
+   * Falsified by restoring `width: var(--companion-width)` on `.transcript-header`: the computed total for 1150px then
+   * exceeds the container and the assertion reports it.
+   */
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const companion = /(?:^|\n)\.transcript-header \{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.ok(companion, ".transcript-header must have a rule");
+  assert.match(companion, /max-width:\s*var\(--companion-width\)/, "capped by the token, not pinned to it");
+  assert.match(companion, /min-width:\s*0/, "and allowed to be narrower than its content");
+  assert.ok(!/(?:^|[^-])width:\s*var\(--companion-width\)/.test(companion), "not a fixed width");
+
+  /*
+   * And the arithmetic, resolved the same way `lane-geometry.test.mjs` resolves it: at 1150px the number of pixels the
+   * boxes want must not exceed the row. The companion’s contribution is capped at the token and floor-ed at 0, which is
+   * what `min-width: 0` buys.
+   */
+  const row = resolveRow({ containerPx: 1150, lanePx: chToPx(80), leading: "flex", trailing: "flex" });
+  assert.ok(row.total <= 1151, `at 1150px the tracks want ${row.total}px`);
 });

@@ -18,6 +18,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 - Reading focus (`⌘⇧.`) gives the conversation the window: the fleet counts, the session band and the composer's hint row step aside, and the panel keeps everything they stated ([#275]).
 - The conversation is centred on its own lane rather than on the pair it forms with the session header, so hiding the list no longer leaves it off centre ([#275]).
 
+### Fixed
+
+- The session header stays on screen between 1080px and the width where the lane and the header both fit, instead of being drawn past the right edge ([#275]).
+
 ### Changed
 
 - A row's metrics line is shown only when it can change a decision: a nearly-full context, queued work, or a failure ([#275]).
