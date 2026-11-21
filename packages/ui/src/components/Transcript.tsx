@@ -21,6 +21,7 @@
  * 2. **`aria-busy` while streaming**, so assistive tech does not read a half-written subtree.
  */
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { SessionPeek } from "./SessionPeek.tsx";
 import type { Transcript as TranscriptModel } from "../transcript.ts";
 import type { TranscriptMessage } from "../transcript.ts";
 import { imageKey } from "../transcript.ts";
@@ -95,6 +96,13 @@ export function TranscriptView({
   onToggleActivity = () => {},
   onToggleAutoFollow,
   header,
+  details,
+  focusMode = false,
+  peekPinned = false,
+  onPeekPinned,
+  peekStateWord,
+  peekContextLabel,
+  peekNearFull = false,
   footer,
   historyError,
 }: {
@@ -207,6 +215,40 @@ export function TranscriptView({
    * window: the same window can hold a wide transcript or a narrow one, depending on the panel.
    */
   header?: React.ReactNode;
+  /**
+   * The session's details, as CONTENT — the frame is chosen by \`focusMode\`.
+   *
+   * One element, two frames (issue #275, third slice): the wide layout puts it in a column, reading focus puts it behind
+   * a peek tab. Passing the content rather than the framed thing is what stops a fact from appearing in one and not the
+   * other — there is no second rendering to keep in step.
+   */
+  details?: React.ReactNode;
+  /** Which frame to use: a column, or the peek rail. The shell owns the preference; this owns placement. */
+  focusMode?: boolean | undefined;
+  /** Is the peek rail pinned open? */
+  peekPinned?: boolean | undefined;
+  /** The session's state, in the app's own words (`stateLabel`), for the peek tab. */
+  peekStateWord?: string | undefined;
+  /** `ctx 37%` for the peek tab — the one number that changes a decision. */
+  peekContextLabel?: string | undefined;
+  /** Is that measurement near the threshold? The tab's one colour change. */
+  peekNearFull?: boolean | undefined;
+  /** Pin or unpin the peek rail. */
+  onPeekPinned?: ((pinned: boolean) => void) | undefined;
+  /**
+   * The session's details as a PEEK RAIL instead of a column (issue #275, third slice).
+   *
+   * Reading focus gives the conversation the window, so the details cannot keep a 340px track beside it — reported as
+   * *"we see the current transactions detail panel, when the conversation has the window. First, i dont know what this
+   * means. Maybe for the reader mode, we can show the details when hovering a minimal version of the detail panel, and
+   * have an option to pin it open manually"*.
+   *
+   * A SEPARATE SLOT from `header` rather than a flag inside it, because the two placements are structurally different:
+   * `header` occupies a track, this one overlays the conversation's trailing edge and rests as a tab. The transcript
+   * decides which — it is the element that knows how much room it has — and the shell decides which one to pass, because
+   * the shell owns the preference.
+   */
+  peek?: React.ReactNode;
   /**
    * Why the conversation could not be read, if it could not be.
    *
@@ -557,8 +599,36 @@ export function TranscriptView({
       `transcript-wrap` is the box the queries style. Two elements, one job each.
     */
     <div className="transcript-shell">
-    <div className={`transcript-wrap${header !== undefined ? " has-header" : ""}`}>
-      {header !== undefined && <div className="transcript-header">{header}</div>}
+    <div
+      className={`transcript-wrap${details !== undefined && !focusMode ? " has-header" : ""}${details !== undefined && focusMode ? " has-peek" : ""}`}
+    >
+      {/*
+        ONE content element, ONE frame (issue #275, third slice).
+        
+        The wide layout puts the details in a COLUMN beside the prose. Reading focus has no column to give — the mode
+        exists to give that width back — so the same element goes behind a PEEK tab as an overlay. The condition is
+        `focusMode && details`, and the transcript decides it because placement within its own width is its business
+        while the preference is the shell's.
+        
+        The peek is a child of the wrap and NOT a grid item: it must not occupy a track, or the prose's position would
+        change when the panel opens. `.transcript-wrap` is already `position: relative`, so the overlay resolves against
+        it.
+      */}
+      {details !== undefined && !focusMode && <div className="transcript-header">{details}</div>}
+      {details !== undefined && focusMode && (
+        <div className="transcript-peek">
+          <SessionPeek
+            stateWord={peekStateWord ?? ""}
+            contextLabel={peekContextLabel ?? ""}
+            nearFull={peekNearFull}
+            label={`Session details for ${sessionLabel}`}
+            pinned={peekPinned}
+            onPinned={(next) => onPeekPinned?.(next)}
+          >
+            {details}
+          </SessionPeek>
+        </div>
+      )}
       {/*
         The reading column: scroller + composer, as ONE box.
         

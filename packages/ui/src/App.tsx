@@ -192,7 +192,7 @@ import { ThinkingPicker } from "./components/ThinkingPicker.tsx";
 import { SessionHeader } from "./components/SessionHeader.tsx";
 import { ModelListDialog } from "./components/ModelListDialog.tsx";
 import { HistoryView } from "./components/History.tsx";
-import { displayName, formatContext, formatCost, formatTokens, headerLocation, nameLabel } from "./format.ts";
+import { displayName, formatContext, formatCost, formatTokens, headerLocation, isNearFull, nameLabel } from "./format.ts";
 import { stateLabel, type UiState } from "./store.ts";
 import {
   ROSTER_PREFS_KEY,
@@ -2296,6 +2296,17 @@ export function App() {
               autoFollow={autoFollow}
               onToggleAutoFollow={() => setAutoFollow((was) => !was)}
               scrollMemory={scrollMemory}
+              /*
+                Reading focus and its peek rail (issue #275, third slice).
+
+                Passed from HERE because the shell owns the preference and `SessionView` is module scope. The transcript
+                then decides placement — it is the element that knows how much room it has.
+              */
+              focusMode={railPrefs.focus}
+              peekPinned={railPrefs.peekPinned}
+              onPeekPinned={(pinned) =>
+                setRailPrefsAndPersist((current) => ({ ...current, peekPinned: pinned }))
+              }
               models={focused ? state.models[focused.id] : undefined}
               modelError={focused ? state.modelErrors[focused.id] : undefined}
               onRename={renameFocused}
@@ -2912,6 +2923,9 @@ function SessionView({
   state,
   draft,
   onDraftChange,
+  focusMode,
+  peekPinned,
+  onPeekPinned,
 }: {
   session: LiveSession | undefined;
   /** Ask the orchestrator for an image a turn names. See `previewFile` in `App`. */
@@ -2974,6 +2988,16 @@ function SessionView({
   state: UiState;
   draft: string;
   onDraftChange: (draft: string) => void;
+  /**
+   * Reading focus, and its peek rail (issue #275, third slice).
+   *
+   * Passed IN rather than read from a preference here: `SessionView` is defined at module scope and has no access to the
+   * shell's state. Three facts and one callback is the whole of what the frame needs — the preference stays the shell's,
+   * the placement stays the transcript's.
+   */
+  focusMode?: boolean;
+  peekPinned?: boolean;
+  onPeekPinned?: (pinned: boolean) => void;
 }) {
   // The model request state lives inside ModelPicker, which is remounted per session by the `key`
   // on SessionView, so focusing another session starts from a clean "not asked yet".
@@ -3037,8 +3061,14 @@ function SessionView({
           the top RIGHT of the reading area as a companion, and when there is no room for that it flips to a compact
           row above the scroller. The placement is the transcript's decision because the transcript knows how much
           room it has (`container-type: inline-size`).
+
+          ONE element, TWO frames (issue #275, third slice). In reading focus the details become a PEEK RAIL — a labelled
+          tab on the trailing edge that reveals this same box on hover or when pinned — because a 340px column beside the
+          conversation is exactly the width the mode existed to give back. The content is not re-implemented: \`details\` is
+          the identical element in both branches, so a fact added to the session's identity cannot appear in one and not
+          the other.
         */
-        header={
+        details={
           <SessionHeader
             session={session}
             home={home}
@@ -3058,6 +3088,16 @@ function SessionView({
             warnings={session.warnings}
           />
         }
+        /*
+          The frame is the shell's choice because the shell owns the preference; the transcript decides PLACEMENT within
+          its own width. `peek` is passed only in focus mode — off, the wide layout's column is the right frame.
+        */
+        focusMode={focusMode}
+        peekPinned={peekPinned}
+        onPeekPinned={onPeekPinned}
+        peekStateWord={stateLabel(session)}
+        peekContextLabel={formatContext(session.contextPercent)}
+        peekNearFull={isNearFull(session.contextPercent)}
         footer={
           pendingDialogCount({ ...initialState(), live: [session] }) > 0 ? undefined : (
             <Composer

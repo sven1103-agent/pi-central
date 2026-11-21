@@ -105,6 +105,17 @@ export interface RailPrefs {
    */
   focus: boolean;
   /**
+   * Is the session's details panel PINNED open in reading focus? (issue #275, third slice)
+   *
+   * A third state alongside "hovered" and "resting", and it is what makes the peek rail usable rather than merely tidy:
+   * a reader comparing a model against a transcript, or watching context fill, needs the details there without holding
+   * the pointer still. Escape unpins. It is remembered, like every other placement in this module, because a reader who
+   * pinned it once meant it.
+   *
+   * Ignored when `focus` is off — the wide layout has a real column and no tab.
+   */
+  peekPinned: boolean;
+  /**
    * Which foldable sections are folded.
    *
    * Kept while the rail is hidden, exactly as `PanelPrefs` keeps its mode and width while collapsed: a control
@@ -122,6 +133,7 @@ export function defaultRailPrefs(): RailPrefs {
     density: "full",
     hidden: false,
     focus: false,
+    peekPinned: false,
     collapsed: { idle: false, stopped: false },
   };
 }
@@ -265,6 +277,7 @@ export function parseRailPrefs(raw: string | null, rowsOnDisk = 0): RailPrefs {
     // `... === true`, not a truthiness test: `"false"` is a reachable stored value and it must not mean hidden.
     hidden: record["hidden"] === true,
     focus: record["focus"] === true,
+    peekPinned: record["peekPinned"] === true,
     collapsed: {
       idle: folded["idle"] === true,
       stopped: folded["stopped"] === true,

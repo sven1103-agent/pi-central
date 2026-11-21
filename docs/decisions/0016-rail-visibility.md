@@ -82,6 +82,37 @@ Four boundaries define the mode, and each is a test in `focus-mode.test.mjs` rat
 4. **Stated once, not dropped.** The keys the hint row carried move to the field's `title`, in the same words. Trading a
    line of chrome for a piece of discoverability is not a trade worth making.
 
+## Amendment 2 — the details peek, and why the conversation's width is not negotiable
+
+The screenshot that followed the first amendment showed the session's details still holding a 340px column beside the
+conversation, in the one mode whose purpose is to give that width back — and the report was two-fold: *"we see the current
+transactions detail panel, when the conversation has the window. First, i dont know what this means. Maybe for the reader
+mode, we can show the details when hovering a minimal version of the detail panel, and have an option to pin it open
+manually"*.
+
+So reading focus frames the SAME details content differently:
+
+1. **Resting, it is a tab.** ~28px on the conversation's trailing edge, carrying the word "Details", the session's state
+   and its context percentage. The proportions matter: what the report needed was not a smaller panel but a **name**, and
+   "idle · ctx 37%" is both the name and the one number that changes a decision. A generic mark would have left the reader
+   exactly where they were.
+2. **Open, it is an OVERLAY.** Hover, focus, or pin reveals it over the trailing edge. An overlay and not a track,
+   because a track that widened on hover would reflow every line of prose under the cursor — the failure `roster.ts`
+   already records for row order, one level up.
+3. **Pinning is a remembered state** (`peekPinned`), and Escape unpins. A reader comparing a model against a transcript
+   needs the details present without holding the pointer still, and a hover-only surface is unusable by keyboard and
+   touch — so the tab is a `<button>` with `aria-expanded`, it opens on focus, and the same key that dismisses a dialog
+   dismisses it.
+
+**One content element, two frames.** The transcript receives the details as *content* and chooses the frame from
+`focusMode`; the shell owns the preference. That is deliberate: the alternative — two renderings — is how a fact arrives
+in the column and not the tab. `session-peek.test.mjs` asserts that the identical node is rendered in exactly two
+branches and never both.
+
+**The hazard an overlay introduces, stated because it is the one thing an overlay must get right:** a closed 340px panel
+sits over the prose, and a box that swallows clicks there reads as "the app is broken", not as a layout bug. The rail and
+the panel are `pointer-events: none` until the tab arms them, and `inert` in the markup agrees with the CSS.
+
 **Deliberately not in this amendment:** frame-less windows, hiding the product mark, a separate composer layout, or moving
 the model pickers INTO the composer. Each is defensible and none is required by "the conversation has the window" — and a
 mode that ships small enough to press twice is worth more than one that argues about its own edges.

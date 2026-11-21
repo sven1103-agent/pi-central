@@ -792,6 +792,140 @@ button { font: inherit; color: inherit; }
 }
 .app.is-focus .composer-chrome:empty { display: none; }
 
+/* ------------------------------------------------------------------ the session's details, peeked */
+
+/*
+ * THE PEEK RAIL (issue #275, third slice).
+ *
+ * Reading focus gives the conversation the window, so the session's details cannot keep a 340px track beside it — that
+ * column was the one piece of chrome the mode had not removed, and it was holding exactly the width the mode existed to
+ * give back. But the details cannot simply go: they are the only place the model, thinking level, context meter, cost
+ * and the session's controls live when the panel is closed.
+ *
+ * So the rail rests as a TAB and opens OVER the conversation:
+ *
+ *   - the tab is ~28px on the trailing edge, and it states the session's state and context pressure, which is the answer
+ *     to "i dont know what this means";
+ *   - the panel is `position: absolute` against `.transcript-wrap` (already `position: relative`), so opening it changes
+ *     what is ON TOP of the prose and never where the prose is. A track that widened on hover would move every line of
+ *     text under the reader's cursor — the failure `roster.ts` records for row order.
+ *
+ * The rail itself is `pointer-events: none` while closed and re-arms on the TAB, so a 340px invisible box does not
+ * swallow clicks aimed at the conversation behind it. That is the one hazard an overlay introduces and the one thing an
+ * overlay must get right.
+ */
+.transcript-peek {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* The conversation's trailing edge, inside the wrap's own padding. */
+  right: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  /* Nothing here may eat a click until the tab arms it. */
+  pointer-events: none;
+}
+
+.session-peek {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  height: 100%;
+  /* Re-armed for the rail's own children only. */
+  pointer-events: none;
+}
+
+/*
+ * THE TAB: the resting state, and the only part of this that is allowed to take a click while closed.
+ *
+ * Vertical writing, because a 28px column with three stacked words is unreadable and a horizontal strip would cost the
+ * conversation a row of height. `writing-mode` is the standard way to do that, and the label order follows the block
+ * direction, so it reads top-to-bottom as it appears.
+ */
+.session-peek-tab {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  /*
+   * Vertical, and the padding is expressed in the BLOCK direction so the tab's thickness is one number: `--sp-2` on each
+   * side gives ~28px with the glyphs' own line height, which is the cost the report asked for.
+   */
+  writing-mode: vertical-rl;
+  padding: var(--sp-2) 4px;
+  margin-top: var(--sp-4);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-right: none;
+  border-radius: var(--r-2) 0 0 var(--r-2);
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  /* Its own edge against the page, so it reads as a tab rather than as a floating speck. */
+  box-shadow: var(--sh-1);
+}
+.session-peek-tab:hover { color: var(--text); border-color: var(--line-strong); background: var(--panel-2); }
+.session-peek-tab:focus-visible { outline: none; box-shadow: var(--focus); }
+/* Open or pinned, the tab is the SELECTED state — the same two-channel convention the rail uses. */
+.session-peek.is-open .session-peek-tab {
+  color: var(--accent-text);
+  background: var(--accent-tint);
+  border-color: var(--accent);
+}
+.session-peek-word { font-weight: 600; }
+/*
+ * The context reading, and the ONLY colour change in the tab.
+ *
+ * Amber past the threshold rather than a bar: there is no room for a gauge in 28px, and this is the same
+ * `--warn-text`/threshold pair `formatContext` and the header meter use — so the word `full` and the colour turn
+ * together, and neither is the only carrier.
+ */
+.session-peek-ctx.is-full { color: var(--warn-text); }
+
+/*
+ * THE PANEL: an overlay on the conversation's trailing edge.
+ *
+ * `right: 100%` — beside the tab, growing LEFTWARD over the prose. Leftward rather than rightward because the tab sits
+ * on the right edge and there is no room to the right of it; the overlay deliberately covers the end of the lines it
+ * opens over, which is what "over" means and why the tab is the thing that closes it.
+ *
+ * `max-width: 100%` so a narrow transcript cannot be overhung: the panel may not be wider than the column it covers.
+ * And `pointer-events: auto` only while open — a closed panel is `inert` in the markup as well, so the two agree.
+ */
+.session-peek-panel {
+  position: absolute;
+  top: 0;
+  right: 100%;
+  height: 100%;
+  width: var(--companion-width);
+  max-width: 100%;
+  overflow-y: auto;
+  background: var(--panel);
+  border-left: 1px solid var(--line-strong);
+  box-shadow: var(--sh-2);
+  padding: var(--sp-4);
+  pointer-events: none;
+  /*
+   * Hidden with visibility rather than display, so the box keeps its layout and the overlay does not jump a frame when it
+   * opens. `visibility: hidden` also removes it from the tab order, which is the behaviour `inert` requests in markup.
+   */
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+.session-peek.is-open .session-peek-panel {
+  pointer-events: auto;
+  visibility: visible;
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-peek-panel { transition: none; }
+}
+
 /* ------------------------------------------------------------------ rail */
 
 .rail {

@@ -684,8 +684,8 @@ function RailPanel({
         <span />
       </label>
       <p className="settings-note">
-        Folds the window's own chrome — not the conversation. The session's identity and controls move into the panel,
-        so open it from the right bar when you need them.
+        Folds the window's own chrome — not the conversation. The session's details become a tab on the conversation's
+        edge: hover it to peek, click to pin, Escape to unpin.
       </p>
 
       <label className="reading-row">

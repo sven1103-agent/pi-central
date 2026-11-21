@@ -26,6 +26,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Changed
 
+- In reading focus the session's details rest as a named tab on the conversation's edge, peek on hover or focus, and pin on click ([#275]).
+
+### Changed
+
 - A row's metrics line is shown only when it can change a decision: a nearly-full context, queued work, or a failure ([#275]).
 - The session list can be hidden above the breakpoint, and the left bar's `☰` both hides it and brings it back ([#275]).
 - A running session can re-read its extensions, skills, prompt templates, MCP servers and context files without being stopped, and asks before abandoning a run in flight ([#274]).
