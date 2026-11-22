@@ -18,7 +18,7 @@
  */
 import { createInterface } from "node:readline";
 import { join } from "node:path";
-import { CdpPage } from "./sidecar-cdp.ts";
+import { CdpPage } from "./sidecar-cdp-pipe.ts";
 import { decideTarget, parseVerb, PROBE_CHECKS, VERB_NAMES, type Refusal } from "./sidecar-control.ts";
 import { launchBrowser } from "./sidecar-browser.ts";
 
@@ -195,13 +195,15 @@ export async function serve(config: SidecarConfig): Promise<void> {
   const page = async (): Promise<CdpPage> => {
     if (session !== undefined) return session;
     if (browser === undefined) {
-      browser = await launchBrowser({
+      browser = launchBrowser({
         executable: config.executable,
         profileDir: config.profileDir,
         onLog: (line) => process.stderr.write(`[browser] ${line}\n`),
       });
     }
-    session = await CdpPage.open({ url: browser.cdpUrl });
+    // The child's fd 3/4, not a URL: the control channel is a pipe, so there is no port for the sidecar's own
+    // egress rule to deny (measured — that is exactly how the WebSocket transport failed under the policy).
+    session = await CdpPage.open({ child: browser.child });
     return session;
   };
 

@@ -126,12 +126,18 @@ test("no source file uses shell interpolation for a spawn (fixed binaries only)"
     const name = relative(SRC, file);
     assert.ok(!text.includes("shell: true"), `${name} uses shell: true`);
 
-    // Match the *child_process* calls, not `RegExp.prototype.exec`. A bare substring check
-    // for "exec(" also fires on `/pattern/.exec(line)`, which is a regex match with no shell
-    // and no subprocess, so it would be a false positive that trains people to ignore this
-    // test. Scan the import binding plus call sites instead.
+    // Match the *child_process* calls, not `RegExp.prototype.exec`. A bare substring check for "exec("
+    // also fires on `/pattern/.exec(line)`, which is a regex match with no shell and no subprocess, so it
+    // would be a false positive that trains people to ignore this test.
+    //
+    // That paragraph was here and the check still had the bug it described: `\bexec(...)` matches
+    // `/rgba?(...)/.exec(c)`, and it fired on the contrast measurement the moment one was written in a file
+    // that also imports child_process. The call must be a STATEMENT-level import binding — i.e. preceded by
+    // nothing that makes it a method call — so a leading `.` excludes `.exec(` and `x.exec(`.
+    const importsChildProcess = /from "node:child_process"/.test(text);
+    const shellCall = /(?<![.\w])exec(File|FileSync|Sync)?\s*\(/.test(text);
     assert.ok(
-      !/from "node:child_process"/.test(text) || !/\bexec(File|Sync)?\s*\(/.test(text),
+      !(importsChildProcess && shellCall),
       `${name} uses a child_process exec call; spawn a fixed binary with spawn() instead`,
     );
   }

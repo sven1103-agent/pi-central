@@ -103,6 +103,12 @@ child.once("exit", () => clearTimeout(deadline));
 
 let nextId = 1;
 const pending = new Map();
+
+const results = [];
+const record = (name, pass, detail) => {
+  results.push(pass);
+  console.log((pass ? "PASS" : "FAIL") + "  " + name + (detail ? "  -- " + detail : ""));
+};
 let buffer = "";
 child.stdout.on("data", (chunk) => {
   buffer += String(chunk);
@@ -112,7 +118,16 @@ child.stdout.on("data", (chunk) => {
     buffer = buffer.slice(index + 1);
     if (line === "") continue;
     let message;
-    try { message = JSON.parse(line); } catch { continue; }
+    try {
+      message = JSON.parse(line);
+    } catch {
+      // A line that is not JSON on the PROTOCOL stream is a defect, not noise: the sidecar writes replies there
+      // and its diagnostics go to stderr. The first version of this client did `catch { continue; }` and thereby
+      // discarded the one piece of evidence for a real corruption, leaving a later call to fail with something
+      // unrelated. Reported with the bytes visible instead.
+      record("every stdout line is JSON-RPC", false, JSON.stringify(line.slice(0, 120)));
+      continue;
+    }
     const waiter = pending.get(message.id);
     if (waiter === undefined) continue;
     pending.delete(message.id);
@@ -127,11 +142,7 @@ const call = (method, params = {}) =>
     child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
   });
 
-const results = [];
-const record = (name, pass, detail) => {
-  results.push(pass);
-  console.log((pass ? "PASS" : "FAIL") + "  " + name + (detail ? "  -- " + detail : ""));
-};
+// Declared before the stdout handler, which reports a protocol defect with `record`.
 
 try {
   const init = await call("initialize", { protocolVersion: "2025-06-18", capabilities: {} });
@@ -143,11 +154,24 @@ try {
 
   console.log("\n  (the next call launches a sandboxed browser)");
   const probe = await call("tools/call", { name: "probe", arguments: { url: ORIGIN, checks: ["overflow"] } });
-  const verdict = JSON.parse(probe?.content?.[0]?.text ?? "{}");
+  // A FAILED verb returns `isError: true` with a human sentence, NOT a verdict. Parsing it blindly made
+  // JSON.parse throw with a message quoting the first bytes ("sidecar er..."), and the harness reported that as
+  // a protocol corruption -- hiding the real cause, which was in the sidecar's stderr. So: read the error
+  // first, and only parse when the sidecar says it succeeded.
+  const probeText = probe?.content?.[0]?.text ?? "";
+  if (probe?.isError === true) {
+    record("probe works under the policy", false, probeText.slice(0, 200));
+    throw new Error("probe failed; see the line above and the stderr tail");
+  }
+  const verdict = JSON.parse(probeText);
   record("probe works under the policy", (verdict.problems ?? []).some((p2) => p2.selector === "#wide"), JSON.stringify(verdict.problems ?? verdict));
 
   const capture = await call("tools/call", { name: "capture", arguments: { url: ORIGIN } });
-  const dataUrl = capture?.content?.[0]?.text ?? "";
+  const dataUrl = capture?.isError === true ? "" : (capture?.content?.[0]?.text ?? "");
+  if (capture?.isError === true) {
+    record("capture returns a PNG under the policy", false, String(capture?.content?.[0]?.text ?? "").slice(0, 200));
+    throw new Error("capture failed; see the line above and the stderr tail");
+  }
   const bytes = Buffer.from(dataUrl.replace(/^data:image\/png;base64,/, ""), "base64");
   record("capture returns a PNG under the policy", bytes.length > 1000, bytes.length + " bytes");
   if (bytes.length > 1000) {

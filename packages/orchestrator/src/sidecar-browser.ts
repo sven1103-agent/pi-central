@@ -1,69 +1,60 @@
 /**
- * The browser lifecycle: launch Chromium under the sidecar's profile, find its endpoint, hand back a page.
+ * Launch Chromium for the sidecar, on a CDP PIPE (ADR-0015).
  *
- * Two facts shape this file and both were measured (Phase 0C):
+ * Two measured facts shape this file, and both replaced an earlier version:
  *
  *   1. **`--no-sandbox` is mandatory.** Safehouse cannot permit Chromium's nested Seatbelt sandbox
- *      (`safehouse --help` says so; `chromium-full.sb` explains the re-init failure). So the renderer runs
- *      with Chrome's own sandbox OFF and its only confinement is the appended fragment. This is the reason
- *      the fragment is required rather than optional.
- *   2. **The endpoint arrives as a FILE inside the profile.** Chrome writes `DevToolsActivePort` with the
- *      port and the browser path. That is why the profile must not sit in `/tmp` or `/var/folders`, which
- *      every session can read — the port in that file is a remote-control endpoint.
- *
- * `--remote-debugging-pipe` would avoid the file entirely and is the better answer if it ever becomes
- * reachable; it is not used here because the pipe transport needs a different client shape and this is a
- * spike-to-product step, not a rewrite. Named as a limit rather than a preference.
+ *      (`safehouse --help` says so; `chromium-full.sb` explains the re-init failure), so the renderer runs
+ *      with Chrome's own sandbox OFF and its only confinement is the appended fragment.
+ *   2. **The control channel is fd 3/4, not a port.** The WebSocket version needed the sidecar to reach its
+ *      own browser over loopback, which its own egress rule forbids — measured: Chrome started, printed
+ *      `DevTools listening on ws://127.0.0.1:…`, and then every CDP call was denied. The pipe has no port,
+ *      no listening socket and no `DevToolsActivePort` file, so there is nothing for the policy to forbid
+ *      and nothing for another session to discover.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
 
 export interface BrowserOptions {
-  /** The Chrome/Chromium executable. Fixed by the caller; never taken from a request. */
+  /** The Chrome/Chromium executable. Resolved by configuration, never from a request. */
   executable: string;
-  /** The sidecar's own profile directory. Must be private (see `assertPrivateLocation`). */
+  /** The sidecar's own profile directory. Private (the orchestrator refuses a shared temp root). */
   profileDir: string;
-  /** What to do with the browser's stderr, for the Inspector. */
+  /** Browser output, for the Inspector and for diagnosing a refusal. */
   onLog?: (line: string) => void;
 }
 
 export interface Browser {
-  /** The CDP websocket URL, from `DevToolsActivePort`. */
-  cdpUrl: string;
+  /** The child, whose fd 3/4 carry CDP. Passed to `CdpPage.open`. */
+  child: ChildProcess;
   /** Kill the browser and wait for it to be gone. Idempotent. */
   stop: () => Promise<void>;
 }
 
-/** Chrome takes a moment to write its port file; this bounds the wait rather than polling forever. */
-const ENDPOINT_TIMEOUT_MS = 20_000;
-
-export async function launchBrowser(options: BrowserOptions): Promise<Browser> {
+export function launchBrowser(options: BrowserOptions): Browser {
   if (!existsSync(options.executable)) {
     throw new Error(`no browser at ${options.executable}`);
   }
   mkdirSync(options.profileDir, { recursive: true, mode: 0o700 });
-  // A stale endpoint from a previous run would make this connect to a dead port and report a browser fault.
-  const portFile = join(options.profileDir, "DevToolsActivePort");
-  rmSync(portFile, { force: true });
 
   const child = spawn(
     options.executable,
     [
       "--headless=new",
       `--user-data-dir=${options.profileDir}`,
-      // Mandatory under Safehouse: see the header. Not a weakening chosen here.
+      // Mandatory under Safehouse; see the header. Not a weakening chosen here.
       "--no-sandbox",
       "--disable-gpu",
       "--disable-crash-reporter",
       "--disable-breakpad",
       "--no-first-run",
       "--disable-extensions",
-      // Port 0 asks the OS for a free one; the value is discovered from the file below, never guessed.
-      "--remote-debugging-port=0",
+      // CDP over fd 3/4: no port to open, no endpoint file to leak, nothing for the egress rule to block.
+      "--remote-debugging-pipe",
       "about:blank",
     ],
-    { stdio: ["ignore", "pipe", "pipe"] },
+    // Two extra pipes BECOME fd 3 and fd 4 in the child. Their order is the protocol: 3 to write, 4 to read.
+    { stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"] },
   );
 
   let stderrTail = "";
@@ -78,69 +69,32 @@ export async function launchBrowser(options: BrowserOptions): Promise<Browser> {
   child.once("exit", (code, signal) => {
     exited = { code, signal };
   });
-
-  const cdpUrl = await waitForEndpoint(portFile, () => exited, stderrTail);
+  // A spawn failure must not escape as an unhandled event: Node would end the sidecar, and the caller would
+  // see a closed pipe rather than the reason.
+  child.once("error", (error) => {
+    options.onLog?.(`browser spawn failed: ${error.message}`);
+    exited = { code: null, signal: null };
+  });
 
   return {
-    cdpUrl,
+    child,
     stop: async () => {
       if (exited !== undefined) return;
-      await terminate(child);
+      await terminate(child, stderrTail);
     },
   };
 }
 
-/**
- * Wait for `DevToolsActivePort` and turn it into a websocket URL.
- *
- * The file has two lines: the port, and the browser's `devtools/browser/…` path. Reading it is the only
- * supported discovery for `--remote-debugging-port=0`.
- *
- * **A browser that died must be reported with its own output**, not with a timeout. The first version of
- * the spike harness printed nothing at all because its filter matched only known failure strings, and a
- * `dyld` abort matched none of them — the check ran and its answer was discarded. So the exit is polled
- * and the stderr tail is included in the message.
- */
-async function waitForEndpoint(
-  portFile: string,
-  exited: () => { code: number | null; signal: string | null } | undefined,
-  stderrTail: string,
-): Promise<string> {
-  const deadline = Date.now() + ENDPOINT_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const gone = exited();
-    if (gone !== undefined) {
-      throw new Error(
-        `the browser exited before exposing an endpoint (code=${gone.code ?? "-"}, signal=${gone.signal ?? "-"})` +
-          (stderrTail.trim() === "" ? "" : `\n${tail(stderrTail, 12)}`),
-      );
-    }
-    if (existsSync(portFile)) {
-      const [port, path] = readFileSync(portFile, "utf8").split("\n");
-      if (port !== undefined && path !== undefined && port.trim() !== "" && path.trim() !== "") {
-        return `ws://127.0.0.1:${port.trim()}${path.trim()}`;
-      }
-    }
-    await new Promise<void>((done) => setTimeout(done, 100));
-  }
-  throw new Error(
-    `the browser wrote no DevToolsActivePort within ${ENDPOINT_TIMEOUT_MS} ms` +
-      (stderrTail.trim() === "" ? "" : `\n${tail(stderrTail, 12)}`),
-  );
-}
-
-const tail = (text: string, lines: number): string =>
-  text.trimEnd().split("\n").slice(-lines).join("\n");
-
 /** SIGTERM, then SIGKILL, then give up rather than hang the sidecar's shutdown. */
-async function terminate(child: ChildProcess): Promise<void> {
+async function terminate(child: ChildProcess, stderrTail: string): Promise<void> {
   const gone = new Promise<void>((done) => child.once("exit", () => done()));
   child.kill("SIGTERM");
-  const killed = await Promise.race([gone.then(() => true), delay(3000).then(() => false)]);
-  if (!killed) {
+  const stopped = await Promise.race([gone.then(() => true), delay(3000).then(() => false)]);
+  if (!stopped) {
     child.kill("SIGKILL");
     await Promise.race([gone, delay(2000)]);
   }
+  void stderrTail;
 }
 
 const delay = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
