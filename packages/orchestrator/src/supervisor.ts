@@ -1293,7 +1293,7 @@ export class Supervisor extends EventEmitter {
         // not an interpreter for a .ts file: the process died before printing anything and Pi reported only
         // "Connection closed".
         sidecar: process.execPath,
-        sidecarArgs: [join(import.meta.dirname, "sidecar.ts")],
+        sidecarArgs: [resolveSidecarEntry(import.meta.dirname)],
         // Read-only access to the sidecar's own code. Without it a source-launched sidecar cannot start at all:
         // the sandbox will not let the interpreter open a script outside its workdir.
         sidecarCodeDir: join(import.meta.dirname, ".."),
@@ -1610,3 +1610,20 @@ export async function clearQueueVia(
   return result;
 }
 
+
+/**
+ * The sidecar's entry point, as this installation actually has it.
+ *
+ * Two modes that cannot share a path. From SOURCE the supervisor sits in `packages/orchestrator/src` and the entry
+ * is the `.ts` file beside it. In the PUBLISHED package everything is bundled into `bin/`, and the sidecar is a
+ * second bundle there -- the `.ts` sources are not shipped, and Node refuses to strip types under `node_modules`
+ * anyway. Before this existed, an installed copy launched a path that did not exist, and the failure was swallowed
+ * as "no browser for this session".
+ *
+ * Resolved by looking, not by a mode flag: a flag is one more thing to set, and a wrong setting would fail as a
+ * missing capability rather than as an error. Exported so a test can hold both branches without building a package.
+ */
+export function resolveSidecarEntry(dir: string): string {
+  const source = join(dir, "sidecar.ts");
+  return existsSync(source) ? source : join(dir, "pi-central-sidecar.js");
+}

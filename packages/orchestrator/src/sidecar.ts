@@ -418,7 +418,7 @@ if (isMain) {
   const port = Number(arg("port") ?? "0");
   if (executable === undefined || profileDir === undefined || origin === undefined || token === undefined) {
     process.stderr.write(
-      "usage: sidecar.ts --executable <chrome> --profile <dir> --origin <http://localhost:PORT> " +
+      "usage: pi-central-sidecar --executable <chrome> --profile <dir> --origin <http://localhost:PORT> " +
         "--token <secret> [--port N]\n",
     );
     process.exit(2);

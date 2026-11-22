@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createServer } from "node:net";
 import { spawn } from "node:child_process";
 import { existsSync as fileExists } from "node:fs";
-import { Supervisor } from "../src/supervisor.ts";
+import { Supervisor, resolveSidecarEntry } from "../src/supervisor.ts";
 import {
   DEV_PORT_BASE,
   devPortFor,
@@ -369,5 +369,19 @@ test("reapDevPort never signals the process that asks", async () => {
     assert.deepEqual(reapDevPort(port), [], "the orchestrator's own socket must never be signalled");
   } finally {
     await new Promise((done) => own.close(done));
+  }
+});
+
+test("the sidecar entry is resolved for the installation that exists, not for one mode", () => {
+  // Measured defect: the supervisor launched `<dir>/sidecar.ts`. From source that is right; in the published package
+  // the sources are not shipped (and Node will not strip types under node_modules), so every installed session got
+  // no browser and no error. Resolved by looking, so BOTH layouts are exercisable here.
+  const scratch = mkdtempSync(join(root as string, "entry-"));
+  try {
+    assert.equal(resolveSidecarEntry(scratch), join(scratch, "pi-central-sidecar.js"), "a bundled layout must use the bundle");
+    writeFileSync(join(scratch, "sidecar.ts"), "");
+    assert.equal(resolveSidecarEntry(scratch), join(scratch, "sidecar.ts"), "a source layout must use the source");
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
 });

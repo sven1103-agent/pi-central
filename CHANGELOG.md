@@ -44,6 +44,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The capture tool says how to show its image from a codemode script ([#276]).
 - Each session with a sidecar is assigned its own dev-server port and told it, with `PI_CENTRAL_SIDECAR=1` ([#276]).
 - An assigned dev port that something already holds is skipped, and a dev server left on one is stopped with its session ([#276]).
+- The published package ships the sidecar as its own bundle, so an installed copy can start one ([#276]).
 - A browser renders a local page under the sidecar's own profile with egress confined to one port ([#276]).
 - A two-verb host-side service is measured against shipping `playwright` for UI capture ([#276]).
 - A hand-written credential deny list failed open on `~/.gitconfig`, as C15c predicts ([#276]).
