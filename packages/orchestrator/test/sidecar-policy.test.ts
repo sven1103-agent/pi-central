@@ -70,6 +70,7 @@ const base: Omit<SidecarSpec, "id" | "port"> = {
   fragmentDir: join(dir, "policy"),
   safehouse: "safehouse",
   sidecar: "/state/bin/pi-central-sidecar",
+  browser: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
 };
 const spec = (over: Partial<SidecarSpec> = {}): SidecarSpec => ({
   ...base,
@@ -86,11 +87,19 @@ test("the sidecar launches through safehouse with its own profile and the pinned
   assert.equal(launch.args[1], join(dir, "profile"));
   assert.ok(launch.args.includes(`--enable=${SIDECAR_ENABLE}`));
   assert.ok(launch.args.includes(`--append-profile=${fragmentFile}`));
-  // The sidecar binary and its verbs, after the `--`.
+
+  // The sidecar and ITS OWN flags, after the `--`. Each of these was wrong once, and each failed only at
+  // runtime: the flags were written before `sidecar.ts` existed, so they named a `--port` the sidecar does not
+  // take. A test that only checked "a path appears after --" would have passed throughout.
   const dd = launch.args.indexOf("--");
   assert.equal(launch.args[dd + 1], "/state/bin/pi-central-sidecar");
-  // Mandatory: Safehouse cannot host Chromium's nested sandbox, so a browser without this does not start.
-  assert.ok(launch.args.includes("--no-sandbox"));
+  const sidecarArgs = launch.args.slice(dd + 2);
+  assert.equal(sidecarArgs[0], "--executable");
+  assert.equal(sidecarArgs[1], "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+  assert.equal(sidecarArgs[2], "--profile");
+  assert.equal(sidecarArgs[3], join(dir, "profile"));
+  assert.equal(sidecarArgs[4], "--origin");
+  assert.equal(sidecarArgs[5], "http://localhost:4173");
   assert.match(isolation, /egress=localhost:4173/);
 });
 
@@ -132,22 +141,19 @@ test("an id that is not identifier-shaped is refused", () => {
   }
 });
 
-test("the sidecar env carries PATH and nothing else", () => {
+test("the sidecar env carries PATH and a private HOME, and nothing else", () => {
   if (skipReason) return console.log(skipReason);
   const { launch } = composeSidecarPolicy(spec());
   // `spawn` inherits `process.env` when `env` is omitted, which would hand the renderer every ambient secret
-  // (C4a/C11). So the object is EXPLICIT — but it cannot be empty, and that was a measured defect: with no
-  // `PATH` a bare command name does not resolve, and the sidecar failed to spawn with `spawn safehouse ENOENT`
-  // while every other part of the wiring was correct.
+  // (C4a/C11). So the object is EXPLICIT. It cannot be empty either: with no `PATH` a bare command name does
+  // not resolve, and with no `HOME` Node refuses to start at all — both measured as "the sidecar never
+  // spawned", reported by Pi only as "Connection closed".
   assert.ok(launch.env !== undefined, "env must be present, or spawn inherits");
-  assert.deepEqual(
-    Object.keys(launch.env).sort(),
-    ["PATH"],
-    "PATH to resolve the launcher, and nothing a renderer could use",
-  );
-  // And no secret-shaped name survives, which is the property the empty object was standing in for.
+  assert.deepEqual(Object.keys(launch.env).sort(), ["HOME", "PATH"], "exactly what a process needs to run");
+  // HOME is the sidecar's OWN profile, not the user's home: nothing here reads ~/.ssh or ~/.config.
+  assert.equal(launch.env["HOME"], join(dir, "profile"), "HOME must be the sidecar profile itself");
   for (const name of Object.keys(launch.env)) {
-    assert.ok(!/(TOKEN|SECRET|KEY|PASSWORD|AUTH|HOME)/i.test(name), `unexpected variable ${name}`);
+    assert.ok(!/(TOKEN|SECRET|KEY|PASSWORD|AUTH)/i.test(name), "unexpected variable " + name);
   }
 });
 

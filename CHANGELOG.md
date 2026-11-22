@@ -34,6 +34,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 - `capture` returns an MCP image block, so the picture reaches the transcript instead of base64 text ([#276]).
 - A session's sidecar port is a per-session option, so testing one session needs no app-wide setup ([#276]).
 - The sidecar launch carries `PATH`, without which `safehouse` does not resolve and it never starts ([#276]).
+- The sidecar is started with `node` and its real flags, not with `pi` and a `--port` it never accepted ([#276]).
+- The sidecar's `HOME` is its own profile, because Node refuses to start without one ([#276]).
 - A browser renders a local page under the sidecar's own profile with egress confined to one port ([#276]).
 - A two-verb host-side service is measured against shipping `playwright` for UI capture ([#276]).
 - A hand-written credential deny list failed open on `~/.gitconfig`, as C15c predicts ([#276]).

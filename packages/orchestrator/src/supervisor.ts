@@ -696,8 +696,13 @@ export class Supervisor extends EventEmitter {
           port: sidecarPort,
           stateRoot: this.#config.stateRoot,
           safehouse: this.#config.safehouse,
-          sidecar: this.#config.pi,
+          // NODE, not `pi`. The first version passed `config.pi` here and started the sidecar with Pi itself,
+          // which is not an interpreter for a .ts file -- the process died before printing anything and Pi
+          // reported only "Connection closed".
+          sidecar: process.execPath,
           sidecarArgs: [join(import.meta.dirname, "sidecar.ts")],
+          // The GRANTED directory is the package root (the sandbox needs to traverse into src/), which is the
+          // parent of the directory this module lives in...
           sidecarCodeDir: join(import.meta.dirname, ".."),
           browser: this.#config.browser,
           onLog: (line: string) => this.emit("log", session.id, line),

@@ -85,6 +85,7 @@ export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
     // The argv shape is what matters and it is fixed: executable, then two flags with validated values.
     sidecar: options.sidecar,
     sidecarCodeDir: options.sidecarCodeDir,
+    browser: options.browser,
     ...(options.sidecarArgs === undefined ? {} : { sidecarArgs: options.sidecarArgs }),
   };
 

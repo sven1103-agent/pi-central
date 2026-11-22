@@ -89,6 +89,13 @@ export interface SidecarSpec {
    * browser. It is NOT caller-controlled — the supervisor resolves it from configuration, like `pi`.
    */
   sidecarArgs?: string[];
+  /**
+   * The browser executable the sidecar drives.
+   *
+   * Passed through the argv rather than the environment because the environment is deliberately minimal (a
+   * `PATH` and nothing else), and because a fixed argv is easier to read in the Inspector.
+   */
+  browser: string;
 }
 
 export interface ComposedSidecar {
@@ -143,9 +150,19 @@ export function composeSidecarPolicy(spec: SidecarSpec): ComposedSidecar {
     "--",
     spec.sidecar,
     ...(spec.sidecarArgs ?? []),
-    "--port",
-    "0",
-    "--no-sandbox",
+    // The sidecar's own arguments, which mirror its entry point exactly:
+    //   --executable  the browser it drives
+    //   --profile     its writable directory (the workdir, so the sandbox already grants it)
+    //   --origin      the ONE origin it serves; egress is pinned to that port in the fragment above
+    //
+    // These were written as `--port 0 --no-sandbox` before `sidecar.ts` existed, and they are not flags it
+    // takes: the sidecar would have exited on an unknown argument even once its interpreter was right.
+    "--executable",
+    spec.browser,
+    "--profile",
+    resolve(spec.profileDir),
+    "--origin",
+    `http://localhost:${spec.port}`,
   ];
 
   return {
@@ -163,7 +180,18 @@ export function composeSidecarPolicy(spec: SidecarSpec): ComposedSidecar {
        * this because `buildSessionEnv` supplies a `PATH`. The sidecar gets the minimum a process needs to resolve
        * its own binary, and nothing else -- no HOME, no credentials, no inherited secrets.
        */
-      env: { PATH: spec.path ?? process.env["PATH"] ?? DEFAULT_PATH },
+      env: {
+        PATH: spec.path ?? process.env["PATH"] ?? DEFAULT_PATH,
+        /**
+         * `HOME`, and only because Node will not start without it.
+         *
+         * Measured, twice: with `PATH` alone the child printed "HOME is not set; set HOME in the environment
+         * before running this script" and exited — the sidecar never started, and Pi reported only "Connection
+         * closed". It is the sidecar's OWN profile directory, not the user's home: nothing here reads `~/.ssh`
+         * or `~/.config`, and the profile is a directory the fragment already confines it to.
+         */
+        HOME: resolve(spec.profileDir),
+      },
     },
     isolation: `Safehouse sidecar profile=${spec.profileDir} enable=${SIDECAR_ENABLE} egress=localhost:${spec.port}`,
     fragmentFile,
