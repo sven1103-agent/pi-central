@@ -184,6 +184,14 @@ export function composeSidecarPolicy(spec: SidecarSpec): ComposedSidecar {
     // than a wrong argument list.
     "--port",
     String(spec.listenPort),
+    // The token is in the spawn environment, and that is NOT enough: Safehouse runs the wrapped command under
+    // `env -i` and rebuilds the environment from its own list, so a variable it was not asked for is discarded.
+    // Measured on the sidecar itself -- it printed its usage line because the token arrived as undefined, which
+    // reads from Pi side as "the server is not listening".
+    //
+    // This is C15 exactly, one level down from where it was first found. The name is derived from the same
+    // object that supplies the value, so the delivered set and the injected set cannot drift.
+    "--env-pass=PI_CENTRAL_SIDECAR_TOKEN",
   ];
 
   return {

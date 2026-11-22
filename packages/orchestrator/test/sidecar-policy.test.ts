@@ -180,3 +180,20 @@ test("a session can never be given a Chromium feature, and the sidecar is the on
     assert.ok(!argv.includes(feature), `a session must not receive ${feature}: ${argv}`);
   }
 });
+
+test("the sidecar's own launch forwards its token, because Safehouse discards the rest", () => {
+  if (skipReason) return console.log(skipReason);
+  const { launch } = composeSidecarPolicy(spec());
+  // C15, one level down. The token is in the spawn environment, and Safehouse runs the wrapped command under
+  // `env -i` -- so a variable it was not asked for is discarded and the sidecar starts with no token. Measured:
+  // it printed its usage line, and Pi reported only "Nothing is listening".
+  assert.ok(
+    launch.args.includes("--env-pass=PI_CENTRAL_SIDECAR_TOKEN"),
+    "without --env-pass the token never reaches the sidecar",
+  );
+  // And the name in the flag must match the name in the environment, or the forward delivers nothing.
+  assert.ok(
+    Object.keys(launch.env).includes("PI_CENTRAL_SIDECAR_TOKEN"),
+    "the forwarded name must exist in the environment",
+  );
+});
