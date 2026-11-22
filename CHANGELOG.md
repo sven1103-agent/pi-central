@@ -10,6 +10,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+<!-- Empty at tag time: a release cannot ship undocumented changes. -->
+
+## [0.15.0] — 2026-11-22
+
 ### Added
 
 - A followed transcript holds its newest line above the window's foot, and the reader can put it back at the foot ([#279]).
