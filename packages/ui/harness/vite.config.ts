@@ -36,7 +36,21 @@ export default defineConfig({
   root: fileURLToPath(new URL("..", import.meta.url)),
   plugins: [react()],
   // The harness talks to nothing: no socket, no proxy, no orchestrator. `connect-src 'self'` is unused.
-  server: { host: "127.0.0.1", port: 5199, strictPort: true },
+  /*
+   * A DELIBERATELY UNCOMMON PORT, AND A RELOCATION POLICY.
+   *
+   * 5199 collided with a running Pi Central on this machine — reported as "port 5199 is in use by the production
+   * PI Central instance" — and `strictPort: true` turned that into a refused start. Two separate mistakes:
+   *
+   *   - the port was picked from nothing. The application's own ports are 8787 (the orchestrator) and 5173 (the UI
+   *     dev server), so neither may be used, and 5199 was arbitrary enough to hit something else on a busy machine.
+   *   - `strictPort` is right for the APP (a dev server on a surprise port breaks the proxy) and wrong for a
+   *     harness, where the whole job is to be opened by a person who then reads the URL. So it relocates instead,
+   *     and the launcher reports where it landed rather than predicting it.
+   *
+   * 4317 is in the IANA dynamic range and matched no listener on this machine when this was written.
+   */
+  server: { host: "127.0.0.1", port: 4317, strictPort: false },
   resolve: {
     /*
      * The workspace package resolves to its TypeScript SOURCE, exactly as `packages/ui/vite.config.ts` does, so

@@ -13,7 +13,14 @@
  *   1. the config's root is where the entry's relative imports still resolve;
  *   2. the entry exists and imports the REAL component, not a copy;
  *   3. nothing in the harness overrides the transcript's own rules, or the preview stops being a preview;
- *   4. the launcher points at a config that exists.
+ *   4. the launcher points at a config that exists;
+ *   5. a busy port relocates, and the launcher reports where it landed rather than predicting it.
+ *
+ * The fifth is here because the harness failed in exactly that way on its first real use: it picked port 5199,
+ * which a running Pi Central already held, refused to start under `strictPort`, and printed a URL that nothing
+ * was listening on. Six servers from earlier attempts were also still running — `pkill` and `ps` are both
+ * unavailable under this project's sandbox, so they were invisible until `lsof` found them. A review tool that
+ * leaks processes and advertises dead URLs is worse than no review tool, because it produces confident silence.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -73,4 +80,45 @@ test("a launcher exists, and the config it points at is a real file", () => {
   const config = /--config",\s*"([^"]+)"/.exec(text)?.[1];
   assert.ok(config, "the launcher names the config it serves");
   assert.ok(existsSync(new URL(config, UI)), `the launcher points at ${config}, which must exist`);
+});
+
+test("the harness relocates when its port is busy, and the launcher reports where it landed", () => {
+  /*
+   * The report: "port 5199 is in use by the production PI Central instance".
+   *
+   * Three faults were behind one error message:
+   *
+   *   1. the port was picked from nothing — the app already claims 8787 (orchestrator) and 5173 (UI dev server),
+   *      and 5199 was arbitrary enough to hit a running instance;
+   *   2. `strictPort: true` turned a collision into a refused start, which is right for the APP (a dev server on a
+   *      surprise port breaks its proxy) and wrong for a harness opened by a person;
+   *   3. the launcher PRINTED its predicted URL before Vite ran, so it advertised a dead address even when it did
+   *      start. A launcher that names a URL must be quoting one that exists.
+   */
+  const config = source(harness("vite.config.ts"));
+  assert.match(
+    config,
+    /strictPort:\s*false/,
+    "a busy port must relocate rather than refuse: this is a harness a person opens, not a proxied dev server",
+  );
+  const port = /port:\s*(\d+)/.exec(config)?.[1];
+  assert.ok(port, "the config names a preferred port");
+  assert.ok(
+    port !== "8787" && port !== "5173",
+    `the harness must not claim the orchestrator (8787) or UI dev server (5173) port; got ${port}`,
+  );
+
+  const launcher = source(new URL("../../../scripts/serve-follow-harness.mjs", import.meta.url));
+  assert.match(
+    launcher,
+    /\/Local:\\s\*\(http:/,
+    "the launcher PARSES the URL Vite reports; a hardcoded one advertises a port that may have relocated",
+  );
+  assert.ok(
+    !/open\s+http:\/\/127\.0\.0\.1:\d+/.test(launcher),
+    "no predicted URL anywhere in the launcher",
+  );
+  // And it must clean up after itself: six servers outlived their shells before this was added.
+  assert.match(launcher, /child\.kill\(/, "the child is taken down explicitly");
+  assert.match(launcher, /process\.on\("exit", stop\)/, "…including on a normal exit");
 });
