@@ -45,13 +45,16 @@ fresh `markdown.ts` module per measurement so the module-level parse cache could
 
 | message | today: one parse per 4-char delta | one parse per frame, 60 Hz | ratio |
 |---|---|---|---|
-| prose, 2989 chars | 746 parses, 550 ms | 60 parses, 57 ms | **9.8×** |
-| with fences, 2646 chars | 660 parses, 314 ms | 60 parses, 28 ms | **11.2×** |
-| with a table, 3012 chars | 752 parses, 633 ms | 60 parses, 52 ms | **12.0×** |
+| prose, 2332–2989 chars | 582–746 parses, 295–550 ms | 60 parses, 32–57 ms | **10.6×** |
+| with fences, 2646–3180 chars | 660–794 parses, 314–419 ms | 60 parses, 28–33 ms | **12.8×** |
+| with a table, 3012 chars | 752 parses, 633–733 ms | 60 parses, 52–60 ms | **12.3×** |
 
-Those are jsdom + DOMPurify in Node, not a browser, so the **absolute** milliseconds are not a browser
-measurement and are not claimed as one. The ratio is the claim, and it is not stable to a decimal: repeated
-runs of the same three messages spread over **8.9× to 14.1×**, so the record claims *an order of magnitude*,
+Each row is the **median of three runs**, with ranges across every run this record has seen. The message in
+each group also moves between runs, because it is "the first matching message in the newest 150 sessions" —
+which is why the character counts are ranges too. Those are jsdom + DOMPurify in Node, not a browser, so the
+**absolute** milliseconds are not a browser
+measurement and are not claimed as one. The ratio is the claim, and it is not stable to a decimal: the same
+three messages have spread over **8.9× to 14.4×** across runs, so the record claims *an order of magnitude*,
 not a number. The direction is what matters — the coalescer removes about 90% of the parses for the same
 stream, and no run put it below half.
 
@@ -64,9 +67,16 @@ which is what a parser with fixed per-call overhead should do.
 The quadratic total has a different cause, and it is exact rather than approximate: **the number of parses
 grows with the message.** A 4-character stride performs `N/4` parses whose average input is `N/2`
 characters, so the characters processed are about `N²/8` against `N` for a single final parse — a ratio of
-`N/8`. Measured against one final parse of the same text: **179× at 1500 characters against `N/8` ≈ 187,
-and 352× at 3000 against 375.** The small shortfall is fixed per-call overhead, and it narrows as the message
-grows — which is the signature of the cause being the number of calls rather than the cost of each. So the defect is not that parsing is slow, it is that **the
+`N/8`. Measured against one final parse of the same text, **the large case matches and the small one is
+noise**: at 3000 characters six repeats give **378–404×** against a predicted 375, which is the arithmetic
+confirmed. At 1500 characters the same six repeats give **178–245×** against a predicted 188 — a band wide
+enough to straddle the prediction, because one final parse at that size is a few hundred microseconds and the
+denominator is then mostly JIT and GC jitter (it ranged from 0.87 ms to 16.8 ms across runs). The 1500-row is
+reported with its spread and is not evidence of anything on its own; the 3000-row is the confirmation, and the
+prediction holds there without a fudge factor.
+
+That distinction is the third correction in this record, and it came from running its own script a second
+time: a single reading at the small size looked like a 5% agreement with the prediction, and was luck. So the defect is not that parsing is slow, it is that **the
 same text is parsed hundreds of times**, and it gets worse the longer the answer runs.
 
 One consequence worth naming: this is also why `CACHE_MAX_SOURCE` is 20 000 characters in `markdown.ts`.
