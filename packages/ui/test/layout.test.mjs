@@ -24,6 +24,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { READING_MEASURE_FILL, readingStyle } from "../src/reading.ts";
 
 const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
   /\/\*[\s\S]*?\*\//g,
@@ -126,37 +127,57 @@ test("the transcript keeps its own horizontal padding, and centres ONE lane", ()
     `per-child centring is #92's defect: a narrower child gets a different centre. Found: ${centred.join(", ")}`,
   );
 });
-test("the companion sits to the RIGHT of the prose, and the pair is centred", () => {
+test("the lane is centred by TWO EQUAL margins, and the companion does not steal one of them", () => {
   /*
-   * Two properties, and the first was wrong twice.
+   * The reported defect, and the bug in the first attempt at fixing it.
    *
-   * The companion is the first child in the DOM, which is correct for reading and tab order — a screen reader should
-   * meet the session's identity before its conversation. In a flex ROW that put it on the LEFT, so the layout was
-   * `[companion][conversation]` (`img_32.png`) while every description of the design, and the review that asked for
-   * it, says the box is to the right of the prose.
+   * The row used to be `display: flex; justify-content: center` over the prose and a 340px companion, so what was
+   * centred was the PAIR: the prose sat half a companion left of the window centre. That is invisible while the rail
+   * fills the void and obvious when it does not — *"without the session list, the transcript is not centered anymore"*.
    *
-   * `order` is the one tool that separates visual order from source order, and this is a legitimate use: both orders
-   * are correct, they simply differ. The guard is that the swap exists in the row form and is neutralised when the
-   * layout stacks, because there the companion must be on top.
+   * The first fix wrote `minmax(0, 1fr) minmax(0, 80ch) 340px` while its comment claimed "one 1fr on each side". A single
+   * flexible track takes ALL of the free space, so the prose was pushed to the trailing edge — a worse defect than the
+   * one being fixed, and reported immediately.
+   *
+   * The property is therefore SYMMETRY, and it is asserted as such: the template must name the same margin token twice
+   * while centred. A literal anywhere in the outer two tracks is the bug.
    */
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
     /\/\*[\s\S]*?\*\//g,
     "",
   );
-  const rowOrder = /\.transcript-wrap\.has-header \.transcript-main\s*\{\s*order:\s*(\d+)/.exec(css)?.[1];
-  const boxOrder = /\.transcript-wrap\.has-header \.transcript-header\s*\{\s*order:\s*(\d+)/.exec(css)?.[1];
-  assert.ok(rowOrder !== undefined && boxOrder !== undefined, "both boxes must declare their visual order");
-  assert.ok(
-    Number(boxOrder) > Number(rowOrder),
-    `the companion must come after the prose visually, got main=${rowOrder} header=${boxOrder}`,
+  const row = [...css.matchAll(/\.transcript-wrap\.has-header\s*\{([^}]*)\}/g)]
+    .map((m) => m[1])
+    .find((body) => /display:\s*grid/.test(body));
+  assert.ok(row, "the wide layout is a grid");
+
+  const template = /grid-template-columns:\s*([^;]+);/.exec(row)?.[1]?.replace(/\s+/g, " ").trim() ?? "";
+  assert.equal(
+    template,
+    "var(--reading-leading) var(--reading-lane) var(--reading-trailing)",
+    "three NAMED tracks, so the stylesheet cannot hold an asymmetry the module does not",
   );
 
-  const pair = /\.transcript-wrap\.has-header\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
-  assert.match(pair, /justify-content:\s*center/, "the pair is centred as a unit");
+  /*
+   * And the module itself is where symmetry is decided — the leading and trailing margins are the same token while
+   * centred, and differ only under `fill`, where the reader asked for the left edge specifically.
+   */
+  const centred = readingStyle({ sizePx: 15, measure: 80 });
+  assert.equal(centred["--reading-leading"], centred["--reading-trailing"], "equal margins ARE the centring");
+  assert.equal(centred["--reading-trailing-max"], "1fr", "the open panel's track keeps absorbing space, so the lane need not move");
+  assert.match(centred["--reading-leading"], /^minmax\(0, 1fr\)$/, "flexible, so the pair of them split the free space");
+  assert.match(centred["--reading-lane"], /^minmax\(0, \d+ch\)$/, "and the lane carries the reader\u2019s measure");
 
-  // Stacked, the swap must be neutralised or the companion would be reordered below the conversation it labels.
-  const stacked = /@container transcript[^{]*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
-  assert.match(stacked, /order:\s*0/, "the visual-order swap is row-only");
+  /*
+   * `fill` is the asymmetric case and must stay asymmetric: "use the column\u2019s width" means everything the companion
+   * does not need, not a symmetric void. The companion keeps its own track, so `.transcript-header` survives — a
+   * `100%` lane instead pushes it out of the grid along with Stop, Resume, Rename and both pickers.
+   */
+  const fill = readingStyle({ sizePx: 15, measure: READING_MEASURE_FILL });
+  assert.equal(fill["--reading-leading"], "0px", "no leading void under fill");
+  assert.equal(fill["--reading-trailing"], "var(--companion-width)", "and the companion still has its track");
+  assert.equal(fill["--reading-trailing-max"], "var(--companion-width)", "and the open panel's track cannot outgrow it");
+  assert.equal(fill["--reading-lane"], "minmax(0, 1fr)", "the lane takes the rest");
 });
 
 test("the composer's chrome shares the field's left edge, and its gap does not move with focus", () => {

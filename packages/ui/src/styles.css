@@ -111,6 +111,49 @@
    */
   --reading-size: 15px;
   --reading-measure: 80ch;
+  /*
+   * The wide layout's three tracks, as tokens rather than literals (issue #275 follow-up).
+   *
+   * `--reading-measure` is a `max-width` on the prose: it says how wide the text may be, not how much ROOM the column
+   * needs. That distinction is the whole reported defect — a `max-width` item inside a flex row is narrower than its
+   * track, the remainder belongs to the container, and `justify-content: center` therefore centres the prose PLUS the
+   * companion rather than the prose. With the rail away the offset became visible: *"the transcript is not centered
+   * anymore"*.
+   *
+   * So the lane gets a track of its own and the centring becomes arithmetic. `reading.ts#laneTracks` derives all three
+   * from the reader's one `measure` setting; the defaults below are what a reader who never opens Settings gets.
+   *
+   * The leading and trailing margins are SEPARATE tokens even though they hold the same value while centred, because
+   * they legitimately differ under `fill` (where the reader asked for the full width and a symmetric void would defeat
+   * it). Writing one `1fr` for the left and a literal `340px` on the right — which the first version did, with a
+   * comment claiming symmetry — lets one track absorb ALL the free space and push the prose to the trailing edge.
+   */
+  --reading-leading: minmax(0, 1fr);
+  --reading-lane: minmax(0, 80ch);
+  --reading-trailing: minmax(0, 1fr);
+  /*
+   * The CEILING of the trailing track when the peek panel is open, beside the token that is its resting size.
+   *
+   * The open track is `minmax(<floor>, <this>)`, and it has to be a token because the right ceiling depends on the
+   * reader's setting: `1fr` while centred, so the margin keeps absorbing space and the lane does NOT move when there is
+   * room for the panel; the companion's own width under `fill`, where the margin is already a fixed track. A `minmax()`
+   * cannot be nested in another, so the resting token cannot be reused.
+   */
+  --reading-trailing-max: 1fr;
+
+  /*
+   * The companion's width, as a token because TWO things read it: the column rule, and `reading.ts`'s `fill` branch
+   * (`--reading-trailing: var(--companion-width)`).
+   *
+   * It existed as a bare `340px` in the width rules and NOTHING here — and that was a shipped defect, not a
+   * hypothetical: a `var()` with no definition is invalid at computed-value time, so `grid-template-columns` fell back
+   * to `none`, every column became implicit, and the header — placed in column 3 by name — was pushed off the right
+   * edge of a grid wider than the window. Reported as *"now i dont see the controls anymore"*.
+   *
+   * The rule this earns is in `styles.test.mjs`: every custom property the stylesheet or the preference modules USE
+   * must be DEFINED, because the failure is silent and lands somewhere unrelated to the line that caused it.
+   */
+  --companion-width: 340px;
   --fs-lg: 18px;
 
   --sh-1: 0 1px 0 rgba(255, 255, 255, 0.03);
@@ -221,7 +264,7 @@ button { font: inherit; color: inherit; }
    *
    * `minmax(0, …)` lets the track shrink, which is what makes every narrower layout reachable at all.
    */
-  grid-template-columns: 288px minmax(0, 1fr) var(--panel-width, 320px);
+  grid-template-columns: var(--rail-width, 288px) minmax(0, 1fr) var(--panel-width, 320px);
   gap: 1px;
   background: var(--line);
   min-height: 0;
@@ -240,11 +283,25 @@ button { font: inherit; color: inherit; }
  * that `clampPanelWidth` would then have to rescue. The `gap: 1px` also stops producing a stray
  * divider, because with two tracks there is only one gap.
  */
-.panes.is-collapsed { grid-template-columns: 288px 1fr; }
+.panes.is-collapsed { grid-template-columns: var(--rail-width, 288px) 1fr; }
 
 /*
- * A page that has no list of its own: History is one full-width list (`DESIGN.md` §6), so the rail's 288px
- * track must not be reserved for a column that is not rendered. Two tracks, not three.
+ * The rail is NOT docked (issue #275), so its track goes with it.
+ *
+ * Two reasons reach this class and they are deliberately the same rule: below the breakpoint the columns cannot all
+ * fit, and above it the reader asked for the transcript's width. The 288px track must not be reserved for a column that
+ * is not rendered — a hole is a layout bug that reads as a loading bug, the same finding `is-pageless` records.
+ */
+.panes.is-rail-less { grid-template-columns: minmax(0, 1fr) var(--panel-width, 320px); }
+.panes.is-rail-less.is-collapsed { grid-template-columns: minmax(0, 1fr); }
+
+/*
+ * A page that has no list of its own: History is one full-width list (`DESIGN.md` §6), so the rail's track must not be
+ * reserved for a column that is not rendered. Two tracks, not three.
+ *
+ * Kept as its own class rather than folded into `is-rail-less` because the two MEAN different things and are only
+ * accidentally alike: one says "this page has no list", the other "this page has one and it is not on screen". A future
+ * page that has a list in its own area would need the first and not the second.
  */
 .panes.is-pageless { grid-template-columns: minmax(0, 1fr) var(--panel-width, 320px); }
 .panes.is-pageless.is-collapsed { grid-template-columns: minmax(0, 1fr); }
@@ -280,37 +337,85 @@ button { font: inherit; color: inherit; }
   /* Matches `RAIL_DRAWER_MAX_WIDTH` in `App.tsx` (1024, so `< 1024` is the same as `<= 1023`). The button that opens
      this drawer is rendered from JavaScript, so the two numbers have to agree; a test asserts it. */
   /* Both selectors, because `.panes.is-collapsed` out-specifies a bare `.panes` and would otherwise
-     win inside this query — leaving a 288px empty track where the hidden rail used to be. */
+     win inside this query — leaving an empty track where the hidden rail used to be. The rail-less variants are named
+     too, for the same cascade reason. */
   .panes,
-  .panes.is-collapsed { grid-template-columns: minmax(0, 1fr); }
-  /*
-   * The rail leaves the grid and becomes an OVERLAY drawer.
-   *
-   * It used to be `display: none` with a `.rail.open` rule for a class nothing ever set — so the session list was
-   * unreachable at these widths, which is a worse failure than a cramped layout.
-   *
-   * Absolute, not fixed: `.panes` is the containing block, so the drawer covers the workspace and not the topbar. The
-   * topbar keeps the control that closes it, which is where a reader will look for it.
-   */
-  .rail {
-    display: none;
-  }
-  .rail.open {
-    display: flex;
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 40;
-    /* 288px is the rail's own width; `min()` keeps it inside a very narrow window. */
-    width: min(288px, 86vw);
-    background: var(--panel);
-    border-right: 1px solid var(--line-strong);
-    box-shadow: var(--sh-2);
-  }
-  /* The rail needs the panes to be its positioning context. */
-  .panes { position: relative; }
+  .panes.is-collapsed,
+  .panes.is-rail-less,
+  .panes.is-rail-less.is-collapsed { grid-template-columns: minmax(0, 1fr); }
 }
+
+/*
+ * The rail as an OVERLAY rather than a column (issue #275).
+ *
+ * `is-rail-overlay` is set by the shell when the rail is summoned — either because the window is too narrow for the
+ * columns, or because the READER chose to keep the transcript's width. One rule for both, because it is one behaviour:
+ * that is the part of "make it a drawer at every width" that is worth having, obtained without making it the default.
+ *
+ * Outside the media query on purpose. The first version of this lived inside `@media (max-width: 1023px)`, which meant
+ * a reader who hid the rail on a 2000px window got no drawer at all — the control appeared to do nothing.
+ *
+ * It used to be `display: none` with a `.rail.open` rule for a class nothing ever set — so the session list was
+ * unreachable at narrow widths, which is a worse failure than a cramped layout.
+ *
+ * Absolute, not fixed: `.panes` is the containing block (see `position: relative` above), so the drawer covers the
+ * workspace and not the topbar. The bar keeps the control that closes it, which is where a reader will look for it.
+ */
+/*
+ * A rail that is neither docked nor summoned is not on screen.
+ *
+ * `display: none` rather than unmounting the component, and that is a decision rather than an optimisation (`App` says
+ * why at the call site): the rail owns `⌥↑`/`⌥↓`, which are the only keyboard way to walk sessions, and the order they
+ * walk is the component's own. A hidden rail that unmounted would take the keys with it.
+ *
+ * Safe to write plainly: `.panes.is-rail-overlay .rail` below re-states `display: flex` at a higher specificity, so the
+ * summoned case wins the cascade without an `!important`.
+ */
+.panes.is-rail-less:not(.is-rail-overlay) .rail {
+  display: none;
+}
+
+.panes.is-rail-overlay .rail {
+  display: flex;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 40;
+  /* The reader's own width, capped by `min()` so a 480px rail still fits a 400px window. */
+  width: min(var(--rail-width, 288px), 86vw);
+  background: var(--panel);
+  border-right: 1px solid var(--line-strong);
+  box-shadow: var(--sh-2);
+}
+
+/*
+ * The rail's resize handle (issue #275).
+ *
+ * The same shape as `.panel-resizer` and for the same measured reason: the gutter is one 1px line of `--line`, and a
+ * 1px target is not grabbable. It sits OVER the gutter — `left: -3px` on a 7px wide element — so the grid keeps its
+ * three tracks and the visual weight of the layout is untouched.
+ *
+ * Only rendered for a DOCKED rail: an overlay has no edge to drag.
+ */
+.rail-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* The rail's own width, less the gutter the handle straddles. */
+  left: calc(var(--rail-width, 288px) - 3px);
+  width: 7px;
+  cursor: col-resize;
+  z-index: 5;
+  background: transparent;
+  touch-action: none;
+}
+.rail-resizer:hover,
+.rail-resizer:focus-visible {
+  background: var(--accent);
+  opacity: 0.4;
+}
+.rail-resizer:focus-visible { outline: none; box-shadow: var(--focus); }
 
 /*
  * The rail toggle, and the backdrop behind it.
@@ -457,6 +562,102 @@ button { font: inherit; color: inherit; }
 .navrail-glyph { display: block; }
 
 /*
+ * THE ITEM'S NAME, in the bar, on hover and focus (issue #275).
+ *
+ * Report: *"users don't remember what the icons mean in the left menu bar. Icons + label brings the better UX."* The
+ * glyph is 16px in a 48px bar and its name lived in the OS tooltip, which appears after the platform's own delay and
+ * cannot be read while the pointer is already moving.
+ *
+ * ## Why hover and not always
+ *
+ * A permanent label is a 64px bar and a column of words beside the roster — the sidebar this bar exists to avoid being,
+ * and the surface the calm rule is about. This costs NOTHING at rest: no new surface, no width change, and nothing
+ * appears over the conversation. The bar is the only thing that grows, and only while the pointer is on the item it
+ * names.
+ *
+ * ## Why transform and not width
+ *
+ * The label is absolutely positioned and revealed with `transform: scaleX`, so it cannot move the glyph it belongs to,
+ * cannot reflow the bar, and cannot change what `.shell` allocates — the property `SessionPeek`'s first version got
+ * wrong in the other direction (a track that widened under the pointer). Falsified by animating `width`: the bar
+ * shifts and the transcript with it.
+ *
+ * `scaleX` from 0 also means the closed state has no size at all rather than a 0px box with padding, which is what
+ * clips a first glyph in a variant that hides with `width: 0`.
+ */
+.navrail-label {
+  position: absolute;
+  left: calc(100% + 2px);
+  top: 50%;
+  transform: translateY(-50%) scaleX(0);
+  transform-origin: left center;
+  /* `nowrap`, or a two-word label wraps inside a bar that is 48px wide. */
+  white-space: nowrap;
+  padding: 3px var(--sp-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  /* `--panel-3`, the raised surface: the same one menus and dialogs use, because this IS a small amount of chrome
+     floating over the content. */
+  background: var(--panel-3);
+  color: var(--text);
+  font-size: var(--fs-2xs);
+  line-height: 1.4;
+  /* `--sh-2`, the floating-surface shadow: a popover that is closer to the page than the menu it mimics reads as a
+     stray line of text. */
+  box-shadow: var(--sh-2);
+  pointer-events: none;
+  opacity: 0;
+  /* One transition on both channels, so the words do not appear at full opacity inside a box still collapsing. */
+  transition: opacity 90ms ease-out, transform 90ms ease-out;
+}
+/*
+ * On hover and on focus. `:focus-visible` is not decorative here: a keyboard reader tabbing the bar is exactly the
+ * reader who cannot guess what a glyph means, and the tooltip they would rely on is pointer-only.
+ */
+.navrail-item:hover .navrail-label,
+.navrail-item:focus-visible .navrail-label {
+  transform: translateY(-50%) scaleX(1);
+  opacity: 1;
+}
+/* Above the rail and the panel: it may sit over the roster, and half a word behind a row would read as a broken
+   label rather than as chrome. */
+.navrail-item { z-index: 1; }
+.navrail-item:hover, .navrail-item:focus-visible { z-index: 45; }
+/*
+ * The RIGHT bar opens its label leftwards, over its own side of the window.
+ *
+ * With `left: 100%` a right-bar label would run off the window's trailing edge, which is the one direction the OS
+ * cannot scroll to. MIRRORED rather than shortened: the same words, the same reveal, the other side.
+ */
+.navrail-right .navrail-label {
+  left: auto;
+  right: calc(100% + 2px);
+  transform-origin: right center;
+}
+
+/*
+ * A bar-level control is not a destination, and it must not LOOK like one.
+ *
+ * Reported as a hierarchy defect: *"the session icon becomes the target of the navigation steps … But it is also the
+ * target to toggle the sidebar session roster."* The fix is structural — the toggle moved into the bar's `header`
+ * slot, above the page group and behind `.navrail-rule` — but structure alone leaves two identical 40px squares in one
+ * 48px column, and the eye reads identical squares as one family.
+ *
+ * So the header's controls are drawn as CHROME: the glyph is `--dim` and does not take the page family's hover tint.
+ * The difference the rule states in space, this states in weight. Falsified by making them identical again — the two
+ * jobs are then separable only by reading two labels.
+ *
+ * The hover LABEL is not suppressed: a reader still needs the word, and an unlabelled control is the complaint
+ * `.navrail-label` exists to answer.
+ */
+.navrail > .navrail-group:first-child .navrail-item { color: var(--dim); }
+.navrail > .navrail-group:first-child .navrail-item:hover {
+  color: var(--text);
+  background: transparent;
+  border-color: transparent;
+}
+
+/*
  * The rule between a bar-level control and the view items.
  *
  * Reported from use: "Include a small visual separator, so it is not mixed up with the other icon actions."
@@ -571,6 +772,332 @@ button { font: inherit; color: inherit; }
   gap: var(--sp-2);
 }
 
+/* ------------------------------------------------------------------ reading focus */
+
+/*
+ * READING FOCUS (issue #275, second slice).
+ *
+ * The report that opened #275 was about the rail; the screenshot that followed it asked a different question, and the
+ * Llama UI answered it: with the fleet list away, the *window* should be the conversation. This mode is that preference
+ * expressed as CSS, and it is deliberately one class on the app root (`rail-prefs.ts#appClass`) rather than a prop
+ * threaded through four components — what changes here is which surfaces are laid out at all.
+ *
+ * ## What it removes, and the rule each removal follows
+ *
+ * Everything below is CHROME — a surface that describes the fleet or the session rather than being either. Nothing that
+ * *is* the conversation, and nothing that changes a decision, is touched:
+ *
+ *   - the conversation keeps its lane, its `--reading-measure` and its own scroller, untouched;
+ *   - the composer keeps its place and its field; only its permanent hint row folds away;
+ *   - warnings, dialog docks, the queue rail and the error strip stay — they are decisions, not descriptions;
+ *   - the activity bars stay, because they are the only way back to everything this mode hides.
+ *
+ * ## Why the header LEAVES rather than shrinks
+ *
+ * The session header exists twice already: a 340px companion box beside the prose, and the Session panel, which states
+ * the same facts with room to read them. Focus mode drops the box and leaves the panel — so the facts are one click
+ * away rather than gone, which is the difference between a mode and a trap. The height it frees goes to the
+ * conversation, and that is the whole intent.
+ *
+ * The rule is reversible in one keystroke (`⌘⇧.`), which is what makes hiding something this large acceptable.
+ */
+.app.is-focus .topbar {
+  /*
+   * The topbar keeps the two things that are not descriptions of the fleet: the product mark, which is the window's
+   * identity, and the connection dot, which is whether the app is working at all. The fleet counts go — they are the
+   * rail's business, and the rail is either on screen or one press from it.
+   */
+  padding-inline: var(--sp-3);
+  gap: var(--sp-2);
+  background: var(--bg);
+  border-bottom-color: transparent;
+}
+/* The fleet counts are the RAIL's business, and the rail is either on screen or one press from it. */
+.app.is-focus .topbar .fleet {
+  display: none;
+}
+/*
+ * The connection dot alone, so "connected" is still answerable at a glance while its sentence folds away.
+ *
+ * The dot stays deliberately: whether the app is working at all is not a description of the fleet, and a window that
+ * could not say "disconnected" would leave the reader typing into a field with nothing behind it.
+ */
+.app.is-focus .topbar .conn > span:not(.conn-dot) {
+  display: none;
+}
+
+.app.is-focus .navrail {
+  /* The bars are chrome, so they narrow rather than disappear: they are the only way back from this mode. */
+  width: 36px;
+}
+.app.is-focus .navrail-item {
+  width: 30px;
+  height: 30px;
+  font-size: 14px;
+}
+
+/*
+ * The companion leaves the reading row — BUT ONLY WHEN THE PANEL IS SHOWING THE SAME THINGS.
+ *
+ * ## The trap this fixes, and it was reachable in the shipped default
+ *
+ * `panel.ts` defaults to `collapsed: true`, so "the Session panel states the same facts" is FALSE out of the box. With
+ * focus mode on, the header hidden and the panel collapsed, there was no surface anywhere for Rename, Stop, Resume,
+ * Retry, Delete, the model picker, the thinking level, or the ctx/cost meters. Reported as *"i cant see the action
+ * bars … where are they"* — and answering "open the panel" is not an answer, because the mode also removed the only
+ * hint that they had moved.
+ *
+ * The rule is therefore conditional on the fact it depends on: `:not(.is-panel-closed)`. The shell writes that class
+ * from `panel.collapsed`, which it already owns, so this needs no new preference and no new control — the header simply
+ * stays for exactly as long as it is the only place those facts exist.
+ *
+ * `display: none` rather than a narrower box: a 340px column of facts squeezed to 200px would be the "clipped
+ * mid-word" defect `panel.ts` records.
+ *
+ * ## The CHILD COMBINATOR, and why it is a correctness fix rather than tidiness
+ *
+ * `.transcript-header` names a FRAME, not a place: the peek overlay wears the same class on purpose, so the details are
+ * laid out by one set of rules in both frames. This rule therefore matched the overlay's copy too — so with the panel
+ * open, hovering the tab opened a 340px box with nothing in it.
+ *
+ * The render side of that is now one condition (`peekOnly` in the shell: focus AND the panel collapsed), so the peek
+ * does not exist while the column is hidden. This narrowing is what keeps the two from ever disagreeing again.
+ *
+ * Narrowed to the row's own item, it hides the column and cannot reach inside the overlay. The same scoping discipline
+ * as `.transcript-wrap.has-header > .transcript-header`: a class that is shared by design needs every rule that acts on
+ * its PLACEMENT to say which placement it means.
+ */
+.app.is-focus:not(.is-panel-closed) .transcript-wrap.has-header > .transcript-header {
+  display: none;
+}
+/*
+ * With the companion hidden the lane keeps the MIDDLE track and stays exactly where it was (issue #275 follow-up).
+ *
+ * The reported case: the header leaves, the row still reserved a trailing track for an element that is `display: none`,
+ * and the prose sat off centre beside a void. Making the trailing margin flexible on both sides — the same token as the
+ * leading one — both re-centres the prose and leaves it at the same x it had a moment earlier. The mode changes what is
+ * around the conversation, never where the conversation is.
+ */
+/*
+ * With the header gone the lane keeps the MIDDLE track and stays exactly where it was, so hiding the companion cannot
+ * move the prose by a pixel. Scoped to the same condition that hides the header: when the header STAYS (because the
+ * panel is closed) this must not apply, or the row would have no track for it.
+ */
+.app.is-focus:not(.is-panel-closed) .transcript-wrap.has-header {
+  grid-template-columns:
+    var(--reading-leading)
+    var(--reading-lane)
+    var(--reading-leading);
+  column-gap: 0;
+  --reading-trailing: var(--reading-leading);
+}
+.app.is-focus:not(.is-panel-closed) .transcript-wrap.has-header .transcript-main { grid-column: 2; }
+
+.app.is-focus .composer-hint {
+  /*
+   * The permanent "Enter to send · Shift+Enter for a new line" line folds away.
+   *
+   * Not because it is wrong — it is the only place the keys are stated without opening a sheet — but because it is a
+   * line of the window's height reserved for something a reader learns once. `⌘K` still lists them, and the field's own
+   * title carries them.
+   */
+  display: none;
+}
+.app.is-focus .composer-chrome {
+  /* With the hint gone the row is the commands and the follow toggle, so it may collapse to nothing when both are
+     absent rather than leaving a gap where a sentence used to be. */
+  justify-content: flex-end;
+}
+.app.is-focus .composer-chrome:empty { display: none; }
+
+/* ------------------------------------------------------------------ the session's details, peeked */
+
+/*
+ * THE PEEK COMPANION (issue #275, third slice).
+ *
+ * Reading focus gives the conversation the window, so the details cannot keep 340px of track beside it — that column is
+ * exactly the width the mode exists to give back, and the report was blunt: *"we see the current transactions detail
+ * panel, when the conversation has the window"*.
+ *
+ * So the SAME companion is still a grid item in the same row, in its own track — it is just 30px wide until the reader
+ * asks for it:
+ *
+ *   - **resting**: the track holds a vertical tab stating the session's state and its context pressure. ~30px, which the
+ *     lane's own margins absorb.
+ *   - **open** (hover, focus, or latched): the track widens to the companion's 340px, the tab goes, and the very same
+ *     `.transcript-header` block the wide layout renders fills that space.
+ *
+ * ## Why a TRACK and not an overlay
+ *
+ * An overlay was tried and it was wrong in the way the reader said: it covered the transcript. The details have had a
+ * home beside the prose since the row became a grid — the empty margin the capped lane leaves on a desktop window — and
+ * the honest answer is to put them back there, not to invent a second placement over the text.
+ *
+ * The cost is that opening moves the lane over by the difference between 30px and 340px, ONCE, when the reader asks for
+ * it. That is a deliberate gesture; the failure the overlay design was built to avoid was a line of prose jumping under
+ * an aimless cursor.
+ *
+ * The content is not re-implemented anywhere: `SessionPeek` renders its children inside `.transcript-header`, so the
+ * picker stack, the label column, the stats row and the control bar are laid out by the rules that already exist.
+ */
+.transcript-wrap.has-peek > .transcript-header-peek {
+  /*
+   * PINNED TO THE ROW'S TRAILING EDGE, OUT OF THE GRID — so neither its height nor its position depends on grid sizing.
+   *
+   * Two reports shaped this. "It is jumping on hover": the box began where the lane ends, so opening resized the track, the
+   * lane slid left, and the tab slid with it. And, measured from a real window: `.transcript-header-peek` was 30 x 0 in a
+   * 793px row — `align-self: stretch` was not producing a height — so the tab sat below a zero-height box with
+   * `overflow: hidden` and was clipped away. The tab was in the DOM, 30x63, and nobody could see it.
+   *
+   * `position: absolute` with `top: 0; bottom: 0; right: 0` removes both: the height is the row's by construction, and the
+   * right edge is the wrap's own edge in EVERY state, so the tab never moves under the pointer. The row's `padding-inline`
+   * reserves the strip it occupies at rest.
+   *
+   * Selected by the ROW, not by its bare class: this box also wears `.transcript-header`, declared hundreds of lines LATER
+   * at the same specificity, so a bare-class width lost to the shared `max-width` and the "tab" was a 340px box.
+   */
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  width: var(--peek-tab);
+  max-width: none;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+/*
+ * OPEN: the PANEL at the companion's full width, plus the tab, with the same right edge.
+ *
+ * Reported from a screenshot as "some width missing, a horizontal scroll bar, controls slightly cut off". The box was the
+ * companion's width INCLUDING the tab, so the panel was 340 - 30 = 310px, and the stats row (meter, cost and two icon
+ * buttons) needs the whole 340 the wide layout gives it. The tab lives in the reserved strip, so it ADDS to the box; it is
+ * not carved out of the panel.
+ *
+ * The cap is 45% of the ROW, not of the box's containing block: that block includes both strips, so the same figure is
+ * `45% - 0.9 * tab` of it. Written out, so the box and the open track agree about how much room the panel has.
+ *
+ * A background, because it can now sit over the row's own padding and the track beside the lane, and a panel whose text
+ * runs into whatever is behind it is the one thing this must not do.
+ */
+.transcript-wrap.has-peek.is-peek-open > .transcript-header-peek {
+  width: calc(min(var(--companion-width), calc(45% - 0.9 * var(--peek-tab))) + var(--peek-tab));
+  background: var(--bg);
+}
+
+.session-peek {
+  display: flex;
+  flex-direction: row-reverse;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  pointer-events: none;
+}
+/*
+ * THE TAB: the resting state, and the only part of this that takes a click while closed.
+ *
+ * Vertical writing, because a 30px column with three stacked words is unreadable and a horizontal strip would cost the
+ * conversation a row of height. `writing-mode` is the standard way to do that, and the label order follows the block
+ * direction, so it reads top-to-bottom as it appears.
+ */
+.session-peek-tab {
+  pointer-events: auto;
+  /* In FLOW: a flex item at the top of the strip, so its height is its content's and nothing can clip it to a stub. */
+  flex: none;
+  align-self: flex-start;
+  margin-top: var(--sp-4);
+  /*
+   * ICON, DOT, NUMBER — stacked, horizontal, readable.
+   *
+   * It was `writing-mode: vertical-rl` with the words "Details · idle · ctx 37%" at 10px, and the reader's question was
+   * the right one: rotated small text is the least legible thing a 30px strip can hold. A column of three small marks
+   * fits the width without rotating anything, and the sentence those marks stand for is the tooltip.
+   */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: var(--sp-2) 0;
+  width: var(--peek-tab);
+  box-sizing: border-box;
+  background: var(--panel);
+  /* Rounded on the outer side and square where it meets the panel, which is the shape that says "tab". */
+  border: 1px solid var(--line);
+  border-radius: var(--r-2) 0 0 var(--r-2);
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--fs-2xs);
+  cursor: pointer;
+  box-shadow: var(--sh-1);
+}
+.session-peek-tab:hover { color: var(--text); border-color: var(--line-strong); background: var(--panel-2); }
+.session-peek-tab:focus-visible { outline: none; box-shadow: var(--focus); }
+/* Showing, by hover, focus or latch: the SELECTED state — the same two-channel convention the rail uses. */
+.session-peek.is-open .session-peek-tab {
+  color: var(--accent-text);
+  background: var(--accent-tint);
+  border-color: var(--accent);
+}
+/*
+ * LATCHED is a second channel on top of that: a solid accent edge, so "it is open because I clicked" reads differently
+ * from "it is open because the pointer is here" without adding a word to a 30px strip.
+ */
+.session-peek.is-pinned .session-peek-tab { box-shadow: inset 3px 0 0 var(--accent); }
+.session-peek-icon { display: block; flex: none; }
+/*
+ * The state, as a dot in the colours the rest of the app already uses for it.
+ *
+ * Never the only carrier: the word is the dot's `title`, the tab's tooltip and its accessible name. `--dim` for a state
+ * that is neither good nor bad (stopped, registered), so a neutral session does not look like a healthy one.
+ */
+.session-peek-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }
+.session-peek-dot.is-ok { background: var(--ok); }
+.session-peek-dot.is-busy { background: var(--accent); }
+.session-peek-dot.is-attention { background: var(--warn); }
+.session-peek-dot.is-bad { background: var(--danger); }
+/*
+ * The context reading, and the ONLY colour change in the tab's text.
+ *
+ * Amber past the threshold rather than a bar: there is no room for a gauge in 30px, and this is the same
+ * `--warn-text`/threshold pair `formatContext` and the header meter use. The word `full` that accompanies it elsewhere is
+ * in the tooltip, so neither colour nor the word is the only carrier.
+ */
+.session-peek-ctx { line-height: 1; }
+.session-peek-ctx.is-full { color: var(--warn-text); }
+
+/*
+ * THE PANEL: the companion's content, beside the tab.
+ *
+ * An ordinary flex item, laid out by the same rules as the wide layout's column; this rule decides only how much room it
+ * has and whether it is VISIBLE. At rest the item is the tab's 30px wide, so the panel's remaining width is zero and it
+ * occupies nothing; `visibility` rather than `display` keeps it in the accessibility tree's `aria-controls` target.
+ */
+.session-peek-panel {
+  pointer-events: auto;
+  /*
+   * The panel takes the item's remaining width and scrolls inside it, so a long details block never grows the row.
+   * `min-width: 0` and `min-height: 0` are what let a flex child shrink below its content: at rest the item is the tab's
+   * 30px and the panel is 0px wide, which is why it needs neither `display: none` nor a transition to disappear.
+   */
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  /* A vertical scroller. A horizontal bar here was the symptom of the panel being 30px too narrow, not a feature. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+.session-peek.is-open .session-peek-panel {
+  visibility: visible;
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-peek-panel { transition: none; }
+}
 /* ------------------------------------------------------------------ rail */
 
 .rail {
@@ -711,6 +1238,100 @@ button { font: inherit; color: inherit; }
 .group-select:focus-visible { outline: none; box-shadow: var(--focus); }
 
 /*
+ * A heading that FOLDS its section (issue #275).
+ *
+ * The same shape as `group-select`, because both are "the heading acts": a reader who has learned one should not have
+ * to learn a second affordance. The difference is the disclosure mark, which says what pressing it does.
+ *
+ * The mark is a text glyph rather than a chevron character from the Technical block: `⌫` from that block rendered as an
+ * empty box on this machine (`SessionControlBar` records the measurement), and a tofu square where the ONLY affordance
+ * is would read as a broken control. `▸`/`▾` are Geometric Shapes, which the platform face has.
+ */
+/*
+ * The mark, now the SIZE of a control rather than the size of a character.
+ *
+ * Measured defect in the first version: a `--fs-2xs` glyph (10px) inside a `padding: 0 2px` button, so the shape the eye
+ * had to find was about 6x8px on an 11px heading — reported as "users can barely see it". The button is a 26px box and
+ * the mark inside it is 15px, which is also why the glyph grew rather than the padding alone: a 26px box around a 10px
+ * shape reads as an empty box.
+ *
+ * Still `▸`/`▾` and not a chevron from the Technical block: `⌫` from that block rendered as an empty box on this machine
+ * (`SessionControlBar` records the measurement), and a tofu square where the affordance is would read as a broken
+ * control. `▸`/`▾` are Geometric Shapes, which the platform face has.
+ */
+.group-fold {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  padding: 0;
+  margin: 0 0 0 calc(-1 * var(--sp-1));
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+}
+/* The row already tints on hover; boxing the mark as well would draw two targets inside one. */
+.group-header.is-foldable:hover .group-fold { color: var(--text); background: transparent; border-color: transparent; }
+/*
+ * A heading that FOLDS its section: the whole row is the target (issue #275).
+ *
+ * Reported from a screenshot: the disclosure mark "is way too small, users can barely see it", and the only thing that
+ * responded was the mark itself — a precision task on a row where every other target is the full width of the list.
+ *
+ * So the heading carries a visible target of its own: a hover tint across the row, and a minimum height that clears the
+ * 24px floor by a margin. The mark becomes a 26px box with a 15px glyph — the size at which a shape stops being a speck.
+ *
+ * `cursor: pointer` only where the row acts: the `Needs you`, `Failed` and `Running` headings are plain text and must
+ * not offer a target they do not have.
+ */
+.group-header.is-foldable {
+  cursor: pointer;
+  border-radius: var(--r-1);
+  margin-inline: var(--sp-1);
+  padding-inline: calc(var(--sp-3) - var(--sp-1));
+  min-height: 34px;
+}
+.group-header.is-foldable:hover { color: var(--text); background: var(--panel-2); }
+.group-header.is-foldable:hover::after { background: var(--line-strong); }
+/* No ring on the heading itself: it is not focusable. Keyboard users land on the mark, and its ring is its own. */
+
+/*
+ * A fixed box for the mark, so the label's x does not shift when the section folds.
+ *
+ * Measured defect in the first version: `▸` and `▾` are different widths in a proportional face, so folding a section
+ * moved its own word sideways — the row of headings visibly jittered, which is the class of movement `roster.ts` rules
+ * out for rows.
+ */
+.group-fold-mark {
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+  /* 15px rather than the 10px meta size: this is a control shape, not a caption, and 10px is what "barely see it" measured. */
+  font-size: var(--fs-md);
+  line-height: 1;
+}
+
+/*
+ * A folded heading says so, in words.
+ *
+ * The mark is a shape and the count is a number; neither says "there are rows behind this". The word is what makes the
+ * difference between "11 idle sessions" and "11 idle sessions, not shown" — and it is the second reading that stops a
+ * reader concluding their sessions vanished.
+ */
+.group-fold-note {
+  font-size: var(--fs-2xs);
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 0 5px;
+}
+
+/*
  * Row: 3 lines, state on the left border, no card.
  *
  * ## The rounded corner is what separates rows, and it was missing
@@ -810,6 +1431,23 @@ button { font: inherit; color: inherit; }
   gap: var(--sp-2);
 }
 .rail-row .ask { color: var(--warn-text); }
+
+/*
+ * CALM density (issue #275): the row as a SWITCHER, not a dashboard.
+ *
+ * At twelve sessions the rail rendered eleven rows of three lines — names, paths, and eleven gauges carrying percentages
+ * nobody could act on (`ctx 0%`, `ctx 3%`, `ctx 0%`, `ctx 5%`…). The deciding rule is not "hide the third line" but
+ * "show it only when it can change a decision", which `showsRowMetrics` owns; this rule is what makes the remaining
+ * lines read as a list rather than as an abbreviated table.
+ *
+ * What is deliberately NOT here: a smaller font, or dimmer text. A calm row is not a faded row — the name is the thing
+ * the reader is looking for, and it must not become the quietest part of the row in the mode whose whole purpose is
+ * scanning for a session.
+ */
+.rail-row.is-calm .r2 { opacity: 0.85; }
+/* A calm row with no metrics is one line of prose plus one of where: tighter, because there is less to separate. */
+.rail-row.is-calm { padding-top: 5px; padding-bottom: 5px; }
+
 
 /*
  * A rail row holds two controls (issue #89): the row itself, and the `⋯` menu of actions.
@@ -3877,6 +4515,16 @@ select.btn { font-family: var(--sans); }
  */
 .transcript-header {
   /*
+   * THE DETAILS FRAME: one class, two placements.
+   *
+   * In the wide layout this is a sticky grid item beside the prose. In reading focus the same class names the box INSIDE
+   * the peek overlay, so the twenty-five `.transcript-header .…` rules that lay the content out apply in both frames — the
+   * alternative, a differently named wrapper, rendered the details as unstyled blocks (Provider and Model as bare text
+   * beside their selects, with no grouping).
+   *
+   * The wide-layout-only declarations are in the sibling rule below, scoped to being a child of the row. What stays here
+   * is what both frames need: the flex column, the padding, and the width cap.
+   *
    * Sticky, so it stays with the reader: the conversation scrolls past it while the identity, state, meter and model
    * remain in view.
    *
@@ -3884,16 +4532,54 @@ select.btn { font-family: var(--sans); }
    * stretched to the row's height has no room to move, and `sticky` silently behaves like `static`. Both are required;
    * neither is decoration.
    */
-  position: sticky;
-  top: 0;
-  align-self: flex-start;
-  height: min-content;
+  /*
+   * The BOX, shared by both frames: a flex column, at the companion's width.
+   *
+   * `position: sticky` and `align-self` are NOT here — they are about being a grid item in the wide row, and in the peek
+   * overlay they would be inert at best and wrong at worst. They live in `.transcript-wrap.has-header > .transcript-header`
+   * below, which is the rule that says "this box is placed in the row".
+   */
   display: flex;
+  flex-direction: column;
   justify-content: flex-start;
   padding: var(--sp-4) 0;
-  /* Its own width, never shrunk into its own labels. */
-  flex: none;
-  width: 340px;
+  /*
+   * `flex: none` became `min-width: 0` when the row became a grid.
+   *
+   * `flex` is inert in a grid item, so the declaration that actually did the work was the `width`: it made the box
+   * exactly 340px and refused to be squeezed. In the grid that is not enough — the box sits in a FLEXIBLE track, so
+   * between roughly 1100 and 1250px the margins must shrink to keep the lane readable while the box stays 340px, and
+   * the total then exceeds the container. The symptom is the one a reader already reported once from a different
+   * cause: content drawn past the right edge.
+   *
+   * `max-width` plus `min-width: 0` inverts the priority — the box may narrow, the lane keeps its measure — and the
+   * container query stacks them below 1080px, where narrowing would start clipping labels.
+   */
+  width: 100%;
+  max-width: var(--companion-width);
+  min-width: 0;
+}
+
+/*
+ * PLACEMENT: "this box is a grid item in the wide row".
+ *
+ * Split from the box's own declarations above so the peek overlay can reuse the same class for the same CONTENT without
+ * inheriting a column's placement. `sticky` needs a scroll container and a grid row; in an overlay it would either be
+ * inert or fight the panel's own scrolling.
+ *
+ * The child combinator matters: it names the row's own item, so the peek's copy — nested inside `.session-peek-panel` —
+ * is not matched.
+ */
+.transcript-wrap.has-header > .transcript-header {
+  position: sticky;
+  top: 0;
+  /*
+   * `align-self: start` and not the row's `align-items`: an item stretched to the row's height has no room to move and
+   * `sticky` silently behaves like `static`. Expressing it on the ITEM is what lets the row stretch, which is what the
+   * scroller needs — the two requirements live on different elements.
+   */
+  align-self: start;
+  height: min-content;
 }
 
 /* The block itself: a quiet raised surface, wide enough for the pickers on one line each. */
@@ -3912,8 +4598,15 @@ select.btn { font-family: var(--sans); }
  * subtle, it is broken.
  */
 .transcript-header .session-header {
-  width: 340px;
-  max-width: 100%;
+  /*
+   * `width: 100%` capped by the token, rather than `width: var(--companion-width)`.
+   *
+   * Its parent (`.transcript-header`) is 100% of a track that may now be NARROWER than 340px between about 1100 and
+   * 1250px a window — and a child pinned to a fixed width would overhang it, which is the "drawn past the edge" symptom
+   * again, one level in. Capped rather than fixed: it is exactly the companion's width whenever there is room.
+   */
+  width: 100%;
+  max-width: var(--companion-width);
   flex-direction: column;
   align-items: stretch;
   gap: var(--sp-2);
@@ -4010,49 +4703,146 @@ select.btn { font-family: var(--sans); }
  * rest. `align-items: start` on the scroller would break the sticky child, so the row alignment is left alone.
  */
 /*
- * THE WIDE LAYOUT: one centred row — [ reading column ] [ companion ].
+ * THE WIDE LAYOUT: [ leading ][ reading lane ][ companion ].
  *
- * `display: flex` with `justify-content: center`, and the reading column given an explicit width. Not a grid with
- * max-sized tracks: that version computed the right thing on paper and rendered pinned to the left edge on a real
- * window (`img_30.png`), because whether `minmax(0, 72ch)` + `justify-content: center` centres anything depends on how
- * the track resolves against the container's spare space. A layout whose centring has that many preconditions drifts
- * again the next time anything nearby changes.
+ * ## Why this is three tracks and not one centred flex row
  *
- * Flex says what is meant: two boxes, centred as a pair.
+ * The row was `display: flex; justify-content: center` over two boxes — the prose and a 340px companion — so what was
+ * centred was the PAIR. The prose's own centre is half a companion to the left of that, which nobody notices while the
+ * rail fills the void and everybody notices when it does not: *"without the session list, the transcript is not
+ * centered anymore"*.
+ *
+ * The mechanism is that a `max-width` item is NARROWER than its flex track, and the remainder belongs to the container.
+ * `justify-content` positions boxes; it cannot position an item inside its own track. A grid TRACK can, so the lane gets
+ * one, and the centring becomes arithmetic: the two margin tracks are the same token, therefore the same width.
+ *
+ * ## The first version of this got the arithmetic wrong, which is why the shape is spelled out
+ *
+ * It wrote `minmax(0, 1fr) minmax(0, 80ch) 340px` with a comment claiming "one `1fr` on each side". The trailing track
+ * was a LITERAL, so the single flexible track absorbed all of the free space and pushed the prose to the right edge —
+ * a worse defect than the centring it replaced. Every track is a token now (`reading.ts#laneTracks`) and the two
+ * margins are one value while centred, so the two cannot disagree.
+ *
+ * ## Why not `1fr` with two spacer children
+ *
+ * Spacers are markup that exists to be ignored, and they would have to be rendered conditionally for the stacked
+ * layout. Tracks are the same idea with no DOM.
  */
 .transcript-wrap.has-header {
-  display: flex;
-  /* A ROW that centres its two boxes. `flex-direction` must be said explicitly: the base `.transcript-wrap` is a
-     column, and a second rule that only changed `display` would leave the companion stacked under the prose. */
-  flex-direction: row;
+  display: grid;
+  grid-template-columns:
+    var(--reading-leading)
+    var(--reading-lane)
+    var(--reading-trailing);
   /*
-   * `center` centres the two boxes as a pair. The pair is not symmetric — 72ch of prose plus a 340px companion — so
-   * the pair's centre is left of the column's centre by half the companion's width. That is correct for "the
-   * composition is centred"; making the PROSE the centred thing instead is #92's mistake and puts the box off the
-   * right edge on a wide window.
+   * The gutter comes out of the TRAILING track's share, not out of the lane: `column-gap` is subtracted from the free
+   * space before the flexible tracks are resolved, so a gap here narrows the margins symmetrically rather than eating
+   * into the reader's measure.
    */
-  justify-content: center;
-  /* The gap between the prose and the box is this one number. */
-  gap: var(--sp-5);
+  column-gap: var(--sp-5);
+  /*
+   * `align-items: stretch` — the DEFAULT, and it is written out because the previous value was a regression that broke
+   * scrolling.
+   *
+   * The rule was `align-items: start`, copied from the flex version, where `start` was needed so the sticky companion
+   * had room to move (`focus-mode.test` and the note at the top of this section both say so). In a GRID row the same
+   * value sizes every row to its content, so `.transcript-main` became content-height instead of filling the column:
+   * the scroller had nothing to scroll, and the composer was pushed up behind the text. Reported as *"i cant scroll"*.
+   *
+   * The sticky companion does not need it here: `align-self: start` on `.transcript-header` gives THAT item room to
+   * move while the row stretches. One item's alignment is a property of the item, not of the row — which is exactly the
+   * mistake, and it is why the item carries its own `align-self`.
+   */
+  align-items: stretch;
+  /*
+   * `grid-template-rows: minmax(0, 1fr)` — ONE explicit row that absorbs the height, and the `minmax` is load-bearing
+   * for the same reason `minmax(0, 1fr)` is on the columns: a bare `1fr` is `minmax(auto, 1fr)`, whose minimum is the
+   * content's height, so a long transcript would size the row to its own text and `.transcript` (which is
+   * `overflow-y: auto`) would never get a bounded box to scroll inside. The pane would simply grow past the window.
+   *
+   * Implicit rows are `auto`, which has the same effect, so this has to be stated rather than left out. Together with
+   * `align-items: stretch` it is what makes "the transcript scrolls" true rather than assumed.
+   */
+  grid-template-rows: minmax(0, 1fr);
   /* Let the row shrink on a narrow window instead of overflowing it. */
   min-width: 0;
   flex: 1;
 }
 
 /*
- * VISUAL ORDER: reading column first, companion second.
+ * PLACEMENT: the lane in the middle track, the companion in the trailing one.
  *
  * The companion is the FIRST child in the DOM, which is right — a screen reader and a keyboard should meet the
- * session's identity before its conversation, and the tab order should follow the same path. But in a flex ROW that
- * put it on the LEFT, so the layout was `[companion][conversation]` (`img_32.png`) while every description of it —
- * and the review that asked for it — says the box sits to the RIGHT of the prose.
- *
- * `order` moves the boxes without touching the source, which is the one thing it is good for: the reading order and
- * the visual order legitimately differ here, and this keeps them both correct instead of bending the DOM to the
- * picture.
+ * session's identity before its conversation, and the tab order should follow the same path. The visual order is the
+ * other way round, and a grid says that by naming the COLUMN rather than by `order`: it states where a box goes
+ * instead of where it sorts, and sorting is what silently reorders a stacked layout.
  */
-.transcript-wrap.has-header .transcript-main { order: 1; }
-.transcript-wrap.has-header .transcript-header { order: 2; }
+.transcript-wrap.has-header .transcript-main { grid-column: 2; }
+.transcript-wrap.has-header .transcript-header { grid-column: 3; }
+
+/*
+ * READING FOCUS: the companion, collapsed to a tab beside the prose.
+ *
+ * The same row the wide layout uses. At rest the tracks are the wide row's three tokens, centred by arithmetic, with a
+ * tab-wide strip of padding reserved on each side so the tab has somewhere to be on ANY window. Open, the trailing
+ * track becomes a real 340px (capped at 45% of the row) and the box fills it.
+ *
+ * `--peek-tab` is defined here and read by the padding, the item's resting width and the tab's thickness — one number,
+ * three readers, so they cannot disagree.
+ */
+.transcript-wrap.has-peek {
+  display: grid;
+  /*
+   * AT REST: the SAME THREE TRACKS AS THE WIDE ROW — literally the same tokens, which is why the prose is centred here too.
+   *
+   * Two shortcuts were tried and both shipped broken: a fixed third track (`1fr … 30px`) absorbs no space, so the prose
+   * lands against the right edge; and `max(var(--reading-leading), 30px)` is not CSS — `minmax()` of `1fr` is a track
+   * size, not a `<length>` — so the declaration is invalid and the grid collapses to one implicit column.
+   */
+  grid-template-columns:
+    var(--reading-leading)
+    var(--reading-lane)
+    var(--reading-trailing);
+  /*
+   * THE TAB'S STRIP IS RESERVED, on both sides, as padding — not carved out of a track.
+   *
+   * Measured from a real window: a 518px transcript resolved the columns to `0px 470px 0px`. The lane takes every pixel
+   * it can, so the margin beside it is ZERO on any window narrower than lane + gaps, and a tab living in that margin was
+   * a 0x0 box clipped by its own `overflow: hidden` — the tab existed, 30x169, and was invisible. There is no free margin
+   * to rely on, so the strip is guaranteed instead.
+   *
+   * Symmetric, so the lane stays centred exactly as in the wide row (the two paddings are one token). The tab sits in the
+   * trailing strip on every window, whatever the margin beside the lane happens to be.
+   */
+  padding-inline: var(--peek-tab);
+  grid-template-rows: minmax(0, 1fr);
+  column-gap: var(--sp-5);
+  align-items: stretch;
+  min-width: 0;
+  flex: 1;
+  /* The tab thickness, and the width the whole companion box takes at rest. One number, two readers. */
+  --peek-tab: 30px;
+}
+/*
+ * OPEN: the trailing track gets a FLOOR and keeps its ceiling, so the lane moves only when it has to.
+ *
+ * `minmax(<floor>, 1fr)` beside the leading `minmax(0, 1fr)`: while each margin is wider than the floor the two split the
+ * free space exactly as they did at rest, so the lane does not move at all and the panel simply opens into margin that was
+ * empty. Only when the margin is narrower than the panel does the trailing track pin at the floor and the lane yield the
+ * difference — once, and only on a window that has no room.
+ *
+ * The floor is the companion's FULL width — the panel needs all of it, and the tab is in the strip the row's padding already
+ * reserves — capped at 45% so the prose keeps the larger half of a narrow row. `min()` of a calc and a percentage is one `<length-percentage>`, a valid
+ * track breadth — unlike the `max()` around `minmax()` that collapsed this grid once already.
+ */
+.transcript-wrap.has-peek.is-peek-open {
+  grid-template-columns:
+    var(--reading-leading)
+    var(--reading-lane)
+    minmax(min(var(--companion-width), 45%), var(--reading-trailing-max));
+}
+.transcript-wrap.has-peek .transcript-main { grid-column: 2; }
+
 
 /*
  * The reading column: the scroller and the composer, stacked, at the reader's measure.
@@ -4097,17 +4887,34 @@ select.btn { font-family: var(--sans); }
    * repositioning because flex places them in source order, which is already header then main.
    */
   .transcript-wrap.has-header {
-    flex-direction: column;
-    /* Centring would centre each child on its own width here, which is #92's defect: a full-width row and a capped
-       column would sit on different centres. A column of full-width children needs no horizontal centring. */
-    justify-content: flex-start;
-    gap: 0;
+    /* One column, source order: the companion above the reading column. */
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    column-gap: 0;
   }
-  /* The visual-order swap exists for the ROW only. Stacked, the companion must be on top, so `order` returns to
-     source order — which is already header-then-main. */
+  /*
+   * Both boxes return to the ONE column.
+   *
+   * The wide form places them in tracks 2 and 3, and there is no track 2 or 3 here — naming a column that does not
+   * exist is how a grid silently invents an implicit one and produces a second column nobody asked for. That is the
+   * same class of defect as the trailing `340px` track above: a declaration that is right for one shape and wrong for
+   * the other, in a rule that looks like it applies to both.
+   */
   .transcript-wrap.has-header .transcript-main,
-  .transcript-wrap.has-header .transcript-header { order: 0; }
-  .transcript-header {
+  .transcript-wrap.has-header > .transcript-header { grid-column: 1; }
+  /*
+   * THE ROW'S OWN ITEM — `>` — and that one character is the whole narrow-form rule.
+   *
+   * Everything in this query describes the BAND the companion becomes when it is stacked above the prose: full width,
+   * no box of its own, labels dropped for room. The peek overlay wears the same `.transcript-header` class on purpose
+   * (one content element, one set of layout rules), so an unscoped selector here would push the band's compromises into
+   * a 340px panel that always has room — which is exactly what happened: three unlabelled controls in a row, the model
+   * elided to `deepseek-ai/Deep…`.
+   *
+   * Scoped to the row's item, the overlay matches nothing here and falls through to the base rules, which already lay
+   * the details out the way the companion column does. No second set of declarations to keep in step with them.
+   */
+  .transcript-wrap.has-header > .transcript-header {
     position: static;
     /* Full width across the top, and no longer a floating box. */
     width: 100%;
@@ -4127,7 +4934,7 @@ select.btn { font-family: var(--sans); }
    * (`deepseek-ai/…` and `high`), and the labels are the first thing that can go when there is no room. Everything
    * dropped is one click away in the Session panel.
    */
-  .transcript-header .session-header {
+  .transcript-wrap.has-header > .transcript-header .session-header {
     width: 100%;
     max-width: none;
     flex-direction: row;
@@ -4146,24 +4953,24 @@ select.btn { font-family: var(--sans); }
     border-radius: 0;
   }
   /* The identity keeps one line: the name truncates, the chips stay. */
-  .transcript-header .session-header .title { flex: 1 1 12ch; min-width: 0; }
+  .transcript-wrap.has-header > .transcript-header .session-header .title { flex: 1 1 12ch; min-width: 0; }
   /* At narrow widths the location line goes; the action that acts on it goes WITH it. Leaving "New session here"
      visible with no path beside it would be an unlabelled button in a row of its own — it is only unambiguous
      next to the directory it names. The sheet's "Used before" list is the same affordance one click away. */
-  .transcript-header .session-header .where-row { display: none; }
+  .transcript-wrap.has-header > .transcript-header .session-header .where-row { display: none; }
   /* Labels go, controls stay. `display: none` rather than `visibility`: a hidden label must not reserve a column. */
-  .transcript-header .picker-label { display: none; }
-  .transcript-header .picker-grid { flex-direction: row; align-items: center; gap: var(--sp-2); margin-left: auto; }
-  .transcript-header .picker-controls { flex-direction: row; align-items: center; gap: var(--sp-2); }
-  .transcript-header .picker { flex-direction: row; align-items: center; gap: var(--sp-2); }
+  .transcript-wrap.has-header > .transcript-header .picker-label { display: none; }
+  .transcript-wrap.has-header > .transcript-header .picker-grid { flex-direction: row; align-items: center; gap: var(--sp-2); margin-left: auto; }
+  .transcript-wrap.has-header > .transcript-header .picker-controls { flex-direction: row; align-items: center; gap: var(--sp-2); }
+  .transcript-wrap.has-header > .transcript-header .picker { flex-direction: row; align-items: center; gap: var(--sp-2); }
   /* The pair gaps belong to the stacked box; in the row the gap alone spaces the controls. */
-  .transcript-header .picker-grid > [data-picker-row="model"][data-picker-label],
-  .transcript-header .picker-grid > [data-picker-row="note"],
-  .transcript-header .picker-controls > .picker { margin-top: 0; }
+  .transcript-wrap.has-header > .transcript-header .picker-grid > [data-picker-row="model"][data-picker-label],
+  .transcript-wrap.has-header > .transcript-header .picker-grid > [data-picker-row="note"],
+  .transcript-wrap.has-header > .transcript-header .picker-controls > .picker { margin-top: 0; }
   /* Neither picker may stretch: two selects side by side have to share the line with the name. */
-  .transcript-header .picker-field { flex: 0 1 auto; min-width: 0; }
-  .transcript-header .picker-select { width: auto; max-width: 22ch; }
-  .transcript-header .header-stats { flex: none; }
+  .transcript-wrap.has-header > .transcript-header .picker-field { flex: 0 1 auto; min-width: 0; }
+  .transcript-wrap.has-header > .transcript-header .picker-select { width: auto; max-width: 22ch; }
+  .transcript-wrap.has-header > .transcript-header .header-stats { flex: none; }
   /* The reading column takes the rest, and still centres itself. */
   .transcript-main { flex: 1 1 auto; margin-inline: auto; }
 }

@@ -48,6 +48,19 @@ test("the defaults turn into the CSS that was hard-coded before", () => {
   assert.deepEqual(readingStyle(defaultReadingPrefs()), {
     "--reading-size": "15px",
     "--reading-measure": "80ch",
+    /*
+     * And the wide layout's three tracks (issue #275 follow-up). Asserted here rather than in the stylesheet because
+     * they are DERIVED from the reader's one `measure` setting: the cap the prose obeys and the room the layout reserves
+     * for it are the same number, which is what stops them drifting.
+     */
+    "--reading-leading": "minmax(0, 1fr)",
+    "--reading-lane": "minmax(0, 80ch)",
+    "--reading-trailing": "minmax(0, 1fr)",
+    /*
+     * The CEILING of the peek panel's track when it is open. `1fr` while centred, so the margin keeps absorbing space and
+     * the lane does not move when there is room for the panel; under `fill` the margin is already a fixed track.
+     */
+    "--reading-trailing-max": "1fr",
   });
 });
 

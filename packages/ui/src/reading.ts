@@ -116,5 +116,57 @@ export function readingStyle(prefs: ReadingPrefs): Record<string, string> {
   return {
     "--reading-size": `${prefs.sizePx}px`,
     "--reading-measure": prefs.measure === READING_MEASURE_FILL ? "none" : `${prefs.measure}ch`,
+    ...laneTracks(prefs.measure),
+  };
+}
+
+/**
+ * The three grid tracks the wide layout puts around the prose lane.
+ *
+ * ## The defect these exist to make impossible
+ *
+ * The composition used to be `display: flex; justify-content: center` over TWO boxes — prose and a 340px companion — so
+ * what was centred was the PAIR. The prose's own centre is therefore half a companion to the left of the pair's, which
+ * is invisible while the rail shares the void and obvious the moment it does not: reported as *"without the session
+ * list, the transcript is not centered anymore"*.
+ *
+ * A `max-width` item cannot be positioned inside its own flex track — the remainder belongs to the container — so the
+ * lane needs a TRACK of its own, and the centring has to be arithmetic: equal space on each side.
+ *
+ * ## Why the two margins are ONE function and not two declarations
+ *
+ * The first attempt at this wrote `minmax(0, 1fr)` for the leading track and the companion's literal width for the
+ * trailing one, with a comment claiming symmetry. One flexible track takes ALL of the free space, so the prose was
+ * pushed to the right edge — a worse defect than the one being fixed, and one a reading of the code should have caught.
+ * Both margins now come from `laneTracks`, so they cannot disagree, and `reading.test.ts` asserts the template names
+ * the same token twice rather than checking a literal.
+ *
+ * ## Why `fill` is the asymmetric case
+ *
+ * `fill` means "use the column's width", i.e. everything the companion does not need — so its leading margin collapses
+ * and the trailing track is exactly the companion. That is deliberately NOT centred: a reader who asked for the full
+ * width asked for it on the left, not for a symmetric void on both sides.
+ *
+ * The lane is `minmax(0, 1fr)` under `fill` rather than `100%`: a `100%` track takes the whole row and pushes the
+ * companion out of the grid entirely, which loses Stop, Resume, Rename and both pickers.
+ */
+function laneTracks(measure: ReadingPrefs["measure"]): Record<string, string> {
+  if (measure === READING_MEASURE_FILL) {
+    return {
+      "--reading-leading": "0px",
+      "--reading-lane": "minmax(0, 1fr)",
+      "--reading-trailing": "var(--companion-width)",
+      "--reading-trailing-max": "var(--companion-width)",
+    };
+  }
+  /*
+   * CENTRED: one flexible margin on each side, and the lane capped by the reader's measure. The two margins are the
+   * same token because they must be the same width — that equality IS the centring.
+   */
+  return {
+    "--reading-leading": "minmax(0, 1fr)",
+    "--reading-lane": `minmax(0, ${measure}ch)`,
+    "--reading-trailing": "minmax(0, 1fr)",
+    "--reading-trailing-max": "1fr",
   };
 }
