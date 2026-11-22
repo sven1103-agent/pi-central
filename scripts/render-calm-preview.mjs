@@ -119,11 +119,18 @@ const transcriptHtml = renderToString(
   }),
 );
 
+/*
+ * THE ANCHOR RULE, scoped to the PANE and not to the body.
+ *
+ * The first version wrote `body.anchor-middle .transcript-lane`, and every pane carried its class on the pane
+ * element instead — so no selector matched, all three states rendered identically, and the page looked like
+ * proof that the padding makes no difference. Found in use, by looking at it, which is what the page exists for.
+ */
 const anchorCss = [
   ":root { --reading-size: 15px; --reading-measure: 80ch; --tail-anchor: min(35vh, 24rem); }",
-  "body.anchor-middle .transcript-lane { padding-bottom: var(--tail-anchor); }",
-  "body.anchor-foot .transcript-lane { padding-bottom: 0; }",
-  "body.anchor-top .transcript-lane { padding-bottom: calc(var(--tail-anchor) * 2); }",
+  ".anchor-middle .transcript-lane { padding-bottom: var(--tail-anchor); }",
+  ".anchor-foot .transcript-lane { padding-bottom: 0; }",
+  ".anchor-top .transcript-lane { padding-bottom: calc(var(--tail-anchor) * 2); }",
 ].join("\n");
 
 const harness = [
@@ -210,14 +217,64 @@ writeFileSync("/tmp/pi-calm-anchor.html", anchorPage);
 
 // --- page 2: how text arrives ----------------------------------------------------------------
 
-const tokenFrames = [];
-for (let end = 4; end <= ANSWER.length; end += 4) tokenFrames.push(renderMarkdown(ANSWER.slice(0, end)));
+/*
+ * A CORRECTION, and the most useful thing this preview produced.
+ *
+ * The first version put "one commit per token" beside "one commit per frame" and played both at once. The
+ * operator reported no visible difference, and that was not a bug in the page — it was the page telling the
+ * truth about a claim the ADR was making badly.
+ *
+ * Both sides committed inside the SAME requestAnimationFrame callback, so the browser painted them at identical
+ * moments. That is not an artefact of the demo: a display refreshes 60 times a second, so any two commit rates
+ * above 60/s are literally unwatchable as a difference, and below 60/s there is nothing to batch. Coalescing
+ * per-token commits into per-frame commits is therefore INVISIBLE BY CONSTRUCTION on a 60Hz display. Its benefit
+ * is main-thread CPU — measured at 550 ms against 57 ms for a 3000-character message — which a reader
+ * experiences as "the window does not stutter", not as "the text arrives differently".
+ *
+ * So this page shows the question the complaint is actually about, which is a DIFFERENT decision: raw stream on
+ * the left, deliberately paced reveal on the right. The reveal steps in units chosen so no step ends
+ * mid-markdown, because slicing source characters shows the reader literal syntax — the census in ADR-0016 puts
+ * that at 3-40% of all reveal positions.
+ */
 
-const FRAMES = 120;
-const frameFrames = [];
-for (let i = 1; i <= FRAMES; i += 1) {
-  frameFrames.push(renderMarkdown(ANSWER.slice(0, Math.max(1, Math.round((ANSWER.length * i) / FRAMES)))));
+/*
+ * REVEAL UNITS, chosen so no unit ends inside markdown syntax.
+ *
+ * A fenced block or a table is atomic: half a fence is a paragraph and half a table is pipes. Prose splits at a
+ * sentence end, so a step never stops between `**` and its closing pair. This is the whole reason a naive
+ * typewriter looks broken and this does not.
+ */
+function revealUnits(text) {
+  const units = [];
+  let cursor = 0;
+  for (const block of text.split(/\n\n+/)) {
+    const start = text.indexOf(block, cursor);
+    if (start < 0) continue;
+    const end = start + block.length;
+    cursor = end;
+    if (block.startsWith(FENCE) || block.startsWith("|")) {
+      units.push(end);
+      continue;
+    }
+    let from = 0;
+    for (const match of block.matchAll(/[.!?:](?=\s|$)/g)) {
+      const stop = match.index + 1;
+      if (stop > from) {
+        units.push(start + stop);
+        from = stop;
+      }
+    }
+    if (from < block.length) units.push(end);
+  }
+  return units;
 }
+
+const REVEAL_UNITS = revealUnits(ANSWER);
+const REVEAL_STATES = REVEAL_UNITS.map((end) => renderMarkdown(ANSWER.slice(0, end)));
+
+// The raw side: every 4-character delta, exactly what the wire carries today.
+const RAW_STATES = [];
+for (let end = 4; end <= ANSWER.length; end += 4) RAW_STATES.push(renderMarkdown(ANSWER.slice(0, end)));
 
 const streamHarness = [
   "html, body { height: 100%; margin: 0; }",
@@ -225,8 +282,8 @@ const streamHarness = [
   ".bar { flex: none; display: flex; align-items: center; gap: 12px; padding: 9px 14px; flex-wrap: wrap; border-bottom: 1px solid var(--line); background: var(--panel); }",
   ".bar strong { font-size: 13px; }",
   ".bar button { font: inherit; font-size: 12px; padding: 5px 11px; border-radius: 5px; cursor: pointer; background: var(--panel-2); color: var(--text); border: 1px solid var(--line-strong); }",
-  ".bar .hint { color: var(--dim); }",
-  ".bar .clock { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--accent-text); }",
+  ".bar .hint { color: var(--dim); max-width: 52ch; line-height: 1.5; }",
+  ".bar .clock { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--accent-text); text-align: right; }",
   ".stage { flex: 1; min-height: 0; display: flex; }",
   ".side { flex: 1; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); }",
   ".side:last-child { border-right: 0; }",
@@ -238,12 +295,12 @@ const streamHarness = [
 ].join("\n");
 
 const streamScript = [
-  "var TOKEN = " + JSON.stringify(tokenFrames) + ";",
-  "var FRAME = " + JSON.stringify(frameFrames) + ";",
+  "var RAW = " + JSON.stringify(RAW_STATES) + ";",
+  "var PACED = " + JSON.stringify(REVEAL_STATES) + ";",
   'var left = document.getElementById("left"), right = document.getElementById("right");',
   'var leftCol = document.getElementById("left-col"), rightCol = document.getElementById("right-col");',
   'var clock = document.getElementById("clock"), running = null;',
-  "var DURATION = 6000;",
+  "var DURATION = 8000;",
   "function reset() {",
   "  if (running) { cancelAnimationFrame(running); running = null; }",
   '  left.innerHTML = ""; right.innerHTML = "";',
@@ -255,13 +312,13 @@ const streamScript = [
   "  var start = performance.now();",
   "  function step(now) {",
   "    var t = Math.min(1, (now - start) / DURATION);",
-  "    var li = Math.min(TOKEN.length - 1, Math.floor(t * (TOKEN.length - 1)));",
-  "    var ri = Math.min(FRAME.length - 1, Math.floor(t * (FRAME.length - 1)));",
-  "    left.innerHTML = TOKEN[li];",
-  "    right.innerHTML = FRAME[ri];",
+  "    var li = Math.min(RAW.length - 1, Math.floor(t * (RAW.length - 1)));",
+  "    var ri = Math.min(PACED.length - 1, Math.floor(t * (PACED.length - 1)));",
+  "    left.innerHTML = RAW[li];",
+  "    right.innerHTML = PACED[ri];",
   "    leftCol.scrollTop = leftCol.scrollHeight;",
   "    rightCol.scrollTop = rightCol.scrollHeight;",
-  '    clock.textContent = Math.round(t * 100) + "% \u2014 token " + (li + 1) + "/" + TOKEN.length + ", frame " + (ri + 1) + "/" + FRAME.length;',
+  '    clock.textContent = Math.round(t * 100) + "% \u2014 raw " + (li + 1) + "/" + RAW.length + ", reveal " + (ri + 1) + "/" + PACED.length;',
   "    if (t < 1) running = requestAnimationFrame(step);",
   '    else { running = null; clock.textContent = "done"; }',
   "  }",
@@ -282,14 +339,14 @@ const streamPage = [
   "  <strong>ADR-0016 \u2014 how text arrives</strong>",
   '  <button id="play">\u25b6 Play both</button>',
   '  <button id="reset">Reset</button>',
-  '  <span class="hint">Same text, same wall-clock duration. Left commits per token, right once per frame.</span>',
+  '  <span class="hint">Raw stream vs a paced reveal \u2014 a SEPARATE decision from coalescing, which is invisible on a 60Hz display. See the note in scripts/render-calm-preview.mjs.</span>',
   '  <span class="clock" id="clock">idle</span>',
   "</div>",
   '<div class="stage">',
-  '  <div class="side"><h2>Today \u2014 one commit per token (' + tokenFrames.length + ' states)</h2>',
+  '  <div class="side"><h2>Raw stream \u2014 as the wire carries it (' + RAW_STATES.length + ' states)</h2>',
   '    <div class="col" id="left-col"><div class="prose" id="left"></div></div>',
   '    <div class="dock"><textarea class="composer-input" readonly>Composer</textarea></div></div>',
-  '  <div class="side"><h2>Proposed \u2014 one commit per frame (' + frameFrames.length + ' states)</h2>',
+  '  <div class="side"><h2>Paced reveal \u2014 whole units, never mid-markdown (' + REVEAL_UNITS.length + ' steps)</h2>',
   '    <div class="col" id="right-col"><div class="prose" id="right"></div></div>',
   '    <div class="dock"><textarea class="composer-input" readonly>Composer</textarea></div></div>',
   "</div>",
@@ -301,6 +358,7 @@ writeFileSync("/tmp/pi-calm-stream.html", streamPage);
 
 console.log("written /tmp/pi-calm-anchor.html  (" + Math.round(anchorPage.length / 1024) + " kB)");
 console.log("written /tmp/pi-calm-stream.html  (" + Math.round(streamPage.length / 1024) + " kB)");
+console.log("  raw states: " + RAW_STATES.length + ", reveal steps: " + REVEAL_UNITS.length);
 console.log("");
 console.log("  open /tmp/pi-calm-anchor.html");
 console.log("  open /tmp/pi-calm-stream.html");
