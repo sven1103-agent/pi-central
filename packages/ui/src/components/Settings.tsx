@@ -671,7 +671,14 @@ function RailPanel({
       </label>
 
       <label className="reading-row">
-        <span>Reading focus</span>
+        {/*
+          "Zen mode", the name the reader used, with the app's own name for it after — `Zen mode (reading focus)`.
+          Two names were in play: the code and the ADR say "reading focus", and the request said *"many apps call it Zen
+          Mode, and the Option + Shift + Z can toggle Zen mode"*. A reader who learns one and finds the other has to
+          decide whether they are the same thing, so the surface a reader meets states both — and the chord, since this
+          is the only place the mode is offered by name.
+        */}
+        <span>Zen mode (reading focus)</span>
         <span style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
           <input
             type="checkbox"
@@ -685,7 +692,7 @@ function RailPanel({
       </label>
       <p className="settings-note">
         Folds the window's own chrome — not the conversation. The session's details become a tab on the conversation's
-        edge: hover it to peek, click to pin, Escape to unpin.
+        edge: hover it to peek, click to pin, Escape to unpin. Toggled with the keys in Settings’ own shortcut list (⌘K), and from the keyboard directly.
       </p>
 
       <label className="reading-row">

@@ -97,7 +97,7 @@ export function TranscriptView({
   onToggleAutoFollow,
   header,
   details,
-  focusMode = false,
+  peekOnly = false,
   peekPinned = false,
   onPeekPinned,
   peekStateWord,
@@ -216,15 +216,22 @@ export function TranscriptView({
    */
   header?: React.ReactNode;
   /**
-   * The session's details, as CONTENT — the frame is chosen by \`focusMode\`.
+   * The session's details, as CONTENT — the frame is decided by \`peekOnly\`.
    *
    * One element, two frames (issue #275, third slice): the wide layout puts it in a column, reading focus puts it behind
    * a peek tab. Passing the content rather than the framed thing is what stops a fact from appearing in one and not the
    * other — there is no second rendering to keep in step.
    */
   details?: React.ReactNode;
-  /** Which frame to use: a column, or the peek rail. The shell owns the preference; this owns placement. */
-  focusMode?: boolean | undefined;
+  /**
+   * Render the details behind the PEEK tab, and nowhere else — the shell's answer, not a preference.
+   *
+   * `focus && panel.collapsed`. It is one condition, computed where both facts are known, because the previous version
+   * let two independent conditions decide and they disagreed: the sheet hid the column whenever focus was on and the
+   * panel was open, while this component rendered the peek whenever focus was on — so the tab opened a 340px box with
+   * nothing in it. The peek replaces the column only when it is the only surface for the same facts.
+   */
+  peekOnly?: boolean | undefined;
   /** Is the peek rail pinned open? */
   peekPinned?: boolean | undefined;
   /** The session's state, in the app's own words (`stateLabel`), for the peek tab. */
@@ -269,6 +276,15 @@ export function TranscriptView({
    * and never show it — a control that exists but is never visible.
    */
   const [pinned, setPinned] = useState(true);
+
+  /**
+   * Is the peek panel showing? Written by `SessionPeek`, read by the WRAPPER's track widths.
+   *
+   * The panel is a grid item in the reading row, so whether it is showing is a fact about the LAYOUT — and the layout is
+   * the wrapper's. Hover stays the component's own state; only the "is it open" half is lifted, because only that half
+   * changes anything outside it.
+   */
+  const [peekOpen, setPeekOpen] = useState(false);
 
   /**
    * The memory callback, readable from the scroll handler.
@@ -600,23 +616,33 @@ export function TranscriptView({
     */
     <div className="transcript-shell">
     <div
-      className={`transcript-wrap${details !== undefined && !focusMode ? " has-header" : ""}${details !== undefined && focusMode ? " has-peek" : ""}`}
+      className={`transcript-wrap${details !== undefined && !peekOnly ? " has-header" : ""}${
+        details !== undefined && peekOnly ? " has-peek" : ""
+      }${peekOpen ? " is-peek-open" : ""}`}
     >
       {/*
         ONE content element, ONE frame (issue #275, third slice).
         
-        The wide layout puts the details in a COLUMN beside the prose. Reading focus has no column to give — the mode
-        exists to give that width back — so the same element goes behind a PEEK tab as an overlay. The condition is
-        `focusMode && details`, and the transcript decides it because placement within its own width is its business
-        while the preference is the shell's.
+        The wide layout puts the details in a COLUMN beside the prose. Reading focus gives the conversation the window, so
+        that column is narrowed to a TAB — and opening the tab widens the track back to the companion's width. The details
+        never leave their home beside the lane, and nothing is ever placed over the conversation.
         
-        The peek is a child of the wrap and NOT a grid item: it must not occupy a track, or the prose's position would
-        change when the panel opens. `.transcript-wrap` is already `position: relative`, so the overlay resolves against
-        it.
+        Both frames are grid ITEMS in the same row, in the same track, wearing the same `.transcript-header` class, so the
+        content is laid out by one set of rules. `peekOnly` chooses which box occupies that track, never what goes in it.
       */}
-      {details !== undefined && !focusMode && <div className="transcript-header">{details}</div>}
-      {details !== undefined && focusMode && (
-        <div className="transcript-peek">
+      {details !== undefined && !peekOnly && <div className="transcript-header">{details}</div>}
+      {details !== undefined && peekOnly && (
+        /*
+          THE COMPANION, AS A GRID ITEM — the same box the wide layout renders, in its own track, narrowed to a tab until
+          the reader asks for it.
+
+          It is a grid ITEM and not an overlay, and that is the whole design: the details already have a home beside the
+          prose, and the tab is that home at 30px instead of 340px. Opening it widens the track, so the panel appears in
+          the space the row already has and the prose moves nothing else. Nothing is re-invented — the children are the
+          very same `SessionHeader`, wearing `.transcript-header`, so the picker stack, the label column and the control
+          bar are laid out by the rules that already exist.
+        */
+        <div className="transcript-header transcript-header-peek">
           <SessionPeek
             stateWord={peekStateWord ?? ""}
             contextLabel={peekContextLabel ?? ""}
@@ -624,6 +650,7 @@ export function TranscriptView({
             label={`Session details for ${sessionLabel}`}
             pinned={peekPinned}
             onPinned={(next) => onPeekPinned?.(next)}
+            onOpenChange={setPeekOpen}
           >
             {details}
           </SessionPeek>

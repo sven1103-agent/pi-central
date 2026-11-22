@@ -38,6 +38,39 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
+/**
+ * The session's state as a colour family, from the words the rest of the app uses (`stateLabel`).
+ *
+ * Derived from the WORD rather than the session so this component keeps knowing only what its tab shows. An unknown word
+ * is `idle`: a neutral dot is a safe wrong answer, while a loud one would claim a problem nobody reported.
+ */
+export function toneOf(stateWord: string): "ok" | "busy" | "attention" | "bad" | "idle" {
+  switch (stateWord) {
+    case "idle":
+      return "ok";
+    case "working":
+    case "starting":
+      return "busy";
+    case "needs you":
+      return "attention";
+    case "failed":
+      return "bad";
+    case "stopped":
+    case "registered":
+      return "idle";
+    default:
+      return "idle";
+  }
+}
+
+/**
+ * `ctx 37%` or `ctx 85% full` → `37%` / `85%`: the number alone, because a 30px strip has no room for the sentence and the
+ * sentence is the tooltip. `ctx —` stays `—` — an unreported measurement is not a zero.
+ */
+export function shortContext(label: string): string {
+  return label.replace(/^ctx\s*/, "").replace(/\s*full$/, "");
+}
+
 export function SessionPeek({
   /** The session's state, in the words the rest of the app uses (`stateLabel`). */
   stateWord,
@@ -50,6 +83,7 @@ export function SessionPeek({
   children,
   pinned,
   onPinned,
+  onOpenChange,
 }: {
   stateWord: string;
   contextLabel: string;
@@ -59,11 +93,25 @@ export function SessionPeek({
   children: React.ReactNode;
   pinned: boolean;
   onPinned: (pinned: boolean) => void;
+  /**
+   * Report whether the panel is showing, so the LAYOUT can answer.
+   *
+   * The panel is a grid item beside the prose now — the original companion — so opening it changes the row's track
+   * widths rather than floating a box over the text. That width lives on the wrapper, which is the transcript's element,
+   * so the one component that knows whether the pointer is here has to say so upward. A callback rather than lifting the
+   * hover state: hover is this component's business, and a parent re-render must not reset it.
+   */
+  onOpenChange?: ((open: boolean) => void) | undefined;
 }) {
   const [hovered, setHovered] = useState(false);
   const [focusedWithin, setFocusedWithin] = useState(false);
 
   const open = pinned || hovered || focusedWithin;
+
+  /** Told once per change, in an effect: reporting during render would be a state write in another component's render. */
+  useEffect(() => {
+    onOpenChange?.(open);
+  }, [open, onOpenChange]);
 
   /**
    * A grace period on LEAVE, and none on ENTER.
@@ -89,23 +137,34 @@ export function SessionPeek({
   );
 
   /*
-   * Escape unpins, while the panel is showing.
+   * Escape closes the panel WHENEVER IT IS SHOWING — hovered, focused or latched.
    *
    * A window listener rather than a key handler on the panel: the reader may have tabbed into a picker inside it, and
    * expecting them to get back to the tab before they can dismiss is the same "aim before you can close" problem as a
    * hover-only surface. Capture phase and `stopPropagation`, because the composer's own Escape stops a run — one
    * keystroke must not do both.
+   *
+   * Guarded on `open` and NOT on `pinned`. The first version only claimed the key while latched, so a reader who
+   * hovered the tab — the ordinary case — pressed Escape to dismiss the overlay and hit the composer's handler instead:
+   * the overlay stayed and the run stopped. A dismissal key that performs an irreversible action in the other mode is
+   * not a dismissal key.
    */
   useEffect(() => {
-    if (!pinned) return undefined;
+    if (!open) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.stopPropagation();
-      onPinned(false);
+      /*
+       * All three states are cleared, not just the latch: leaving `hovered` set would make Escape look broken while the
+       * pointer is parked on the tab, and nothing would re-arm it until the pointer left and came back.
+       */
+      setHovered(false);
+      setFocusedWithin(false);
+      if (pinned) onPinned(false);
     };
     window.addEventListener("keydown", onKeyDown, { capture: true });
     return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
-  }, [pinned, onPinned]);
+  }, [open, pinned, onPinned]);
 
   return (
     <div
@@ -135,17 +194,28 @@ export function SessionPeek({
         aria-expanded={open}
         aria-controls="session-peek-panel"
         aria-label={`${label} — ${stateWord}, ${contextLabel}`}
-        title={`${label} · hover to peek, click to pin`}
+        title={`${label} — ${stateWord}, ${contextLabel}\n${pinned ? "Click to unpin" : "Hover to peek, click to pin"}`}
         onClick={() => onPinned(!pinned)}
       >
-        <span className="session-peek-word" aria-hidden="true">
-          {pinned ? "Pinned" : "Details"}
-        </span>
-        <span className="session-peek-state" aria-hidden="true">
-          {stateWord}
-        </span>
+        {/*
+          A SMALL ICON, A DOT AND A NUMBER — all horizontal, because the first version was the words "Details · idle · ctx 37%"
+          set in `vertical-rl` at 10px, and the reader's question was fair: *"why is the tab vertical with text I can't
+          read"*. Rotated small text is the least legible thing a 30px strip can hold.
+
+          What each part says, without words: the glyph is "settings and details" (the same sliders the model and thinking
+          pickers are), the dot is the session's state in the colours the rest of the app already uses, and the number is
+          the one figure that changes a decision. The sentence is the tooltip and the accessible name, so nothing depends on
+          colour alone and the words are one hover away.
+        */}
+        <svg className="session-peek-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+          <path d="M2 4h6M12 4h2M2 8h2M8 8h6M2 12h7M13 12h1" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+          <circle cx="10" cy="4" r="1.6" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="6" cy="8" r="1.6" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="11" cy="12" r="1.6" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        </svg>
+        <span className={`session-peek-dot is-${toneOf(stateWord)}`} aria-hidden="true" title={stateWord} />
         <span className={`session-peek-ctx mono${nearFull ? " is-full" : ""}`} aria-hidden="true">
-          {contextLabel}
+          {shortContext(contextLabel)}
         </span>
       </button>
 

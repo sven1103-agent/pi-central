@@ -2987,33 +2987,75 @@ test("the rail is reachable below the drawer breakpoint", () => {
   // A drawer that is never opened is `display: none` with extra steps.
   const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
   /*
-   * The opener moved from a `rail-toggle` button in the topbar to the Sessions item in the left activity
-   * bar. It is still a BUTTON with `aria-expanded` and `aria-controls` — the property the original test
-   * was written for — so the assertions follow the responsibility rather than the class name. Asserting
-   * `rail-toggle` here would have kept the test green while nothing opened the drawer.
-   */
-  assert.match(app, /id: "activity-left-sessions"/, "the left bar has a Sessions item");
-  /*
-   * Issue #275 made the item a toggle at EVERY width, so the two claims are now separate:
+   * The opener moved from a `rail-toggle` button in the topbar to the left activity bar. It is still a BUTTON with
+   * `aria-expanded` and `aria-controls` — the property the original test was written for — so the assertions follow the
+   * responsibility rather than the class name. Asserting `rail-toggle` here would have kept the test green while
+   * nothing opened the drawer.
    *
-   *   - `expanded={railShown}` — the button states whether the list is on the page, which is the fact a reader needs
-   *     whether the window forced the drawer or the reader hid the column;
-   *   - `controls="session-rail"` — unconditional, because the id it names now always exists when the element does.
+   * It is NOT the Sessions item any more (issue #275, third report): *"the navigation hierarchy is broken. The session
+   * icon becomes the target of the navigation steps … But it is also the target to toggle the sidebar session roster."*
+   * One handler did both jobs, so a destination rearranged the layout it navigated to. The toggle is now a control of
+   * the REGION — in the bar's `header`, above the page group and behind the rule, exactly where the right panel's
+   * toggle sits — and `Sessions` is a plain destination.
    *
-   * The earlier form (`railIsDrawer ? railOpen : undefined`) was correct while only the breakpoint could hide the rail,
-   * and became false the moment hiding it was a preference — the bar would have claimed "not expanded, not a toggle"
-   * about a rail the reader had switched off themselves.
+   * Falsified by moving `setRailPrefsAndPersist` back into the `activity-left-sessions` handler: the third assertion
+   * reports a page that changes the layout, and the first reports the toggle missing from the header.
    */
-  assert.match(app, /expanded: railShown/, "…which states whether the list is on the page");
-  assert.match(app, /controls: "session-rail"/, "…and what it controls");
+  assert.match(
+    app,
+    /header=\{[\s\S]{0,4000}?aria-expanded=\{railShown\}[\s\S]{0,400}?aria-controls="session-rail"/,
+    "the roster toggle is a control of the region, in the header slot above the pages",
+  );
+  assert.match(
+    app,
+    /id: "activity-left-sessions",[\s\S]{0,900}?onSelect: \(\) => setTab\("sessions"\)/,
+    "and Sessions is only a destination",
+  );
+  // The page item must not touch the layout: one press, one effect.
+  const sessionsItem = /id: "activity-left-sessions",([\s\S]*?)\n              onSelect: \(\) => setTab\("sessions"\),/.exec(app)?.[1] ?? "";
+  assert.ok(
+    !/setRailPrefsAndPersist|setRailOpen/.test(sessionsItem),
+    "pressing a PAGE must not also move the layout it navigates to",
+  );
   /*
-   * ONE control, a three-step ladder (issue #275): dismiss a showing overlay, otherwise summon one, otherwise dock the
-   * column away. Collapsing steps two and three into a single toggle of `hidden` would make one press mean two things
-   * and leave a docked-column reader pressing a button that appears to do nothing.
+   * ONE control, TWO rungs — and the rungs are now "hide what is showing" / "show it", NOT "narrow" / "wide".
+   *
+   * Three reports shaped this, and the order matters because each fixed the previous one and broke something the
+   * other had:
+   *
+   *   1. A single toggle of `hidden` meant a narrow-window reader pressed it and nothing happened.
+   *   2. Splitting by width so that a hidden list was SUMMONED produced the modal — *"why is the roster rendered as a
+   *      modal"* — because above the breakpoint the overlay was the return path (amendment 3).
+   *   3. Sizing on the PREFERENCE alone made the toggle a no-op on History, where the roster is never on the page —
+   *      *"the toggle for the roster becomes a noop when in history"*. It also flipped `hidden` invisibly, which is
+   *      worse than doing nothing.
+   *
+   * So the switch is `railShown`, the thing the button's own label is about, and the width only chooses the
+   * MECHANISM inside each rung.
+   *
+   * Falsified by sizing on `railPrefs.hidden` instead: the third assertion reports a toggle that claims to show a
+   * list while leaving the reader on a page that has none.
    */
-  assert.match(app, /if \(railOverlay\) \{\s*setRailOpen\(false\);/, "a showing overlay is dismissed first");
-  assert.match(app, /if \(railPrefs\.hidden \|\| railIsDrawer\) \{\s*setRailOpen\(true\);/, "a hidden one is summoned");
-  assert.match(app, /hidden: true/, "and a docked one is docked away");
+  assert.match(app, /if \(railShown\) \{[\s\S]{0,300}setRailOpen\(false\);/, "hiding: close the drawer below the breakpoint");
+  assert.match(app, /if \(railShown\) \{[\s\S]{0,400}hidden: true/, "hiding: dock the column away above it");
+  /*
+   * And SHOWING it from another page goes there. Bounded to the `else` branch, so this cannot be satisfied by a page
+   * item that rearranges the layout — the defect amendment 4 fixed.
+   */
+  assert.match(
+    app,
+    /if \(railShown\) \{[\s\S]*?return;\s*\}[\s\S]*?if \(tab !== "sessions"\) setTab\("sessions"\);\s*if \(railIsDrawer\) setRailOpen\(true\);\s*else if \(railPrefs\.hidden\) setRailPrefsAndPersist/,
+    "showing: the page that has the list, then the list",
+  );
+  /*
+   * And the preference is SET, not flipped: `hidden: true` to hide, `hidden: false` to show. A flip (`!current.hidden`)
+   * is the shape that made the toggle a no-op on History — it changed a preference without reference to what was on
+   * screen, so a reader could press it twice and be exactly where they started with no feedback either way.
+   */
+  assert.ok(
+    !/hidden: !current\.hidden/.test(app),
+    "the roster toggle states the state it wants, so pressing it twice cannot round-trip invisibly",
+  );
   assert.match(app, /rail-backdrop/, "a backdrop must close it");
   assert.match(app, /setRailOpen\(false\)/, "Escape, the backdrop and a selection all close it");
 
@@ -3193,6 +3235,43 @@ test("both bars are vertical, labelled, and 48px wide", () => {
   // The edges face the content, so each bar reads as a side of the window.
   assert.match(css, /\.navrail-left\s*\{[^}]*border-right/, "the left bar's edge faces the content");
   assert.match(css, /\.navrail-right\s*\{[^}]*border-left/, "the right bar's edge faces the content");
+});
+
+test("each bar item carries its NAME, revealed on hover and focus and adding nothing at rest", () => {
+  /*
+   * The report: *"users don't remember what the icons mean in the left menu bar. Icons + label brings the better UX."*
+   *
+   * The label is in the DOM always — a label rendered only on hover is a label assistive tech never sees, and a
+   * conditional render would put a state change inside a control that has none. What changes is its presentation.
+   *
+   * Three properties, and each is a way this could have been wrong:
+   *
+   *   1. the word is rendered for EVERY item, from `item.label`, so it cannot drift from the tooltip;
+   *   2. it is `aria-hidden`, because the button already carries `aria-label` with the same string;
+   *   3. it is revealed by a transformed absolutely-positioned box, so the bar cannot reflow — the failure
+   *      `SessionPeek` recorded for a track that widened under the pointer.
+   *
+   * Falsified by animating `width` instead of `transform`: the commit-size assertion reports a bar that moves.
+   */
+  const activityBar = readFileSync(new URL("../src/components/ActivityBar.tsx", import.meta.url), "utf8");
+  assert.match(activityBar, /className="navrail-label" aria-hidden="true"/, "the label is in the markup, hidden from speech");
+  assert.match(activityBar, /\{item\.label\}/, "and it is the item's own word, so the tooltip and the label cannot disagree");
+
+  const label = /\.navrail-label\s*\{([^}]*)\}/.exec(readCss())?.[1] ?? "";
+  assert.match(label, /position:\s*absolute/, "out of flow, so the glyph it names cannot move");
+  assert.match(label, /transform:\s*translateY\(-50%\) scaleX\(0\)/, "revealed by a transform, which is not a reflow");
+  assert.ok(!/(^|[^-])width:/.test(label), "never by its width");
+  assert.match(label, /white-space:\s*nowrap/, "a two-word label does not wrap inside a 48px bar");
+  assert.match(label, /opacity:\s*0/, "absent at rest");
+
+  // Revealed by pointer AND by keyboard: the reader who cannot guess a glyph is the reader tabbing through them.
+  const sheet = readCss();
+  assert.match(sheet, /\.navrail-item:hover \.navrail-label,\s*\n\.navrail-item:focus-visible \.navrail-label \{/, "hover and focus, one rule");
+  /*
+   * And the right bar mirrors it. `left: 100%` there would run the label off the window's trailing edge — the one
+   * direction nothing can scroll to. Falsified by dropping the mirror rule: the right bar's labels leave the window.
+   */
+  assert.match(sheet, /\.navrail-right \.navrail-label \{[^}]*right:\s*calc\(100% \+ 2px\)/, "the right bar opens leftwards");
 });
 
 test("the left bar is a nav and the right bar is a tablist, because they mean different things", () => {
@@ -3542,15 +3621,22 @@ test("a page shows its own list, not another page's", () => {
     "the stylesheet hides it instead",
   );
   // And the name itself is bounded by the page, which is the property the original test protected.
+  /*
+   * The docked rail is bounded by the page, the breakpoint and the preference — three conditions, named. It used to be
+   * `!railSummonable`, which folded the last two together and cost the column its return path: a reader who hid it
+   * above the breakpoint could only summon the OVERLAY (issue #275).
+   *
+   * Falsified by folding them again: the overlay is then reachable at any width and a test reports it.
+   */
   assert.match(
     src,
-    /const railDocked = tab === "sessions" && !railSummonable/,
-    "the docked rail belongs to the Sessions page",
+    /const railDocked = tab === "sessions" && !railIsDrawer && !railPrefs\.hidden;\n/,
+    "the docked rail belongs to the Sessions page, above the breakpoint, for a reader who wants it",
   );
   assert.match(
     src,
-    /const railOverlay = railSummonable && railOpen && tab === "sessions"/,
-    "and so does the summoned one",
+    /const railOverlay = railIsDrawer && railOpen && tab === "sessions";\n/,
+    "and the overlay is the shape the WINDOW forces, never the one the preference chooses",
   );
 
   // The context bar needs BOTH a live session and the Sessions page.

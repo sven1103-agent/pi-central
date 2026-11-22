@@ -109,8 +109,13 @@ export interface RailPrefs {
    *
    * A third state alongside "hovered" and "resting", and it is what makes the peek rail usable rather than merely tidy:
    * a reader comparing a model against a transcript, or watching context fill, needs the details there without holding
-   * the pointer still. Escape unpins. It is remembered, like every other placement in this module, because a reader who
-   * pinned it once meant it.
+   * the pointer still. Escape closes it.
+   *
+   * LIVE state, not a remembered placement — the one value in this module deliberately kept out of `localStorage`.
+   * Every other value here is a size or a fold, and restoring it restores a layout the reader chose. This one covers
+   * prose, and restoring it would restore an occlusion nobody remembers asking for; the shell therefore sets it
+   * without persisting. `parseRailPrefs` still reads a stored value if one is present, so an older session's
+   * admittedly-persisted latch is honoured rather than silently dropped mid-upgrade.
    *
    * Ignored when `focus` is off — the wide layout has a real column and no tab.
    */

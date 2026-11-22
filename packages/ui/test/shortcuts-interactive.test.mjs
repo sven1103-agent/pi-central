@@ -239,9 +239,31 @@ test("the sheet lists the keys as KEYS, grouped, in the platform's notation", ()
   assert.ok(chords.includes("⌘⌫"), "and so is the delete key");
   assert.ok(chords.includes("⌘⇧O"), "and the one the rail already advertised");
 
-  // Every chord is a real `<kbd>`, which is what makes it read as a key and survive `forced-colors`.
+  /*
+   * Every chord is a real `<kbd>`, which is what makes it read as a key and survive `forced-colors`.
+   *
+   * Boxes are counted against CHORDS, not against ROWS: a row may offer two chords, and Zen mode does (issue #275).
+   * Counting per row would have been a claim about how many bindings a mode is allowed, which is not what this test is
+   * protecting — the bare text is. Falsified by rendering a chord as raw text beside its `<kbd>`: combos and boxes then
+   * disagree.
+   */
+  const combos = container.querySelectorAll(".keys-chord .keys-combo");
   const kbds = container.querySelectorAll(".keys-chord kbd");
-  assert.equal(kbds.length, chords.length, "one key box per chord, no bare text");
+  assert.equal(kbds.length, combos.length, "one key box per chord, no bare text");
+
+  /*
+   * A row may offer TWO chords, and Zen mode does (`⌥⇧Z` and `⌘⇧.`, issue #275). The claim above is about boxes versus
+   * raw text, not about one chord per row, so it holds either way — and this asserts the alternative is RENDERED as an
+   * alternative rather than as a sequence: `⌥⇧Z or ⌘⇧.`, never `⌥⇧Z ⌘⇧.`, which a reader would take for a chord of
+   * five keys.
+   *
+   * Falsified by dropping the `keys-or` separator: the two combos then run together with no word between them.
+   */
+  const zen = [...container.querySelectorAll(".keys-row")].find((row) => row.textContent.includes("Zen mode"));
+  assert.ok(zen, "the mode is on the sheet");
+  const zenChords = [...zen.querySelectorAll(".keys-chord kbd")].map((node) => node.textContent);
+  assert.deepEqual(zenChords, ["⌥⇧Z", "⌘⇧."], "both chords, in the registry's order");
+  assert.match(zen.textContent, /⌥⇧Z\s*or\s*⌘⇧\./, "and the word between them, so they are alternatives");
 
   // The words are the ACTION's, not a second description of it.
   assert.match(container.textContent, /Stop the focused session/);

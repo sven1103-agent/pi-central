@@ -19,6 +19,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
+import { readFileSync } from "node:fs";
 import { createServer } from "vite";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://local.invalid/" });
@@ -118,6 +119,14 @@ function rail({ prefs, onToggleFolded = () => {}, rows } = {}) {
     prefs: prefs ?? defaultRailPrefs(),
     onToggleFolded,
   });
+}
+
+const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+
+/** The declarations of the first rule whose selector matches, or `undefined`. */
+function rule(selector) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css)?.[1];
 }
 
 const headings = (container) => [...container.querySelectorAll(".group-header")].map((h) => h.textContent);
@@ -269,6 +278,65 @@ test("FULL density is the default, and renders the metrics line for the same row
   const { container, unmount } = mount(rail({ rows: rowsOf([session({ state: "idle", contextPercent: 3 })]) }));
   assert.ok(container.querySelector(".rail-row .r3"), "the metrics line is rendered by default");
   unmount();
+});
+
+test("the whole heading folds the section — pressing it anywhere but on a control inside it", () => {
+  /*
+   * The report: *"users shall not try to aim for the icon alone to trigger the action, but also the category label should
+   * trigger collapsing"*. The heading is the row with the target, and the mark was the only part that responded.
+   *
+   * Two things are asserted, because the fix has two failure modes. Pressing the WORD must fold — that is the request.
+   * Pressing the MARK must fold ONCE — a handler on both the mark and the heading would toggle twice, and because
+   * `onToggleFolded` is the effect's input rather than a local flip, "twice" is not a no-op: it is two calls to the
+   * shell, which is how a fold appears to do nothing at all.
+   *
+   * Falsified by removing the `closest("button")` guard: the mark press reports two calls and the second assertion fails.
+   */
+  const toggled = [];
+  const { container, unmount } = mount(rail({ onToggleFolded: (group) => toggled.push(group) }));
+  const idle = [...container.querySelectorAll(".group-header")].find((h) => h.textContent.includes("Idle"));
+  assert.ok(idle.classList.contains("is-foldable"), "the heading offers the action");
+
+  // The label: a press on the word itself.
+  const word = [...idle.querySelectorAll("span")].find((s) => s.textContent === "Idle");
+  act(() => word.dispatchEvent(new window.MouseEvent("click", { bubbles: true })));
+  assert.deepEqual(toggled, ["idle"], "the label folds the section");
+
+  // The mark: its own press, which must not be counted twice.
+  toggled.length = 0;
+  act(() => idle.querySelector(".group-fold").dispatchEvent(new window.MouseEvent("click", { bubbles: true })));
+  assert.deepEqual(toggled, ["idle"], "and the mark folds it ONCE, not once per handler");
+  unmount();
+});
+
+test("a heading that cannot fold is not a target", () => {
+  // `Needs you` must not offer a pointer cursor and a hover tint over an action it does not have: the same rule
+  // `roster.ts` follows for a row whose control is absent. Asserted on the class the shell adds, since the cursor and
+  // the tint hang off `.is-foldable`.
+  // Falsified by adding `is-foldable` to every heading.
+  const { container, unmount } = mount(rail());
+  const unmarked = [...container.querySelectorAll(".group-header")].filter((h) => !h.classList.contains("is-foldable"));
+  assert.ok(unmarked.length >= 2, "Needs you, Failed and Running are plain text");
+  for (const heading of unmarked) assert.equal(heading.querySelector(".group-fold"), null, "and offer no mark");
+  unmount();
+});
+
+test("the disclosure mark is a control-sized target, with a shape big enough to see", () => {
+  /*
+   * The first half of the report: *"the arrow ... is way too small, users can barely see it"*. It was a 10px glyph
+   * (`--fs-2xs`) in a `padding: 0 2px` box — a ~6x8px speck beside an 11px word, and the only pressable part of the row.
+   *
+   * Asserted on the numbers rather than on a screenshot: the box must clear the 24px target floor, the glyph must be
+   * larger than the meta size it was drawn at, and the row must be taller than the heading text alone.
+   * Falsified by returning either to `--fs-2xs` or to the paddings — the mark is a speck again and this reports it.
+   */
+  const mark = rule(".group-fold") ?? "";
+  assert.match(mark, /width:\s*26px/, "a 26px box");
+  assert.match(mark, /height:\s*26px/, "square, so it is the same target in both directions");
+  assert.match(mark, /inline-flex/, "the glyph is centred in the box by layout, not by a padding guess");
+  assert.match(rule(".group-fold-mark") ?? "", /font-size:\s*var\(--fs-md\)/, "and the shape is drawn at the control size");
+  assert.match(rule(".group-header.is-foldable") ?? "", /min-height:\s*34px/, "the row is a target, so it is taller than its text");
+  assert.match(rule(".group-header.is-foldable") ?? "", /cursor:\s*pointer/, "and it says so");
 });
 
 test("a shell that cannot remember a fold does not offer one", () => {

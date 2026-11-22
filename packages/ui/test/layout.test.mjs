@@ -164,6 +164,7 @@ test("the lane is centred by TWO EQUAL margins, and the companion does not steal
    */
   const centred = readingStyle({ sizePx: 15, measure: 80 });
   assert.equal(centred["--reading-leading"], centred["--reading-trailing"], "equal margins ARE the centring");
+  assert.equal(centred["--reading-trailing-max"], "1fr", "the open panel's track keeps absorbing space, so the lane need not move");
   assert.match(centred["--reading-leading"], /^minmax\(0, 1fr\)$/, "flexible, so the pair of them split the free space");
   assert.match(centred["--reading-lane"], /^minmax\(0, \d+ch\)$/, "and the lane carries the reader\u2019s measure");
 
@@ -175,6 +176,7 @@ test("the lane is centred by TWO EQUAL margins, and the companion does not steal
   const fill = readingStyle({ sizePx: 15, measure: READING_MEASURE_FILL });
   assert.equal(fill["--reading-leading"], "0px", "no leading void under fill");
   assert.equal(fill["--reading-trailing"], "var(--companion-width)", "and the companion still has its track");
+  assert.equal(fill["--reading-trailing-max"], "var(--companion-width)", "and the open panel's track cannot outgrow it");
   assert.equal(fill["--reading-lane"], "minmax(0, 1fr)", "the lane takes the rest");
 });
 

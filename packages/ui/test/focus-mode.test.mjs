@@ -19,7 +19,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { appClass, defaultRailPrefs, parseRailPrefs, serializeRailPrefs } from "../src/rail-prefs.ts";
-import { SHORTCUTS } from "../src/shortcuts.ts";
+import { QUEUE_CHORD, chordOf, chordsOf, resolveShortcut, setKeyLayout, SHORTCUTS } from "../src/shortcuts.ts";
+
+/** Nothing open, nothing focused: the state every chord is expected to work in unless it says otherwise. */
+const closedGate = { modalOpen: false, keysOpen: false, sheetOpen: false, inField: false };
 
 const read = (name) => readFileSync(new URL(`../src/${name}`, import.meta.url), "utf8");
 const css = read("styles.css").replace(/\/\*[\s\S]*?\*\//g, "");
@@ -82,11 +85,21 @@ test("focus mode hides the CHROME, and nothing that is the conversation", () => 
   /*
    * The companion band leaves the row — conditionally, and the condition is the whole point. `:not(.is-panel-closed)` is
    * what stops the mode from removing the only surface that holds the session's controls.
+   *
+   * And it names the ROW's own item with a child combinator. `.transcript-header` is a FRAME class the peek overlay wears
+   * on purpose, so a descendant selector hid the overlay's content too: with the panel open, hovering the tab opened a
+   * 340px box containing nothing. Falsified by dropping the `>` — the frame assertion below then reads the shared class
+   * and this fails.
    */
   assert.match(
-    rule(".app.is-focus:not(.is-panel-closed) .transcript-header") ?? "",
+    rule(".app.is-focus:not(.is-panel-closed) .transcript-wrap.has-header > .transcript-header") ?? "",
     /display:\s*none/,
     "the companion band leaves the row, but only when the panel is showing the same facts",
+  );
+  assert.equal(
+    rule(".app.is-focus:not(.is-panel-closed) .transcript-header"),
+    undefined,
+    "and it must not reach the peek's copy of the same class, or the overlay opens empty",
   );
   assert.equal(
     rule(".app.is-focus .transcript-header"),
@@ -168,17 +181,174 @@ test("the mode has a key, and it is not the stop key", () => {
    * by accident, so `⌘⇧.` takes the Shift: the same corner, a different thing, and pressing the wrong one costs a
    * confirmation rather than a silent stop.
    *
+   * `⌥⇧Z` was added beside it because it is the mode's popular name and chord (*"many apps call it Zen Mode"*), and BOTH
+   * are kept: replacing `⌘⇧.` would send readers who learned it next to the stop key.
+   *
    * Falsified by registering `mod+.`: the two assertions then name the same chord, and `shortcuts.test.mjs` would report
    * a duplicate binding.
    */
   const focus = SHORTCUTS.find((shortcut) => shortcut.id === "view.focus");
   assert.ok(focus, "the mode is in the registry, so the sheet lists it");
-  assert.deepEqual([...focus.keys], ["mod+shift+."]);
+  assert.deepEqual([...focus.keys], ["alt+shift+z", "mod+shift+."]);
   const stop = SHORTCUTS.find((shortcut) => shortcut.id === "session.stop");
   assert.notDeepEqual([...focus.keys], [...stop.keys], "one keystroke, one meaning");
   // Dispatched by the shell, like every other window-level key.
   assert.equal(focus.shell, true);
   assert.match(app, /"view\.focus": \(\) => setRailPrefsAndPersist/, "and the shell handles it by id");
+});
+
+test("Zen mode's chord is reachable on a keyboard where Option is a dead key", () => {
+  /*
+   * The defect this test exists for, and it is the same class as the German-keyboard `⌘/` bug the registry already
+   * records: on macOS Option is a DEAD KEY for letters, so `⌥⇧Z` reports `key: "¸"` rather than `"z"`. A binding
+   * declared as `alt+shift+z` would be documented, listed on the sheet, and impossible to press.
+   *
+   * `chordOf` therefore reads the PHYSICAL key (`code`) when Option is the only modifier. Both spellings are asserted
+   * because both happen in the wild — some layouts and some platforms report the letter through Option.
+   *
+   * Falsified by deleting the `letterFromCode` branch: the first assertion reports `alt+shift+¸`, no binding matches it,
+   * and the mode becomes pointer-only on macOS.
+   */
+  /*
+   * EVERY SHAPE macOS PRODUCES, because the first version of this test only had the third one and the binding was still
+   * dead — reported as *"no shortcut toggled zen mode"*. The failure was guard ORDER: `"dead"` is in `MODIFIER_KEYS` and
+   * `""` fails the empty-key check, and both of those ran BEFORE the `code` fallback, so two of the three shapes below
+   * returned `undefined` and `code` was never read.
+   *
+   * Falsified by restoring the old order (guards first, `code` after): the first two assertions report `undefined`.
+   */
+  const shapes = [
+    { key: "Dead", note: "the composed character is itself a dead key — what ⌥⇧Z actually reports on macOS" },
+    { key: "", note: "a layout that reports nothing at all" },
+    { key: "¸", note: "the composed cedilla" },
+    { key: "Ω", note: "⌥Z on a US layout" },
+    { key: "z", note: "a platform that reports the letter through Option" },
+  ];
+  for (const { key, note } of shapes) {
+    const event = { key, code: "KeyZ", altKey: true, shiftKey: true };
+    assert.equal(chordOf(event), "alt+shift+z", `${JSON.stringify(key)} → the physical key (${note})`);
+    assert.equal(resolveShortcut(event, closedGate)?.id, "view.focus", `${JSON.stringify(key)} resolves to the mode`);
+  }
+
+  /*
+   * And a modifier pressed ON ITS OWN is still not a chord. This is what the `MODIFIER_KEYS` guard is for, and it has to
+   * survive the reordering: with `fromCode` `undefined` the guard still applies, so holding Option (reported as
+   * `key: "Alt"`, or as `"Dead"` with no `code`) does nothing.
+   */
+  assert.equal(chordOf({ key: "Alt", altKey: true }), undefined, "Option alone is not a chord");
+  assert.equal(chordOf({ key: "Dead", altKey: true }), undefined, "and neither is a dead key with no letter behind it");
+
+  /*
+   * And WITHOUT Option the produced key still wins, because a layout is entitled to decide what `⌘Y` means: QWERTZ
+   * swaps Y and Z, and `⌘Z` on QWERTZ produces `key: "y"`. Reading `code` there would bind the wrong physical key.
+   */
+  assert.equal(chordOf({ key: "y", code: "KeyZ", metaKey: true }), "mod+y", "⌘ chords follow the layout");
+
+  // A non-letter code is never substituted: the fallback exists for dead-key substitution, not to overrule a layout.
+  assert.equal(chordOf({ key: "&", code: "Digit1", altKey: true }), "alt+&");
+});
+
+test("an Option chord follows the LETTER, on a keyboard that is not US QWERTY", () => {
+  /*
+   * The second report on the same key: *"it still does not work"*, after the dead-key fallback was added and verified.
+   *
+   * `code` is a PHYSICAL position, not a letter — `KeyZ` is "the key in the Z position of a US keyboard". Reading it
+   * directly assumed US QWERTY, so on the German layout this repository already has two other reports from, the key
+   * LABELLED `Z` reports `code: "KeyY"`:
+   *
+   *     ⌥⇧Z  →  composed alt+shift+y  →  matches nothing  →  the mode never toggles
+   *
+   * And it would have hit `⌥Q` on AZERTY the same way (the key labelled Q is `KeyA` there).
+   *
+   * `setKeyLayout` installs the browser's own `getLayoutMap()`, which answers what each physical key TYPES on this
+   * machine — the only honest source, since `code` cannot know. Falsified by ignoring the map: the QWERTZ assertions
+   * then report `alt+shift+y`, exactly as the report did.
+   */
+  const QWERTZ = new Map([
+    ["KeyY", "z"], // the key labelled Z
+    ["KeyZ", "y"], // the key labelled Y
+    ["KeyQ", "q"],
+    ["KeyA", "a"],
+    ["Period", "."],
+  ]);
+
+  try {
+    setKeyLayout(QWERTZ);
+    // The key labelled Z, which macOS reports as a dead key and as physical position KeyY.
+    const qwertzZ = { key: "Dead", code: "KeyY", altKey: true, shiftKey: true };
+    assert.equal(chordOf(qwertzZ), "alt+shift+z", "the letter the reader sees, not the US position");
+    assert.equal(resolveShortcut(qwertzZ, closedGate)?.id, "view.focus", "so the mode toggles");
+
+    /*
+     * And the arrangement is still respected in the OTHER direction: on QWERTZ the key labelled Y is `KeyZ`, so
+     * `⌥⇧Y` must be `alt+shift+y` — a mapping that only rewrote one of the two would make the other key lie.
+     */
+    assert.equal(chordOf({ key: "Dead", code: "KeyZ", altKey: true, shiftKey: true }), "alt+shift+y");
+
+    // AZERTY's fault, caught by the same fix: there the key labelled Q is KeyA.
+    setKeyLayout(new Map([["KeyA", "q"]]));
+    assert.equal(chordOf({ key: "œ", code: "KeyA", altKey: true }), "alt+q", "⌥Q on AZERTY");
+    assert.equal(QUEUE_CHORD, "alt+q", "which is the queued-messages chord, so that binding was dead too");
+
+    /*
+     * A layout entry that is not a single letter is ignored rather than trusted: this map turns physical keys back
+     * into letters, and `"ShiftLeft" → "Shift"` must not become the letter "s".
+     */
+    setKeyLayout(new Map([["KeyZ", "Shift"], ["KeyY", "ß"]]));
+    assert.equal(chordOf({ key: "Dead", code: "KeyZ", altKey: true }), "alt+z", "a non-letter entry falls back to the position");
+    assert.equal(chordOf({ key: "Dead", code: "KeyY", altKey: true }), "alt+y", "and so does a multi-character one");
+  } finally {
+    // The module holds this globally, so a test that leaves it installed would change every later test in the file.
+    setKeyLayout(undefined);
+  }
+});
+
+test("on QWERTZ the key LABELLED Z toggles it, with no layout API to ask", () => {
+  /*
+   * The third report on one key, and the one that finally states the real requirement: *"ah, with Y it works. So on a
+   * QWERTZ layout, it wont work!"*
+   *
+   * On QWERTZ the key labelled Z sits in the US position of Y, so it reports `code: "KeyY"` — and the key labelled Y sits
+   * where the US has Z (`code: "KeyZ"`). Reading the physical key as US letters therefore made the key labelled Y fire the
+   * mode, which is exactly what the reader observed. Reading it through the layout map fixed it in principle and not in
+   * practice: `getLayoutMap` is CDP-gated in Electron, so the map was absent and the US letter was used.
+   *
+   * So the requirement is stated here WITHOUT the map: `setKeyLayout(undefined)`, meaning "the browser cannot tell us",
+   * and the key labelled Z must STILL toggle the mode. That is what the candidate list buys — the binding decides, not the
+   * platform.
+   *
+   * Falsified by returning only the US letter from `chordsOf`: this reports `alt+shift+y`, which is the bug.
+   */
+  setKeyLayout(undefined);
+
+  // The key labelled Z: US position Y. This is the one the reader pressed.
+  const keyLabelledZ = { key: "Dead", code: "KeyY", altKey: true, shiftKey: true };
+  assert.equal(resolveShortcut(keyLabelledZ, closedGate)?.id, "view.focus", "the key labelled Z toggles Zen mode");
+
+  /*
+   * And the key LABELLED Y is `code: "KeyZ"` — the US position of Z — so it must ALSO work, because on a US keyboard that
+   * key IS Z. Both keys toggling on one layout is the correct, deliberate outcome: the two bindings that could claim them
+   * (`⌥⇧Z`) is one, and the reader who presses either key labelled Z or key labelled Y has asked for the mode under the
+   * name this app gives it. Nothing else is bound to `alt+shift+y`, so there is no collision to resolve.
+   */
+  const keyLabelledY = { key: "Dead", code: "KeyZ", altKey: true, shiftKey: true };
+  assert.equal(resolveShortcut(keyLabelledY, closedGate)?.id, "view.focus", "and so does the US position of Z");
+
+  /*
+   * ORDER MATTERS WHEN A LAYOUT REALLY DOES SWAP THEM. With a QWERTZ map installed, `KeyZ` is `y` and `KeyY` is `z`, and
+   * the reader's own letter must come first — so a future `⌥⇧Y` binding would win on the key labelled Y rather than being
+   * shadowed by the US spelling.
+   */
+  try {
+    setKeyLayout(new Map([["KeyY", "z"], ["KeyZ", "y"]]));
+    assert.deepEqual(chordsOf(keyLabelledZ), ["alt+shift+z", "alt+shift+y"], "their letter first, then the US one");
+    assert.deepEqual(chordsOf(keyLabelledY), ["alt+shift+y", "alt+shift+z"], "and the other way round for the other key");
+    // Neither order changes which binding these two events resolve to, because only one chord is bound.
+    assert.equal(resolveShortcut(keyLabelledZ, closedGate)?.id, "view.focus");
+    assert.equal(resolveShortcut(keyLabelledY, closedGate)?.id, "view.focus");
+  } finally {
+    setKeyLayout(undefined);
+  }
 });
 
 test("no other binding is registered twice, now that one more exists", () => {

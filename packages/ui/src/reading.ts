@@ -156,6 +156,7 @@ function laneTracks(measure: ReadingPrefs["measure"]): Record<string, string> {
       "--reading-leading": "0px",
       "--reading-lane": "minmax(0, 1fr)",
       "--reading-trailing": "var(--companion-width)",
+      "--reading-trailing-max": "var(--companion-width)",
     };
   }
   /*
@@ -166,5 +167,6 @@ function laneTracks(measure: ReadingPrefs["measure"]): Record<string, string> {
     "--reading-leading": "minmax(0, 1fr)",
     "--reading-lane": `minmax(0, ${measure}ch)`,
     "--reading-trailing": "minmax(0, 1fr)",
+    "--reading-trailing-max": "1fr",
   };
 }

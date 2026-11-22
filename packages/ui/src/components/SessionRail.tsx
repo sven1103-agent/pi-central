@@ -310,8 +310,28 @@ export function SessionRail({
                 One word per heading, always. The earlier attempt put the word inside the fold button as well, which read
                 well for `Idle` and produced two controls both called "Stopped" in the one heading that also selects rows:
                 a reader would have had to tell apart two identically named buttons that do different things.
+
+                AND THE WHOLE HEADING FOLDS IT. Reported from a screenshot: the mark is "way too small, users can barely
+                see it", and aiming for it is a precision task on a row where everything else is a wide target. So the
+                heading itself is the button for a foldable section, and the two controls inside it keep their own jobs:
+                a press that lands on either one is theirs alone, checked on the event rather than by stopping
+                propagation in four handlers. The mark remains, and remains a BUTTON: it is what says the section can
+                fold, and it is the keyboard stop and the accessible name for the action — an `h3` with a click handler
+                is a pointer convenience and not a control, so nothing is reachable only through it.
               */}
-              <h3 className={`group-header${folded ? " is-folded" : ""}`}>
+              <h3
+                className={`group-header${folded ? " is-folded" : ""}${foldable ? " is-foldable" : ""}`}
+                onClick={
+                  foldable
+                    ? (event) => {
+                        // A press on the mark or on the bulk selection is that control's press. Without this the mark
+                        // would toggle twice (its own handler, then the bubble), which reads as "nothing happened".
+                        if ((event.target as HTMLElement).closest("button") !== null) return;
+                        onToggleFolded?.(section.group as "idle" | "stopped");
+                      }
+                    : undefined
+                }
+              >
                 {/*
                   THE DISCLOSURE MARK, and only the mark.
 
@@ -324,6 +344,9 @@ export function SessionRail({
                   `▸`/`▾` rather than a chevron from the Technical block: `⌫` from that block rendered as an empty box on
                   this machine (`SessionControlBar` records the measurement), and a tofu square where the only affordance
                   is would read as a broken control.
+
+                  The mark is `aria-hidden` inside a button that names the action, which is why enlarging it costs
+                  nothing in speech: it is a picture of "this folds", not a second label.
                 */}
                 {foldable && (
                   <button

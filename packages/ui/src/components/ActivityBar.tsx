@@ -32,7 +32,14 @@ export type ActivityItem = {
    * the caller's to choose and must not be rewritten here.
    */
   id: string;
-  /** One or two words, shown in the tooltip. Never rendered as visible text: the bar is 48px wide. */
+  /**
+   * One or two words.
+   *
+   * Shown as a LABEL when the pointer is over the item (issue #275), and always as the accessible name and the OS
+   * tooltip. It was tooltip-only, and the report was the obvious consequence: *"users don't remember what the icons
+   * mean in the left menu bar"* — a 16px glyph, a 48px bar, and a name that appears only after the platform's own
+   * tooltip delay.
+   */
   label: string;
   /** The glyph. Text rather than SVG so the bar needs no asset pipeline and inherits `currentColor`. */
   glyph: string;
@@ -126,6 +133,20 @@ export function ActivityBar({
           >
             <span className="navrail-glyph" aria-hidden="true">
               {item.glyph}
+            </span>
+            {/*
+              THE NAME, in the bar, on hover and focus.
+
+              A permanent label would mean a 64px bar and a column of words beside the roster — the opposite of the calm
+              this bar was built for. A label that arrives on hover costs nothing at rest and answers the complaint
+              without adding a surface: nothing appears over the text, nothing moves, and the bar's own width is
+              unchanged.
+
+              `aria-hidden` because the button already carries `aria-label` with the same string: two names for one
+              control is how a reader hears it twice.
+              */}
+            <span className="navrail-label" aria-hidden="true">
+              {item.label}
             </span>
           </button>
         ))}

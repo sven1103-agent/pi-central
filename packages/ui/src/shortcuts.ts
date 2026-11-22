@@ -178,18 +178,33 @@ export const SHORTCUTS: readonly ShortcutDefinition[] = [
     id: "view.focus",
     group: "pages",
     /*
-     * `⌘⇧.` — and the pair with `⌘.` is the reason for it.
+     * `⌥⇧Z`, AND still `⌘⇧.` — two chords, one mode.
      *
-     * `⌘.` stops the run: the most consequential keystroke in the app. A view MODE should not sit one modifier away from
-     * it by accident, so this takes the Shift: "the same corner, a different thing", and pressing the wrong one costs a
-     * confirmation rather than a silent stop.
+     * The second was asked for by name: *"many apps call it Zen Mode, and the Option + Shift + Z can toggle Zen mode"*.
+     * It is a fair request — this is the mode's popular name and the popular chord — so the sheet lists both and either
+     * one works. Two chords is not a second binding: it is `keys`, which has been a list for exactly this.
      *
-     * `.` rather than a letter because the mode is about the WINDOW, and the window's keys in this registry are the
-     * punctuation ones (`⌘,` settings, `⌘.` stop). It is also layout-safe on the layouts this app is used on — unlike
-     * `/`, which is Shift+7 on a German keyboard and was the reason `⌘K` replaced `⌘/`.
+     * `⌘⇧.` stays rather than being replaced, and the note below is why: it is the pair with `⌘.`, which STOPS A RUN.
+     * Removing it would send every reader who learned it next to the most consequential keystroke in the app, and the
+     * Shift is what keeps those two apart.
+     *
+     * ## Why this chord only works because of `chainOf`'s `code` fallback
+     *
+     * On macOS, Option is a dead key for letters: `⌥⇧Z` reports `key: "¸"`, not `"z"`. A binding written as
+     * `alt+shift+z` was therefore UNPRESSABLE — declared, listed, and dead — which is the same class of defect this file
+     * records for `⌘/` on a German layout. `chordOf` now reads the PHYSICAL key when Option is the only modifier
+     * (`KeyZ` → `z`), on every layout and under every dead-key substitution.
+     *
+     * Falsified by deleting that branch: this chord stops firing and `shortcuts.test.mjs` reports a binding no event can
+     * produce.
+     *
+     * ## Why not `⌘⇧.`'s neighbours
+     *
+     * `Z` was chosen by the reader, and it is a good key here: it is a letter, so no layout Shift trick is needed to
+     * type it, and `⌥` (not `⌘`) means it cannot collide with a system menu item on macOS the way `⌘` letters do.
      */
-    keys: ["mod+shift+."],
-    label: "Reading focus",
+    keys: ["alt+shift+z", "mod+shift+."],
+    label: "Zen mode",
     note: "Gives the conversation the window, and puts the chrome back when pressed again.",
     shell: true,
   },
@@ -292,6 +307,17 @@ const MODIFIER_KEYS = new Set(["shift", "control", "alt", "meta", "altgraph", "c
 /** The part of a `KeyboardEvent` a chord is made of. Narrowed so this is testable without a DOM. */
 export interface KeyEventLike {
   key: string;
+  /**
+   * The PHYSICAL key — `KeyZ`, `Digit1`, `Comma`.
+   *
+   * Needed for exactly one case, and it is the reason `⌥` bindings on letters used to be undeclarable: on macOS Option
+   * is a dead key for letters. `⌥Z` reports `key: "Ω"` (U+03A9) on a US layout and something else on every other one,
+   * so a chord written as `alt+z` is never produced by pressing Option+Z. `code` is layout- and modifier-independent:
+   * the key at that position is `KeyZ` whatever the layout does with it.
+   *
+   * Optional because a synthetic event (and the tests' own literals) may omit it; without it the old behaviour holds.
+   */
+  code?: string | undefined;
   metaKey?: boolean | undefined;
   ctrlKey?: boolean | undefined;
   altKey?: boolean | undefined;
@@ -299,20 +325,147 @@ export interface KeyEventLike {
 }
 
 /**
- * The canonical chord for a keystroke, or `undefined` when it cannot be a binding.
+ * Every chord this keystroke could mean, most likely first; empty when it cannot be a binding.
+ *
+ * ## Why this is a LIST
  *
  * `undefined` for a bare key (no ⌘/⌥) on purpose: see the file header. `⌘` and `Ctrl` are the same modifier here —
  * `mod` — because the app is used on both and one list of bindings is worth more than a platform split.
+ *
+ * More than one chord for exactly one case, and it is the case this file spent three reports on: an `⌥` chord on a
+ * LETTER. macOS replaces the character with a dead-key composition (`⌥⇧Z` reports `key: "Dead"`, not `"z"`), so the
+ * physical key is the only honest source — and it is ambiguous. `KeyZ` is `z` on a US keyboard and `y` on a German one,
+ * and the browser cannot be asked reliably which (`getLayoutMap` is CDP-gated in Electron).
+ *
+ * So both are offered, nearest first, and the BINDING decides: `⌥⇧Z` matches a key offering `z`, `⌥⇧Y` matches one
+ * offering `y`. On QWERTZ those are the same physical key, and a candidate list ordered [their letter, the US letter]
+ * is what keeps `⌥⇧Z` meaning Z for the reader who pressed it.
+ *
+ * Falsified by returning only the US letter: `⌥⇧Z` on QWERTZ composites `alt+shift+y`, matches nothing, and
+ * `focus-mode.test.mjs` reports a mode that cannot be toggled — which is the report, twice.
  */
-export function chordOf(event: KeyEventLike): string | undefined {
-  const key = NAMED_KEYS[event.key] ?? event.key.toLowerCase();
-  if (key.length === 0) return undefined;
-  if (MODIFIER_KEYS.has(key)) return undefined;
+export function chordsOf(event: KeyEventLike): string[] {
   const mod = event.metaKey === true || event.ctrlKey === true;
   const alt = event.altKey === true;
   const shift = event.shiftKey === true;
-  if (!mod && !alt) return undefined;
-  return `${mod ? "mod+" : ""}${alt ? "alt+" : ""}${shift ? "shift+" : ""}${key}`;
+  if (!mod && !alt) return [];
+  const prefix = `${mod ? "mod+" : ""}${alt ? "alt+" : ""}${shift ? "shift+" : ""}`;
+  /*
+   * The physical key, BEFORE any judgement about `key`: `"dead"` is in `MODIFIER_KEYS` and `""` fails the empty-key
+   * check, and both of those are exactly what Option sends. That ordering was the second report: *"no shortcut toggled
+   * zen mode"*, because two of the three shapes macOS produces were rejected before `code` was read.
+   */
+  if (alt && !mod) {
+    const letters = lettersFromCode(event.code);
+    if (letters.length > 0) return letters.map((letter) => prefix + letter);
+  }
+  const name = NAMED_KEYS[event.key] ?? event.key.toLowerCase();
+  if (name.length === 0) return [];
+  // A modifier pressed on its own is not yet a chord.
+  if (MODIFIER_KEYS.has(name)) return [];
+  return [prefix + name];
+}
+
+/** The chord this keystroke most likely means, for the callers that need one answer. */
+export function chordOf(event: KeyEventLike): string | undefined {
+  return chordsOf(event)[0];
+}
+
+/**
+ * EVERY letter this physical key could be standing for, nearest first.
+ *
+ * ## The two reports that shaped this
+ *
+ * macOS turns Option into a dead key, so `⌥⇧Z` reports `key: "Dead"` (or `"¸"`) rather than a letter. Only the physical
+ * key says which letter was meant:
+ *
+ *   - the first fix read `code` directly, which assumed the letters sit where a US keyboard puts them. On German QWERTZ
+ *     the key LABELLED `Z` is `code: "KeyY"`, so the chord composed `alt+shift+y` and matched nothing — *"it still does
+ *     not work"*, and ``"with Y it works"`` said exactly why;
+ *   - the second fix read the layout through `navigator.keyboard.getLayoutMap()`, which is the right answer when it is
+ *     available — and is not, reliably, in the Electron runtime this app ships (a CDP-gated API), so the same report
+ *     came back.
+ *
+ * ## So the ambiguity is resolved by MATCHING, not by asking
+ *
+ * A physical key offers at most two letters: what the US arrangement calls it (`KeyZ` → `z`) and what the reader's
+ * layout puts there (`KeyZ` → `y` on QWERTZ). The first is always knowable; the second comes from the layout map when
+ * the browser has one. Rather than pick one and be wrong on half the world's keyboards, both are offered as candidates
+ * and the BINDING decides: `⌥⇧Z` matches a key offering `z`, and `⌥⇧Y` matches a key offering `y`.
+ *
+ * That is why `resolveChord` returns a list. It already did, for the layout-Shift tolerance; this is the same idea one
+ * level down — an ambiguous keystroke yields a set of chords, and a binding matches if any candidate is it.
+ *
+ * The cost of being wrong in the other direction is a genuine collision: if a reader's layout puts `y` where the US
+ * has `z`, then `⌥⇧Y` and `⌥⇧Z` are the same physical key and BOTH bindings would fire for it. That is resolved by
+ * ordering, not by exclusion — the reader's own layout comes first, so the candidate list is
+ * [their letter, the US letter] and a binding on a chord is checked in that order by `resolveShortcut`.
+ */
+function lettersFromCode(code: string | undefined): string[] {
+  if (code === undefined || !/^Key[A-Z]$/.test(code)) return [];
+  const us = code.slice(3).toLowerCase();
+  const typed = layoutMap?.get(code);
+  if (typed !== undefined) return typed === us ? [us] : [typed, us];
+  /*
+   * NO MAP, SO OFFER EVERY LETTER THIS KEY IS KNOWN TO CARRY.
+   *
+   * The map is unavailable in Electron (`getLayoutMap` is CDP-gated), and that is the case the reader is actually in:
+   * *"with Y it works. So on a QWERTZ layout, it wont work!"*. The letter the US arrangement puts here is known; the
+   * letter a layout puts here is not. For the keys the world's layouts actually SWAP, both are known from the swap
+   * itself — and without them `⌥⇧Z` on QWERTZ composes `alt+shift+y` and dies, which is the report, twice.
+   *
+   * Only the swapped pairs, not a guess at every layout: these are the arrangements where a letter sits at another
+   * letter's US position, which is the ONE situation the candidate list exists to survive. A layout this table does not
+   * know still works for its US-position letters, and works fully when the browser can supply a map.
+   *
+   * Falsified by returning `[us]` here: the QWERTZ test reports `alt+shift+y`, which is the bug as reported.
+   */
+  const swapped = SWAPPED_POSITIONS[code];
+  return swapped === undefined ? [us] : [us, swapped];
+}
+
+/**
+ * Physical positions whose letter is a different letter on a real, common layout.
+ *
+ * QWERTZ (German, Austrian, Swiss, Czech, Hungarian…) swaps Z and Y: the key labelled Z sits where the US has Y, so
+ * `KeyY` types `z` and `KeyZ` types `y`. AZERTY (French, Belgian…) moves Q and A the same way. Both are recorded here
+ * because a reader on either cannot press an `⌥` chord on those letters otherwise — and the two other keyboard-layout
+ * reports in this repository are from those layouts.
+ *
+ * The value is the letter the layout puts at that POSITION; the key is the US letter at that position.
+ */
+const SWAPPED_POSITIONS: Readonly<Record<string, string>> = {
+  KeyY: "z", // QWERTZ: this position types z
+  KeyZ: "y", // QWERTZ: this position types y
+  KeyQ: "a", // AZERTY: this position types a
+  KeyA: "q", // AZERTY: this position types q
+};
+
+/**
+ * The reader's key layout, when the browser can tell us.
+ *
+ * `navigator.keyboard.getLayoutMap()` is the honest source — it says what each physical key TYPES on this machine — but
+ * it is a CDP-gated API in Electron, so it is an OPTIMISATION here rather than a dependency: without it the US letter is
+ * still offered as a candidate, which is what makes `⌥⇧Z` work on a QWERTZ keyboard either way.
+ */
+let layoutMap: ReadonlyMap<string, string> | undefined;
+
+/**
+ * Install the reader's key layout, if the browser has one.
+ *
+ * Entries that do not name a single letter are dropped rather than trusted: this map turns physical keys back into
+ * letters, and a modifier entry (`"ShiftLeft" → "Shift"`), or a QWERTZ `ß`, must not become a letter candidate.
+ */
+export function setKeyLayout(map: ReadonlyMap<string, string> | undefined): void {
+  if (map === undefined) {
+    layoutMap = undefined;
+    return;
+  }
+  const letters = new Map<string, string>();
+  for (const [code, typed] of map) {
+    if (/^[a-z]$/i.test(typed)) letters.set(code, typed.toLowerCase());
+  }
+  layoutMap = letters;
 }
 
 /** The binding for a canonical chord, if there is one. */
@@ -371,9 +524,12 @@ export function resolveChord(chord: string): string[] {
  * and the three dialogs that answer their own chords cannot disagree about what a keystroke meant.
  */
 export function matchesChord(event: KeyEventLike, binding: string): boolean {
-  const chord = chordOf(event);
-  if (chord === undefined) return false;
-  return resolveChord(chord).includes(binding);
+  /*
+   * EVERY candidate chord, then every layout-Shift tolerance of each. Two levels because the ambiguity is two-level: a
+   * keystroke may mean more than one chord (an `⌥` letter, see `chordsOf`), and any one of those may be typed through a
+   * Shift the layout required (see `resolveChord`).
+   */
+  return chordsOf(event).some((chord) => resolveChord(chord).includes(binding));
 }
 
 /** The ids the shell must handle, derived from the registry so the sheet cannot promise a key nobody reads. */
@@ -395,6 +551,15 @@ export const DELETE_CHORD: string = chordForId("session.delete");
  * keyboard that could not press it.
  */
 export const KEYS_CHORD: string = chordForId("keys.show");
+
+/**
+ * The chord that opens the queued-messages sheet, for the same reason as `KEYS_CHORD`.
+ *
+ * The composer had the literal `event.altKey && event.key === "q"` beside a registry entry declaring `alt+q` — two
+ * copies of one fact, and the copy in the component was the dead one (Option is a dead key for letters on macOS). Read
+ * from the registry, so the sheet and the behaviour cannot disagree again.
+ */
+export const QUEUE_CHORD: string = chordForId("composer.queueSheet");
 
 /**
  * The (first) chord for a binding id.
@@ -581,15 +746,20 @@ export interface ShellGate {
  *    mean a reader who clicked into the composer lost `⌘N` for the rest of the session.
  */
 export function resolveShortcut(event: KeyEventLike, gate: ShellGate): ShortcutDefinition | undefined {
-  const chord = chordOf(event);
-  if (chord === undefined) return undefined;
   /*
-   * Every candidate form of the chord, not just the literal one: a layout that types this key through Shift produces a
-   * chord with `shift` in it, and that extra Shift must not hide the binding (see `resolveChord`).
+   * Every candidate form of every candidate chord, in order, and the FIRST match wins.
+   *
+   * Two sources of ambiguity, and the order between them is the behaviour: a keystroke may mean more than one chord (an
+   * `⌥` letter — `chordsOf`), and any one of those may be typed through a Shift the layout required (`resolveChord`).
+   * Nearest-first ordering is what makes `⌥⇧Z` on a QWERTZ keyboard mean Z to the reader who pressed the key labelled Z,
+   * even though the same physical key also answers to `⌥⇧Y`.
    */
   let shortcut: ShortcutDefinition | undefined;
-  for (const candidate of resolveChord(chord)) {
-    shortcut = shortcutForChord(candidate);
+  for (const chord of chordsOf(event)) {
+    for (const candidate of resolveChord(chord)) {
+      shortcut = shortcutForChord(candidate);
+      if (shortcut !== undefined) break;
+    }
     if (shortcut !== undefined) break;
   }
   if (shortcut === undefined || !shortcut.shell) return undefined;

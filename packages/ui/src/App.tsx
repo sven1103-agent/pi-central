@@ -81,6 +81,7 @@ import {
   isEditableTarget,
   matchesChord,
   resolveShortcut,
+  setKeyLayout,
   type TargetLike,
 } from "./shortcuts.ts";
 import { FollowToggle } from "./components/FollowToggle.tsx";
@@ -387,17 +388,29 @@ export function App() {
    * keep the transcript's width for the transcript (issue #275). Conflating them into one boolean would also let the
    * breakpoint write the preference — a window narrowed once would come back with the rail hidden.
    */
-  const railSummonable = railIsDrawer || railPrefs.hidden;
-  /** A DOCKED rail: a column in the grid. Only above the breakpoint, only for a reader who has not hidden it. */
-  const railDocked = tab === "sessions" && !railSummonable;
   /**
-   * A SUMMONED rail: the same element as an overlay, above the transcript.
+   * A DOCKED rail: a column in the grid.
    *
-   * `railOpen` is that transient show state, at every width, so a reader who hides the column at 2000px gets the same
-   * behaviour as one whose window is 900px wide — one code path for one behaviour, which is the property the issue
-   * lists as the benefit of making the rail a drawer everywhere, obtained without making it the default.
+   * TWO conditions, and the second one is deliberately NOT `railPrefs.hidden` (issue #275).
+   *
+   * The earlier form was `tab === "sessions" && !railSummonable`, where `railSummonable` folded together "the window
+   * is too narrow" and "the reader hid it". So a reader who pressed `☰` at 1550px could only ever get the OVERLAY
+   * back, and the report was accurate: *"why is the roster rendered as a modal"*. It was, because above the breakpoint
+   * there was no rung of the ladder that returned the COLUMN.
+   *
+   * The two facts are the same shape only above the breakpoint and only by accident. Below it the window genuinely
+   * cannot fit a column, so the drawer is the only shape; above it the column fits and the reader's choice is simply
+   * whether it is there.
    */
-  const railOverlay = railSummonable && railOpen && tab === "sessions";
+  const railDocked = tab === "sessions" && !railIsDrawer && !railPrefs.hidden;
+  /**
+   * A SUMMONED rail: the same element as an overlay, above the transcript — and ONLY below the breakpoint.
+   *
+   * `railOpen` is the transient show state. Above the breakpoint it is unusable because nothing sets it: a hidden
+   * column is restored as a column (see the activity bar's ladder), never as a drawer. That is the point — the drawer
+   * is the shape a narrow window FORCES, not the shape a preference chooses, so the two no longer share a rule.
+   */
+  const railOverlay = railIsDrawer && railOpen && tab === "sessions";
   /** Is the list on the page at all? The one question the activity bar asks. */
   const railShown = railDocked || railOverlay;
 
@@ -470,29 +483,42 @@ export function App() {
 
   /*
    * Closing it on resize is not tidiness: a drawer left open while the window grows would cover a rail that is already
-   * there, so the reader would see two lists. The state is meaningless once the breakpoint is crossed.
+   * there, so the reader would see two lists. The state is meaningless once the breakpoint is crossed — and since
+   * `railOverlay` is now bounded by the breakpoint, this also guarantees a widened window shows the column.
    */
   useEffect(() => {
     if (!railIsDrawer) setRailOpen(false);
   }, [railIsDrawer]);
 
   /*
-   * Escape closes a HIDDEN-BY-READER rail too, above the breakpoint (issue #275).
+   * THE READER'S KEY LAYOUT, read once.
    *
-   * The rail is an overlay in that state as well: it covers the transcript's left edge rather than sitting beside it.
-   * A reader who hid it, summoned it and then pressed Escape must get the state they were in — and one gesture for that
-   * is better than a second one because the window happens to be wider.
+   * Needed because an `⌥` chord has to be matched by the PHYSICAL key — macOS replaces the character with a dead-key
+   * composition, so `⌥⇧Z` is not reported as a letter at all — and `code` alone assumes a US keyboard. On QWERTZ the
+   * key labelled `Z` is `KeyY`, which is why `⌥⇧Z` did nothing until this was read.
+   *
+   * Once, not per keystroke, and it is allowed to fail: the Keyboard API is not in every browser, and without it
+   * `shortcuts.ts` falls back to the US arrangement — which is what every reader with letters in those positions had
+   * before. A promise that rejects must not surface as an unhandled rejection either, hence the `catch`.
    */
   useEffect(() => {
-    if (!railOverlay) return undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.stopPropagation();
-      setRailOpen(false);
+    const keyboard = (navigator as Navigator & { keyboard?: { getLayoutMap?: () => Promise<Map<string, string>> } })
+      .keyboard;
+    const pending = keyboard?.getLayoutMap?.();
+    if (pending === undefined) return undefined;
+    let live = true;
+    pending
+      .then((map) => {
+        if (live) setKeyLayout(map);
+      })
+      .catch(() => {
+        // No layout: the US arrangement stands, which is a working keyboard for anyone whose letters are where
+        // `code` says they are. Nothing to report to the reader.
+      });
+    return () => {
+      live = false;
     };
-    window.addEventListener("keydown", onKeyDown, { capture: true });
-    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
-  }, [railOverlay]);
+  }, []);
 
   /*
    * Escape closes the drawer, and it is registered HERE rather than in the rail because the composer already owns
@@ -1953,62 +1979,107 @@ export function App() {
         rather than cards inside it — see `styles.css`'s activity-bar section for the geometry decision.
       */}
       <div className="shell">
+        {/*
+            THE PAGES, and only the pages.
+
+            Reported from use: *"the navigation hierarchy is broken. The session icon becomes the target of the
+            navigation steps: when navigating back from e.g. history or settings, users need to click it to see the
+            transcript (which is the actual navigation target). But it is also the target to toggle the sidebar session
+            roster."*
+
+            That was exact, and the cause was structural: the item did BOTH jobs in one handler, so from History one
+            press meant two things and the second depended on state the reader could not see. The bar promises that the
+            left bar chooses a PAGE — `ActivityBar`'s own note says so — and a destination that also rearranges the
+            layout it navigates to is not a destination.
+
+            So the two are separated by the only rule that makes them safely separable:
+
+              - **Sessions** is a DESTINATION. It opens the page and changes nothing else. Idempotent, always: pressing
+                it from anywhere lands on the same picture, whatever the roster is doing.
+              - **The roster toggle** is a control of the REGION, not of a page. It lives ABOVE the page group and
+                behind the bar's rule, which is exactly where `ActivityBar` puts the right panel's toggle for the same
+                reason — a control of the region and a destination are different kinds of thing, and the mark that says
+                so is the rule between them.
+
+            That is also why the roster toggle is not merely a second button in the same group: grouping is the
+            hierarchy. A reader who sees two marks in one group reads two destinations.
+        */}
         <ActivityBar
           side="left"
           label="Main"
           items={[
             {
               id: "activity-left-sessions",
+              label: "Sessions",
               /*
-                "Sessions" is the only word in the whole bar, so the tooltip carries the extra fact that this is a
-                toggle, and WHICH toggle it is: below 1024 it opens the drawer, above it the rail is a column that
-                the reader may have hidden (issue #275) — so the same control shows and hides it at every width.
+                `☰` used to be here and is now the roster control's, because a toggle is not a destination.
+
+                `◪` (U+25EA) rather than anything taken: `▤` is the panel's Files mode, `≡` its Trace, `◉` its Session,
+                `↺` History, `⚙` Settings, `?` the keys. Every mark in these bars is a Geometric Shapes codepoint for
+                the reason `styles.css` records — private-use and emoji codepoints render differently on every OS.
+
+                The filled quadrant is the pictogram of a conversation: a page with something said in it. Distinct at
+                16px from `▤` two bars away, which is a page divided into rows.
               */
-              label: railShown ? "Hide sessions" : "Show sessions",
-              // Not `▤`: that is the Files glyph in the context bar, and the same mark for "the session
-              // list" and "this session's files" is a collision a reader has to resolve from position alone.
-              glyph: "☰",
-              /*
-                Selected only while the list is actually VISIBLE.
-
-                It used to be `tab === "sessions" && (!railIsDrawer || railOpen)`, i.e. "this page is the sessions
-                page" — which was right while the rail was a permanent column and became a lie the moment hiding it was
-                a reader choice: the bar item would claim to be current while the thing it names was gone.
-              */
-              active: tab === "sessions" && railShown,
-              expanded: railShown,
-              controls: "session-rail",
-              onSelect: () => {
-                if (tab !== "sessions") setTab("sessions");
-                /*
-                  ONE control, a three-step ladder, and the same ladder at every width.
-
-                  The states a rail can be in are "docked", "summoned over the transcript", and "away", and the button
-                  means the next sensible one from wherever it is:
-
-                    1. an overlay is showing        → dismiss it (this is the drawer's close gesture, wherever it came from)
-                    2. the column is hidden         → summon the overlay, which is the cheap look without changing the
-                                                      preference
-                    3. the column is docked         → dock it away
-
-                  The first version collapsed steps 2 and 3 into one toggle of `hidden`, which meant a reader whose column
-                  was docked pressed the button and NOTHING appeared to happen. Keeping the three apart is what makes
-                  "the thing that hides it is the thing that brings it back" true without making one press do two jobs —
-                  the rule `PanelToggle` records for the panel.
-                */
-                if (railOverlay) {
-                  setRailOpen(false);
-                  return;
-                }
-                if (railPrefs.hidden || railIsDrawer) {
-                  setRailOpen(true);
-                  return;
-                }
-                setRailPrefsAndPersist((current) => ({ ...current, hidden: true }));
-              },
+              glyph: "◪",
+              active: tab === "sessions",
+              onSelect: () => setTab("sessions"),
             },
             { id: "activity-left-history", label: "History", glyph: "↺", active: tab === "history", onSelect: () => setTab("history") },
           ]}
+          header={
+            /*
+              THE ROSTER'S OWN CONTROL, above the pages and behind the rule.
+
+              It acts on what is ON THE PAGE, not on a preference — which is the correction after two reports in
+              opposite directions:
+
+                - *"why is the roster rendered as a modal"*: this could only produce the overlay from a hidden state;
+                - *"the toggle for the roster becomes a noop when in history"*: the roster is the Sessions page's list,
+                  so `railShown` is false there whatever the preference says, and pressing this flipped `hidden`
+                  with nothing on screen to show for it. That is worse than a no-op — it changed a preference the
+                  reader could not see change.
+
+              So the two rungs are "hide what is showing" and "show it", and SHOWING it from another page means going to
+              the page that has one. That is not the defect amendment 4 fixed: that was a DESTINATION with a hidden side
+              effect on the layout, and this is a toggle whose one visible effect is the thing it names. The reader
+              presses "show the session list" and sees the session list.
+
+              Within each rung the width still decides the mechanism, because they are genuinely different: below the
+              breakpoint the drawer is the only form the list can take, above it the column is the preference's.
+            */
+            <button
+              type="button"
+              className="navrail-item"
+              aria-expanded={railShown}
+              aria-controls="session-rail"
+              title={railShown ? "Hide the session list" : "Show the session list"}
+              aria-label={railShown ? "Hide the session list" : "Show the session list"}
+              onClick={() => {
+                if (railShown) {
+                  if (railIsDrawer) setRailOpen(false);
+                  else setRailPrefsAndPersist((current) => ({ ...current, hidden: true }));
+                  return;
+                }
+                /*
+                  SHOW it. The list belongs to one page, so a reader asking for it from History is asking to be taken
+                  there — the press has exactly one effect and it is the one the label promised.
+                */
+                if (tab !== "sessions") setTab("sessions");
+                if (railIsDrawer) setRailOpen(true);
+                else if (railPrefs.hidden) setRailPrefsAndPersist((current) => ({ ...current, hidden: false }));
+              }}
+            >
+              <span className="navrail-glyph" aria-hidden="true">
+                ☰
+              </span>
+              {/* The same hover label the page items carry, so the bar reads as one control family. It states the same
+                  action the tooltip and the accessible name do, from one expression. */}
+              <span className="navrail-label" aria-hidden="true">
+                {railShown ? "Hide the list" : "Show the list"}
+              </span>
+            </button>
+          }
         >
           {/*
             Keyboard help, in the bar's footer beside Settings — the two things a reader looks up rather than does.
@@ -2033,6 +2104,9 @@ export function App() {
             <span className="navrail-glyph" aria-hidden="true">
               ?
             </span>
+            <span className="navrail-label" aria-hidden="true">
+              Keyboard shortcuts
+            </span>
           </button>
           <button
             type="button"
@@ -2044,6 +2118,9 @@ export function App() {
           >
             <span className="navrail-glyph" aria-hidden="true">
               ⚙
+            </span>
+            <span className="navrail-label" aria-hidden="true">
+              Settings
             </span>
           </button>
         </ActivityBar>
@@ -2302,11 +2379,18 @@ export function App() {
                 Passed from HERE because the shell owns the preference and `SessionView` is module scope. The transcript
                 then decides placement — it is the element that knows how much room it has.
               */
-              focusMode={railPrefs.focus}
+              /*
+                Whether the PEEK is the only place the session's facts appear: the mode, AND the Session panel being
+                collapsed. Derived here because the shell owns both facts, and as ONE condition — two conditions in two
+                files is how the tab came to open an empty panel: the sheet hid the column when focus was on and the
+                panel was open, while the transcript rendered the peek whenever focus was on.
+
+                The latch is NOT persisted. It covers prose; every other value in `rail-prefs` restores a layout the
+                reader chose, and restoring an occlusion nobody remembers asking for is not the same promise.
+              */
+              peekOnly={railPrefs.focus && panel.collapsed}
               peekPinned={railPrefs.peekPinned}
-              onPeekPinned={(pinned) =>
-                setRailPrefsAndPersist((current) => ({ ...current, peekPinned: pinned }))
-              }
+              onPeekPinned={(pinned) => setRailPrefs((current) => ({ ...current, peekPinned: pinned }))}
               models={focused ? state.models[focused.id] : undefined}
               modelError={focused ? state.modelErrors[focused.id] : undefined}
               onRename={renameFocused}
@@ -2810,6 +2894,9 @@ export function App() {
                 <span className="navrail-glyph" aria-hidden="true">
                   {panel.collapsed ? "◨" : "◫"}
                 </span>
+                <span className="navrail-label" aria-hidden="true">
+                  {panel.collapsed ? "Show the panel" : "Hide the panel"}
+                </span>
               </button>
             </>
             }
@@ -2923,7 +3010,7 @@ function SessionView({
   state,
   draft,
   onDraftChange,
-  focusMode,
+  peekOnly,
   peekPinned,
   onPeekPinned,
 }: {
@@ -2995,7 +3082,8 @@ function SessionView({
    * shell's state. Three facts and one callback is the whole of what the frame needs — the preference stays the shell's,
    * the placement stays the transcript's.
    */
-  focusMode?: boolean;
+  /** Is the peek the only frame for the session's details? `focus && panel.collapsed` — see `TranscriptView`. */
+  peekOnly?: boolean;
   peekPinned?: boolean;
   onPeekPinned?: (pinned: boolean) => void;
 }) {
@@ -3092,7 +3180,7 @@ function SessionView({
           The frame is the shell's choice because the shell owns the preference; the transcript decides PLACEMENT within
           its own width. `peek` is passed only in focus mode — off, the wide layout's column is the right frame.
         */
-        focusMode={focusMode}
+        peekOnly={peekOnly === true}
         peekPinned={peekPinned}
         onPeekPinned={onPeekPinned}
         peekStateWord={stateLabel(session)}

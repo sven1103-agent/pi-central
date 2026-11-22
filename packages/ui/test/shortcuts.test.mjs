@@ -39,6 +39,7 @@ import {
   SHORTCUTS,
   SHORTCUT_GROUPS,
   STOP_CHORD,
+  QUEUE_CHORD,
   chordOf,
   detectPlatform,
   displayChord,
@@ -406,3 +407,28 @@ test("a keystroke that cannot act says so, in the app's one error surface", () =
   assert.match(code(app), /kind: "noteError"/, "the shell reports it locally");
   assert.match(code(app), /it is open in the running session/, "in the orchestrator's own words");
 });
+test("a surface that answers its own chord reads it from the registry, not from event.key", () => {
+  /*
+   * The `⌥Q` defect, and it shipped: the registry declared `alt+q` for the queued-messages sheet AND `Composer.tsx`
+   * decided for itself with `event.altKey && event.key === "q"`. Two copies of one fact, and the copy in the component
+   * was dead on macOS — Option is a dead key for letters, so the event carries `key: "œ"` and the comparison never held.
+   * The sheet has listed that key since it was written, and it had never worked on the platform this app is built for.
+   *
+   * The rule this asserts is the one the registry states in its own header: handlers switch on IDS, never on keys. A
+   * literal comparison in a component makes "what can I press" a question with two answers, and only one of them is
+   * tested.
+   *
+   * Falsified by restoring the literal comparison: the second assertion reports a surface that reads the chord itself.
+   */
+  const composer = readFileSync(new URL("../src/components/Composer.tsx", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  assert.match(composer, /matchesChord\(event, QUEUE_CHORD\)/, "the queue sheet answers the registry's chord");
+  assert.ok(
+    !/event\.key === "q"/.test(composer),
+    "and does not also compare the composed character, which is what Option replaces",
+  );
+  // The chord itself is still the registry's, so the tooltip, the sheet and the handler cannot disagree.
+  assert.equal(QUEUE_CHORD, "alt+q");
+});
+
