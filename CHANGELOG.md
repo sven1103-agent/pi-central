@@ -16,8 +16,10 @@ They are kept because each one is the reason a constraint or an invariant test e
   this branch again ([#276]).
 - Playwright's MCP server is ruled out as the sidecar: it exposes `browser_evaluate` and nothing
   host-side can narrow it, so a session can call it with no credentials at all ([#276]).
-- A browser renders a local page under the sidecar's own profile while non-loopback egress and name
-  resolution are refused ([#276]).
+- A browser renders a local page under the sidecar's own profile while non-loopback egress, name
+  resolution and a second loopback port are refused ([#276]).
+- The next spike asks whether a two-verb host-side service covers UI capture with no `playwright`
+  dependency and a surface that is small by construction ([#276]).
 
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
