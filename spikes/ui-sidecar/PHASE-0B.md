@@ -1,6 +1,6 @@
 # Phase 0B — is Pi's MCP plumbing a cheaper sidecar than a bespoke broker?
 
-**Status:** ⏳ **NOT STARTED** — this file is the brief, not the result.
+**Status:** ⛔ **B4 FAILED — B is retired as specified.** B0–B3, B5, B6 unrun (need a plain terminal).
 **Parent:** Phase 0 ([PHASE-0.md](PHASE-0.md)) — same unproven claim, a different plumbing choice.
 **Issue:** [#276](https://github.com/sven1103-agent/pi-central/issues/276)
 **Branch:** `slice/ui-sidecar`
@@ -27,6 +27,49 @@ protocol, and a Pi extension that lives in a directory the agent can rewrite.
 
 B is only acceptable if the row that differs — "the whole surface" — can be narrowed from the *host*
 side. That is check B4, and it is the one that can retire B.
+
+## B4 — FAILED, measured without a browser (run first, moved here because it is the answer)
+
+The check asks whether the host can narrow the server's tool surface. It cannot, and the failure is not a
+missing option. Measured against `@playwright/mcp@0.0.86` (tarball 97 KB, an 11-line `cli.js` that shims
+straight into `playwright-core`'s bundled MCP implementation) on this machine:
+
+| Question | Method | Result |
+|---|---|---|
+| Does the server withdraw a tool on request? | `README` §options, exhaustive | **no such option.** `--blocked-origins` exists for URLs; there is no `--allowed-tools`, no `--blocked-tools` |
+| What does it expose | `tools/list` over streamable HTTP | **25 tools**, including `browser_evaluate`, `browser_run_code_unsafe`, `browser_file_upload` |
+| Can a client narrow it? | `--exclude-tools`, `--tools` | yes, in-session only — cosmetic, and the agent owns that space |
+| **Can a session bypass a client-side narrowing?** | `tools/call browser_evaluate` with **no auth header** | **yes — `200`, the server executed and answered** |
+
+That last row is the one that ends the argument, and it did not need a browser: a client that never
+declares `browser_evaluate` still reaches it, because **the server is the only enforcement point and it
+enforces nothing**. `--exclude-tools` in Pi is presentation. Whatever narrows B must be host-side and
+argument-blind, which is what `--isolated` does for the whole browser: no cookies, no storage, no
+identity.
+
+So B is not "shape A minus the broker". It is a general browser driver reachable by every session that
+can see the port — which, at one UID with no auth on the transport, is every session. Two consequences
+that outlive this spike:
+
+- **Any MCP server added to Pi Central in future inherits this property.** MCP has an experimental
+  `oauth` mode, and that is the only mechanism in the protocol for "this client may call this tool".
+  It is the same finding as C6's `~/.pi` writability, one layer up: **enforcement that lives in Pi's
+  configuration lives in the agent's writable space.** Worth a C-number when it is confirmed with
+  `oauth`, not before.
+- **What survives is a smaller B.** `--isolated --output-dir` plus a port-scoped egress fragment is a
+  real answering service, and it fails only on the driver *verbs*. That is the seed of **C** below.
+
+### What the run also established, cheaply
+
+- **The server is IPv6-only.** `http://127.0.0.1:8931/mcp` → **connection refused (000)**;
+  `http://localhost:8931/mcp` and `http://[::1]:8931/mcp` → `200`. Two things follow, and both matter:
+  a v4-only loopback egress rule would have produced a false FAIL, and a browser told to visit
+  `http://127.0.0.1:<devport>` reaching a dev server on `::1` is the S5 port-scoping question in a new
+  form.
+- **It answers on every interface-shaped spelling with no credentials**, and starts a *persistent* Chrome
+  from `/Applications` by default (not bundled Chromium) — `--isolated` prevents the profile, not the app.
+- Transport is `/mcp` (streamable HTTP) with a legacy `/sse` alias, so Pi's "SSE is rejected" rule is not
+  a blocker — worth knowing, because it was my first guess at a kill-switch.
 
 ## What is already measured, so this run does not redo it
 
