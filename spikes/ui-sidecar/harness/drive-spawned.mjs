@@ -33,7 +33,18 @@ const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 // A private root OUTSIDE /tmp and /var/folders -- those are readable by every session, so a profile there
 // cannot demonstrate confinement (and composeSidecarPolicy refuses it for the same reason).
 const root = mkdtempSync(join(homedir(), ".pi-central-sidecar-drive-"));
-process.on("exit", () => rmSync(root, { recursive: true, force: true }));
+// Cleanup that cannot fail the RUN. The first version threw ENOTEMPTY on exit, after all five checks had
+// passed: Chrome was still writing into the profile when rm started, and an exception in an exit handler
+// turns a green result into a stack trace. Two things are wrong with reporting a cleanup race as a test
+// failure -- it is not a result, and it teaches the reader to ignore exit noise.
+process.on("exit", () => {
+  try {
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch {
+    // Named, not silenced: the directory is a throwaway under $HOME and a later run will not reuse it.
+    console.error("note: could not remove " + root + " (a browser was still writing). Harmless.");
+  }
+});
 const profileDir = join(root, "profile");
 mkdirSync(profileDir, { recursive: true, mode: 0o700 });
 

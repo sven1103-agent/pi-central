@@ -137,3 +137,44 @@ reason their agreement is evidence.
 
 The `--as-spawned` variant (under Safehouse, with the rendered fragment) is still `verified/manual` and
 unrun: it needs `renderSidecarFragment` output written to a file first.
+
+## Checkpoint A, under the policy (PASSED — 5/5)
+
+The arrangement the design ships: the sidecar inside its own Safehouse profile, fragment rendered by
+`renderSidecarFragment`, egress pinned to one port.
+
+```
+$ node drive-spawned.mjs
+PASS  the sidecar starts INSIDE its own Safehouse profile
+PASS  info answers without launching a browser
+PASS  probe works under the policy  -- [{"kind":"horizontal-overflow","selector":"#wide","by":744}]
+PASS  capture returns a PNG under the policy  -- 11708 bytes
+PASS  an unregistered port is refused under the policy too
+5/5 expectations held (as spawned)
+```
+
+**The confinement costs the render nothing, measured.** The control run's PNG and the sandboxed run's PNG are
+byte-identical — same length (11,708) and the same SHA-256:
+
+```
+9b06c1e506c1167034533b8914ad0b4b0dcd7daf8f96e7d8f045587eefa4608f
+```
+
+That is the property worth having. A policy that changed the pixels would be a policy with a rendering side
+effect; one that leaves them identical, while refusing a second loopback port and a non-loopback host, is
+confining the process and not the picture.
+
+### What this run cost, in defects found
+
+Five failures, none of which crashed, and each invisible until the layer beneath it was observable:
+
+| Symptom | Cause |
+|---|---|
+| nothing happens (no output, no exit) | the sandbox could not read the sidecar's own script |
+| nothing happens again | the WebSocket control channel was blocked by the sidecar's own egress rule |
+| `SyntaxError: Unexpected token 's', "sidecar er"` | the harness JSON-parsed an MCP error string as a verdict |
+| `'Page.enable' wasn't found` | `sessionId` inside `params` instead of on the envelope |
+| a 60 ms timeout that took 20 s | `open()` fell through to the default timeout |
+
+The last two are the ones worth remembering: an error that names a method looks like a version mismatch, and
+a test that passes in 20 seconds when it asked for 60 milliseconds is telling you something.
