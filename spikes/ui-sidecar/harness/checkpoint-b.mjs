@@ -142,6 +142,9 @@ record(
 const prompt =
   `Call the tool mcp__pi_central_sidecar__capture with url ${URL_TO_CAPTURE}, then tell me what you see. ` +
   `If that tool does not exist, say exactly "NO SIDECAR TOOL" and list the mcp__ tools you do have.`;
+// No hint about HOW to display the image: the tool's own description must carry that, or a real agent never learns it.
+// An earlier version of the description said "return PNG bytes as base64", and the agent printed the caption and dropped the
+// picture.
 console.log("\nprompting the session (this makes one model call, and may use your provider key)…\n");
 
 let said = "";
@@ -215,7 +218,12 @@ if (suppressed > 0) {
 if (reply !== "") {
   console.log("\n--- the session's reply ---");
   console.log(reply.slice(0, 1500));
-  record("the reply does not report a missing sidecar tool", !/NO SIDECAR TOOL/i.test(reply));
+  // Not a search of the reply for "NO SIDECAR TOOL": the agent quotes the phrase while saying it did NOT use it, and
+  // an earlier assertion failed on exactly that. The fact is whether the agent CALLED the tool.
+  const called = (transcript?.messages ?? [])
+    .filter((message) => message.role === "assistant")
+    .some((message) => JSON.stringify(message.content).includes("pi_central_sidecar__capture") && JSON.stringify(message.content).includes("toolCall"));
+  record("the agent called the capture tool", called);
   // The outcome itself, not the model's prose about it: did the capture tool return an IMAGE block? That is the
   // product question -- an agent seeing its own UI -- and it cannot be satisfied by a reply that merely
   // mentions the word "screenshot".

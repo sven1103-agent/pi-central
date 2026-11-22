@@ -62,8 +62,10 @@ export function toolDefinitions(): ToolDefinition[] {
     {
       name: "capture",
       description:
-        "Screenshot the registered dev server and return PNG bytes as base64. Writes no file. Prefer " +
-        "`probe` first: a screenshot costs thousands of tokens.",
+        "Screenshot the registered dev server. Returns the PNG as an image content block, first in `content`, " +
+        "followed by a one-line caption. Writes no file. From a codemode script the image reaches you only if " +
+        "the script shows it: `image(result.content[0])`; printing the text alone discards the picture. " +
+        "Prefer `probe` first: a screenshot costs thousands of tokens.",
       inputSchema: {
         type: "object",
         properties: {
