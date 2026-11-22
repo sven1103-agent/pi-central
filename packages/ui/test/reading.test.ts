@@ -168,7 +168,7 @@ test("the stylesheet reads the tokens rather than the constants", () => {
   assert.ok(!/--fs-md:\s*var\(--reading-size\)/.test(css), "the reading size must not drive --fs-md");
 });
 
-test("the newest line is held above the foot by padding on the lane (ADR-0016)", () => {
+test("the newest line is held above the foot by padding on the lane (ADR-0017)", () => {
   /*
    * THE ANCHOR, AS THREE SEPARATE CLAIMS, because each one fails differently.
    *

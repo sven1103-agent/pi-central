@@ -266,7 +266,7 @@ test("the prompt field holds three lines before it scrolls", () => {
   );
 });
 
-test("the transcript has NO scrollbar, and reports its ends with a fade instead (ADR-0016)", () => {
+test("the transcript has NO scrollbar, and reports its ends with a fade instead (ADR-0017)", () => {
   /*
    * The report: on a 1512x982 window the transcript scrollbar drew a vertical rule most of the column tall,
    * reading as a second unowned edge beside the prose. It was already slim and inset; the problem was that a
@@ -319,7 +319,7 @@ test("the transcript has NO scrollbar, and reports its ends with a fade instead 
   assert.match(handler, /setOverflow\(/, "the fades are driven by the scroll handler, not a second listener");
   assert.match(handler, /setPinned\(following\)/, "the same handler that decides following, so they cannot disagree");
 });
-test("the end-fades report the right state at every scroll position (ADR-0016)", () => {
+test("the end-fades report the right state at every scroll position (ADR-0017)", () => {
   /*
    * The defect this prevents: the fades shipped ONCE already and the operator could not see them, because
    * `setOverflow` sat AFTER the `restoring` guard in the scroll handler. That guard returns on the mount
@@ -377,7 +377,7 @@ test("the end-fades report the right state at every scroll position (ADR-0016)",
     );
   }
 });
-test("the end-fade band is tall enough to read, and both ends share one height (ADR-0016)", () => {
+test("the end-fade band is tall enough to read, and both ends share one height (ADR-0017)", () => {
   /*
    * 28px was a thin edge that read as a slight darkening rather than as "the text continues" — reported after
    * looking at it on a 1512x982 window. The band is now 56px and the height lives in a custom property, so the

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Build two self-contained pages for LOOKING at ADR-0016, because a document cannot be seen.
+ * Build two self-contained pages for LOOKING at ADR-0017, because a document cannot be seen.
  *
  *   node scripts/render-calm-preview.mjs
  *   open /tmp/pi-calm-anchor.html    # where the tail sits
@@ -8,7 +8,7 @@
  *
  * ## Why this exists
  *
- * ADR-0016 decides two things a reader experiences and a test cannot judge: how far above the foot the newest
+ * ADR-0017 decides two things a reader experiences and a test cannot judge: how far above the foot the newest
  * line sits, and whether streaming feels calm. The record is five commits of measurement and not one screenshot,
  * which its own author said was a gap. This is the screenshot.
  *
@@ -233,13 +233,13 @@ const anchorScript = [
 const anchorPage = [
   "<!doctype html>",
   '<html lang="en"><head><meta charset="utf-8">',
-  "<title>Pi Central \u2014 ADR-0016: where the tail sits</title>",
+  "<title>Pi Central \u2014 ADR-0017: where the tail sits</title>",
   "<style>" + css + "</style>",
   "<style>" + anchorCss + "</style>",
   "<style>" + harness + "</style>",
   "</head><body>",
   '<div class="bar">',
-  "  <strong>ADR-0016 \u2014 where the tail sits</strong>",
+  "  <strong>ADR-0017 \u2014 where the tail sits</strong>",
   '  <button id="b-middle" aria-pressed="true">middle (proposed)</button>',
   '  <button id="b-foot" aria-pressed="false">foot (today)</button>',
   '  <button id="b-top" aria-pressed="false">top (rejected)</button>',
@@ -276,7 +276,7 @@ writeFileSync("/tmp/pi-calm-anchor.html", anchorPage);
  *
  * So this page shows the question the complaint is actually about, which is a DIFFERENT decision: raw stream on
  * the left, deliberately paced reveal on the right. The reveal steps in units chosen so no step ends
- * mid-markdown, because slicing source characters shows the reader literal syntax — the census in ADR-0016 puts
+ * mid-markdown, because slicing source characters shows the reader literal syntax — the census in ADR-0017 puts
  * that at 3-40% of all reveal positions.
  */
 
@@ -374,12 +374,12 @@ const streamScript = [
 const streamPage = [
   "<!doctype html>",
   '<html lang="en"><head><meta charset="utf-8">',
-  "<title>Pi Central \u2014 ADR-0016: how text arrives</title>",
+  "<title>Pi Central \u2014 ADR-0017: how text arrives</title>",
   "<style>" + css + "</style>",
   "<style>" + streamHarness + "</style>",
   "</head><body>",
   '<div class="bar">',
-  "  <strong>ADR-0016 \u2014 how text arrives</strong>",
+  "  <strong>ADR-0017 \u2014 how text arrives</strong>",
   '  <button id="play">\u25b6 Play both</button>',
   '  <button id="reset">Reset</button>',
   '  <span class="hint">Raw stream vs a paced reveal \u2014 a SEPARATE decision from coalescing, which is invisible on a 60Hz display. See the note in scripts/render-calm-preview.mjs.</span>',

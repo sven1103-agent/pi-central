@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Serve the follow-scroll harness (ADR-0016).
+ * Serve the follow-scroll harness (ADR-0017).
  *
  *   node scripts/serve-follow-harness.mjs
  *
@@ -34,7 +34,7 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const UI = join(ROOT, "packages", "ui");
 const vite = join(ROOT, "node_modules", "vite", "bin", "vite.js");
 
-console.log("Follow-scroll harness -- ADR-0016");
+console.log("Follow-scroll harness -- ADR-0017");
 console.log("");
 console.log("Watch the SCROLL, not the text:");
 console.log("  - slow     ~15 chars/s, a cautious model; nothing should move for long stretches");

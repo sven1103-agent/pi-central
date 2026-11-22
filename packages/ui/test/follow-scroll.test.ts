@@ -1,5 +1,5 @@
 /**
- * The arithmetic behind a smooth follow (ADR-0016).
+ * The arithmetic behind a smooth follow (ADR-0017).
  *
  * Three rules, and each one exists because a naive version produces a specific defect. The tests are grouped
  * by the defect rather than by the function, so a failure says what would break in the product rather than
@@ -191,7 +191,7 @@ test("a non-finite reported position does not read as the reader moving", () => 
 
 test("reduced motion settles instantly, and that is not optional", () => {
   /*
-   * The stylesheet honours this preference in three places already (ADR-0016, constraint 1). The follow scroll
+   * The stylesheet honours this preference in three places already (ADR-0017, constraint 1). The follow scroll
    * is written from JavaScript, so it cannot be gated in CSS — this is the only place the gate can exist, and a
    * change that dropped it would animate for exactly the readers who asked it not to.
    */

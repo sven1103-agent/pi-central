@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Reproduce ADR-0016's measurements against real sessions in this machine's store.
+ * Reproduce ADR-0017's measurements against real sessions in this machine's store.
  *
  *   node scripts/verify-calm-transcript.mjs           # both halves, each in its own process
  *   node scripts/verify-calm-transcript.mjs --part 1  # the cost measurement only
@@ -26,7 +26,7 @@
  * ## What it deliberately does not measure
  *
  * Milliseconds are jsdom + DOMPurify in Node, not a browser, so the RATIO is the claim and the absolute
- * numbers are not. The geometry half of ADR-0016 (where the newest line sits) needs a screenshot and
+ * numbers are not. The geometry half of ADR-0017 (where the newest line sits) needs a screenshot and
  * cannot be measured here at all — a headless browser aborts under the Seatbelt profile these sessions
  * run in (C1). That gap is stated in the record rather than papered over.
  *

@@ -2227,7 +2227,7 @@ button { font: inherit; color: inherit; }
   margin-inline: auto;
   font-size: var(--fs-base);
   /*
-   * THE TAIL ANCHOR (ADR-0016), so the newest line is not pinned to the window's foot.
+   * THE TAIL ANCHOR (ADR-0017), so the newest line is not pinned to the window's foot.
    *
    * Padding ON THE LANE, not a spacer element. A spacer would be a new child of this element, and the lane's own
    * child-count rules — `.transcript-lane > .turn-user:first-child` just below — would then be correct for N
@@ -5785,7 +5785,7 @@ select.btn { font-family: var(--sans); }
 }
 .reading-row input[type="range"] { width: 100%; accent-color: var(--accent); }
 /*
- * THE "NEWEST LINE" CHOICE (ADR-0016).
+ * THE "NEWEST LINE" CHOICE (ADR-0017).
  *
  * A fieldset rather than a range, because this is a choice and not a quantity: two named positions, no third value
  * to slide to. The ADR refuses a "top" setting — it doubles the space under the tail for a complaint nobody made.

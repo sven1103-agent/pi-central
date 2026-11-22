@@ -1,5 +1,5 @@
 /**
- * A review harness for ADR-0016's follow scroll — NOT part of the app.
+ * A review harness for ADR-0017's follow scroll — NOT part of the app.
  *
  * ## Why this exists
  *

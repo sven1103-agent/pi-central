@@ -2253,7 +2253,7 @@ test("the jump control floats in a band, anchored to the scroller", () => {
    *
    * The opening tag is matched loosely on `className="transcript-viewport"` rather than as an exact
    * `<div className="transcript-viewport">`, because the element gained a `data-overflow` attribute when the
-   * scrollbar was replaced by the two end-fades (ADR-0016). The stricter match failed for that reason — the
+   * scrollbar was replaced by the two end-fades (ADR-0017). The stricter match failed for that reason — the
    * assertion doing its job, but on the wrong property: what this test is about is WHERE the pill sits, not what
    * attributes the viewport carries.
    */

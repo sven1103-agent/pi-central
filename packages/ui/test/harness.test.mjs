@@ -1,5 +1,5 @@
 /**
- * The follow-scroll harness stays runnable (ADR-0016).
+ * The follow-scroll harness stays runnable (ADR-0017).
  *
  * ## Why a test for a review tool
  *

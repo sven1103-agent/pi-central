@@ -541,7 +541,7 @@ function ReadingPanel() {
       </label>
 
       {/*
-        WHERE THE NEWEST LINE SITS (ADR-0016).
+        WHERE THE NEWEST LINE SITS (ADR-0017).
 
         Two radio buttons rather than a slider, because this is not a quantity — it is a choice between "the tail
         is held above the foot" and "the tail sits flush with the foot". A slider would invite a third value at

@@ -167,7 +167,7 @@ test("a shrinking container does not invent a negative discount", () => {
 
 test("the follow glides rather than teleports, and CSS smooth scrolling is still refused", () => {
   /*
-   * THIS TEST MEANT THE OPPOSITE UNTIL ADR-0016, and it is rewritten rather than deleted because its subject
+   * THIS TEST MEANT THE OPPOSITE UNTIL ADR-0017, and it is rewritten rather than deleted because its subject
    * is still right.
    *
    * It used to require that every follow be INSTANT and that only the deliberate jump animate, because

@@ -278,7 +278,7 @@ export function TranscriptView({
    */
   const [pinned, setPinned] = useState(true);
   /**
-   * Which ends of the scroller have content the reader cannot see (ADR-0016).
+   * Which ends of the scroller have content the reader cannot see (ADR-0017).
    *
    * Replaces the scrollbar, which drew a vertical rule longer than the message it belonged to. Held as one
    * object so a single measurement updates both ends together, and so the two can never report a state the
@@ -319,7 +319,7 @@ export function TranscriptView({
       };
       const previous = sample.current;
       /*
-       * THE SCROLL THAT MADE THE ANIMATION POSSIBLE (ADR-0016, and the reason #86 could be revisited).
+       * THE SCROLL THAT MADE THE ANIMATION POSSIBLE (ADR-0017, and the reason #86 could be revisited).
        *
        * An intermediate position of our own glide is indistinguishable from the reader scrolling up by measurement
        * alone — that is exactly what made `scroll-behavior: smooth` un-pin the pane in #86. So before anything is
@@ -358,7 +358,7 @@ export function TranscriptView({
        * taking control — behaves as it always did.
        */
       /*
-       * The two fades are driven from the SAME measurement as the follow decision (ADR-0016).
+       * The two fades are driven from the SAME measurement as the follow decision (ADR-0017).
        *
        * With the scrollbar gone, "is there more above / below" is the only position information left, so it
        * must not be computed twice or from a second source. `up` is any scroll at all; `down` is the same
@@ -463,7 +463,7 @@ export function TranscriptView({
 
 
   /**
-   * The one place that moves the scroller toward the tail (ADR-0016).
+   * The one place that moves the scroller toward the tail (ADR-0017).
    *
    * ## What this replaces, and why
    *
@@ -541,7 +541,7 @@ export function TranscriptView({
       if (!Number.isFinite(remaining) || remaining === 0) return;
 
       /*
-       * TWO reasons to arrive instead of gliding, and neither is a distance (ADR-0016).
+       * TWO reasons to arrive instead of gliding, and neither is a distance (ADR-0017).
        *
        * `instant` is set by the callers where the READER asked to be somewhere — a restore on open, the Jump to
        * latest pill. Animating a request shows them a delay they did not ask for. Content arriving underneath them
@@ -656,7 +656,7 @@ export function TranscriptView({
        */
       if (!shouldFollow(autoFollow, pinnedRef.current)) return;
       /*
-       * Through `followTail` rather than a direct assignment (ADR-0016).
+       * Through `followTail` rather than a direct assignment (ADR-0017).
        *
        * The direct assignment here was correct about one thing and wrong about another: `scrollIntoView` can move an
        * ANCESTOR scroll port too, which on a growing transcript means the whole window jumping. `followTail` writes
@@ -691,7 +691,7 @@ export function TranscriptView({
     pinnedRef.current = true;
     setPinned(true);
     /*
-     * THROUGH `followTail`, NOT `scrollIntoView` (ADR-0016).
+     * THROUGH `followTail`, NOT `scrollIntoView` (ADR-0017).
      *
      * This used to be `scrollIntoView({ block: "end", behavior: "smooth" })` plus a direct assignment as
      * "belt and braces". Three things were wrong with that, and only the third was obvious:
@@ -860,7 +860,7 @@ export function TranscriptView({
         data-overflow={[overflow.up ? "up" : "", overflow.down ? "down" : ""].filter(Boolean).join(" ")}
       >
       {/*
-        THE TWO FADES, which replace the scrollbar (ADR-0016).
+        THE TWO FADES, which replace the scrollbar (ADR-0017).
 
         Decoration, so both are aria-hidden: the content still scrolls, the keyboard still moves it, and the
         "Jump to latest" pill still states in words that there is newer output below. A reader who cannot see a

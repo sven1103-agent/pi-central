@@ -1,5 +1,5 @@
 /**
- * The follow-scroll harness (ADR-0016). Not part of the app; nothing imports it.
+ * The follow-scroll harness (ADR-0017). Not part of the app; nothing imports it.
  *
  * Mounts the REAL `TranscriptView` and feeds it simulated streaming through the REAL reducer, so what you see is
  * the component's behaviour rather than a rendering of it. That distinction is the whole point: the previous
@@ -548,7 +548,7 @@ function Harness() {
   return (
     <div className="hx">
       <div className="hx-bar">
-        <strong>Follow scroll — ADR-0016</strong>
+        <strong>Follow scroll — ADR-0017</strong>
         {(Object.keys(MODE_LABEL) as Mode[]).map((key) => (
           <button
             key={key}

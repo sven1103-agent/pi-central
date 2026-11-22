@@ -26,7 +26,7 @@ import "./styles.css";
  *
  * That was survivable while the only preferences were size and measure, because their defaults happen to equal
  * the stylesheet's declarations and the reversion looked like a design choice. It is not survivable for the tail
- * anchor (ADR-0016), where the two values are visibly different: a reader who chose "flush with the foot" would
+ * anchor (ADR-0017), where the two values are visibly different: a reader who chose "flush with the foot" would
  * get the held-above-the-foot default on every reload until they opened Settings again.
  *
  * Done here rather than in `App` so it precedes the first paint: applying it after mount would show the tail at

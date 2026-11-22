@@ -46,7 +46,7 @@ export const READING_MEASURE_DEFAULT = 80;
 export const READING_MEASURE_FILL = "fill";
 
 /**
- * WHERE THE NEWEST LINE SITS (ADR-0016).
+ * WHERE THE NEWEST LINE SITS (ADR-0017).
  *
  * The report: *"the newest line is pinned to the window's foot; I want it in the upper or middle half."* A
  * transcript that ends flush with the composer makes the reader hunt for the newest line at the bottom edge of a
@@ -61,7 +61,7 @@ export type ReadingTail = typeof READING_TAIL_MIDDLE | typeof READING_TAIL_FOOT;
 /**
  * The default, and the reason it is not the shipped behaviour.
  *
- * ADR-0016 answers the stated requirement: the tail is held above the scroller's foot. `"foot"` stays available
+ * ADR-0017 answers the stated requirement: the tail is held above the scroller's foot. `"foot"` stays available
  * because the padding below the last line is visible space, and on a short window it can read as a rendering bug
  * rather than as breathing room — the escape hatch is why the default is safe to take.
  */
@@ -70,7 +70,7 @@ export const READING_TAIL_DEFAULT: ReadingTail = READING_TAIL_MIDDLE;
 /**
  * How much room follows the last line when `tail` is `"middle"`.
  *
- * NOT MEASURED. ADR-0016 states this plainly: the capture it needs could not be taken in this environment, so this
+ * NOT MEASURED. ADR-0017 states this plainly: the capture it needs could not be taken in this environment, so this
  * is a starting number to be corrected from one screenshot, not a settled one. `min(35vh, 24rem)` holds the anchor
  * to a fraction of a short window instead of letting it swallow the viewport, and `24rem` stops it from growing
  * without limit on a tall display.
@@ -93,7 +93,7 @@ export function defaultReadingPrefs(): ReadingPrefs {
    * typography — the acceptance criterion for #134.
    *
    * `tail` is the one default that DOES change what a reader sees, and deliberately: the anchor is the answer to
-   * a stated requirement (ADR-0016). It is listed here rather than omitted so the departure is visible.
+   * a stated requirement (ADR-0017). It is listed here rather than omitted so the departure is visible.
    */
   return { sizePx: READING_SIZE_DEFAULT, measure: READING_MEASURE_DEFAULT, tail: READING_TAIL_DEFAULT };
 }

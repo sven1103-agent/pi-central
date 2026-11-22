@@ -1,5 +1,5 @@
 /**
- * Following the tail SMOOTHLY, and the one thing that makes that safe (ADR-0016).
+ * Following the tail SMOOTHLY, and the one thing that makes that safe (ADR-0017).
  *
  * ## The report this answers
  *
@@ -255,7 +255,7 @@ export function tailStep(remaining: number): number {
 /**
  * Did the reader move the scroller, rather than us?
  *
- * The whole safety argument of ADR-0016 rests on this one comparison. #86 was caused by treating a
+ * The whole safety argument of ADR-0017 rests on this one comparison. #86 was caused by treating a
  * programmatic intermediate position as a reader scroll; this is the same distinction, made explicit.
  *
  * `lastWritten` is what the animation assigned on the previous frame (read back AFTER assignment, so a clamp

@@ -179,7 +179,7 @@ test("activating it scrolls to the newest content AND resumes following", () => 
   });
 
   /*
-   * THE ASSERTION IS ON scrollTop, NOT ON scrollIntoView (ADR-0016).
+   * THE ASSERTION IS ON scrollTop, NOT ON scrollIntoView (ADR-0017).
    *
    * This used to require a scrollIntoView call and pinned the target to the END sentinel. Both encoded the old
    * teleport: the component no longer calls scrollIntoView at all, because it glided by writing scrollTop — and
@@ -199,7 +199,7 @@ test("activating it scrolls to the newest content AND resumes following", () => 
   /*
    * Following resumed, demonstrated rather than assumed.
    *
-   * The OBSERVABLE is now scrollTop, not a scrollIntoView count, because the glide writes the offset (ADR-0016).
+   * The OBSERVABLE is now scrollTop, not a scrollIntoView count, because the glide writes the offset (ADR-0017).
    * The mechanism is unchanged and still worth testing: the content grows, the follow effect runs on the render,
    * and the pane must move. Had jumpToLatest scrolled without re-pinning, pinnedRef would still be false and this
    * second move would not happen — the half-done implementation this test exists to catch.
