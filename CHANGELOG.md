@@ -15,6 +15,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The UI-sidecar spike briefs state no version and their paths resolve, so `verify` is green again ([#276]).
 - Playwright's MCP server is ruled out as the sidecar: nothing host-side narrows its 25 tools ([#276]).
 - A CDP client of 183 lines replaces `playwright` for capture and probe, using `ws` ([#276]).
+- ADR-0015 proposes a browser sidecar as a sibling sandbox, driven by four host-side verbs ([#276]).
 - A browser renders a local page under the sidecar's own profile with egress confined to one port ([#276]).
 - A two-verb host-side service is measured against shipping `playwright` for UI capture ([#276]).
 - A hand-written credential deny list failed open on `~/.gitconfig`, as C15c predicts ([#276]).

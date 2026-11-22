@@ -20,6 +20,7 @@ reader can tell whether a decision still holds.
 | [0012](0012-directory-chooser.md) | A placed directory browser in the orchestrator, not a native OS panel | Accepted |
 | [0013](0013-application-shell.md) | An optional desktop shell that is a launcher, never the update target | Accepted |
 | [0014](0014-os-actions.md) | The orchestrator may take one bounded OS action on a path it resolved | Accepted |
+| [0015](0015-ui-sidecar.md) | A browser sidecar in its own sibling sandbox, driven by four verbs | Proposed |
 
 ## Format
 
