@@ -276,56 +276,231 @@ test("the prompt field holds three lines before it scrolls", () => {
   );
 });
 
-test("the prose and the composer end on the SAME right edge, scrollbar included", () => {
+test("the transcript has NO scrollbar, and reports its ends with a fade instead (ADR-0017)", () => {
   /*
-   * MEASURED in a real window, and the defect the numbers named instead of the one being investigated:
+   * The report: on a 1512x982 window the transcript scrollbar drew a vertical rule most of the column tall,
+   * reading as a second unowned edge beside the prose. It was already slim and inset; the problem was that a
+   * position bar is the wrong instrument here, because a following reader is at the end by construction and has
+   * no use for a position indicator at all.
    *
-   *   .transcript  w=655  clientW=644      ← an 11px scrollbar inside the box
+   * What replaces it answers the only two questions a reader has — "is there more above me" and "is there more
+   * below me" — with a fade at each end of the column.
+   *
+   * Both halves are asserted, because either alone is a regression: removing the bar without the fades leaves the
+   * reader with no indication at all, and the fades without removing the bar is the defect plus decoration.
+   */
+  const transcript = rule(".transcript");
+  assert.ok(transcript, ".transcript must have a rule");
+  assert.match(transcript, /scrollbar-width:\s*none/, "the platform scrollbar is suppressed");
+  assert.match(css, /\.transcript::-webkit-scrollbar\s*\{\s*display:\s*none/, "and the webkit path too");
+  assert.ok(
+    !/\.transcript::-webkit-scrollbar-thumb/.test(css),
+    "the thumb rules must be GONE, not merely overridden: a leftover thumb is the defect still in the file",
+  );
+
+  /*
+   * The two fades, each on the correct edge of the viewport.
+   *
+   * Matched against the whole stylesheet rather than through `rule()`, because that helper returns the LAST rule
+   * whose selector matches — and the last rule mentioning these selectors is the `opacity: 1` that shows them,
+   * not the one that positions them. Asserting on the helper would have checked the wrong declaration.
+   */
+  assert.match(
+    css,
+    /\.transcript-fade\.is-top\s*\{[^}]*top:\s*0/,
+    "the upper fade sits at the top edge of the viewport",
+  );
+  assert.match(
+    css,
+    /\.transcript-fade\.is-bottom\s*\{[^}]*bottom:\s*var\(--jump-strip\)/,
+    "the lower fade stops above the reserved band, so it never covers the pill",
+  );
+  // They must not eat clicks: an overlay that swallowed one would make the last line un-selectable.
+  assert.match(
+    css,
+    /\.transcript-fade\s*\{[^}]*pointer-events:\s*none/,
+    "the fades are overlay-only, so a click on the last line still lands on the text",
+  );
+
+  // And they appear from ONE measurement, which is the handler that already decides `pinned`.
+  const source = readFileSync(new URL("../src/components/Transcript.tsx", import.meta.url), "utf8");
+  assert.match(source, /data-overflow=/, "the viewport reports its overflow state");
+  const handler = /const onScroll = \(\) => \{([\s\S]*?)container\.addEventListener/.exec(source)?.[1] ?? "";
+  assert.match(handler, /setOverflow\(/, "the fades are driven by the scroll handler, not a second listener");
+  assert.match(handler, /setPinned\(following\)/, "the same handler that decides following, so they cannot disagree");
+});
+test("the end-fades report the right state at every scroll position (ADR-0017)", () => {
+  /*
+   * The defect this prevents: the fades shipped ONCE already and the operator could not see them, because
+   * `setOverflow` sat AFTER the `restoring` guard in the scroll handler. That guard returns on the mount
+   * measurement, so the fade state was skipped on the first paint — the only paint a static render produces.
+   * A markup assertion passed throughout; nothing checked that the rule runs.
+   *
+   * So the rule is exercised directly, in the states that matter. jsdom has no layout engine, so the scroller
+   * metrics are supplied rather than measured — which is the same technique `scroll.test.ts` uses for
+   * `isFollowing`, and for the same reason.
+   */
+  const source = readFileSync(new URL("../src/components/Transcript.tsx", import.meta.url), "utf8");
+
+  // 1. The rule must run BEFORE the restoring guard, or the first paint has no fades.
+  const handler = /const onScroll = \(\) => \{([\s\S]*?)container\.addEventListener/.exec(source)?.[1] ?? "";
+  assert.ok(handler, "the scroll handler must exist");
+  const overflowAt = handler.indexOf("setOverflow(");
+  const guardAt = handler.indexOf("if (restoring.current) return;");
+  assert.ok(overflowAt >= 0, "the handler updates the fade state");
+  assert.ok(guardAt >= 0, "the restoring guard must still be there");
+  assert.ok(
+    overflowAt < guardAt,
+    "setOverflow must run BEFORE the restoring guard: after it, the first paint has no fades at all",
+  );
+
+  // 2. Both ends are derived from the SAME measurement as `pinned`, not a second listener.
+  assert.match(handler, /setPinned\(following\)/, "the same handler decides following");
+
+  // 3. The states themselves, against the rule the component states.
+  const overflowRule = (scrollTop, clientHeight, scrollHeight) => {
+    const atEnd = scrollTop + clientHeight >= scrollHeight - 2;
+    const marks = [];
+    if (scrollTop > 1) marks.push("up");
+    if (!atEnd) marks.push("down");
+    return marks.join(" ");
+  };
+  assert.equal(overflowRule(0, 500, 2000), "down", "at the top with more below: only the lower fade");
+  assert.equal(overflowRule(600, 500, 2000), "up down", "mid-history: both");
+  assert.equal(overflowRule(1500, 500, 2000), "up", "at the end: only the upper fade, because there IS more above");
+  assert.equal(overflowRule(0, 2000, 2000), "", "content that fits shows neither");
+  assert.equal(
+    overflowRule(1499, 500, 2000),
+    "up",
+    "within 2px of the bottom counts as the bottom, or the fade flickers on the last pixel",
+  );
+
+  // 4. And the marks must actually turn into a visible fade.
+  for (const [mark, fade] of [
+    ["up", "is-top"],
+    ["down", "is-bottom"],
+  ]) {
+    assert.match(
+      css,
+      new RegExp(`data-overflow~="${mark}"[^{]*\\.transcript-fade\\.${fade}\\s*\\{[^}]*opacity:\\s*1`),
+      `the "${mark}" mark must show the ${fade} fade`,
+    );
+  }
+});
+test("the end-fade band is tall enough to read, and both ends share one height (ADR-0017)", () => {
+  /*
+   * 28px was a thin edge that read as a slight darkening rather than as "the text continues" — reported after
+   * looking at it on a 1512x982 window. The band is now 56px and the height lives in a custom property, so the
+   * two ends cannot drift apart.
+   *
+   * The ramp is asserted too, because height alone would not have fixed it: a plain `var(--bg)` to `transparent`
+   * is already mostly transparent a third of the way in, so a taller band would have been more faint pixels
+   * rather than a stronger edge. The stops hold full opacity for the first 40% and only then dissolve.
+   */
+  const fade = /\.transcript-fade\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(fade, /--fade-height:\s*56px/, "the band height is one declared value");
+  assert.match(fade, /height:\s*var\(--fade-height\)/, "and the element uses it rather than a second literal");
+
+  // Both ends start from the page colour, so the two edges look the same.
+  assert.match(
+    css,
+    /\.transcript-fade\.is-top\s*\{[^}]*rgb\(14 17 22\)\s*0%/
+    , "the upper fade holds the page colour at its outer edge",
+  );
+  assert.match(
+    css,
+    /\.transcript-fade\.is-bottom\s*\{[^}]*rgb\(14 17 22\)\s*0%/
+    , "the lower fade does too, so the two edges match",
+  );
+
+  // The front-loaded ramp: full opacity to 40%, then partial, then nothing.
+  const topGradient = /\.transcript-fade\.is-top\s*\{[^}]*linear-gradient\(([\s\S]*?)\)\s*;/.exec(css)?.[1] ?? "";
+  const stops = [...topGradient.matchAll(/(\d+)%/g)].map((m) => Number(m[1]));
+  assert.ok(stops.length >= 3, `the ramp needs at least three stops to stay dense; got ${stops.join(", ")}`);
+  assert.ok(
+    stops.includes(40),
+    `the page colour must hold to 40% before dissolving, or a taller band is only fainter; got ${stops.join(", ")}`,
+  );
+});
+test("the transcript disables browser scroll anchoring, which was a second writer", () => {
+  /*
+   * THE DEFECT, reported as "i cant say that i see any effect on any parameter setting for burst and huge".
+   *
+   * `overflow-anchor: auto` is the browser default: on a content change it adjusts `scrollTop` to keep the
+   * reader\u2019s place, in ONE frame, outside any animation. For a document that is right. Here it was a second
+   * scroll manager with no knowledge of the first, and it adjusted by exactly the size of the change:
+   *
+   *   - a trickle changes ~1.2px, so the adjustment was invisible and the glide was what the reader saw -- which is
+   *     why the steady mode DID respond to the sliders;
+   *   - a burst changes 99-581px, so the adjustment was a full-magnitude jump that bypassed the curve entirely. No
+   *     parameter could affect it, because our code was not the thing moving the scroller.
+   *
+   * `none` is the only correct value: following, the restore and the glide are all this component\u2019s decisions, so
+   * nothing else may move the viewport.
+   */
+  const transcript = rule(".transcript");
+  assert.ok(transcript, ".transcript must have a rule");
+  assert.match(
+    transcript,
+    /overflow-anchor:\s*none/,
+    "scroll anchoring must be off, or the browser moves the viewport behind the animation and the tuning has no effect",
+  );
+  assert.ok(
+    !/overflow-anchor:\s*auto/.test(css),
+    "and it must not be re-enabled elsewhere; `auto` is the default that caused the defect",
+  );
+});
+
+test("the prose and the composer share one width, which is now true by construction", () => {
+  /*
+   * MEASURED in a real window, before ADR-0017 removed the transcript's scrollbar:
+   *
+   *   .transcript  w=655  clientW=644      <- an 11px scrollbar inside the box
    *   .transcript-lane    left=629 right=1236  w=608   mid=933
    *   .composer-dock      left=629 right=1248  w=619   mid=938
    *   .transcript-wrap                      mid=938
    *
-   * Two things, one cause. The prose ended 12px short of the composer's right edge — the "two right edges" defect
-   * `img_35.png` recorded, returning through a box the earlier fix never considered — and the lane sat 5.5px left of the
-   * column's centre, because `margin-inline: auto` was centring 608px inside the 597px the scrollbar left.
+   * The prose ended 12px short of the composer's right edge — the "two right edges" defect `img_35.png` recorded,
+   * returning through a box the earlier fix never considered — and the lane sat 5.5px left of the column's centre,
+   * because `margin-inline: auto` was centring 608px inside the 597px the scrollbar left.
    *
-   * `.transcript-footer` is a SIBLING of the scroller and has no scrollbar, so `padding: 0 18px` resolved its width
-   * against 11px more than the scroller did. The fix is arithmetic, not a nudge: the trailing padding names the
-   * scrollbar's width, and that width is ONE token because two rules have to agree on it.
+   * The cause was that `.transcript-footer` is a SIBLING of the scroller with no scrollbar, so `padding: 0 18px`
+   * resolved its width against 11px more than the scroller did. #281 patched that with a `--transcript-scrollbar`
+   * token and a `calc()` in the footer's padding.
    *
-   * Falsified by reverting the footer to `0 18px var(--sp-2)`: the assertion reports that the composer insets 18px on a
-   * side where the scroller insets 18 + the scrollbar.
+   * ADR-0017 (#279) removed the scrollbar instead, which is the better fix: there is no asymmetry left to
+   * compensate for, so the two boxes agree because they read the same 18px against the same width. This asserts the
+   * PROPERTY the token existed to buy — equal insets on both boxes — rather than the token, which is gone.
+   *
+   * Falsified by giving either box an asymmetric inset: the assertion reports which side differs.
    */
   const footer = rule(".transcript-footer") ?? "";
-  assert.match(
-    footer,
-    /padding:\s*0 calc\(18px \+ var\(--transcript-scrollbar\)\) var\(--sp-2\) 18px/,
-    `the trailing inset includes the scrollbar the scroller reserves; got: ${footer}`,
+  const pad = /padding:\s*([^;]+);/.exec(footer)?.[1]?.replace(/\s+/g, " ").trim() ?? "";
+  assert.ok(pad.length > 0, `the footer must declare its inset; got: ${footer}`);
+  /*
+   * Three values (top, inline, bottom) means the inline pair is SYMMETRIC by shorthand — one number for both sides.
+   * Four values would state them separately and could disagree, which is what this forbids.
+   */
+  assert.equal(
+    pad.split(" ").length,
+    3,
+    `the footer's inset must be one inline value for both sides, not two that can drift; got "${pad}"`,
+  );
+  /* The INLINE value — the middle term — is the one that must be 18px, the same number the scroller uses. */
+  assert.equal(
+    pad.split(" ")[1],
+    "18px",
+    `18px on both sides, as the scroller has; got "${pad}"`,
   );
 
   /*
-   * The gutter must be STABLE, not `auto`. With `auto` the scrollbar appears only once the conversation overflows, so the
-   * lane's usable width changes by 11px mid-read — every line re-wraps and the prose shifts sideways at the moment the
-   * first screenful is exceeded. Stable also gives `clientWidth` a value the footer's arithmetic can rely on.
+   * And the scroller keeps the SAME 18px. Asserted from the base rule, since the container query also sets
+   * `.transcript` and `rule()` returns the last match.
    */
   const transcript = /(?:^|\n)\.transcript\s*\{([^}]*)\}/.exec(css.replace(/\/\*[\s\S]*?\*\//g, ""))?.[1] ?? "";
-  assert.match(transcript, /scrollbar-gutter:\s*stable/, "the gutter is reserved, so the layout does not shift when it fills");
-
-  /*
-   * And the token is DEFINED, with the value the measured box implies. A `var()` with no definition is invalid at
-   * computed-value time — the silent failure `--companion-width` already shipped once (`styles-tokens.test.mjs`).
-   */
-  const root = /:root\s*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
-  const token = /--transcript-scrollbar:\s*(\d+)px/.exec(root)?.[1];
-  assert.ok(token !== undefined, "--transcript-scrollbar must be defined on :root");
-  /*
-   * The scroller's own `::-webkit-scrollbar { width }` is the other half of the same fact: a gutter wider than the bar
-   * would leave a gap, narrower would clip the thumb.
-   */
-  const barWidth = /\.transcript::-webkit-scrollbar\s*\{\s*width:\s*(\d+)px/.exec(css)?.[1];
-  assert.ok(barWidth !== undefined, "the scroller declares its scrollbar width");
-  assert.ok(
-    Number(token) >= Number(barWidth),
-    `the reserved gutter (${token}px) must cover the bar (${barWidth}px), or the thumb is clipped`,
+  assert.match(
+    transcript,
+    /padding:\s*var\(--sp-4\) 18px var\(--sp-4\) 18px/,
+    "the scroller insets 18px on both sides, which is what the footer must match",
   );
 });

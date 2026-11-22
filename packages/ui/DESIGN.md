@@ -412,7 +412,7 @@ Rendering spec (exact, from `LiveSession`):
 | cost | **not shown per row**; the header's `Usage` disclosure and the Session panel carry it |
 | pending | `+2 queued` appended only when `pending > 0` |
 | warnings | a `⚠` prefix on line 3 replaces the metric line if `warnings.length > 0` |
-| line 3, `calm` density | shown only when it can change a decision: a nearly-full context, `pending > 0`, or a failed state. At 3 % with nothing queued there is nothing to act on, and a column of gauges becomes texture (ADR-0016) |
+| line 3, `calm` density | shown only when it can change a decision: a nearly-full context, `pending > 0`, or a failed state. At 3 % with nothing queued there is nothing to act on, and a column of gauges becomes texture (ADR-0017) |
 
 Full line 3 at the default 288px: `sonnet-4.5 · high · ctx 62% · $0.0142` = 37 chars at 11px mono (6.6px/char) fits in 264px. Mono is not decoration here — it is what makes six values line up in a column across 20 rows.
 

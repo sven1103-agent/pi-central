@@ -46,6 +46,8 @@ import {
   READING_SIZE_MIN,
   clampReadingMeasure,
   clampReadingSize,
+  READING_TAIL_FOOT,
+  READING_TAIL_MIDDLE,
   defaultReadingPrefs,
   parseReadingPrefs,
   readingStyle,
@@ -477,7 +479,11 @@ function ReadingPanel() {
           type="button"
           className="btn btn-quiet"
           onClick={() => setPrefs(defaultReadingPrefs())}
-          disabled={prefs.sizePx === defaultReadingPrefs().sizePx && prefs.measure === defaultReadingPrefs().measure}
+          disabled={
+            prefs.sizePx === defaultReadingPrefs().sizePx &&
+            prefs.measure === defaultReadingPrefs().measure &&
+            prefs.tail === defaultReadingPrefs().tail
+          }
           title="Back to what this build ships with"
         >
           Reset to defaults
@@ -533,6 +539,37 @@ function ReadingPanel() {
         </span>
         <span />
       </label>
+
+      {/*
+        WHERE THE NEWEST LINE SITS (ADR-0017).
+
+        Two radio buttons rather than a slider, because this is not a quantity — it is a choice between "the tail
+        is held above the foot" and "the tail sits flush with the foot". A slider would invite a third value at
+        the top, which the ADR refuses: it doubles the space under the tail for a complaint nobody made.
+
+        Judged live in the transcript behind the dialog, like the size, rather than by a preview.
+      */}
+      <fieldset className="reading-row reading-tail">
+        <legend>Newest line</legend>
+        <label>
+          <input
+            type="radio"
+            name="reading-tail"
+            checked={prefs.tail === READING_TAIL_MIDDLE}
+            onChange={() => setPrefs((c) => ({ ...c, tail: READING_TAIL_MIDDLE }))}
+          />
+          Held above the foot
+        </label>
+        <label>
+          <input
+            type="radio"
+            name="reading-tail"
+            checked={prefs.tail === READING_TAIL_FOOT}
+            onChange={() => setPrefs((c) => ({ ...c, tail: READING_TAIL_FOOT }))}
+          />
+          Flush with the foot
+        </label>
+      </fieldset>
 
       {/*
         The sample shows the SIZE, and deliberately not the width (issue #142).

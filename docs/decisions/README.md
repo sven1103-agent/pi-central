@@ -22,6 +22,7 @@ reader can tell whether a decision still holds.
 | [0014](0014-os-actions.md) | The orchestrator may take one bounded OS action on a path it resolved | Accepted |
 | [0015](0015-reload-through-an-extension.md) | Reloading a session's resources goes through Pi Central's own extension | Accepted |
 | [0016](0016-rail-visibility.md) | The rail's visibility, width, density and folds are reader preferences; the breakpoint is only a floor | Accepted |
+| [0017](0017-calm-transcript.md) | A followed transcript keeps its newest line above the window's foot and glides rather than teleporting; text coalescing is a separate slice | Accepted |
 
 ## Format
 
