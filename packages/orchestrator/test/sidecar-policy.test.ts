@@ -71,6 +71,8 @@ const base: Omit<SidecarSpec, "id" | "port"> = {
   safehouse: "safehouse",
   sidecar: "/state/bin/pi-central-sidecar",
   browser: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  listenPort: 47800,
+  token: "test-token",
 };
 const spec = (over: Partial<SidecarSpec> = {}): SidecarSpec => ({
   ...base,
@@ -141,20 +143,23 @@ test("an id that is not identifier-shaped is refused", () => {
   }
 });
 
-test("the sidecar env carries PATH and a private HOME, and nothing else", () => {
+test("the sidecar env carries what it needs to run, and no invented secret", () => {
   if (skipReason) return console.log(skipReason);
   const { launch } = composeSidecarPolicy(spec());
   // `spawn` inherits `process.env` when `env` is omitted, which would hand the renderer every ambient secret
-  // (C4a/C11). So the object is EXPLICIT. It cannot be empty either: with no `PATH` a bare command name does
-  // not resolve, and with no `HOME` Node refuses to start at all — both measured as "the sidecar never
-  // spawned", reported by Pi only as "Connection closed".
+  // (C4a/C11). So the object is EXPLICIT and short. Every entry earns its place:
+  //
+  //   PATH  — without it a bare command name does not resolve, and the sidecar never spawned at all
+  //   HOME  — Node refuses to start without one, and it is the sidecar's OWN profile, not the user's home
+  //   TOKEN — the MCP bearer token; in the environment rather than the argv because `ps` shows arguments
+  //
+  // Everything else stays out, including every secret-shaped name a session would legitimately carry.
   assert.ok(launch.env !== undefined, "env must be present, or spawn inherits");
-  assert.deepEqual(Object.keys(launch.env).sort(), ["HOME", "PATH"], "exactly what a process needs to run");
-  // HOME is the sidecar's OWN profile, not the user's home: nothing here reads ~/.ssh or ~/.config.
+  assert.deepEqual(Object.keys(launch.env).sort(), ["HOME", "PATH", "PI_CENTRAL_SIDECAR_TOKEN"]);
   assert.equal(launch.env["HOME"], join(dir, "profile"), "HOME must be the sidecar profile itself");
-  for (const name of Object.keys(launch.env)) {
-    assert.ok(!/(TOKEN|SECRET|KEY|PASSWORD|AUTH)/i.test(name), "unexpected variable " + name);
-  }
+  assert.equal(launch.env["PI_CENTRAL_SIDECAR_TOKEN"], "test-token");
+  // The token must NOT be on the command line, where any process of the same user can read it.
+  assert.ok(!launch.args.join(" ").includes("test-token"), "the token leaks into argv");
 });
 
 test("a session can never be given a Chromium feature, and the sidecar is the only assembler that can", () => {

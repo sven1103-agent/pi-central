@@ -96,6 +96,7 @@ function sessionOrdinal(sessionId: string): number {
 
 export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
   const root = join(options.stateRoot, "sidecars", options.sessionId);
+  const token = randomBytes(24).toString("hex");
   const spec: SidecarSpec = {
     id: options.sessionId,
     port: options.port,
@@ -108,6 +109,8 @@ export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
     sidecar: options.sidecar,
     sidecarCodeDir: options.sidecarCodeDir,
     browser: options.browser,
+    listenPort: SIDECAR_PORT_BASE + sessionOrdinal(options.sessionId),
+    token,
     ...(options.sidecarArgs === undefined ? {} : { sidecarArgs: options.sidecarArgs }),
   };
 
@@ -124,8 +127,6 @@ export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
    * requested by name via `--env-pass`. Putting the literal token in mcp.json would work and would also write a
    * secret to a file that outlives the session.
    */
-  const token = randomBytes(24).toString("hex");
-
   const child: ChildProcess = spawn(composed.launch.command, composed.launch.args, {
     // `stdin` is the lifetime mechanism: when this process dies or closes it, the sidecar exits on EOF.
     stdio: ["pipe", "pipe", "pipe"],

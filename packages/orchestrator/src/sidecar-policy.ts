@@ -61,6 +61,22 @@ export interface SidecarSpec {
   id: string;
   /** The dev-server port egress is pinned to. Per session, because a fleet has more than one. */
   port: number;
+  /**
+   * The loopback port the sidecar LISTENS on for MCP.
+   *
+   * Distinct from `port`, which is the dev server it may reach. Two different ports because they are two
+   * different things, and conflating them would either expose the dev server as an MCP endpoint or pin egress to
+   * the sidecar's own listener.
+   */
+  listenPort: number;
+  /**
+   * The bearer token, delivered through the ENVIRONMENT rather than the argv.
+   *
+   * `ps` shows another process's arguments to the same user, so a token on the command line is readable by
+   * anything that can list processes. The environment is not private either (C5), but it is strictly less
+   * visible, and it matches how the token already reaches Pi.
+   */
+  token: string;
   /** Where the sidecar keeps its profile. Must not be `/tmp` or `/var/folders` — every session can read those. */
   profileDir: string;
   /** Directory to write the rendered fragment into. Created if absent, mode 0700. */
@@ -163,6 +179,11 @@ export function composeSidecarPolicy(spec: SidecarSpec): ComposedSidecar {
     resolve(spec.profileDir),
     "--origin",
     `http://localhost:${spec.port}`,
+    // The sidecar reads its own listening port and token. Both were added to the entry point and NOT to this
+    // argv, so the sidecar exited on its own usage message — a failure that looks like a missing server rather
+    // than a wrong argument list.
+    "--port",
+    String(spec.listenPort),
   ];
 
   return {
@@ -191,6 +212,14 @@ export function composeSidecarPolicy(spec: SidecarSpec): ComposedSidecar {
          * or `~/.config`, and the profile is a directory the fragment already confines it to.
          */
         HOME: resolve(spec.profileDir),
+        /**
+         * The bearer token, delivered here rather than on the argv.
+         *
+         * `ps` shows another process's arguments to the same user, so a token in the command line is readable by
+         * anything that can list processes. The environment is not private either (C5) — but it is strictly less
+         * visible, and it is already the channel this token travels on to reach Pi.
+         */
+        PI_CENTRAL_SIDECAR_TOKEN: spec.token,
       },
     },
     isolation: `Safehouse sidecar profile=${spec.profileDir} enable=${SIDECAR_ENABLE} egress=localhost:${spec.port}`,

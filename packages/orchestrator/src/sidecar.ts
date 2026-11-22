@@ -408,7 +408,10 @@ if (isMain) {
   const executable = arg("executable");
   const profileDir = arg("profile");
   const origin = arg("origin");
-  const token = arg("token");
+  // The token arrives in the ENVIRONMENT, not the argv: `ps` shows another process's arguments, so a secret on
+  // the command line is readable by anything that can list processes. The flag is still accepted for a manual
+  // run, where there is no launcher to set the variable.
+  const token = process.env["PI_CENTRAL_SIDECAR_TOKEN"] ?? arg("token");
   const port = Number(arg("port") ?? "0");
   if (executable === undefined || profileDir === undefined || origin === undefined || token === undefined) {
     process.stderr.write(
