@@ -22,7 +22,7 @@
  * refuse.
  */
 import { randomBytes } from "node:crypto";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { composeSidecarPolicy, type SidecarSpec } from "./sidecar-policy.ts";
@@ -112,6 +112,82 @@ export const DEV_PORT_BASE = 48000;
  */
 export function devPortFor(sessionId: string): number {
   return DEV_PORT_BASE + sessionOrdinal(sessionId);
+}
+
+/** The pids listening on a TCP port, via a fixed binary and a fixed argv. Empty when none, or when lsof cannot say. */
+function listenerPids(port: number): number[] {
+  const result = spawnSync("/usr/sbin/lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], {
+    encoding: "utf8",
+    timeout: 3000,
+  });
+  // lsof exits 1 when nothing matches, which is the ordinary "free" answer, and fails to start when it is missing.
+  if (result.error !== undefined || result.status !== 0) return [];
+  return result.stdout
+    .split("\n")
+    .map((token) => Number(token.trim()))
+    .filter((pid) => Number.isInteger(pid) && pid > 1);
+}
+
+/**
+ * Whether anything is listening on a TCP port, on either address family.
+ *
+ * Best effort: when `lsof` is missing or fails, the answer is "no", which degrades to the unchecked assignment
+ * rather than refusing to start a session. `lsof` exits 1 when nothing matches, which is the normal "free" case.
+ */
+export function portHasListener(port: number): boolean {
+  return listenerPids(port).length > 0;
+}
+
+/**
+ * Stop whatever is still listening on a dev port Pi Central ASSIGNED, and return the pids it signalled.
+ *
+ * Needed because a dev server an agent starts does not die with its session. Measured: three Python servers were
+ * still listening after both harness runs had exited. The session's teardown signals its process group, and a
+ * server started with `&` from Pi's bash tool is not in it — it is reparented to launchd and holds its port until
+ * reboot. The port is the only handle left, and it is a safe one: the range is reserved, an assigned port belongs to
+ * exactly one live session, and `pickDevPort` refused any port that already had a listener when it was handed out.
+ *
+ * Callers must pass ONLY an assigned port. An explicit or pinned port is the user's own (5173 is somebody's real
+ * dev server), and signalling it would be a far worse defect than the leak.
+ */
+export function reapDevPort(port: number, self: number = process.pid): number[] {
+  const signalled: number[] = [];
+  for (const pid of listenerPids(port)) {
+    if (pid === self) continue;
+    try {
+      process.kill(pid, "SIGTERM");
+      signalled.push(pid);
+    } catch {
+      // Already gone, or not ours to signal: either way there is nothing more to do.
+    }
+  }
+  return signalled;
+}
+
+/**
+ * The dev port a session is given: its own number if it is free, otherwise the next free one in the range.
+ *
+ * "Its own number" is not enough on its own. Session ids restart at `s1` with every orchestrator, so the same
+ * session number gets the same port every time, and a dev server the previous run's agent left behind is still
+ * holding it. Measured: the next session's sidecar probed that stale server, got a 404 page with no problems, and
+ * reported `verdict: ok` for a page that overflowed by 720px — a clean answer about someone else's server, which
+ * is the one failure the per-session assignment exists to prevent.
+ *
+ * `taken` is every port already assigned to a live session, which may not be listening yet. Returns undefined
+ * when the whole range is exhausted, and the caller starts the session without a sidecar rather than guessing.
+ */
+export function pickDevPort(
+  sessionId: string,
+  taken: ReadonlySet<number>,
+  listening: (port: number) => boolean = portHasListener,
+): number | undefined {
+  const first = sessionOrdinal(sessionId);
+  for (let step = 0; step < 200; step += 1) {
+    const port = DEV_PORT_BASE + ((first + step) % 200);
+    if (taken.has(port) || listening(port)) continue;
+    return port;
+  }
+  return undefined;
 }
 
 /**

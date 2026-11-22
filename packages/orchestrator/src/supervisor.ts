@@ -24,8 +24,9 @@ import { join } from "node:path";
 import type { Command, HistoricalSession, LiveSession, ModelOption, PiRecord } from "@pi-central/protocol";
 import { composePolicy, describe, type LaunchMode, type SessionSpec } from "./policy.ts";
 import {
-  devPortFor,
   mcpConfigArgs,
+  pickDevPort,
+  reapDevPort,
   sidecarPromptArgs,
   spawnSidecar,
   type SidecarHandle,
@@ -582,7 +583,7 @@ export class Supervisor extends EventEmitter {
         ? undefined
         : (input.sidecarPort ??
           this.#config.sidecarPort ??
-          (this.#config.sidecar === true ? devPortFor(input.id) : undefined));
+          (this.#config.sidecar === true ? this.#assignDevPort(input.id) : undefined));
     const sidecarHandle =
       sidecarPort !== undefined && input.mode === "sandboxed"
         ? this.#startSidecar(input.id, sidecarPort)
@@ -1268,6 +1269,19 @@ export class Supervisor extends EventEmitter {
    * A failure is logged and swallowed. A browser is a capability, not a precondition: the session is still
    * useful without one, and a launch error in the transcript is noise nobody asked for.
    */
+  /** Ports assigned to live sessions, which may not be listening yet and so cannot be found by looking. */
+  readonly #devPorts = new Map<string, number>();
+
+  #assignDevPort(sessionId: string): number | undefined {
+    const port = pickDevPort(sessionId, new Set(this.#devPorts.values()));
+    if (port === undefined) {
+      this.emit("log", sessionId, "no UI sidecar for this session: every dev port in the assigned range is in use");
+      return undefined;
+    }
+    this.#devPorts.set(sessionId, port);
+    return port;
+  }
+
   #startSidecar(sessionId: string, port: number): SidecarHandle | undefined {
     try {
       const handle = spawnSidecar({
@@ -1295,6 +1309,14 @@ export class Supervisor extends EventEmitter {
   }
 
   async #stopSidecar(id: string): Promise<void> {
+    // Only a port Pi Central ASSIGNED is ever in this map, so an explicit or pinned port (someone's real dev server)
+    // cannot be reaped by mistake. See `reapDevPort` for why the port is the handle.
+    const assigned = this.#devPorts.get(id);
+    this.#devPorts.delete(id);
+    if (assigned !== undefined) {
+      const reaped = reapDevPort(assigned);
+      if (reaped.length > 0) this.emit("log", id, `stopped ${reaped.length} dev server(s) left on port ${assigned}`);
+    }
     const sidecar = this.#sidecars.get(id);
     if (sidecar === undefined) return;
     this.#sidecars.delete(id);

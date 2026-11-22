@@ -118,6 +118,13 @@ through a fixed verb set over CDP, with no new shipped dependency.**
     `PI_CENTRAL_SIDECAR_PORT` or a per-session port still overrides it. **Considered and deferred:** letting the
     agent register its own port, which widens what a browser can reach on a loopback every session shares; it
     would need the orchestrator to confirm the port is listened on by a process inside *that* session's tree.
+    **Two defects found by running it, now handled.** Session ids restart at `s1`, so a session always preferred
+    the same port, and a dev server the previous run's agent left behind still held it: the next sidecar probed that
+    stale server and reported `verdict: ok` for a page that overflowed by 720px. So the port is the preferred one
+    only if nothing is listening on it, otherwise the next free one in the range. And a dev server an agent
+    starts with `&` is not in the session's process group, so teardown never reached it: three were still
+    listening after the runs had exited. A port Pi Central *assigned* is therefore reaped when its session stops
+    (never an explicit or pinned port, which may be someone's own dev server).
 
 ## Consequences
 

@@ -2,11 +2,17 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { createServer } from "node:net";
+import { spawn } from "node:child_process";
+import { existsSync as fileExists } from "node:fs";
 import { Supervisor } from "../src/supervisor.ts";
 import {
   DEV_PORT_BASE,
   devPortFor,
   mcpConfigArgs,
+  pickDevPort,
+  portHasListener,
+  reapDevPort,
   sidecarInstruction,
   sidecarPromptArgs,
 } from "../src/sidecar-supervise.ts";
@@ -231,4 +237,137 @@ test("without the switch and without a port, a session gets no sidecar and no in
   assert.ok(!argv.includes("--append-system-prompt"), "a session with no sidecar must not be told it has a browser");
   assert.doesNotMatch(argv, /--env-pass=\S*PI_CENTRAL_DEV_PORT/);
   return app.stopAll().then(() => undefined);
+});
+
+test("a dev port with something already listening on it is skipped, not handed out", () => {
+  // The measured failure: session ids restart at s1, so s1 always got the same port, and a server the previous
+  // run's agent left behind still held it. The next sidecar probed THAT server, got a 404 page with no problems,
+  // and reported verdict "ok" for a page that overflowed by 720px.
+  const stale = new Set<number>([48001]);
+  const listening = (port: number): boolean => stale.has(port);
+  assert.equal(pickDevPort("s1", new Set(), () => false), 48001, "a free port is the session's own");
+  assert.equal(pickDevPort("s1", new Set(), listening), 48002, "a stale listener must push it to the next port");
+  assert.equal(pickDevPort("s1", new Set([48002]), listening), 48003, "and so must a port assigned to a live session");
+  assert.equal(pickDevPort("s200", new Set(), (port) => port === 48000), 48001, "the range wraps");
+  assert.equal(pickDevPort("s1", new Set(), () => true), undefined, "an exhausted range yields no port, not a guess");
+});
+
+test("portHasListener sees a real listener on either address family", async () => {
+  if (!fileExists("/usr/sbin/lsof")) return console.log("# skip: /usr/sbin/lsof is not present");
+  // The stubbed test above proves the choice; this proves the question is asked correctly, because a wrong lsof
+  // argument would answer "free" for every port and the whole defence would be a no-op that every other test
+  // passed.
+  for (const host of ["127.0.0.1", "::1"]) {
+    const server = createServer();
+    const port = await new Promise<number>((done, fail) => {
+      server.once("error", fail);
+      server.listen(0, host, () => done((server.address() as { port: number }).port));
+    }).catch(() => undefined);
+    if (port === undefined) continue;
+    try {
+      assert.equal(portHasListener(port), true, "a listener on " + host + " must be seen");
+    } finally {
+      await new Promise((done) => server.close(done));
+    }
+    assert.equal(portHasListener(port), false, "and a closed port must read as free");
+  }
+});
+
+test("a session started while its own dev port is occupied is given a different one", async () => {
+  if (skip) return console.log(skip);
+  if (!fileExists("/usr/sbin/lsof")) return console.log("# skip: /usr/sbin/lsof is not present");
+  const occupied = devPortFor("s1");
+  const blocker = createServer();
+  const bound = await new Promise<boolean>((done) => {
+    blocker.once("error", () => done(false));
+    blocker.listen(occupied, "127.0.0.1", () => done(true));
+  });
+  if (!bound) return console.log("# skip: port " + occupied + " is already in use on this machine");
+  try {
+    const state = join(root as string, "occupied");
+    const app = new Supervisor(config({ sidecar: true, stateRoot: state }) as never, { rememberOpenSessions: false });
+    app.on("error", () => {});
+    app.on("log", () => {});
+    const started = app.start({ cwd: root as string, mode: "sandboxed" });
+    assert.ok(started.ok);
+    if (!started.ok) return;
+    const fragment = readFileSync(join(state, "sidecars", started.session.id, "policy", started.session.id + ".sb"), "utf8");
+    const pinned = Number(/localhost:(\d+)/.exec(fragment)?.[1]);
+    assert.notEqual(pinned, occupied, "the sidecar must not be pinned to a port something already holds");
+    assert.ok(pinned > occupied && pinned < 48200, "it must be the next free port in the range");
+    await app.stopAll();
+  } finally {
+    await new Promise((done) => blocker.close(done));
+  }
+});
+
+/** A dev server that is NOT in the session's process group, as one started with "&" from Pi's bash tool is not. */
+function strayServer(port: number): Promise<{ pid: number; exited: Promise<boolean> } | undefined> {
+  const child = spawn(
+    process.execPath,
+    ["-e", `require("net").createServer().listen(${port}, "127.0.0.1", () => console.log("up"))`],
+    { detached: true, stdio: ["ignore", "pipe", "ignore"] },
+  );
+  const exited = new Promise<boolean>((done) => child.once("exit", () => done(true)));
+  return new Promise((resolve) => {
+    child.stdout.once("data", () => resolve({ pid: child.pid as number, exited }));
+    child.once("exit", () => resolve(undefined));
+  });
+}
+
+const visible = (port: number): boolean => existsSync("/usr/sbin/lsof") && portHasListener(port);
+
+test("a stray dev server on an assigned port is stopped when its session stops", async () => {
+  if (skip) return console.log(skip);
+  const state = join(root as string, "reap-assigned");
+  const app = new Supervisor(config({ sidecar: true, stateRoot: state }) as never, { rememberOpenSessions: false });
+  app.on("error", () => {});
+  app.on("log", () => {});
+  const started = app.start({ cwd: root as string, mode: "sandboxed" });
+  assert.ok(started.ok);
+  if (!started.ok) return;
+  const fragment = readFileSync(join(state, "sidecars", started.session.id, "policy", started.session.id + ".sb"), "utf8");
+  const port = Number(/localhost:(\d+)/.exec(fragment)?.[1]);
+  const stray = await strayServer(port);
+  if (!stray) return console.log("# skip: port " + port + " is already held on this machine, so a stand-in cannot bind it");
+  if (!visible(port)) {
+    process.kill(stray.pid, "SIGKILL");
+    return console.log("# skip: this environment cannot see other processes' sockets (lsof), so reaping cannot be shown");
+  }
+  await app.stopAll();
+  const gone = await Promise.race([stray.exited, new Promise<boolean>((done) => setTimeout(() => done(false), 3000))]);
+  if (!gone) process.kill(stray.pid, "SIGKILL");
+  assert.equal(gone, true, "a dev server left on the assigned port must not outlive its session");
+});
+
+test("a server on an EXPLICIT port is never stopped, because it is somebody's own dev server", async () => {
+  if (skip) return console.log(skip);
+  const state = join(root as string, "reap-explicit");
+  const explicit = 48190;
+  const app = new Supervisor(config({ sidecar: true, stateRoot: state }) as never, { rememberOpenSessions: false });
+  app.on("error", () => {});
+  app.on("log", () => {});
+  const stray = await strayServer(explicit);
+  assert.ok(stray, "the stand-in dev server must start");
+  if (!stray) return;
+  try {
+    const started = app.start({ cwd: root as string, mode: "sandboxed", sidecarPort: explicit });
+    assert.ok(started.ok);
+    await app.stopAll();
+    await new Promise((done) => setTimeout(done, 500));
+    assert.doesNotThrow(() => process.kill(stray.pid, 0), "an explicit port's server must still be running");
+  } finally {
+    try { process.kill(stray.pid, "SIGKILL"); } catch { /* already gone */ }
+  }
+});
+
+test("reapDevPort never signals the process that asks", async () => {
+  if (!existsSync("/usr/sbin/lsof")) return console.log("# skip: /usr/sbin/lsof is not present");
+  const own = createServer();
+  const port = await new Promise<number>((done) => own.listen(0, "127.0.0.1", () => done((own.address() as { port: number }).port)));
+  try {
+    assert.deepEqual(reapDevPort(port), [], "the orchestrator's own socket must never be signalled");
+  } finally {
+    await new Promise((done) => own.close(done));
+  }
 });

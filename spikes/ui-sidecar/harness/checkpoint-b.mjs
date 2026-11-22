@@ -139,8 +139,11 @@ if (!started.ok) {
 }
 const id = started.session.id;
 console.log("session: " + id + " in " + root);
-const { devPortFor } = await import(join(REPO, "packages/orchestrator/src/sidecar-supervise.ts"));
-const targetPort = SERVES ? devPortFor(id) : PORT;
+// The port the supervisor actually PINNED, read from the rendered policy. It is the session's preferred port unless
+// something was already listening there (a dev server a previous run left behind), so computing it here would
+// report the wrong one exactly when it matters.
+const pinnedFragment = join(config.stateRoot, "sidecars", id, "policy", id + ".sb");
+const targetPort = SERVES ? Number(/localhost:(\d+)/.exec(readFileSync(pinnedFragment, "utf8"))?.[1]) : PORT;
 if (SERVES) console.log("assigned dev port: " + targetPort + (IPV6 ? " (the session is asked to bind ::1 only)" : ""));
 
 const configFile = join(config.stateRoot, "sidecars", id, "mcp.json");
