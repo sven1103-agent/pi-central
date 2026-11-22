@@ -63,6 +63,8 @@ const composed = composeSidecarPolicy({
 const uid = String(process.getuid());
 await run("/bin/launchctl", ["asuser", uid, "/usr/bin/curl", "-sS", "-m", "3", "-o", "/dev/null", "http://127.0.0.1:" + BLOCKED_PORT + "/control-asuser"]);
 const r = await run(composed.launch.command, composed.launch.args, { cwd: composed.launch.cwd, env: composed.launch.env });
+// The internet control: WITHOUT the policy the same request must reach the host, or a refusal inside proves nothing.
+const netControl = await run("/usr/bin/curl", ["-sS", "-m", "8", "-o", "/dev/null", "-w", "%{http_code}", "https://update.googleapis.com/service/update2/json"]);
 for (const s of servers) s.close();
 
 const line = (r.stdout ?? "").split("\n").find((l) => l.startsWith("RESULT "));
@@ -82,10 +84,30 @@ console.log("what the listeners saw: " + JSON.stringify(hits) + "\n");
 
 const results = [
   ok("control: launchctl asuser works from OUTSIDE the sandbox (so a refusal inside is the policy)", seen(BLOCKED_PORT + "/control-asuser")),
+  // Reachability outside is what makes the sandboxed internet refusal mean anything: on a machine with no network
+  // at all, every assertion above would pass for the wrong reason.
+  ok(
+    "control: the same internet request completes outside the sandbox",
+    netControl.status === 0,
+    "curl exit " + String(netControl.status) + "; HTTP " + String(netControl.stdout ?? "").trim(),
+  ),
   ok("control: the allowed port is reachable (so 'blocked' below means the policy, not a broken curl)", seen(OK_PORT + "/direct-allowed")),
   ok("a direct connection to a port outside the policy is refused", !seen(BLOCKED_PORT + "/direct-blocked")),
   ok("the same connection started THROUGH launchd (launchctl asuser) is also refused", !seen(BLOCKED_PORT + "/asuser-blocked"), seen(BLOCKED_PORT + "/asuser-blocked") ? "ESCAPE: launchd ran it outside the sandbox" : "launchd did not run it, or it was refused"),
   ok("a direct write outside the profile is refused", !existsSync(markerDirect)),
+  // THE INTERNET: the question the Chrome updater raised. It tried update.googleapis.com and then started a helper
+  // through launchd, so a real request to that host is what "egress escaped" would look like. Asserted directly
+  // rather than inferred from the absence of HTML in a log.
+  ok(
+    "a request to the internet (the updater's own host) does not complete",
+    got.internet?.status !== 0,
+    "curl exit " + String(got.internet?.status) + " " + String(got.internet?.stderr ?? "").slice(0, 90),
+  ),
+  ok(
+    "name resolution for it fails too, so it cannot even be addressed",
+    !/ip_address|^\s*\d+\.\d+\.\d+\.\d+/m.test(JSON.stringify(got.dns ?? {})),
+    JSON.stringify(got.dns).slice(0, 110),
+  ),
   ok("a write started THROUGH launchd outside the profile is also refused", !existsSync(markerAsuser), existsSync(markerAsuser) ? "ESCAPE: launchd wrote outside the sandbox" : ""),
 ];
 rmSync(root, { recursive: true, force: true });
