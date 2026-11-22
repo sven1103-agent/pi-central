@@ -235,12 +235,12 @@ if (reply !== "") {
     images.length > 0,
     images.length > 0 ? images.length + " image block(s), first " + String(images[0].data ?? "").length + " base64 chars" : "no image block anywhere in the transcript",
   );
-if (/NO SIDECAR TOOL/i.test(reply) && sidecarLog.length === 0) {
+if (!called && sidecarLog.length === 0) {
   // The most useful distinction available at this point: did the sidecar say ANYTHING?
   console.log("");
   console.log("  The sidecar wrote nothing at all. That means it never got as far as its own stderr, so the");
   console.log("  failure is in the LAUNCH — safehouse refusing the policy, or the interpreter not starting.");
-} else if (/NO SIDECAR TOOL/i.test(reply)) {
+} else if (!called) {
   console.log("");
   console.log("  The sidecar DID write the lines above. Those are its own words, not Pi's paraphrase of them.");
 }
