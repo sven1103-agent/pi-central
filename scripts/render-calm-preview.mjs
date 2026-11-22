@@ -154,6 +154,28 @@ const anchorScript = [
   "panes.foot.innerHTML = panes.middle.innerHTML;",
   "panes.top.innerHTML = panes.middle.innerHTML;",
   'Object.keys(panes).forEach(function (k) { panes[k].className = "pane " + panes[k].dataset.anchor; });',
+  /*
+   * SET `data-overflow` THE WAY THE REAL HANDLER DOES, and that is the whole reason this function exists.
+   *
+   * The first version of this page was a static SSR render, so the component's scroll handler never ran,
+   * `data-overflow` stayed empty, and every fade sat at `opacity: 0` — the operator reported "I cannot see any
+   * fade", correctly, because no code path in the page could ever show one. A preview of a RUNTIME state has to
+   * run the runtime logic; rendering the markup and hoping is how a review tool lies.
+   *
+   * The rule is mirrored from Transcript.tsx deliberately rather than approximated: `up` is any scroll at all,
+   * `down` is "not at the end" with the same 2px tolerance the component uses for the exact-bottom case. If the
+   * two ever disagree, the PREVIEW is wrong and not the component, so they are kept trivially readable.
+   */
+  "function setOverflow(scroller) {",
+  '  var viewport = scroller.parentElement;',
+  "  if (!viewport) return;",
+  "  var atEnd = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;",
+  '  var marks = [];',
+  '  if (scroller.scrollTop > 1) marks.push("up");',
+  '  if (!atEnd) marks.push("down");',
+  '  viewport.setAttribute("data-overflow", marks.join(" "));',
+  '  return marks;',
+  "}",
   "function measure() {",
   '  var pane = document.querySelector(".pane:not([hidden])");',
   '  var scroller = pane.querySelector(".transcript");',
@@ -164,6 +186,7 @@ const anchorScript = [
   "  }",
   "  if (!scroller || !last) return;",
   "  scroller.scrollTop = scroller.scrollHeight;",
+  "  setOverflow(scroller);",
   "  var box = scroller.getBoundingClientRect();",
   "  var tail = last.getBoundingClientRect().bottom;",
   "  var footGap = Math.round(box.bottom - tail);",
@@ -186,6 +209,25 @@ const anchorScript = [
   'document.getElementById("b-top").addEventListener("click", function () { show("top"); });',
   'window.addEventListener("resize", function () { requestAnimationFrame(measure); });',
   'window.addEventListener("load", function () { requestAnimationFrame(function () { requestAnimationFrame(measure); }); });',
+  "/*",
+  " * The scroller must update its own fades AS THE READER SCROLLS, exactly as the component does, or the fades",
+  " * only ever describe the moment the page loaded. This is the same passive listener the component attaches.",
+  " */",
+  'Object.keys(panes).forEach(function (k) {',
+  '  var scroller = panes[k].querySelector(".transcript");',
+  '  if (!scroller) return;',
+  '  scroller.addEventListener("scroll", function () { setOverflow(scroller); }, { passive: true });',
+  '});',
+  "/*",
+  " * And a control that PARKS the reader mid-history, because that is the only state in which the lower fade has",
+  " * anything to say. Without it the page always sits at the end and the fade can only be believed, not seen.",
+  " */",
+  'document.getElementById("b-park").addEventListener("click", function () {',
+  '  var pane = document.querySelector(".pane:not([hidden])");',
+  '  var scroller = pane.querySelector(".transcript");',
+  "  scroller.scrollTop = Math.round(scroller.scrollHeight * 0.35);",
+  "  setOverflow(scroller);",
+  "});",
 ].join("\n");
 
 const anchorPage = [
@@ -201,7 +243,8 @@ const anchorPage = [
   '  <button id="b-middle" aria-pressed="true">middle (proposed)</button>',
   '  <button id="b-foot" aria-pressed="false">foot (today)</button>',
   '  <button id="b-top" aria-pressed="false">top (rejected)</button>',
-  '  <span class="hint">Scroll to the bottom \u2014 it is pinned there for you. Then resize the window.</span>',
+  '  <button id="b-park">park mid-history (shows the lower fade)</button>',
+  '  <span class="hint">Scroll to the bottom \u2014 it is pinned there for you. Drag or scroll to see the end-fades, which replace the scrollbar.</span>',
   '  <span class="probe" id="probe">measuring\u2026</span>',
   "</div>",
   '<div class="stage">',

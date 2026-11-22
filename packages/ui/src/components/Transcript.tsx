@@ -340,11 +340,6 @@ export function TranscriptView({
        * `restoring` is true for exactly the mount tick and false ever after, so a real scroll — the reader
        * taking control — behaves as it always did.
        */
-      if (restoring.current) return;
-      // One measurement, two consumers, so the control and the follow behaviour cannot disagree
-      // about whether the reader is at the bottom.
-      pinnedRef.current = following;
-      setPinned(following);
       /*
        * The two fades are driven from the SAME measurement as the follow decision (ADR-0016).
        *
@@ -352,11 +347,22 @@ export function TranscriptView({
        * must not be computed twice or from a second source. `up` is any scroll at all; `down` is the same
        * question `following` answers, and deriving it here rather than from `pinned` keeps a re-render from
        * being able to disagree with the ref the follow effect reads.
+       *
+       * SET BEFORE THE `restoring` GUARD, and that guard is the reason it was briefly broken: it returns on the
+       * mount measurement, so every fade state computed after it was skipped exactly once — on the first paint,
+       * which is the only paint a static render ever produces. Overflow is pure geometry, so unlike `pinned` it
+       * has no #141 problem to inherit: an unpositioned box simply reports what it can see.
        */
       setOverflow({
         up: container.scrollTop > 1,
         down: !following,
       });
+
+      if (restoring.current) return;
+      // One measurement, two consumers, so the control and the follow behaviour cannot disagree
+      // about whether the reader is at the bottom.
+      pinnedRef.current = following;
+      setPinned(following);
       /*
        * Do NOT record a position measured before there is content to scroll (issue #141, follow-up).
        *
