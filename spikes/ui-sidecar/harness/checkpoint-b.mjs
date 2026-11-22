@@ -84,8 +84,18 @@ const config = {
 };
 const supervisor = new Supervisor(config, { rememberOpenSessions: false });
 supervisor.on("error", () => {});
+/**
+ * EVERY line the sidecar writes, printed as it arrives.
+ *
+ * The filtered version printed only lines matching /sidecar/, which excluded the sidecar's OWN stderr — so the
+ * one message that named the failure ("Path does not exist: …") was visible only second-hand, inside Pi's
+ * paraphrased "Connection closed (…)" summary. A harness that filters the evidence it exists to collect is
+ * asking the reader to guess.
+ */
+const sidecarLog = [];
 supervisor.on("log", (_id, line) => {
-  if (/sidecar/i.test(line)) console.log("  [session log] " + line);
+  sidecarLog.push(line);
+  console.log("  [sidecar] " + line);
 });
 
 // --- 3. Start a session WITH the port. This is the per-session option: one command, no env arming. ----
@@ -160,6 +170,15 @@ if (reply !== "") {
   console.log("\n--- the session's reply ---");
   console.log(reply.slice(0, 1500));
   record("the reply does not report a missing sidecar tool", !/NO SIDECAR TOOL/i.test(reply));
+if (/NO SIDECAR TOOL/i.test(reply) && sidecarLog.length === 0) {
+  // The most useful distinction available at this point: did the sidecar say ANYTHING?
+  console.log("");
+  console.log("  The sidecar wrote nothing at all. That means it never got as far as its own stderr, so the");
+  console.log("  failure is in the LAUNCH — safehouse refusing the policy, or the interpreter not starting.");
+} else if (/NO SIDECAR TOOL/i.test(reply)) {
+  console.log("");
+  console.log("  The sidecar DID write the lines above. Those are its own words, not Pi's paraphrase of them.");
+}
   record("the reply describes what was captured", /captur|screenshot|png|image/i.test(reply));
 }
 
