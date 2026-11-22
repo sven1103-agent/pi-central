@@ -23,7 +23,13 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Command, HistoricalSession, LiveSession, ModelOption, PiRecord } from "@pi-central/protocol";
 import { composePolicy, describe, type LaunchMode, type SessionSpec } from "./policy.ts";
-import { mcpConfigArgs, spawnSidecar, type SidecarHandle } from "./sidecar-supervise.ts";
+import {
+  devPortFor,
+  mcpConfigArgs,
+  sidecarPromptArgs,
+  spawnSidecar,
+  type SidecarHandle,
+} from "./sidecar-supervise.ts";
 import { RpcProcess, type LaunchSpec } from "./rpc.ts";
 import { retryRefusal } from "./retry.ts";
 import { checkResumable } from "./resume.ts";
@@ -569,8 +575,14 @@ export class Supervisor extends EventEmitter {
      *
      * The port resolves per session: an explicit `null` opts out, a number overrides the orchestrator default.
      */
+    // Precedence: an explicit per-session value, then an explicit global pin, then the port Pi Central assigns
+    // (when sidecars are on at all). ASSIGNED is the default because a discovered port collides across sessions.
     const sidecarPort =
-      input.sidecarPort === null ? undefined : (input.sidecarPort ?? this.#config.sidecarPort);
+      input.sidecarPort === null
+        ? undefined
+        : (input.sidecarPort ??
+          this.#config.sidecarPort ??
+          (this.#config.sidecar === true ? devPortFor(input.id) : undefined));
     const sidecarHandle =
       sidecarPort !== undefined && input.mode === "sandboxed"
         ? this.#startSidecar(input.id, sidecarPort)
@@ -581,7 +593,12 @@ export class Supervisor extends EventEmitter {
       ...(input.env ?? {}),
       // The trusted channel (ADR-0010 §3). Absent when there is no sidecar, so nothing references a token that
       // does not exist.
-      ...(sidecarHandle === undefined ? {} : { PI_CENTRAL_SIDECAR_TOKEN: sidecarHandle.token }),
+      ...(sidecarHandle === undefined
+        ? {}
+        : {
+            PI_CENTRAL_SIDECAR_TOKEN: sidecarHandle.token,
+            PI_CENTRAL_DEV_PORT: String(sidecarHandle.devPort),
+          }),
     };
 
     // Provider-key resolution needs keychain access (C13), and the grant is derived from the
@@ -755,6 +772,7 @@ export class Supervisor extends EventEmitter {
     // BEFORE any subcommand: `pi mcp list --mcp-config X` reports "Unknown option" (Phase 0D measured it,
     // and a probe nearly concluded the flag did not exist because of the ordering).
     extra.push(...mcpConfigArgs(sidecar));
+    extra.push(...sidecarPromptArgs(sidecar));
     if (sessionPath) extra.push("--session", sessionPath);
     if (extra.length === 0) return launch;
     return { ...launch, args: [...launch.args, ...extra] };

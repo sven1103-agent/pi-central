@@ -108,6 +108,16 @@ through a fixed verb set over CDP, with no new shipped dependency.**
     `tools.mcp({ tool })` and the `tools.mcp__<server>({ tool })` proxy the result is the caption alone;
     through `tools.mcp__pi_central_sidecar__capture` it carries the image block, shown with
     `image(result.content[0])`. The tool description says so. Whether agents follow it unaided is untested.
+14. **Pi Central assigns each session its dev-server port; the agent does not discover it.** The sidecar's egress is
+    pinned to one port, and a frontend toolchain cannot know it: Vite and Next default to 5173 and 3000 and move
+    to the next free port when it is busy, which in a second session is the *other* session's server. So the
+    port is `48000 + the session's ordinal`, above the sidecar's own listen range, and the session is told it
+    twice: in the appended system prompt, with the number written in (an instruction the agent must expand
+    itself is one it gets wrong), and as `PI_CENTRAL_DEV_PORT`. A server that lands elsewhere is unreachable and
+    the refusal says why, rather than a wrong screenshot. `PI_CENTRAL_SIDECAR=1` turns this on; an explicit
+    `PI_CENTRAL_SIDECAR_PORT` or a per-session port still overrides it. **Considered and deferred:** letting the
+    agent register its own port, which widens what a browser can reach on a loopback every session shares; it
+    would need the orchestrator to confirm the port is listened on by a process inside *that* session's tree.
 
 ## Consequences
 

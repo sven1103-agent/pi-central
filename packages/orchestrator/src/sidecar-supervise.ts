@@ -32,6 +32,8 @@ export interface SidecarHandle {
   configFile: string;
   /** The origin this sidecar serves, for the Inspector. */
   origin: string;
+  /** The dev-server port this session was assigned, which the sidecar's egress is pinned to. */
+  devPort: number;
   /** The bearer token, for delivery to Pi's environment (never into the config file). */
   token: string;
   /** The port the sidecar actually bound, once it said so. */
@@ -92,6 +94,50 @@ const SIDECAR_PORT_BASE = 47800;
 function sessionOrdinal(sessionId: string): number {
   const match = /^s(\d+)$/.exec(sessionId);
   return match === null ? 0 : Number(match[1]) % 200;
+}
+
+/**
+ * The first port a session's dev server is assigned. Directly above the sidecar listen range
+ * (`SIDECAR_PORT_BASE` .. +199), so the two can never meet.
+ */
+export const DEV_PORT_BASE = 48000;
+
+/**
+ * The dev-server port Pi Central assigns a session (ADR-0015 §14).
+ *
+ * Assigned rather than discovered, because the sidecar's egress is pinned to ONE port and an agent cannot know
+ * its dev server's: frameworks default to 5173 or 3000 and silently move to the next free port, which in a
+ * second session would be the OTHER session's server. A per-session port makes that collision impossible by
+ * construction instead of by luck.
+ */
+export function devPortFor(sessionId: string): number {
+  return DEV_PORT_BASE + sessionOrdinal(sessionId);
+}
+
+/**
+ * What the agent is told about its browser, appended to Pi's system prompt.
+ *
+ * The number is written INTO the text rather than left as `$PI_CENTRAL_DEV_PORT`: an instruction the agent has to
+ * expand itself is one it gets wrong. The variable exists too, for scripts. "Do not fall back" is the line that
+ * matters: a server that moves to another port is simply unreachable for the sidecar, which is the whole point
+ * of the pin.
+ */
+export function sidecarInstruction(devPort: number): string {
+  return [
+    "## Your browser",
+    "",
+    "You have a UI sidecar: a browser in its own sandbox, reached through the `mcp__pi_central_sidecar__*` tools",
+    "(`capture`, `probe`, `act`, `info`). It can reach exactly ONE address: http://localhost:" + devPort + ".",
+    "",
+    "- Start any dev server or preview you want to look at on port " + devPort + ", and do not let it fall back to",
+    "  another port. For example `vite --port " + devPort + " --strictPort`, `next dev -p " + devPort + "`, or",
+    "  `python3 -m http.server " + devPort + " --bind 127.0.0.1`. `$PI_CENTRAL_DEV_PORT` holds the same number.",
+    "- Prefer `probe` (a compact verdict on overflow, contrast, overlap and console errors) and use `capture` only",
+    "  when that is not enough: a screenshot costs thousands of tokens.",
+    "- To SEE a screenshot, call the typed function from a codemode script and show the image:",
+    `  \`const r = await tools.mcp__pi_central_sidecar__capture({ url: "http://localhost:${devPort}/" }); image(r.content[0]);\``,
+    "  The `mcp({ tool })` proxy forms return only the caption.",
+  ].join("\n");
 }
 
 export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
@@ -243,6 +289,7 @@ export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
   return {
     configFile,
     origin: `http://localhost:${options.port}`,
+    devPort: options.port,
     token,
     port: () => (gone ? undefined : port),
     ready: Promise.resolve(port),
@@ -262,4 +309,9 @@ export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
  */
 export function mcpConfigArgs(handle: SidecarHandle | undefined): string[] {
   return handle === undefined ? [] : ["--mcp-config", handle.configFile];
+}
+
+/** The system-prompt text for a session that has a sidecar, as Pi arguments. Nothing when it has none. */
+export function sidecarPromptArgs(handle: SidecarHandle | undefined): string[] {
+  return handle === undefined ? [] : ["--append-system-prompt", sidecarInstruction(handle.devPort)];
 }

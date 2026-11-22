@@ -85,6 +85,7 @@ test("--mcp-config precedes any subcommand, because after it the flag is unrecog
   const handle: SidecarHandle = {
     configFile: "/state/mcp.json",
     origin: "http://localhost:4173",
+    devPort: 4173,
     token: "t",
     port: () => 47801,
     ready: Promise.resolve(47801),

@@ -96,6 +96,13 @@ export interface Config {
    */
   sidecarPort: number | undefined;
   /**
+   * Give every sandboxed session a sidecar, on a dev port Pi Central assigns it (ADR-0015 §14).
+   *
+   * Optional so existing configurations keep meaning "no sidecar". An explicit `sidecarPort` still wins, which is
+   * what a harness or a manual run wants; a single global port is only right for a single session.
+   */
+  sidecar?: boolean;
+  /**
    * The browser the sidecar drives, resolved by configuration like `safehouse` and `pi`.
    *
    * Not distributed: a renderer is a host tool, and shipping one would add ~344 MB to a package whose only
@@ -157,6 +164,7 @@ export function defaultConfig(): Config {
     // means the answer is the running installation and not whatever a config file claims.
     installationRoot: resolveInstallationRoot(),
     sidecarPort: parsePort(process.env["PI_CENTRAL_SIDECAR_PORT"]),
+    sidecar: process.env["PI_CENTRAL_SIDECAR"] === "1",
     browser:
       process.env["PI_CENTRAL_BROWSER"] ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   };

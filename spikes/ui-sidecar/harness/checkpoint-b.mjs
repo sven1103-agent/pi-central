@@ -37,6 +37,13 @@ const opt = (name, fallback) => {
 const PORT = Number(opt("port", "4173"));
 const URL_TO_CAPTURE = opt("url", "http://localhost:" + PORT + "/");
 
+// --session-serves: the harness starts NO server. Pi Central assigns the port, the agent is told it, and the agent
+// has to write a page, serve it from inside its own sandbox and look at it -- the real workflow. Every earlier run
+// used a fixture started outside any sandbox, which proved the sidecar but not that a session can feed it.
+// --ipv6 additionally asks for the server to bind ::1 only, to find out whether "localhost:<port>" covers it.
+const SERVES = argv.includes("--session-serves");
+const IPV6 = argv.includes("--ipv6");
+
 const { defaultConfig } = await import(join(REPO, "packages/orchestrator/src/config.ts"));
 const { Supervisor } = await import(join(REPO, "packages/orchestrator/src/supervisor.ts"));
 
@@ -53,7 +60,9 @@ const listening = await new Promise((done) => {
   probe.once("error", () => done(true));
   probe.listen(PORT, () => probe.close(() => done(false)));
 });
-if (listening) {
+if (SERVES) {
+  console.log("dev server: none started by the harness -- the SESSION must serve its own page");
+} else if (listening) {
   console.log(`dev server: already listening on :${PORT}`);
 } else {
   // The Phase 0 fixture: a page with deliberate horizontal overflow, so the verdict has something to say.
@@ -81,6 +90,8 @@ const config = {
   stateRoot: join(root, "state"),
   workspaceRoot: join(root, "workspaces"),
   fragmentDir: join(root, "state", "policy"),
+  // Assigned ports, not a pinned one: a pin from the environment would defeat what this mode tests.
+  ...(SERVES ? { sidecar: true, sidecarPort: undefined } : {}),
 };
 const supervisor = new Supervisor(config, { rememberOpenSessions: false });
 supervisor.on("error", () => {});
@@ -121,13 +132,16 @@ supervisor.on("log", (_id, line) => {
 });
 
 // --- 3. Start a session WITH the port. This is the per-session option: one command, no env arming. ----
-const started = supervisor.start({ cwd: root, mode: "sandboxed", sidecarPort: PORT });
+const started = supervisor.start({ cwd: root, mode: "sandboxed", ...(SERVES ? {} : { sidecarPort: PORT }) });
 if (!started.ok) {
   console.error("could not start a session: " + started.message);
   process.exit(1);
 }
 const id = started.session.id;
 console.log("session: " + id + " in " + root);
+const { devPortFor } = await import(join(REPO, "packages/orchestrator/src/sidecar-supervise.ts"));
+const targetPort = SERVES ? devPortFor(id) : PORT;
+if (SERVES) console.log("assigned dev port: " + targetPort + (IPV6 ? " (the session is asked to bind ::1 only)" : ""));
 
 const configFile = join(config.stateRoot, "sidecars", id, "mcp.json");
 record("the session was armed with a sidecar", existsSync(configFile), configFile);
@@ -139,10 +153,15 @@ record(
 
 // --- 4. Ask the session to use it. ---------------------------------------------------------------
 // The prompt is the product question, not a protocol probe: can the agent see its own UI work?
-const prompt =
-  `Call the tool mcp__pi_central_sidecar__capture with url ${URL_TO_CAPTURE}, then tell me what you see. ` +
-  `Do it in a codemode script: \`const r = await tools.mcp__pi_central_sidecar__capture({ url: "${URL_TO_CAPTURE}" }); image(r.content[0]);\`. ` +
-  `If that tool does not exist, say exactly "NO SIDECAR TOOL" and list the mcp__ tools you do have.`;
+const prompt = SERVES
+  ? "In the current directory create index.html: a navy (#0b3d91) page with a white heading 'served by the session' " +
+    "and a green <div> exactly 2000px wide and 40px tall, so the page overflows horizontally. Serve the directory so " +
+    "you can look at it" +
+    (IPV6 ? ", bound to the IPv6 loopback ::1 ONLY (not 127.0.0.1)" : "") +
+    ", then check it with your browser: report what probe finds, and show me a screenshot."
+  : `Call the tool mcp__pi_central_sidecar__capture with url ${URL_TO_CAPTURE}, then tell me what you see. ` +
+    `Do it in a codemode script: \`const r = await tools.mcp__pi_central_sidecar__capture({ url: "${URL_TO_CAPTURE}" }); image(r.content[0]);\`. ` +
+    `If that tool does not exist, say exactly "NO SIDECAR TOOL" and list the mcp__ tools you do have.`;
 // This prompt names the display call on purpose: the checkpoint asks whether the picture CAN reach the model. Whether an
 // agent finds that path unaided is the tool description's job, and the first two runs showed it taking the lossy proxy.
 console.log("\nprompting the session (this makes one model call, and may use your provider key)…\n");
@@ -161,7 +180,8 @@ try {
     // 90 s: long enough for a real capture on a slow page, short enough that a hang is reported while the
     // operator is still watching. The previous bound was three minutes, which is a long time to wait for a
     // result that is not coming.
-    const deadline = Date.now() + 120_000;
+    // The agent writes a page and starts a server in this mode, which takes a few turns.
+    const deadline = Date.now() + (SERVES ? 300_000 : 120_000);
     // "Idle with a message" is ALSO true the instant the prompt is accepted, before the agent has started its
     // turn -- the first version of this declared the session settled at once and stopped it mid-turn, so the
     // capture never ran. A settle is: the session was seen BUSY, and is now idle on two consecutive ticks.
@@ -238,6 +258,23 @@ if (reply !== "") {
     images.length > 0,
     images.length > 0 ? images.length + " image block(s), first " + String(images[0].data ?? "").length + " base64 chars" : "no image block anywhere in the transcript",
   );
+  if (SERVES) {
+    const everything = JSON.stringify(transcript?.messages ?? []);
+    // The agent must have used the port it was ASSIGNED. Anything else would have been refused, but a refusal that
+    // was then worked around would hide that the instruction was ignored.
+    record(
+      "the agent served and looked at the page on its assigned port",
+      everything.includes("localhost:" + targetPort) || everything.includes("127.0.0.1:" + targetPort),
+      "assigned " + targetPort,
+    );
+    // The page is the session's own: only it contains the 2000px bar, so a verdict naming the overflow cannot have
+    // come from any other server on this machine.
+    record(
+      "the probe measured the overflow of the page the session wrote",
+      /horizontal-overflow/.test(everything),
+      "the sidecar reached a server that lives inside the session's sandbox",
+    );
+  }
 if (!called && sidecarLog.length === 0) {
   // The most useful distinction available at this point: did the sidecar say ANYTHING?
   console.log("");
