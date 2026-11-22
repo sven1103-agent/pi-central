@@ -79,7 +79,8 @@ export class CdpPage {
     }
 
     const page = new CdpPage(write as NodeJS.WritableStream, read as NodeJS.ReadableStream);
-    const bootstrap = (await page.#send("Target.getTargets", {}, options.timeoutMs)) as {
+    // No sessionId: the browser target owns Target.* — that is how a page session is obtained in the first place.
+    const bootstrap = (await page.#send("Target.getTargets", {}, undefined, options.timeoutMs)) as {
       targetInfos?: { type: string; targetId: string }[];
     };
     const target = (bootstrap.targetInfos ?? []).find((info) => info.type === "page");
@@ -87,11 +88,14 @@ export class CdpPage {
     const attached = (await page.#send(
       "Target.attachToTarget",
       { targetId: target.targetId, flatten: true },
+      undefined,
       options.timeoutMs,
     )) as { sessionId?: string };
     page.#sessionId = attached.sessionId;
-    await page.#call("Page.enable");
-    await page.#call("Runtime.enable");
+    // The caller's timeout applies to these too. They used to fall through to the 20 s default, which made a
+    // bounded open() unbounded — a test that asked for 60 ms waited 20 seconds and still passed, hiding it.
+    await page.#call("Page.enable", {}, options.timeoutMs);
+    await page.#call("Runtime.enable", {}, options.timeoutMs);
     return page;
   }
 
@@ -142,7 +146,21 @@ export class CdpPage {
     }
   }
 
-  #send(method: string, params: Record<string, unknown>, timeoutMs = 20_000): Promise<unknown> {
+  /**
+   * Send one command, optionally addressed to an attached session.
+   *
+   * **`sessionId` is a sibling of `method`, never a member of `params`.** With `flatten: true` the protocol puts
+   * it in the envelope; putting it inside `params` sends the command to the BROWSER target instead, which does
+   * not implement page methods — and the answer is `'Page.enable' wasn't found`, which reads like a version
+   * mismatch rather than a misplaced field. Measured: that is exactly how the first pipe version failed after
+   * `attachToTarget` had already succeeded.
+   */
+  #send(
+    method: string,
+    params: Record<string, unknown>,
+    sessionId?: string,
+    timeoutMs = 20_000,
+  ): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const id = this.#nextId++;
       // A response that never comes must fail the CALL, not hang the sidecar. The socket version could hang
@@ -152,13 +170,13 @@ export class CdpPage {
         reject(new Error("CDP " + method + " did not answer within " + timeoutMs + " ms"));
       }, timeoutMs);
       this.#pending.set(id, { resolve, reject, timer });
-      this.#write.write(JSON.stringify({ id, method, params }) + "\0");
+      const envelope = { id, method, params, ...(sessionId === undefined ? {} : { sessionId }) };
+      this.#write.write(JSON.stringify(envelope) + "\0");
     });
   }
 
-  #call(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
-    const withSession = this.#sessionId === undefined ? params : { ...params, sessionId: this.#sessionId };
-    return this.#send(method, withSession);
+  #call(method: string, params: Record<string, unknown> = {}, timeoutMs = 20_000): Promise<unknown> {
+    return this.#send(method, params, this.#sessionId, timeoutMs);
   }
 
   async setViewport(viewport: { width: number; height: number }): Promise<void> {

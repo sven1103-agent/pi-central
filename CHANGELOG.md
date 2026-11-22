@@ -29,6 +29,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The Inspector's command string now matches the argv that actually runs ([#276]).
 - The sidecar is granted read-only access to its own code, so a source-launched one starts at all ([#276]).
 - The sidecar drives its browser over a pipe rather than loopback, which its own egress rule blocks ([#276]).
+- A CDP `sessionId` rides the message envelope, so page commands reach the page and not the browser ([#276]).
 - A browser renders a local page under the sidecar's own profile with egress confined to one port ([#276]).
 - A two-verb host-side service is measured against shipping `playwright` for UI capture ([#276]).
 - A hand-written credential deny list failed open on `~/.gitconfig`, as C15c predicts ([#276]).
