@@ -293,8 +293,12 @@ function ScrollProbe({ stageRef }: { stageRef: React.RefObject<HTMLDivElement | 
     };
     find();
     if (scroller === null) return undefined;
+    // Captured in a const: TypeScript cannot narrow a `let` that a callback reassigns, and the sample loop below
+    // runs long after `find` finished. The first version narrowed `scroller` to `never` because the only
+    // assignment it could see was the null one.
+    const pane: HTMLElement = scroller;
 
-    let previous = scroller.scrollTop;
+    let previous = pane.scrollTop;
     let lastReport = performance.now();
     let peakThisSecond = 0;
 
@@ -306,8 +310,8 @@ function ScrollProbe({ stageRef }: { stageRef: React.RefObject<HTMLDivElement | 
     let raf = 0;
     const sample = () => {
       const now = performance.now();
-      const delta = Math.abs(scroller.scrollTop - previous);
-      previous = scroller.scrollTop;
+      const delta = Math.abs(pane.scrollTop - previous);
+      previous = pane.scrollTop;
       peakThisSecond = Math.max(peakThisSecond, delta);
 
       /*
@@ -321,7 +325,7 @@ function ScrollProbe({ stageRef }: { stageRef: React.RefObject<HTMLDivElement | 
        * The distinction it draws is still the useful one: a movement at or below the ceiling is OUR animation, and
        * anything above it came from somewhere else — a clamp, an anchoring jump, or a caller passing `instant`.
        */
-      const ceiling = TAIL_MAX_STEP_PX + 0.5;
+      const ceiling = followConfig.maxStepPx + 0.5;
       if (delta > ceiling) setExternal((n) => n + 1);
       else if (delta > 0) setOurs((n) => n + 1);
 
@@ -336,13 +340,13 @@ function ScrollProbe({ stageRef }: { stageRef: React.RefObject<HTMLDivElement | 
     return () => cancelAnimationFrame(raf);
   }, [stageRef]);
 
-  const jump = worst.px > TAIL_MAX_STEP_PX + 0.5;
+  const jump = worst.px > followConfig.maxStepPx + 0.5;
   return (
     <span className={"hx-probe" + (jump ? " is-jump" : "")}>
       {jump ? (
         <strong>JUMP {worst.px.toFixed(0)}px in one frame = {worst.perSecond.toFixed(0)} px/sec</strong>
       ) : (
-        <>peak {worst.px.toFixed(1)}px of {(TAIL_MAX_STEP_PX).toFixed(0)}px/frame</>
+        <>peak {worst.px.toFixed(1)}px of {followConfig.maxStepPx.toFixed(0)}px/frame</>
       )}
       {" · ours "}{ours}{" · external "}{external}
     </span>
