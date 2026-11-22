@@ -1,6 +1,6 @@
 # Phase 0 — can a browser run at all, outside a session's sandbox?
 
-**Status:** ⏳ **NOT STARTED** — this file is the brief, not the result.
+**Status:** ✅ **PASSED** — see [RESULT.md](RESULT.md). This file is kept as the brief.
 **Issue:** [#276](https://github.com/sven1103-agent/pi-central/issues/276)
 **Branch:** `slice/ui-sidecar`
 **Environment measured so far:** macOS, Pi Central and Agent Safehouse and `node` at the versions named
@@ -73,8 +73,14 @@ because it is the shape the second draft would have had too.
 | 1 | a PNG exists, 800×400 | Chromium can render at all on this machine |
 | 2 | a PNG exists **under the profile** | the sidecar's sandbox can host the renderer — **this is the claim** |
 | 2 | non-loopback reachable, DNS resolves | the "before": the base profile has no egress confinement |
-| 3 | both REFUSED | the appended fragment decides, not the base policy |
+| 3 | a non-loopback host, DNS, **and a second loopback port** all REFUSED | the appended fragment decides, not the base policy |
 | 3 | a PNG still exists | the confinement did not cost the capability (C12's shape) |
+
+The second loopback port is the check that tells us *what the fragment actually pins*. `localhost:<port>`
+is a pin on **the port, not the peer**, so "non-loopback is refused" is not enough: the orchestrator's
+control socket is on loopback too, and its transport performs no Origin, Host or token check. If :4174 is
+reachable while :4173 is allowed, a confined renderer can dial the orchestrator — record that, because it
+is a finding for the issue and not a detail for later.
 
 **Open the PNG in run 1 and run 3.** A blank frame or a page of tofu is a FAIL even though a file
 exists, and the harness cannot tell — it checks dimensions, not content.

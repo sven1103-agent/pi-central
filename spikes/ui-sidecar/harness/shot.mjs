@@ -117,6 +117,23 @@ if (boundV4) {
   console.log("note: bound v4 only; if navigation times out, the browser may have tried ::1 first.");
 }
 
+// A second listener on a different loopback port, so "the port is the unit" is measured rather
+// than assumed. This decides whether a confined renderer can still reach the orchestrator's
+// control socket, which is on loopback too and performs no Origin, Host or token check.
+const PEER_PORT = Number(opt("peer-port", String(PORT + 1)));
+const peer = createHttpServer((req, res) => {
+  res.writeHead(200, { "content-type": "text/plain" });
+  res.end("peer\n");
+});
+const peerBound = await new Promise((done) => {
+  peer.once("error", (error) => done({ error }));
+  peer.listen(PEER_PORT, () => done({ address: peer.address() }));
+});
+if (peerBound.error) {
+  console.error("could not bind :" + PEER_PORT + " for the peer check -- " + peerBound.error.message);
+  process.exit(2);
+}
+
 // 2. Three directions, from this one process.
 const tcp = (host, port, timeout = 4000) =>
   new Promise((done) => {
@@ -136,6 +153,15 @@ const tcp = (host, port, timeout = 4000) =>
 
 const loop = await tcp("localhost", PORT);
 record("loopback :" + PORT + " is reachable", loop.ok, loop.detail);
+
+const peerHit = await tcp("localhost", PEER_PORT);
+record(
+  expectDenied
+    ? "a second loopback port (:" + PEER_PORT + ") is REFUSED -- the PORT is pinned, not the address"
+    : "a second loopback port (:" + PEER_PORT + ") is reachable (baseline)",
+  peerHit.ok !== expectDenied,
+  peerHit.detail + (expectDenied ? "" : " -- this is what an unconfined renderer can dial"),
+);
 
 const ext = await tcp("1.1.1.1", 443);
 record(
@@ -212,6 +238,7 @@ if (launched.error) {
 }
 
 server.close();
+peer.close();
 const failed = results.filter((r) => !r.pass).length;
 console.log("\n" + (results.length - failed) + "/" + results.length + " expectations held (" + mode + ")");
 process.exit(failed === 0 ? 0 : 1);
