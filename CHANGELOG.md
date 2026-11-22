@@ -20,6 +20,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The sidecar's fragment is rendered from the shared deny set, so a new deny reaches it too ([#276]).
 - The renderer is denied `~/.npmrc` and the gh caches, which the base profile grants ([#276]).
 - The sidecar's URL policy and four-verb set are decided in one pure, tested module ([#276]).
+- The CDP driver behind those verbs interpolates no caller input into an expression ([#276]).
 - A browser renders a local page under the sidecar's own profile with egress confined to one port ([#276]).
 - A two-verb host-side service is measured against shipping `playwright` for UI capture ([#276]).
 - A hand-written credential deny list failed open on `~/.gitconfig`, as C15c predicts ([#276]).
