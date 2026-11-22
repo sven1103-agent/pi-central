@@ -2054,6 +2054,24 @@ button { font: inherit; color: inherit; }
  */
 .transcript {
   scrollbar-width: none;
+  /*
+   * NO BROWSER SCROLL ANCHORING — this element has exactly ONE scroll manager, and it is our animation.
+   *
+   * `overflow-anchor: auto` is the browser default, and it is right for a document: when content changes above
+   * the viewport, the browser adjusts `scrollTop` so the reader's place is preserved. It is wrong here, because
+   * this scroller is intentionally pinned to its tail and something else is already moving it.
+   *
+   * The defect it caused was reported as "i cant say that i see any effect on any parameter setting for burst and
+   * huge", and the arithmetic explains it exactly: anchoring adjusts by the size of the content change, in ONE
+   * frame, before any animation frame runs. A trickle changes 1.2px, so the adjustment is invisible and our curve
+   * is what the reader sees — which is why the steady mode responded to the sliders. A burst changes 99-581px, so
+   * the adjustment is a full-magnitude jump that bypasses the curve entirely, and no parameter could affect it
+   * because our code was not the thing moving the scroller.
+   *
+   * `none` because no part of this pane wants the browser's idea of stability: following is our decision, the
+   * restore is our decision, and the glide is ours. A second writer with no knowledge of the first is the bug.
+   */
+  overflow-anchor: none;
 }
 .transcript::-webkit-scrollbar { display: none; }
 

@@ -370,16 +370,16 @@ const TUNING: { key: keyof FollowConfig; label: string; min: number; max: number
     max: 80,
     step: 0.25,
     unit: "px",
-    note: "the one that matters most — one prose line is ~23px",
+    note: "THE ONLY ONE THAT AFFECTS burst/huge — one prose line is ~23px",
   },
-  { key: "ease", label: "gentle fraction", min: 0.04, max: 0.9, step: 0.01, unit: "", note: "shape of a trickle" },
-  { key: "burstFraction", label: "burst fraction", min: 0.1, max: 1, step: 0.01, unit: "", note: "shape of a burst" },
+  { key: "ease", label: "gentle fraction", min: 0.04, max: 0.9, step: 0.01, unit: "", note: "TRICKLE ONLY — no effect on burst/huge" },
+  { key: "burstFraction", label: "burst fraction", min: 0.1, max: 1, step: 0.01, unit: "", note: "only the last ~26px, because the cap binds first" },
   { key: "rampSpanPx", label: "ramp span", min: 4, max: 200, step: 1, unit: "px", note: "where gentle becomes brisk" },
   { key: "snapPx", label: "snap", min: 0.1, max: 4, step: 0.1, unit: "px", note: "size of the final step" },
 ];
 
 /** What each arrival costs under the CURRENT settings, so a slider movement is legible as well as felt. */
-function settleTable(): { distance: number; frames: number; ms: number; peak: number }[] {
+function settleTable(): { distance: number; frames: number; ms: number; peak: number; governedBy: string }[] {
   return [23, 99, 233, 581, 1163, 2000].map((distance) => {
     let remaining = distance;
     let frames = 0;
@@ -390,7 +390,22 @@ function settleTable(): { distance: number; frames: number; ms: number; peak: nu
       remaining -= step;
       frames += 1;
     }
-    return { distance, frames, ms: Math.round((frames * FRAME_MS)), peak: Math.round(peak) };
+    /*
+     * WHICH PARAMETER DECIDES THIS ARRIVAL — computed, not guessed, and the column exists because five rounds of
+     * tuning went into knobs that provably could not affect the case being watched.
+     *
+     * The cap binds whenever `remaining * fraction > cap`, i.e. above `cap / burstFraction` px. Below that the
+     * fraction decides, and which fraction depends on the ramp. So an arrival is "cap" if it is above that
+     * threshold, "burst" between rampSpan and it, and "gentle" below rampSpan.
+     */
+    const threshold = followConfig.maxStepPx / followConfig.burstFraction;
+    const governedBy =
+      distance > threshold
+        ? "per-frame cap"
+        : distance > followConfig.rampSpanPx
+          ? "burst fraction"
+          : "gentle fraction";
+    return { distance, frames, ms: Math.round((frames * FRAME_MS)), peak: Math.round(peak), governedBy };
   });
 }
 
@@ -446,6 +461,7 @@ function TuningPanel() {
             <th>frames</th>
             <th>settle</th>
             <th>peak step</th>
+            <th>governed by</th>
           </tr>
         </thead>
         <tbody>
@@ -455,6 +471,7 @@ function TuningPanel() {
               <td>{row.frames}</td>
               <td>{row.ms}ms</td>
               <td>{row.peak}px</td>
+              <td>{row.governedBy}</td>
             </tr>
           ))}
         </tbody>

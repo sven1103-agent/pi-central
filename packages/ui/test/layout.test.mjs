@@ -412,3 +412,31 @@ test("the end-fade band is tall enough to read, and both ends share one height (
     `the page colour must hold to 40% before dissolving, or a taller band is only fainter; got ${stops.join(", ")}`,
   );
 });
+test("the transcript disables browser scroll anchoring, which was a second writer", () => {
+  /*
+   * THE DEFECT, reported as "i cant say that i see any effect on any parameter setting for burst and huge".
+   *
+   * `overflow-anchor: auto` is the browser default: on a content change it adjusts `scrollTop` to keep the
+   * reader\u2019s place, in ONE frame, outside any animation. For a document that is right. Here it was a second
+   * scroll manager with no knowledge of the first, and it adjusted by exactly the size of the change:
+   *
+   *   - a trickle changes ~1.2px, so the adjustment was invisible and the glide was what the reader saw -- which is
+   *     why the steady mode DID respond to the sliders;
+   *   - a burst changes 99-581px, so the adjustment was a full-magnitude jump that bypassed the curve entirely. No
+   *     parameter could affect it, because our code was not the thing moving the scroller.
+   *
+   * `none` is the only correct value: following, the restore and the glide are all this component\u2019s decisions, so
+   * nothing else may move the viewport.
+   */
+  const transcript = rule(".transcript");
+  assert.ok(transcript, ".transcript must have a rule");
+  assert.match(
+    transcript,
+    /overflow-anchor:\s*none/,
+    "scroll anchoring must be off, or the browser moves the viewport behind the animation and the tuning has no effect",
+  );
+  assert.ok(
+    !/overflow-anchor:\s*auto/.test(css),
+    "and it must not be re-enabled elsewhere; `auto` is the default that caused the defect",
+  );
+});
