@@ -372,17 +372,31 @@ what a preview is for. It records three findings, in the order they arrived.
    - **Dividing the remainder by the budget frame count.** A geometric decay at (1 - 1/15) per frame never
      arrives in the budget: 1067ms instead of 260ms.
 
-   **What works is one continuous curve.** `TAIL_EASE` (0.22) and `TAIL_BURST_FRACTION` (0.62) are the ends of a
-   fraction that ramps over `TAIL_RAMP_SPAN_PX` (28px) with the remaining distance. There is no seam, so nothing
-   can crawl through one, and every arrival settles inside one budget:
+   **What works is one continuous curve.** A gentle fraction (0.035) and a burst fraction (0.08) are the ends of
+   a fraction that ramps over a 132px span with the remaining distance. There is no seam, so nothing can crawl
+   through one.
 
-   | arrival | settle |
-   |---|---|
-   | 2px | 100ms |
-   | 12px | 183ms |
-   | 99px | 217ms |
-   | 581px | 250ms |
-   | 5000px | 283ms |
+   The four earlier constant sets were each reported wrong, and the last correction was the important one: the
+   curve had been tuned against arrival modes **the product does not have**. A harness mode delivering 340 or 2000
+   characters in a single frame was invented by the review tool; `transport.ts` broadcasts every record as it
+   arrives with no batching, so real arrival is a token rate of roughly 80–400 characters per second. Tuning
+   against a fabricated burst produced six rounds of "no effect", because at real rates the tail settles a few
+   pixels behind the text — an order of magnitude below the per-frame cap, so the cap could never fire.
+
+   At a real token rate the tail settles at a fixed distance behind the text, and settle time is **monotonic** in
+   arrival size:
+
+   | arrival | settle | note |
+   |---|---|---|
+   | 20px | 1767ms | inside the ramp, so the gentle fraction governs |
+   | 99px | 2317ms | |
+   | 581px | 2717ms | |
+   | 2000px | ~3100ms | not a real arrival; a guard on the curve |
+
+   These are long, and that is the point of the setting: the reader is not reading text as it slides, they read
+   it once the viewport stops. The earlier table in this section quoted 100–283ms for the same distances, from a
+   curve whose gain was 6× higher and whose settle time *inverted* at 26px — a larger arrival finishing faster
+   than a smaller one, which reads as erratic motion without any single step looking wrong.
 
    Small moves are slow enough to read rather than flick; large ones are over before the eye tracks them. The
    tradeoff is resolved in favour of DURATION for large moves, because the reader is not reading the text as it
@@ -391,6 +405,11 @@ what a preview is for. It records three findings, in the order they arrived.
    Three falsifications, each run by reverting to a failed version: restoring the regime switch fails on a 333ms
    settle, the gentle fraction everywhere fails on 483ms, and the burst fraction everywhere fails because a 5px
    move settles in 67ms — a flick rather than a scroll.
+
+   A fourth was added when the shipped constants changed: reverting to the old values (0.22 / 0.9 / 28px) fails
+   the monotonicity test, which reports that a 24px arrival settles in 10 frames, faster than the 11 frames taken
+   by the smaller arrival before it. That inversion was present in shipped code and had not been noticed, because
+   it is invisible frame by frame.
 
    This is the change that answers the report. The anchor moves where the tail sits; the pacing in (b) is a CPU
    saving; **the scroll is the part the reader actually watches**, and it was the one part missing from this

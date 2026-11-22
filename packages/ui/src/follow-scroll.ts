@@ -127,10 +127,10 @@ export interface FollowConfig {
  */
 export const FOLLOW_DEFAULTS: FollowConfig = {
   maxStepPx: 23.25,
-  ease: 0.22,
-  burstFraction: 0.9,
-  rampSpanPx: 28,
-  snapPx: 0.6,
+  ease: 0.035,
+  burstFraction: 0.08,
+  rampSpanPx: 132,
+  snapPx: 0.4,
 };
 
 /** The live values. Mutated only through `setFollowConfig`, so one writer and one place to look. */
@@ -182,8 +182,13 @@ export const FRAME_MS = 1000 / 60;
  * somewhere, not content arriving underneath them.
  */
 
-/** Closer than this and the movement is a rounding artefact; snap, or it never converges. */
-export const TAIL_SNAP_PX = 0.6;
+/**
+ * Closer than this and the movement is a rounding artefact; snap, or it never converges.
+ *
+ * Kept as the name of the CONCEPT, but `followConfig.snapPx` is the value in force. Two constants for one
+ * threshold is how they drift apart, so nothing reads this at runtime.
+ */
+export const TAIL_SNAP_PX = 0.4;
 
 /**
  * How far the browser will report a programmatic scroll differing from what was written.
