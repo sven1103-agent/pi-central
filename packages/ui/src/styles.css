@@ -154,6 +154,13 @@
    * must be DEFINED, because the failure is silent and lands somewhere unrelated to the line that caused it.
    */
   --companion-width: 340px;
+
+  /*
+   * ROOM AFTER THE LAST LINE (ADR-0017). Defaulted here as well as in `reading.ts` so the anchor holds before the
+   * reader's preference is read — the first paint of a session must not show the tail at the foot and then jump.
+   * `reading.ts` is the single writer once it runs; this is the same value, stated where the stylesheet can see it.
+   */
+  --tail-space: min(35vh, 24rem);
   --fs-lg: 18px;
 
   --sh-1: 0 1px 0 rgba(255, 255, 255, 0.03);
@@ -2017,37 +2024,135 @@ button { font: inherit; color: inherit; }
 }
 
 /*
- * THE TRANSCRIPT'S SCROLLBAR: a slim overlay, not a trench.
+ * THE TRANSCRIPT HAS NO SCROLLBAR — it fades at the ends instead, so the reader can see there is more.
  *
- * The platform default on macOS is a full-height track with a visible channel, which on a dark page reads as a bright
- * vertical line down the right of the column — louder than the prose it sits beside. It also takes layout width, so
- * the text inset had to compensate for it.
+ * ## Why not a slimmer scrollbar
  *
- * `scrollbar-width: thin` covers Firefox and Chromium; the `::-webkit-scrollbar` rules cover the Chromium/Safari path
- * where the platform's own styling would otherwise win. The thumb is `--line-strong` and inset by a transparent
- * border, so it reads as a small floating marker rather than a filled channel, and the track is transparent — the
- * page shows through, and there is no second vertical rule competing with the column's edge.
+ * The previous rule made it thin and inset, and that was still wrong for the one job this container has. A scrolling
+ * column with a visible thumb draws a vertical rule down the right of the prose, and in a transcript that rule is
+ * LONGER than the message: on a 909px scrollport with a 370px tail anchor the bar spans most of the column and reads
+ * as a second, unowned edge. It also takes layout width, so the text inset has to compensate for a control the
+ * reader is not using while following.
  *
- * The elapsed position is still visible: a thumb whose LENGTH is the visible fraction is the position indicator. That
- * is the requirement — the requirement was never a wide channel.
+ * ## The two clues, and what each one answers
+ *
+ * The reader's questions here are only ever "is there more above me" and "is there more below me". Neither needs a
+ * position indicator, and a following reader has no use for one — they are at the end by construction. So the
+ * indication moves from a bar on the EDGE to a fade at the ends of the COLUMN, which is where the eye already is:
+ *
+ *   - **top** — content is scrolled off above. Appears the moment `scrollTop > 0`.
+ *   - **bottom** — content continues below. Appears only when the reader is NOT at the end, which is exactly when
+ *     the "Jump to latest" pill also appears; the two answer the same question and are allowed to agree.
+ *
+ * Both are driven by `data-overflow` on `.transcript-viewport`, written by the same scroll handler that already
+ * measures position for the follow decision. One writer, one place to look, and no second source of truth about
+ * where the reader is.
+ *
+ * ## Why a fade rather than a rule or a chevron
+ *
+ * A rule is what we just removed, one element shorter. A chevron is an affordance the reader has to notice and
+ * interpret. A gradient from the page colour is the technique `.transcript-footer` already uses to dissolve the
+ * transcript into the composer, so it is a shape this product already speaks: "this surface continues".
+ *
+ * `scrollbar-width: none` is the standard property; the `::-webkit-scrollbar { display: none }` rule covers the
+ * Chromium/Safari path where the platform's own styling would otherwise win. Scrolling itself is untouched — wheel,
+ * trackpad, keyboard and the "Jump to latest" pill all still work, and `scrollTop` is still the source of truth for
+ * following.
  */
 .transcript {
-  scrollbar-width: thin;
-  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-width: none;
+  /*
+   * NO BROWSER SCROLL ANCHORING — this element has exactly ONE scroll manager, and it is our animation.
+   *
+   * `overflow-anchor: auto` is the browser default, and it is right for a document: when content changes above
+   * the viewport, the browser adjusts `scrollTop` so the reader's place is preserved. It is wrong here, because
+   * this scroller is intentionally pinned to its tail and something else is already moving it.
+   *
+   * The defect it caused was reported as "i cant say that i see any effect on any parameter setting for burst and
+   * huge", and the arithmetic explains it exactly: anchoring adjusts by the size of the content change, in ONE
+   * frame, before any animation frame runs. A trickle changes 1.2px, so the adjustment is invisible and our curve
+   * is what the reader sees — which is why the steady mode responded to the sliders. A burst changes 99-581px, so
+   * the adjustment is a full-magnitude jump that bypasses the curve entirely, and no parameter could affect it
+   * because our code was not the thing moving the scroller.
+   *
+   * `none` because no part of this pane wants the browser's idea of stability: following is our decision, the
+   * restore is our decision, and the glide is ours. A second writer with no knowledge of the first is the bug.
+   */
+  overflow-anchor: none;
 }
-.transcript::-webkit-scrollbar { width: 10px; }
-.transcript::-webkit-scrollbar-track { background: transparent; }
-.transcript::-webkit-scrollbar-thumb {
-  /* An inset thumb: the border is transparent and `background-clip` paints only inside it, which is what makes a 12px
-     scrollbar show a 6px pill with air on both sides. */
-  background: var(--line-strong);
-  background-clip: padding-box;
-  border: 3px solid transparent;
-  border-radius: var(--r-pill);
+.transcript::-webkit-scrollbar { display: none; }
+
+/*
+ * THE TWO FADES. Positioned on `.transcript-viewport`, which is already the positioned ancestor of the pill, so
+ * neither needs a new wrapper and neither can affect the scroller's layout.
+ *
+ * `pointer-events: none` is load-bearing: an overlay above the text that swallowed a click would make the first and
+ * last visible line un-selectable, which is a worse defect than the one being fixed.
+ */
+.transcript-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  /*
+   * THE BAND IS TALL, AND THE GRADIENT IS FRONT-LOADED.
+   *
+   * 28px was a thin edge that read as a slight darkening rather than as "the text continues" — reported after
+   * looking at it on a 1512x982 window. The height is doubled and a custom property carries it, so the two ends
+   * cannot drift apart.
+   *
+   * The ramp is not a plain two-stop gradient. A linear `var(--bg)` to `transparent` is already mostly
+   * transparent by a third of the way in, so a taller band would just be more faint pixels. The stops hold the
+   * page colour for the first 40% — where it has to actually hide the cut-off line — and only then dissolve. That
+   * is what makes the extra height do work instead of diluting the effect.
+   */
+  --fade-height: 56px;
+  height: var(--fade-height);
+  pointer-events: none;
+  z-index: 4;
+  opacity: 0;
+  transition: opacity 120ms linear;
 }
-.transcript::-webkit-scrollbar-thumb:hover { background: var(--dim); background-clip: padding-box; }
-/* The corner where both bars meet, if a horizontal one ever appears: never a filled square. */
-.transcript::-webkit-scrollbar-corner { background: transparent; }
+/* Above the scrollport, below the header: it only exists to say "there is more up". */
+.transcript-fade.is-top {
+  top: 0;
+  /*
+   * Stated as literal channels rather than `color-mix` on purpose: `color-mix` would be the newest CSS in the
+   * file, used for exactly one gradient, and this stylesheet otherwise stays within widely-supported syntax.
+   * The channels are #0e1116 — the value of `--bg` — so a change to that token must change here too, which is
+   * the one cost of not being able to interpolate a custom property through a gradient.
+   */
+  background: linear-gradient(
+    to bottom,
+    rgb(14 17 22) 0%,
+    rgb(14 17 22) 40%,
+    rgb(14 17 22 / 0.55) 70%,
+    rgb(14 17 22 / 0) 100%
+  );
+}
+/* At the scrollport's foot, above the reserved jump strip, so it never covers the pill. */
+.transcript-fade.is-bottom {
+  bottom: var(--jump-strip);
+  background: linear-gradient(
+    to top,
+    rgb(14 17 22) 0%,
+    rgb(14 17 22) 40%,
+    rgb(14 17 22 / 0.55) 70%,
+    rgb(14 17 22 / 0) 100%
+  );
+}
+.transcript-viewport[data-overflow~="up"] .transcript-fade.is-top { opacity: 1; }
+.transcript-viewport[data-overflow~="down"] .transcript-fade.is-bottom { opacity: 1; }
+
+/*
+ * THE FADES ARE DECORATION AND MUST SAY SO.
+ *
+ * A reader who cannot see them loses no information: the content itself still scrolls, the keyboard still moves it,
+ * and "Jump to latest" still states in words that there is newer output. So they are `aria-hidden` in the markup and
+ * they can be switched off entirely by a reader who finds the movement distracting.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .transcript-fade { transition: none; }
+}
 
 /*
  * The same treatment for every OTHER scroll region, so they never look like different apps.
@@ -2121,6 +2226,24 @@ button { font: inherit; color: inherit; }
   max-width: var(--reading-measure);
   margin-inline: auto;
   font-size: var(--fs-base);
+  /*
+   * THE TAIL ANCHOR (ADR-0017), so the newest line is not pinned to the window's foot.
+   *
+   * Padding ON THE LANE, not a spacer element. A spacer would be a new child of this element, and the lane's own
+   * child-count rules — `.transcript-lane > .turn-user:first-child` just below — would then be correct for N
+   * children and wrong at N+1 (C20). Padding adds height without changing what any child-count rule counts.
+   *
+   * It must be PADDING-BOTTOM rather than margin, because margin at the end of a scroll container collapses and
+   * leaves the space outside the scrollable area, which is indistinguishable from no space at all.
+   *
+   * The end sentinel is the LAST CHILD OF THE SCROLLER, after this lane. Both follow paths go to maximum scroll,
+   * and that lands below this padding only because the padding is content ABOVE the sentinel. Moving the sentinel
+   * inside or above the lane would anchor to the padding's end and reproduce the complaint exactly.
+   *
+   * `--tail-space` is written by `readingStyle` from the reader's `tail` preference: the anchor mechanism always
+   * applies, and `"foot"` sets the value to 0px.
+   */
+  padding-bottom: var(--tail-space, 0px);
 }
 
 /*
@@ -5661,6 +5784,38 @@ select.btn { font-family: var(--sans); }
   color: var(--dim);
 }
 .reading-row input[type="range"] { width: 100%; accent-color: var(--accent); }
+/*
+ * THE "NEWEST LINE" CHOICE (ADR-0017).
+ *
+ * A fieldset rather than a range, because this is a choice and not a quantity: two named positions, no third value
+ * to slide to. The ADR refuses a "top" setting — it doubles the space under the tail for a complaint nobody made.
+ *
+ * Laid out as a row to match the two sliders above it, so the panel reads as one list of transcript settings.
+ */
+.reading-tail {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 2px var(--sp-2);
+  border: 0;
+  padding: 0;
+  margin: 0 0 6px;
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+.reading-tail legend {
+  padding: 0;
+  grid-column: 1;
+  line-height: 1.7;
+}
+.reading-tail label {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.7;
+  cursor: pointer;
+}
+.reading-tail input { accent-color: var(--accent); }
 .reading-row input[type="range"]:disabled { opacity: 0.4; }
 .reading-value { color: var(--text); text-align: right; }
 /*

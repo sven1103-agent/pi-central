@@ -41,6 +41,7 @@ import {
   type ScrollSample,
   type SessionScroll,
 } from "../scroll.ts";
+import { readerMoved, shouldSettleInstantly, tailStep } from "../follow-scroll.ts";
 import { RunNotices } from "./RunNotices.tsx";
 import { FollowToggle } from "./FollowToggle.tsx";
 
@@ -276,6 +277,14 @@ export function TranscriptView({
    * and never show it — a control that exists but is never visible.
    */
   const [pinned, setPinned] = useState(true);
+  /**
+   * Which ends of the scroller have content the reader cannot see (ADR-0017).
+   *
+   * Replaces the scrollbar, which drew a vertical rule longer than the message it belonged to. Held as one
+   * object so a single measurement updates both ends together, and so the two can never report a state the
+   * scroll position does not have.
+   */
+  const [overflow, setOverflow] = useState<{ up: boolean; down: boolean }>({ up: false, down: false });
 
   /**
    * Is the peek panel showing? Written by `SessionPeek`, read by the WRAPPER's track widths.
@@ -309,6 +318,22 @@ export function TranscriptView({
         clientHeight: container.clientHeight,
       };
       const previous = sample.current;
+      /*
+       * THE SCROLL THAT MADE THE ANIMATION POSSIBLE (ADR-0017, and the reason #86 could be revisited).
+       *
+       * An intermediate position of our own glide is indistinguishable from the reader scrolling up by measurement
+       * alone — that is exactly what made `scroll-behavior: smooth` un-pin the pane in #86. So before anything is
+       * concluded, a position that matches what we last wrote is discarded: it is our own movement, it says nothing
+       * about what the reader wants, and reporting it would stop the very animation producing it.
+       *
+       * The comparison is against what the browser REPORTED after the last assignment, not what was assigned, because
+       * it clamps and rounds. A difference beyond the tolerance is a wheel notch, a keypress or a drag — the reader.
+       */
+      if (readerMoved(container.scrollTop, lastWritten.current)) {
+        // The reader took control mid-glide: stop immediately rather than sliding out from under them.
+        stopFrames();
+      }
+      lastWritten.current = null;
       // Only a real measurement may become the previous one: an unmeasured sample reads as enormous
       // growth and would cancel the reader's whole distance from the bottom (see `isMeasured`).
       if (isMeasured(current)) sample.current = current;
@@ -332,6 +357,24 @@ export function TranscriptView({
        * `restoring` is true for exactly the mount tick and false ever after, so a real scroll — the reader
        * taking control — behaves as it always did.
        */
+      /*
+       * The two fades are driven from the SAME measurement as the follow decision (ADR-0017).
+       *
+       * With the scrollbar gone, "is there more above / below" is the only position information left, so it
+       * must not be computed twice or from a second source. `up` is any scroll at all; `down` is the same
+       * question `following` answers, and deriving it here rather than from `pinned` keeps a re-render from
+       * being able to disagree with the ref the follow effect reads.
+       *
+       * SET BEFORE THE `restoring` GUARD, and that guard is the reason it was briefly broken: it returns on the
+       * mount measurement, so every fade state computed after it was skipped exactly once — on the first paint,
+       * which is the only paint a static render ever produces. Overflow is pure geometry, so unlike `pinned` it
+       * has no #141 problem to inherit: an unpositioned box simply reports what it can see.
+       */
+      setOverflow({
+        up: container.scrollTop > 1,
+        down: !following,
+      });
+
       if (restoring.current) return;
       // One measurement, two consumers, so the control and the follow behaviour cannot disagree
       // about whether the reader is at the bottom.
@@ -418,30 +461,137 @@ export function TranscriptView({
     pendingRestore.current = undefined;
   });
 
+
   /**
-   * Sending a prompt re-arms following (#86).
+   * The one place that moves the scroller toward the tail (ADR-0017).
    *
-   * The reported symptom was that a reply arrived off-screen after a prompt, because an earlier
-   * scroll had un-pinned the reader and nothing ever re-pinned them. Following is re-enabled BEFORE
-   * the scroll for the same reason `jumpToLatest` does it: the scroll event fires a handler that
-   * would otherwise immediately un-follow the reader again.
+   * ## What this replaces, and why
    *
-   * The first run is skipped — the token starts at 0 and is only meaningful once it changes.
+   * Three separate paths used to move it, each with a direct assignment or `scrollIntoView`: this effect, the
+   * `ResizeObserver` below, and the re-arm on send. Every one of them was a TELEPORT — an instant jump to a new
+   * position, once per commit, with no interpolation. That is what the report describes: *"producing the tokens is
+   * not the issue, it is how smooth the scrolling happens"*. Coalescing deltas changes how often a jump happens and
+   * nothing about how each one looks.
+   *
+   * So all three call `followTail`, which glides. The arithmetic lives in `follow-scroll.ts`, tested without a DOM.
+   *
+   * ## Why animating is safe now, having been forbidden since #86
+   *
+   * #86 removed `scroll-behavior: smooth` because the animation's intermediate positions were read as "the reader
+   * scrolled away", so the pane un-pinned itself and stopped following. The diagnosis was right; the conclusion was
+   * too broad. The defect was MEASURING `pinned` from scroll events during our own animation.
+   *
+   * `lastWritten` closes that: the scroll handler compares what the browser reports with what we last assigned, and
+   * a difference within `READER_SCROLL_TOLERANCE_PX` is ours. Only a real movement un-pins. That is the whole safety
+   * argument, and it is one comparison rather than a re-design of the follow logic.
    */
-  const rearmToken = useRef(followToken);
-  useEffect(() => {
-    if (rearmToken.current === followToken) return;
-    rearmToken.current = followToken;
-    pinnedRef.current = true;
-    setPinned(true);
-    const container = containerRef.current;
-    if (container) container.scrollTop = container.scrollHeight;
-  }, [followToken]);
+  const lastWritten = useRef<number | null>(null);
+  const frameRef = useRef<number | null>(null);
+
+  /**
+   * Does the reader want motion? Read live rather than captured, so a preference changed while the app is open is
+   * honoured without a remount — and so a test can stub it.
+   */
+  const reducedMotion = useCallback((): boolean => {
+    if (typeof matchMedia !== "function") return false;
+    try {
+      return matchMedia("(prefers-reduced-motion: reduce)").matches;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  /**
+   * One frame, or immediately when there is no frame clock.
+   *
+   * `requestAnimationFrame` is not guaranteed: jsdom does not implement it, and a test that mounted this component
+   * without one made every follow throw a `TypeError` — which surfaced as "the pane did not scroll", three layers
+   * away from the cause. A follow that cannot animate must still FOLLOW, so the fallback runs the step once and
+   * settles instantly, which is the reduced-motion behaviour and correct for any environment without a frame clock.
+   */
+  const onFrame = useCallback((step: () => void): number | null => {
+    if (typeof requestAnimationFrame !== "function") {
+      step();
+      // Null rather than a fake id: there is no pending frame to cancel, and a sentinel number would have to be
+      // special-cased at every `cancelAnimationFrame` call site.
+      return null;
+    }
+    return requestAnimationFrame(step);
+  }, []);
+
+  /** Cancel a pending frame, whatever produced it. */
+  const stopFrames = useCallback(() => {
+    if (frameRef.current === null) return;
+    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
+  }, []);
+
+  const followTail = useCallback(
+    (options: { force?: boolean; instant?: boolean } = {}) => {
+      const container = containerRef.current;
+      if (container === null) return;
+      /*
+       * The PINNED flag is read at call time, not captured — the rule the ResizeObserver already needed. A captured
+       * value would leave following armed after the reader scrolled away, and the pane would keep pulling them back.
+       */
+      if (options.force !== true && !shouldFollow(autoFollow, pinnedRef.current)) return;
+
+      const target = container.scrollHeight - container.clientHeight;
+      const remaining = target - container.scrollTop;
+      if (!Number.isFinite(remaining) || remaining === 0) return;
+
+      /*
+       * TWO reasons to arrive instead of gliding, and neither is a distance (ADR-0017).
+       *
+       * `instant` is set by the callers where the READER asked to be somewhere — a restore on open, the Jump to
+       * latest pill. Animating a request shows them a delay they did not ask for. Content arriving underneath them
+       * is the opposite case and always glides, however far it moved: that is the motion that was reported as
+       * abrupt, and it was abrupt precisely because it used to take this branch.
+       */
+      if (options.instant === true || shouldSettleInstantly(reducedMotion())) {
+        stopFrames();
+        container.scrollTop = target;
+        lastWritten.current = container.scrollTop;
+        return;
+      }
+
+      // Already gliding: do NOT start a second loop. The running one reads `scrollHeight` each frame, so it is
+      // already heading for the new target — which is exactly what "re-target each frame" means, with no extra state.
+      if (frameRef.current !== null) return;
+
+      const step = () => {
+        const box = containerRef.current;
+        if (box === null) {
+          frameRef.current = null;
+          return;
+        }
+        // Re-read both numbers EVERY frame: content arrives between frames, and a target captured once would be
+        // stale by the time the glide got there.
+        const live = box.scrollHeight - box.clientHeight - box.scrollTop;
+        if (!shouldFollow(autoFollow, pinnedRef.current) || Math.abs(live) < 0.5) {
+          box.scrollTop = box.scrollHeight - box.clientHeight;
+          lastWritten.current = box.scrollTop;
+          frameRef.current = null;
+          return;
+        }
+        box.scrollTop = box.scrollTop + tailStep(live);
+        // Read BACK, not the value assigned: the browser clamps and rounds, and the next comparison must be
+        // against what it actually reports or the first clamped frame reads as the reader moving.
+        lastWritten.current = box.scrollTop;
+        // Through `onFrame`, never `requestAnimationFrame` directly — this was the one path left calling it raw
+        // after the fallback was added, and it threw in jsdom while every other path was guarded.
+        frameRef.current = onFrame(step);
+      };
+      frameRef.current = onFrame(step);
+    },
+    [autoFollow, reducedMotion, onFrame],
+  );
+
+  // Cancel on unmount, or a glide left running holds a container that is gone.
+  useEffect(() => stopFrames, [stopFrames]);
 
   useEffect(() => {
-    // Instant, never animated: this is a catch-up, and an animated one cannot catch a moving bottom.
-    // `scroll-behavior` is `auto` on the container for the same reason (see styles.css).
-    if (shouldFollow(autoFollow, pinnedRef.current)) endRef.current?.scrollIntoView({ block: "end" });
+    followTail();
   });
 
   /**
@@ -470,6 +620,28 @@ export function TranscriptView({
    * by the same amount. That is correct behaviour for a pane that is following, and it is the same thing the existing
    * effect already does on every render.
    */
+  /**
+   * Sending a prompt re-arms following (#86).
+   *
+   * The reported symptom was that a reply arrived off-screen after a prompt, because an earlier
+   * scroll had un-pinned the reader and nothing ever re-pinned them. Following is re-enabled BEFORE
+   * the scroll for the same reason `jumpToLatest` does it: the scroll event fires a handler that
+   * would otherwise immediately un-follow the reader again.
+   *
+   * The first run is skipped — the token starts at 0 and is only meaningful once it changes.
+   */
+  const rearmToken = useRef(followToken);
+  useEffect(() => {
+    if (rearmToken.current === followToken) return;
+    rearmToken.current = followToken;
+    pinnedRef.current = true;
+    setPinned(true);
+    // `force`, because the whole point of re-arming is that following was OFF a moment ago — the flag has just been
+    // set, and reading it again inside `followTail` would be a second decision about the same fact.
+    followTail({ force: true, instant: true });
+  }, [followToken, followTail]);
+
+
   const laneRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const lane = laneRef.current;
@@ -483,12 +655,17 @@ export function TranscriptView({
        * the ref means "the reader is following RIGHT NOW", which is the only question this should ask.
        */
       if (!shouldFollow(autoFollow, pinnedRef.current)) return;
-      // Direct assignment rather than `scrollIntoView`: this fires on layout changes, and `scrollIntoView` can move an
-      // ANCESTOR scroll port too — on a growing transcript that means the whole window jumping, which is a far more
-      // disruptive bug than the one being fixed.
-      const container = containerRef.current;
-      if (container === null) return;
-      container.scrollTop = container.scrollHeight;
+      /*
+       * Through `followTail` rather than a direct assignment (ADR-0017).
+       *
+       * The direct assignment here was correct about one thing and wrong about another: `scrollIntoView` can move an
+       * ANCESTOR scroll port too, which on a growing transcript means the whole window jumping. `followTail` writes
+       * `scrollTop` on this container only, so that protection is kept — and the move now glides instead of teleporting.
+       *
+       * This observer is also the path a lazy image takes when it decodes, which is the case that motivated it: the
+       * height arrives after paint, so the correct response is to start moving rather than to have already moved.
+       */
+      followTail();
     });
     observer.observe(lane);
     return () => observer.disconnect();
@@ -509,21 +686,27 @@ export function TranscriptView({
    * agrees.
    */
   const jumpToLatest = useCallback(() => {
+    // Re-pin BEFORE moving, and that order is load-bearing: the resulting scroll event runs the handler, which
+    // would otherwise immediately un-follow the reader again — the bug this control exists to fix (#86).
     pinnedRef.current = true;
     setPinned(true);
-    const end = endRef.current;
-    if (!end) return;
-    // `"end"` rather than `"nearest"`: the target is the bottom, and `"nearest"` would do nothing
-    // when the element is already partly visible. `behavior: "smooth"` is asked for HERE, explicitly,
-    // because this one IS a deliberate jump — the container no longer smooth-scrolls by default.
-    if (typeof end.scrollIntoView === "function") end.scrollIntoView({ block: "end", behavior: "smooth" });
-    // Belt and braces for the case that matters most — a browser where `scrollIntoView` is a
-    // no-op in this container (for example if the pane is a scroll port but the target is not
-    // reached). Assigning the scroll offset directly is what the reader asked for, and it is
-    // cheap.
-    const container = containerRef.current;
-    if (container) container.scrollTop = container.scrollHeight;
-  }, []);
+    /*
+     * THROUGH `followTail`, NOT `scrollIntoView` (ADR-0017).
+     *
+     * This used to be `scrollIntoView({ block: "end", behavior: "smooth" })` plus a direct assignment as
+     * "belt and braces". Three things were wrong with that, and only the third was obvious:
+     *
+     *   - `scrollIntoView` can move an ANCESTOR scroll port, so a deliberate jump could move the whole window;
+     *   - `behavior: "smooth"` is the browser's own animation, which this component cannot cancel when the reader
+     *     takes over — and cannot re-target when the agent keeps emitting while it runs;
+     *   - and the direct assignment overrode the smooth scroll immediately, so in practice this control TELEPORTED
+     *     despite asking for an animation.
+     *
+     * `force: true`, because the reader has explicitly asked to go to the tail — `pinnedRef` has just been set, and
+     * reading it again inside would be a second decision about a fact already decided here.
+     */
+    followTail({ force: true, instant: true });
+  }, [followTail]);
 
   const isEmpty = transcript.messages.length === 0 && transcript.tools.length === 0;
   // An error is not "still loading": the attempt is over.
@@ -672,7 +855,19 @@ export function TranscriptView({
         reading column. Anchored to the column it sat under the composer — 44px from a bottom edge that is below the
         input — so the control meant for the conversation appeared over the thing you type into.
       */}
-      <div className="transcript-viewport">
+      <div
+        className="transcript-viewport"
+        data-overflow={[overflow.up ? "up" : "", overflow.down ? "down" : ""].filter(Boolean).join(" ")}
+      >
+      {/*
+        THE TWO FADES, which replace the scrollbar (ADR-0017).
+
+        Decoration, so both are aria-hidden: the content still scrolls, the keyboard still moves it, and the
+        "Jump to latest" pill still states in words that there is newer output below. A reader who cannot see a
+        gradient loses no information, and a screen reader is not told twice.
+      */}
+      <div className="transcript-fade is-top" aria-hidden="true" />
+      <div className="transcript-fade is-bottom" aria-hidden="true" />
       <div
         className="transcript"
         ref={containerRef}
