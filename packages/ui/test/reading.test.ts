@@ -250,3 +250,35 @@ test("the newest line is held above the foot by padding on the lane (ADR-0016)",
   // And the stylesheet has a fallback, so the anchor holds before the preference is read on first paint.
   assert.match(css, /--tail-space:\s*min\(35vh, 24rem\)/, "the token defaults in the stylesheet too");
 });
+test("the reader's transcript settings are applied before the first paint, not only in Settings", () => {
+  /*
+   * A preference that reverted on reload.
+   *
+   * `readingStyle` was called only inside `ReadingPanel`, which React mounts while the Settings dialog is open. So
+   * `:root` carried the reader's choices only during the moment they were being edited, and a plain reload went
+   * back to whatever the stylesheet declared.
+   *
+   * That was invisible while size and measure merely echoed the stylesheet's own defaults. The tail anchor makes it
+   * visible: "flush with the foot" and "held above the foot" are different enough to notice, so a reader who chose
+   * one would get the other on every reload.
+   *
+   * Falsified by deleting the `applyReadingPrefs()` call from `main.tsx`: the first assertion fails.
+   */
+  const dir = new URL("../", import.meta.url);
+  const main = readFileSync(new URL("src/main.tsx", dir), "utf8");
+
+  assert.match(main, /\bapplyReadingPrefs\(\)\s*;/, "main.tsx applies the stored prefs");
+
+  /*
+   * And it must run BEFORE the root renders, or the first paint shows the stylesheet position and the anchor then
+   * moves — the jump this ADR exists to remove. Asserted as source order, because that is the only part of "before
+   * first paint" a test without a browser can see.
+   */
+  const applied = main.indexOf("applyReadingPrefs();");
+  const rendered = main.indexOf("createRoot(root).render(");
+  assert.ok(applied > 0 && rendered > 0, "both steps are present");
+  assert.ok(applied < rendered, "the prefs are applied before the root renders, so the first paint is correct");
+
+  // One mapping, so the read side and the write side cannot describe a preference differently.
+  assert.equal((main.match(/readingStyle\(/g) ?? []).length, 1, "main.tsx reuses readingStyle rather than restating it");
+});
