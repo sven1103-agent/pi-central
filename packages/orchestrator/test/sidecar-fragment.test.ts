@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderPolicyFragment } from "../src/fragment.ts";
@@ -117,13 +117,34 @@ test("a port that is not a port is refused rather than silently composed", () =>
   }
 });
 
-test("the fragment parses as SBPL", () => {
-  const probe = spawnSync("/usr/bin/sandbox-exec", ["-p", "(version 1)", "--", "/usr/bin/true"]);
-  if (probe.error || probe.status !== 0) {
-    // Said out loud: a green tick over an unparsed policy is the gap C10 keeps opening.
-    console.log("# skip: sandbox-exec cannot apply a policy here (C10) — the fragment is NOT parsed");
-    return;
+/**
+ * The parse check, and the correction that matters more than the test.
+ *
+ * The first version probed `sandbox-exec -p '(version 1)' -- /usr/bin/true` and skipped whenever that
+ * exited non-zero. It always exits non-zero, on every machine: a bare `(version 1)` has no rules, so
+ * `true` is *denied* — a valid policy that refuses the command. The guard therefore skipped a healthy
+ * environment and **the parse check never ran anywhere**, which is the "a test that cannot fail is not
+ * evidence" defect this repository keeps recording. A positive control has to allow the thing it runs.
+ *
+ * The right question is not "did it apply" but "did it complain about SYNTAX": nested, `sandbox_apply`
+ * fails with EPERM for a *valid* policy too, so `fragment.test.ts` checks for the absence of a syntax
+ * error and keeps a negative control beside it. This does the same, and adds the one thing that makes it
+ * meaningful here — a broken variant must produce the error the good one must not.
+ */
+const sandboxExec = "/usr/bin/sandbox-exec";
+const canValidate = process.platform === "darwin" && existsSync(sandboxExec);
+
+/** Run `sandbox-exec -f file` and return its diagnostics. EPERM is expected and not a failure. */
+function applyDiagnostics(file: string): string {
+  try {
+    execFileSync(sandboxExec, ["-f", file, "/bin/true"], { stdio: "pipe" });
+    return "";
+  } catch (error) {
+    return String((error as { stderr?: Buffer }).stderr ?? "");
   }
+}
+
+test("the fragment parses as SBPL", { skip: !canValidate && "sandbox-exec is not on this platform (C10)" }, () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-central-sidecar-fragment-"));
   process.on("exit", () => rmSync(dir, { recursive: true, force: true }));
   const file = join(dir, "sidecar.sb");
@@ -134,4 +155,23 @@ test("the fragment parses as SBPL", () => {
   });
   assert.equal(composed.status, 0, `safehouse refused the fragment: ${composed.stderr}`);
   assert.ok(composed.stdout.includes("Pi Central"), "the fragment reached the composed policy");
+
+  const composedFile = join(dir, "composed.sb");
+  writeFileSync(composedFile, composed.stdout, { mode: 0o600 });
+  const diagnostics = applyDiagnostics(composedFile);
+  assert.ok(
+    !/syntax error/i.test(diagnostics),
+    `the composed policy must parse; sandbox-exec said: ${diagnostics.trim()}`,
+  );
+});
+
+test("a deliberately broken fragment DOES report a syntax error (the check has teeth)", { skip: !canValidate && "sandbox-exec is not on this platform (C10)" }, () => {
+  // Negative control. Without it the assertion above passes even if sandbox-exec validated nothing —
+  // which is precisely what the first version of this test did, with a strace-free skip that looked
+  // like diligence. Measured: an unbalanced paren produces "syntax error" here, EPERM or not.
+  const dir = mkdtempSync(join(tmpdir(), "pi-central-sidecar-broken-"));
+  process.on("exit", () => rmSync(dir, { recursive: true, force: true }));
+  const broken = join(dir, "broken.sb");
+  writeFileSync(broken, '(version 1)\n(allow file-read*\n', { mode: 0o600 });
+  assert.match(applyDiagnostics(broken), /syntax error/i);
 });
