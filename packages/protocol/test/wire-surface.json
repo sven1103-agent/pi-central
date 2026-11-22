@@ -1,5 +1,5 @@
 {
-  "version": 11,
+  "version": 12,
   "control": [
     "abort",
     "answerDialog",
@@ -14,6 +14,7 @@
     "listThinkingLevels",
     "prompt",
     "readFile",
+    "reload",
     "rename",
     "resume",
     "retry",
@@ -21,7 +22,8 @@
     "setModel",
     "setThinkingLevel",
     "start",
-    "stop"
+    "stop",
+    "toolset"
   ],
   "event": [
     "deleted",
@@ -44,6 +46,8 @@
     "snapshot",
     "thinkingLevels",
     "thinkingLevelsError",
+    "toolset",
+    "toolsetError",
     "transcript",
     "transcriptError"
   ]

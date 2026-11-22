@@ -309,6 +309,7 @@ errors. Extension commands (`/foo`) execute immediately even while streaming.
 | `get_available_thinking_levels` | constrain the level picker per model |
 | `set_thinking_level` / `cycle_thinking_level` | thinking controls |
 | `compact` | manual compaction |
+| — | **no `reload`**: `/reload` is a built-in TUI command, excluded from `get_commands` and not executable via `prompt`. Pi Central loads its own extension command instead (ADR-0015, issue #274) |
 | `set_auto_compaction` | toggle |
 | `set_auto_retry` / `abort_retry` | retry controls |
 | `set_steering_mode` / `set_follow_up_mode` | queue semantics |
@@ -319,6 +320,7 @@ errors. Extension commands (`/foo`) execute immediately even while streaming.
 |---|---|
 | `bash` / `abort_bash` | run a shell command (streams `bash_execution_update`, `id`-correlated) |
 | `get_commands` | discoverable extension commands, prompt templates, skills |
+| `prompt` with `/<extension-command>` | runs an extension command — the only reachable route to `ctx.reload()` (ADR-0015) |
 | `export_html` | export a session |
 
 ## Events consumed

@@ -119,6 +119,8 @@ const CONTROL_KINDS: Record<Control["kind"], true> = {
   setThinkingLevel: true,
   listThinkingLevels: true,
   compact: true,
+  reload: true,
+  toolset: true,
   answerDialog: true,
   resume: true,
   retry: true,
@@ -713,6 +715,31 @@ export class Transport {
          */
         await this.#supervisor.compact(control.sessionId);
         return;
+      case "reload":
+        /*
+         * Not caught here, for the same reason as `compact`: `#dispatch` reports a throw as an `error` event, and a
+         * refusal — Pi's own "wait for the current response to finish", a session with no process, a second reload,
+         * or Pi taking the command as a prompt because the extension is not loaded — must arrive as a visible
+         * sentence. A reload that appeared to work and changed nothing is the failure the issue forbids.
+         */
+        await this.#supervisor.reload(control.sessionId, {
+          ...(control.interrupt === undefined ? {} : { interrupt: control.interrupt }),
+        });
+        return;
+      case "toolset": {
+        /*
+         * Answered as a RESULT rather than by throwing, because "I could not establish the toolset" and "I established
+         * that it is unchanged" are different claims and only one of them is a failure: `toolsetError` says the
+         * question could not be asked at all, while `unknown` freshness is an ANSWER that says what could not be
+         * seen. Collapsing them is the fabricated-clean-result failure C14 describes for a transcript.
+         */
+        try {
+          this.#broadcast({ kind: "toolset", sessionId: control.sessionId, status: this.#supervisor.toolset(control.sessionId) });
+        } catch (error) {
+          this.#broadcast({ kind: "toolsetError", sessionId: control.sessionId, message: (error as Error).message });
+        }
+        return;
+      }
       case "answerDialog":
         this.#supervisor.answerDialog(control.sessionId, control.dialogId, control.answer);
         return;

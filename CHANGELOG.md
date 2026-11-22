@@ -10,7 +10,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
-<!-- Empty at tag time: a release cannot ship undocumented changes. -->
+### Added
+
+- A running session can re-read its extensions, skills, prompt templates, MCP servers and context files without being stopped, and asks before abandoning a run in flight ([#274]).
+- Pi Central says whether a session's toolset has changed since it last read its resources, or that it cannot tell ([#274]).
 
 ## [0.13.0] — 2026-11-21
 
@@ -785,3 +788,4 @@ The spike that answered whether this was worth building.
 [#263]: https://github.com/sven1103-agent/pi-central/issues/263
 [#265]: https://github.com/sven1103-agent/pi-central/issues/265
 [#269]: https://github.com/sven1103-agent/pi-central/issues/269
+[#274]: https://github.com/sven1103-agent/pi-central/issues/274

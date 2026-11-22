@@ -59,6 +59,7 @@ export function Composer({
   listDirectory,
   directoryEntries,
   onCompact,
+  onReload,
   follow,
 }: {
   session: LiveSession | undefined;
@@ -121,6 +122,14 @@ export function Composer({
    * compaction is the threshold mechanism; this is the reader's own decision.
    */
   onCompact?: (() => void) | undefined;
+  /**
+   * Open the reload confirmation (issue #274).
+   *
+   * Asks the SHELL to open the confirmation rather than sending the control: a reload during a run is refused by Pi
+   * unless the run is abandoned, and that is a decision the reader makes with the run's cost in front of them — not
+   * something a button in a chrome row can assume on their behalf.
+   */
+  onReload?: (() => void) | undefined;
   /**
    * The follow toggle, rendered in the composer's own chrome row.
    *
@@ -541,25 +550,50 @@ export function Composer({
           )}
         </span>
         {/*
-          THE COMPOSER'S COMMANDS. Today this list has one entry, and that is the honest shape: the command exists
-          because the context is nearly full, not because a menu was wanted. Keeping it a LIST (a group with a label)
-          rather than a lone button is what lets a second command arrive without a second layout.
+          THE COMPOSER'S COMMANDS (issues #263, #274).
+
+          Two entries now, which is what the list was drawn for: a group with a label, so the second command arrived
+          without a second layout. Both are MANUAL and both say what they cost — a compaction spends a model call, a
+          reload shuts Pi's extension instances down and rebinds them — because the reader deciding whether to press
+          deserves that before the click rather than after it.
+
+          Neither is offered without a process (`hasProcess`): both are delivered to a live Pi, and a disabled button
+          whose only possible outcome is a refusal is a button that should not be drawn.
         */}
-        {onCompact !== undefined && session !== undefined && hasProcess(session) && (
+        {session !== undefined &&
+          hasProcess(session) &&
+          (onCompact !== undefined || onReload !== undefined) && (
             <div className="composer-commands" role="group" aria-label="Composer commands">
-              <button
-                type="button"
-                className="composer-command"
-                disabled={session.compacting === true}
-                title={
-                  session.compacting === true
-                    ? "A compaction is already running. It spends a model call and may take a minute."
-                    : "Summarize this session's context now. This spends a model call and may take a minute."
-                }
-                onClick={onCompact}
-              >
-                {session.compacting === true ? "Compacting…" : "Compact context"}
-              </button>
+              {onCompact !== undefined && (
+                <button
+                  type="button"
+                  className="composer-command"
+                  disabled={session.compacting === true}
+                  title={
+                    session.compacting === true
+                      ? "A compaction is already running. It spends a model call and may take a minute."
+                      : "Summarize this session's context now. This spends a model call and may take a minute."
+                  }
+                  onClick={onCompact}
+                >
+                  {session.compacting === true ? "Compacting…" : "Compact context"}
+                </button>
+              )}
+              {onReload !== undefined && (
+                <button
+                  type="button"
+                  className="composer-command"
+                  disabled={session.reloading === true}
+                  title={
+                    session.reloading === true
+                      ? "A reload is already running. Pi shuts down and rebinds its extensions, so this is not instant."
+                      : "Re-read extensions, skills, prompt templates, MCP servers and context files. The transcript is untouched."
+                  }
+                  onClick={onReload}
+                >
+                  {session.reloading === true ? "Reloading…" : "Reload resources"}
+                </button>
+              )}
             </div>
           )}
         {follow !== undefined && follow}

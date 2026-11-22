@@ -117,6 +117,15 @@ export interface LiveSession {
    * older orchestrator simply never sends it.
    */
   compacting?: boolean | undefined;
+  /**
+   * Whether a resource reload is in flight for this session (issue #274).
+   *
+   * The same shape as `compacting`, for the same reason: the control that started it says
+   * "Reloading…" and is disabled, rather than inviting a second press the orchestrator would
+   * refuse. A reload is NOT completion either — it shuts down and rebinds extension instances
+   * while the session keeps its transcript, its cwd and its handle (C8, ADR-0015).
+   */
+  reloading?: boolean | undefined;
   messageCount: number;
   pending: number;
   contextPercent: number | null;
@@ -126,6 +135,60 @@ export interface LiveSession {
   error?: string | undefined;
   warnings: string[];
   startedAt: number;
+}
+
+/**
+ * What Pi Central can say about a session's toolset (issue #274).
+ *
+ * The three `freshness` values and the two lists exist so that "I checked and it is current",
+ * "I checked and it changed", and "I could not check" cannot be rendered as one another. See the
+ * `toolset` event for why `unknown` is an answer rather than a failure.
+ */
+export interface ToolsetStatus {
+  /**
+   * `changed` / `unchanged` / `unknown`.
+   *
+   * `unchanged` is a claim about {@link watched} ONLY — never about the session's whole resource set.
+   */
+  freshness: "changed" | "unchanged" | "unknown";
+  /**
+   * The moment the session last loaded its resources: its start, or its last reload.
+   *
+   * `undefined` when Pi Central has not seen that moment for this session (a session restored by an
+   * earlier orchestrator, say). Without it `changed` cannot be computed and the answer is `unknown`,
+   * never a guess at "fresh".
+   */
+  resourcesLoadedAt?: number | undefined;
+  /** The locations that were checked, at most one per kind. */
+  watched: ToolsetLocation[];
+  /**
+   * Locations that exist and decide what the session has, but that this check cannot see:
+   * an `extensions` list in an agent `settings.json`, MCP servers from an installed package.
+   *
+   * Sent so a surface can say what the freshness does not cover, rather than implying that
+   * "unchanged" means "current".
+   */
+  unwatched: string[];
+  /**
+   * The directories that exist and could NOT be read, with the OS error.
+   *
+   * An unreadable directory is why `freshness` is `unknown`: a check that could not look has not
+   * found anything, and reporting that as "unchanged" is the fabricated-clean-result failure C14
+   * describes for a transcript.
+   */
+  unreadable: { path: string; code?: string | undefined }[];
+}
+
+/** One location whose contents decide part of a session's resources (issue #274). */
+export interface ToolsetLocation {
+  /** `agent` / `project` — which side of the trust boundary the location is on. */
+  scope: "agent" | "project";
+  /** What it holds: extensions, skills, prompts, themes, or an MCP configuration file. */
+  kind: "extensions" | "skills" | "prompts" | "themes" | "mcp";
+  /** Absolute path, so a reader can go and look. */
+  path: string;
+  /** Newest modification time at the top level of that location, or `undefined` when it is absent. */
+  mtimeMs?: number | undefined;
 }
 
 export interface PendingDialog {
@@ -273,6 +336,41 @@ export type Control =
    * later reader sees a decision rather than an omission.
    */
   | { kind: "compact"; sessionId: string }
+  /**
+   * Make this session re-read its resources: extensions, skills, prompt templates, MCP servers,
+   * themes and context files (issue #274).
+   *
+   * ## Why a control, and not a command the client sends itself
+   *
+   * Pi HAS a reload — `/reload`, and `ctx.reload()` behind it — but `/reload` is a built-in TUI
+   * command, and built-ins are excluded from `get_commands` precisely because they "would not
+   * execute if sent via `prompt`". So a client cannot invoke it, and sending the text `/reload`
+   * would deliver it to the MODEL as a user message. The reachable route is an extension command
+   * (extension commands ARE in `get_commands` and DO run from `prompt`), which is why Pi Central
+   * loads its own one-line extension into every session — see ADR-0015.
+   *
+   * ## `interrupt`, and why it is a field rather than a second control
+   *
+   * Pi cannot reload while a run is in flight: it refuses with "Wait for the current response to
+   * finish before reloading". A reload is nonetheless wanted in exactly that moment — the reader is
+   * mid-task and has just added a tool — so the choice is `interrupt: true` (stop the run, then
+   * reload, which is what the confirmation in the UI is asking about) or a refusal that names the
+   * run. It is a field because it is the same act with one more consequence, and because splitting
+   * it into `reload` and `forceReload` would make the wire say the reader chose a different thing.
+   *
+   * A session with no live process, or one whose Pi did not load Pi Central's reload command, is
+   * REFUSED with a stated reason rather than sent `/reload` on the chance that something handles it.
+   */
+  | { kind: "reload"; sessionId: string; interrupt?: boolean }
+  /**
+   * Report what is known about this session's toolset, and whether it is stale (issue #274).
+   *
+   * On demand rather than a field on `LiveSession`, for the reason `listModels` is: it is answered
+   * by reading the filesystem, and a session update is broadcast on every record. Answered with
+   * `toolset` or `toolsetError` — never with a silently empty answer, because "nothing to report"
+   * and "the check failed" must not look alike (C14's family).
+   */
+  | { kind: "toolset"; sessionId: string }
   /** Ask which thinking levels the CURRENT model supports. */
   | { kind: "listThinkingLevels"; sessionId: string }
   | { kind: "answerDialog"; sessionId: string; dialogId: string; answer: { value: string } | { confirmed: boolean } | { cancelled: true } }
@@ -542,6 +640,32 @@ export type Event =
    */
   | { kind: "thinkingLevels"; sessionId: string; levels: string[] }
   | { kind: "thinkingLevelsError"; sessionId: string; message: string }
+  /**
+   * What Pi Central can honestly say about a session's toolset (issue #274), in answer to `toolset`.
+   *
+   * ## Why it is three-valued
+   *
+   * The acceptance criterion is that Pi Central "can state that a session's toolset is stale, or
+   * states plainly that it cannot tell — it must not imply freshness it has not checked". Those are
+   * different claims, so they are different values:
+   *
+   *   - `changed` — every watched location answered, and at least one is newer than the moment the
+   *     session last loaded its resources. The session is missing something (or has something it
+   *     should not);
+   *   - `unchanged` — every watched location answered and none is newer. A claim about the watched
+   *     locations only, which is why `watched` travels with it;
+   *   - `unknown` — a location exists and could not be read, or the session's own resource set could
+   *     not be listed. `unreadable` names what failed.
+   *
+   * `unchanged` is NOT "your session is current": extensions can be enabled from a path in someone
+   * else's `settings.json`, MCP servers can arrive from an installed package, and neither is under
+   * a directory this check can see. `unwatched` states that limit on the payload rather than
+   * leaving it to documentation, so a surface cannot render "up to date" over a check that never
+   * covered the question.
+   */
+  | { kind: "toolset"; sessionId: string; status: ToolsetStatus }
+  /** The toolset could not be established at all. Distinct from `unknown` freshness, which is an answer. */
+  | { kind: "toolsetError"; sessionId: string; message: string }
   /**
    * A session's EXISTING conversation, fetched when it starts or resumes.
    *
@@ -899,8 +1023,17 @@ export interface PlaceListingInfo {
  * as a version skew. `compacting` is an ADDED FIELD that the fingerprint cannot see — a v10 UI talking to a v11
  * orchestrator simply ignores it, and a v11 UI talking to v10 would never offer the control in the first place
  * because `supportsCompact` gates it.
+ *
+ * v12 (issue #274, ADR-0015): the `reload` and `toolset` controls, and the `toolset` / `toolsetError`
+ * events.
+ *
+ * Four new KINDS, so `wire-surface.test.ts` catches this one, and the bump is not optional anyway: a v11
+ * orchestrator receiving `reload` would answer `bad control: unknown kind 'reload'`, which reads as a broken
+ * button rather than as a version skew. `LiveSession.reloading` is an ADDED FIELD the fingerprint cannot see —
+ * ignored by an older receiver, and only ever sent by an orchestrator whose `supportsReload` already gated the
+ * control on the sender's side.
  */
-export const PROTOCOL_VERSION = 11 as const;
+export const PROTOCOL_VERSION = 12 as const;
 
 /**
  * The first protocol version that understands the `retry` control (issue #11).
@@ -982,6 +1115,22 @@ export const COMPACT_SINCE_PROTOCOL = 11;
 export function supportsCompact(protocol: number | undefined): boolean {
   // `undefined` is "not reported yet", not "old" — the same convention `supportsRetry` documents.
   return protocol === undefined ? true : protocol >= COMPACT_SINCE_PROTOCOL;
+}
+
+/**
+ * The first protocol version that understands the `reload` control and the `toolset` pair (issue #274).
+ *
+ * The same reasoning as `COMPACT_SINCE_PROTOCOL`, with the consequence this issue's acceptance criteria
+ * single out: against a v11 orchestrator, `reload` answers `bad control: unknown kind 'reload'`, and the
+ * reader who pressed it because a tool was missing would learn nothing about why. The control is withheld
+ * instead, and `docs/SECURITY.md` records that the capability needs Pi Central's own extension.
+ */
+export const RELOAD_SINCE_PROTOCOL = 12;
+
+/** Whether a peer speaking `protocol` can be asked to reload a session's resources. */
+export function supportsReload(protocol: number | undefined): boolean {
+  // `undefined` is "not reported yet", not "old" — the same convention `supportsRetry` documents.
+  return protocol === undefined ? true : protocol >= RELOAD_SINCE_PROTOCOL;
 }
 
 /** Whether a peer speaking `protocol` can be asked to reveal a path in the file manager. */
