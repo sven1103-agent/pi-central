@@ -377,3 +377,38 @@ test("the end-fades report the right state at every scroll position (ADR-0016)",
     );
   }
 });
+test("the end-fade band is tall enough to read, and both ends share one height (ADR-0016)", () => {
+  /*
+   * 28px was a thin edge that read as a slight darkening rather than as "the text continues" — reported after
+   * looking at it on a 1512x982 window. The band is now 56px and the height lives in a custom property, so the
+   * two ends cannot drift apart.
+   *
+   * The ramp is asserted too, because height alone would not have fixed it: a plain `var(--bg)` to `transparent`
+   * is already mostly transparent a third of the way in, so a taller band would have been more faint pixels
+   * rather than a stronger edge. The stops hold full opacity for the first 40% and only then dissolve.
+   */
+  const fade = /\.transcript-fade\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(fade, /--fade-height:\s*56px/, "the band height is one declared value");
+  assert.match(fade, /height:\s*var\(--fade-height\)/, "and the element uses it rather than a second literal");
+
+  // Both ends start from the page colour, so the two edges look the same.
+  assert.match(
+    css,
+    /\.transcript-fade\.is-top\s*\{[^}]*rgb\(14 17 22\)\s*0%/
+    , "the upper fade holds the page colour at its outer edge",
+  );
+  assert.match(
+    css,
+    /\.transcript-fade\.is-bottom\s*\{[^}]*rgb\(14 17 22\)\s*0%/
+    , "the lower fade does too, so the two edges match",
+  );
+
+  // The front-loaded ramp: full opacity to 40%, then partial, then nothing.
+  const topGradient = /\.transcript-fade\.is-top\s*\{[^}]*linear-gradient\(([\s\S]*?)\)\s*;/.exec(css)?.[1] ?? "";
+  const stops = [...topGradient.matchAll(/(\d+)%/g)].map((m) => Number(m[1]));
+  assert.ok(stops.length >= 3, `the ramp needs at least three stops to stay dense; got ${stops.join(", ")}`);
+  assert.ok(
+    stops.includes(40),
+    `the page colour must hold to 40% before dissolving, or a taller band is only fainter; got ${stops.join(", ")}`,
+  );
+});

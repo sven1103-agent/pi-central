@@ -2068,7 +2068,20 @@ button { font: inherit; color: inherit; }
   position: absolute;
   left: 0;
   right: 0;
-  height: 28px;
+  /*
+   * THE BAND IS TALL, AND THE GRADIENT IS FRONT-LOADED.
+   *
+   * 28px was a thin edge that read as a slight darkening rather than as "the text continues" — reported after
+   * looking at it on a 1512x982 window. The height is doubled and a custom property carries it, so the two ends
+   * cannot drift apart.
+   *
+   * The ramp is not a plain two-stop gradient. A linear `var(--bg)` to `transparent` is already mostly
+   * transparent by a third of the way in, so a taller band would just be more faint pixels. The stops hold the
+   * page colour for the first 40% — where it has to actually hide the cut-off line — and only then dissolve. That
+   * is what makes the extra height do work instead of diluting the effect.
+   */
+  --fade-height: 56px;
+  height: var(--fade-height);
   pointer-events: none;
   z-index: 4;
   opacity: 0;
@@ -2077,12 +2090,30 @@ button { font: inherit; color: inherit; }
 /* Above the scrollport, below the header: it only exists to say "there is more up". */
 .transcript-fade.is-top {
   top: 0;
-  background: linear-gradient(to bottom, var(--bg), transparent);
+  /*
+   * Stated as literal channels rather than `color-mix` on purpose: `color-mix` would be the newest CSS in the
+   * file, used for exactly one gradient, and this stylesheet otherwise stays within widely-supported syntax.
+   * The channels are #0e1116 — the value of `--bg` — so a change to that token must change here too, which is
+   * the one cost of not being able to interpolate a custom property through a gradient.
+   */
+  background: linear-gradient(
+    to bottom,
+    rgb(14 17 22) 0%,
+    rgb(14 17 22) 40%,
+    rgb(14 17 22 / 0.55) 70%,
+    rgb(14 17 22 / 0) 100%
+  );
 }
 /* At the scrollport's foot, above the reserved jump strip, so it never covers the pill. */
 .transcript-fade.is-bottom {
   bottom: var(--jump-strip);
-  background: linear-gradient(to top, var(--bg), transparent);
+  background: linear-gradient(
+    to top,
+    rgb(14 17 22) 0%,
+    rgb(14 17 22) 40%,
+    rgb(14 17 22 / 0.55) 70%,
+    rgb(14 17 22 / 0) 100%
+  );
 }
 .transcript-viewport[data-overflow~="up"] .transcript-fade.is-top { opacity: 1; }
 .transcript-viewport[data-overflow~="down"] .transcript-fade.is-bottom { opacity: 1; }
