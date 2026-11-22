@@ -209,13 +209,14 @@ if (corpus.length === 0) {
   process.exit(1);
 }
 
-if (excludedFromOwnSession > 0) {
-  console.log(
-    `corpus: ${corpus.length} messages from ${files.length} sessions` +
-      ` (excluded ${excludedFromOwnSession} from the session running this script)`,
-  );
-  console.log("");
-}
+// Printed unconditionally: an invisible filter on a corpus is indistinguishable from a small corpus.
+console.log(
+  `corpus: ${corpus.length} messages from ${files.length} sessions` +
+    (ownSession === undefined
+      ? " (PI_SESSION_FILE unset, so nothing was excluded)"
+      : ` (excluded ${excludedFromOwnSession} from the session running this script)`),
+);
+console.log("");
 
 /*
  * WHERE THE PARSE WORK ACTUALLY IS (part 1 only).
@@ -271,31 +272,30 @@ if (part === 1) {
     return { parses: ends.length, ms: Number((performance.now() - started).toFixed(1)) };
   }
 
-  const sample = (predicate) => corpus.find(predicate);
-  const groups = [
-    ["prose", sample((t) => !t.includes(FENCE) && !t.includes("\n|") && /\*\*/.test(t))],
-    ["fence", sample((t) => t.includes(FENCE) && !t.includes("\n|"))],
-    ["table", sample((t) => t.includes("\n|") && !t.includes(FENCE))],
-  ];
-
   /*
-   * THREE runs, and the spread is printed.
+   * THE SAME BODY AT EXACT SIZES, so a row means the same thing on every machine and every run.
    *
-   * One reading of this ratio is not a number: repeated runs of these three messages have produced
-   * everything from 8.9x to 14.4x. The record therefore claims "an order of magnitude", and this prints
-   * the range it came from rather than a decimal that the next run will contradict.
+   * The first version sampled one corpus message per shape, which made this a measurement of an arbitrary
+   * message: the "prose" row moved between 3.3x and 13.6x across runs because the sampled length changed,
+   * and on one run the sample was a reply written by the very session executing the script. Length is the
+   * variable that matters — per-delta cost is N^2/8 while per-frame cost is fixed at 60 — so length is what
+   * this sweep varies and everything else is held still.
    */
-  const ROUNDS = 3;
+  const para = "The **root cause** is in `scroll.ts`, where distance is measured after paint. ";
+  const build = (chars, tag) => {
+    let out = "";
+    while (out.length < chars) out += para;
+    return out.slice(0, chars - 8) + "x" + tag;
+  };
+
   console.log("=== 1. what one streamed message costs ===");
-  for (const [label, text] of groups) {
-    if (text === undefined) {
-      console.log(`${label.padEnd(6)} no sample in this corpus`);
-      continue;
-    }
+  console.log("  length  per-delta  per-frame  ratio (median of 3, spread)");
+  for (const size of [800, 1500, 2000, 3000]) {
+    const text = build(size, "sweep");
     const ratios = [];
-    let perDelta;
-    let perFrame;
-    for (let round = 0; round < ROUNDS; round += 1) {
+    let perDelta = { parses: 0 };
+    let perFrame = { parses: 0 };
+    for (let round = 0; round < 3; round += 1) {
       // One delta is ~4 characters, and each one re-parses everything received so far.
       perDelta = cost(text, stride(4, text.length, Math.floor((text.length - 4) / 4)));
       // The same stream coalesced to 60 Hz, over the number of frames the text fills at that rate.
@@ -303,12 +303,10 @@ if (part === 1) {
       ratios.push(perDelta.ms / perFrame.ms);
     }
     const sorted = [...ratios].sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length / 2)];
     console.log(
-      `${label.padEnd(6)} ${String(text.length).padStart(4)} chars` +
-        ` | per-delta ${String(perDelta.parses).padStart(4)} parses, ~${perDelta.ms.toFixed(0)} ms` +
-        ` | per-frame ${String(perFrame.parses).padStart(3)} parses, ~${perFrame.ms.toFixed(0)} ms` +
-        ` | ratio ${median.toFixed(1)}x median of ${ROUNDS} (${sorted[0].toFixed(1)}-${sorted[sorted.length - 1].toFixed(1)}x)`,
+      `  ${String(text.length).padStart(4)}  ${String(perDelta.parses).padStart(4)} parses  ` +
+        `${String(perFrame.parses).padStart(3)} parses  ` +
+        `${sorted[1].toFixed(1)}x (${sorted[0].toFixed(1)}-${sorted[2].toFixed(1)}x)`,
     );
   }
 

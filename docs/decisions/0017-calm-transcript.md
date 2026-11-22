@@ -43,22 +43,24 @@ text, and streaming changes the text, so `Prose` calls `renderMarkdown` on the W
 once per delta.
 
 **The saving is real, but it is NOT "an order of magnitude" — and that claim came from a misleading sample.**
-Six measurements in, the honest picture is that the gain scales with the message:
+Measured at sizes held EXACTLY fixed, on markdown-dense prose built to length, so a row means the same thing
+on any machine and on every run:
 
-| message | today: one parse per 4-char delta | one parse per frame, 60 Hz | ratio |
+| message length | parses today | parses per frame | ratio, across three runs |
 |---|---|---|---|
-| prose, 831 chars | 206 parses, 59 ms | 60 parses, 22 ms | **2.7×** |
-| prose, 1500 chars | 372 parses, 152 ms | 60 parses, 23 ms | **6.7×** |
-| prose, 2000 chars | 498 parses, 252 ms | 60 parses, 29 ms | **8.8×** |
-| with fences, 2646 chars | 660 parses, 332 ms | 60 parses, 30 ms | **11.0×** |
-| with a table, 3012 chars | 752 parses, 549 ms | 60 parses, 44 ms | **12.4×** |
+| 800 chars | 198 | 60 | **3.2 – 4.6×** |
+| 1500 chars | 372 | 60 | **6.3 – 6.6×** |
+| 2000 chars | 498 | 60 | **7.7 – 8.1×** |
+| 3000 chars | 748 | 60 | **11.5 – 12.9×** |
 
-**Nothing else scales, so the ratio is a function of length.** Per-delta cost is `N²/8` character-parses
-while per-frame cost is fixed at 60, so the gain grows with `N`: threefold at 831 characters, twelvefold at
-3000. A single "order of magnitude" figure was therefore wrong for most messages, and quoting it from a
-2669-character sample was quoting a best case as if it were the typical one.
+The parse counts are exact — `N/4` deltas, 60 frames — and the ratio's spread is the timing noise, which
+narrows as the message grows because the denominator does. **Nothing else scales, so the ratio is a function
+of length:** per-delta cost is `N²/8` character-parses while per-frame cost is fixed at 60, so the gain grows
+with `N` — roughly fourfold at 800 characters and twelvefold at 3000. A single "order of magnitude" figure was
+therefore wrong for most messages, and quoting it from a 2669-character sample was quoting a best case as if
+it were the typical one.
 
-**And the typical message is short.** Across 1231 assistant text blocks in 91 real sessions, excluding the
+**And the typical message is short.** Across ~1300 assistant text blocks in 91 real sessions, excluding the
 session that ran the measurement:
 
 | message length | share of messages | share of total parse work |
@@ -67,12 +69,14 @@ session that ran the measurement:
 | 200–600 | 6% | 0.2% |
 | 600–1500 | 1% | 0.7% |
 | 1500–2500 | 6% | 11.5% |
-| 2500–4000 | 6% | 26.0% |
-| 4000+ | 3% | **61.1%** |
+| 2500–4000 | 6% | 27% |
+| 4000+ | 3% | **60%** |
 
-The median assistant message is **109 characters** and 85% are under 1000. Below ~200 characters the
-coalescer saves almost nothing — there are only ~50 deltas to fold into ~30 frames, and the work is already
-small. **Roughly 87% of all parse work sits in the 9% of messages over 2500 characters.**
+That table has now been computed on four separate runs of the script and moved by less than a percentage
+point per band, so it is the most stable number in this record. The median assistant message is ~110
+characters and 78% are under 200. Below ~200 characters the coalescer saves almost nothing — there are only
+~50 deltas to fold into ~30 frames, and the work is already small. **Roughly 88% of all parse work sits in
+the 9% of messages over 2500 characters.**
 
 That shape is the strongest argument FOR the coalescer rather than against it: the cost is concentrated in
 exactly the long answers a reader is most likely to be following, and a message that takes ten seconds to
@@ -80,16 +84,20 @@ stream is the one where a stutter is unbearable. It is not an argument that ever
 faster.
 
 Those timings are jsdom + DOMPurify in Node, not a browser, so the **absolute** milliseconds are not a
-browser measurement and are not claimed as one. Ratios of the same message have still spread 8.9×–14.4×
-across runs, which is why each row above is a median of three at a size held fixed by construction.
+browser measurement and are not claimed as one. The table above is the only set of timings quoted, because
+it is the only one whose rows are reproducible: the corpus-sampled timings it replaces moved between 3.3× and
+13.6× for the *same row* on different runs, since the message being sampled changed with the sample.
 
-**Two earlier drafts of this table were wrong, in ways worth recording.** The first sampled "the first
+**Four earlier drafts of this section were wrong, in ways worth recording.** The first sampled "the first
 matching message in the newest 150 sessions" — which is the session running the command, so the "prose
 message" was a previous reply written by this very conversation, and its length changed every time the
-script was discussed. The second fixed the sample-size drift but kept the "order of magnitude" claim, which
-the 831-character row above shows is not true for the median message. Both are corrected here rather than
-quietly renumbered, because a measurement that has been revised three times is more informative with the
-history than without it.
+script was discussed. The second fixed that but kept the "order of magnitude" claim, which the 800-character
+row shows is false for the median message. The third replaced the rows with fixed sizes but claimed they were
+"held fixed by construction" while two were still sampled from the corpus and still drifted between runs. The
+fourth claimed a `3.2×` at 800 characters from a single run, where three runs give `3.2–4.6×` — the smallest
+denominator is the least stable, which is the same lesson as the `N/8` rows below.
+All four are recorded rather than quietly renumbered, because a measurement revised five times is more
+informative with the history than without it.
 
 **Why the total is quadratic in message length, stated correctly.** An earlier draft of this record said the
 cost *per parse* was superlinear, on the strength of two one-shot timings (0.46 ms at 300 chars, 1.44 ms at
@@ -256,11 +264,11 @@ commit per frame with no animation.**
 - The followed tail sits where the reader's eyes are, and the reader who disagrees gets a setting instead of a
   revert. The complaint that #92 and #132/#133 chased is answered without touching alignment, which is what
   produced five defects both times.
-- Streaming costs less main-thread work, by an amount that scales with the answer: about 3× on an
-  831-character message and 12× on a 3000-character one, because the per-delta re-parse grows with the square of
+- Streaming costs less main-thread work, by an amount that scales with the answer: roughly 4× on an
+  800-character message and 12× on a 3000-character one, because the per-delta re-parse grows with the square of
   the length while a per-frame flush does not. The work no longer grows with the message at all, so the
   benefit is largest exactly where a stutter hurts most — a long answer being followed live. On a typical
-  109-character message it is a small win, and this record does not claim otherwise.
+  110-character message it is a small win, and this record does not claim otherwise.
 - Nothing animates, so `prefers-reduced-motion` cannot be regressed by this change, and the "settled text
   fights the animation" defect is impossible rather than avoided.
 - The two halves are independently revertible: the anchor is CSS plus one preference, the pacing is one
