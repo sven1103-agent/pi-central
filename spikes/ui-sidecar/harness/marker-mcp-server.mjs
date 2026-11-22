@@ -1,3 +1,16 @@
+/**
+ * A marker MCP server: it exists only to be OBSERVED.
+ *
+ * Appends a line to `$MARKER_LOG` the moment Pi spawns it, because that side effect — not any answer it
+ * gives — is the evidence Phase 0D needs. Keeping the observable outside the protocol is what lets the probe
+ * ask "did Pi read that config file" without asking a model anything, and therefore without a keychain
+ * lookup.
+ */
+import { appendFileSync } from "node:fs";
+
+const log = process.env["MARKER_LOG"];
+if (log) appendFileSync(log, "spawned " + new Date().toISOString() + "\n");
+
 let buffer = "";
 const TOOL_NAME = "probe_marker_tool";
 process.stdin.on("data", (chunk) => {
