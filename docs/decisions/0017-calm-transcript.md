@@ -38,35 +38,71 @@ smooth the scroll and broke following. The readings below are what keeps this re
 over `packages/ui/src` returns three hits, all unrelated (a composer caret placement and two comments
 about the socket). The one `requestAnimationFrame` in the composer moves a caret.
 
-**Each delta costs a full re-parse, and the cost is superlinear in the message.** `Prose` memoizes on the
+**Each delta costs a full re-parse, so a message is parsed hundreds of times.** `Prose` memoizes on the
 text, and streaming changes the text, so `Prose` calls `renderMarkdown` on the WHOLE accumulated message
 once per delta. Measured by summing the parse cost of every prefix of one real assistant message, with a
 fresh `markdown.ts` module per measurement so the module-level parse cache could not answer:
 
-| message | today: one parse per 4-char delta | one parse per frame, 60 Hz | one parse per frame, 240 Hz |
+| message | today: one parse per 4-char delta | one parse per frame, 60 Hz | ratio |
 |---|---|---|---|
-| prose, 2989 chars | 746 parses, **550 ms** | 60 parses, **57 ms** | 240 parses, 150 ms |
-| with fences, 2646 chars | 660 parses, **314 ms** | 60 parses, **28 ms** | 240 parses, 112 ms |
-| with a table, 3012 chars | 752 parses, **633 ms** | 60 parses, **52 ms** | 240 parses, 199 ms |
+| prose, 2989 chars | 746 parses, 550 ms | 60 parses, 57 ms | **9.8×** |
+| with fences, 2646 chars | 660 parses, 314 ms | 60 parses, 28 ms | **11.2×** |
+| with a table, 3012 chars | 752 parses, 633 ms | 60 parses, 52 ms | **12.0×** |
 
 Those are jsdom + DOMPurify in Node, not a browser, so the **absolute** milliseconds are not a browser
-measurement and are not claimed as one. The ratio is the claim: **an order of magnitude less work for the
-same stream**, and it is the same order of magnitude whatever the platform's constant. The superlinearity is
-real and independent of the harness — one parse is 0.46 ms at 300 chars and 1.44 ms at 2989 chars in the same
-run, so 746 parses of growing prefixes cost ~1000× one final parse.
+measurement and are not claimed as one. The ratio is the claim, and it is not stable to a decimal: repeated
+runs of the same three messages spread over **8.9× to 14.1×**, so the record claims *an order of magnitude*,
+not a number. The direction is what matters — the coalescer removes about 90% of the parses for the same
+stream, and no run put it below half.
+
+**Why the total is quadratic in message length, stated correctly.** An earlier draft of this record said the
+cost *per parse* was superlinear, on the strength of two one-shot timings (0.46 ms at 300 chars, 1.44 ms at
+2989). That was noise, and measuring it properly inverted the claim: batched across 40 distinct documents per
+size, per-parse cost grows **7.1× while the text grows 16×** — it is *sub*linear, about 0.45× per character,
+which is what a parser with fixed per-call overhead should do.
+
+The quadratic total has a different cause, and it is exact rather than approximate: **the number of parses
+grows with the message.** A 4-character stride performs `N/4` parses whose average input is `N/2`
+characters, so the characters processed are about `N²/8` against `N` for a single final parse — a ratio of
+`N/8`. Measured against one final parse of the same text: **179× at 1500 characters against `N/8` ≈ 187,
+and 352× at 3000 against 375.** The small shortfall is fixed per-call overhead, and it narrows as the message
+grows — which is the signature of the cause being the number of calls rather than the cost of each. So the defect is not that parsing is slow, it is that **the
+same text is parsed hundreds of times**, and it gets worse the longer the answer runs.
+
+One consequence worth naming: this is also why `CACHE_MAX_SOURCE` is 20 000 characters in `markdown.ts`.
+Above that a message is not cached at all — the streaming text would churn the cache — so a very long
+message pays the full quadratic cost with no help from the cache in either direction.
 
 **Revealing N source characters shows markdown as literal punctuation, and the rate is not marginal.** For
-every prefix of a real message, graded on the *rendered text* (what the reader sees, not on the markup):
+every 2nd prefix of a real message, graded on the *rendered text* (what the reader sees, not on the markup),
+counting a prefix as literal when the reader is shown a `**`, an unclosed backtick, or a bare `]`:
 
-| message | prefixes sampled | showing literal `**` or an unclosed backtick | first at | longest run |
-|---|---|---|---|---|
-| prose, 1467 chars | 733 | 116 (16%) | char 88 | 30 chars |
-| with fences, 1454 chars | 727 | 103 (14%) | char 118 | 22 chars |
-| with a table, 2221 chars | 1110 | 180 (16%) | char 204 | 24 chars |
+| message | rate per message, fastest to slowest | median | range |
+|---|---|---|---|
+| prose with `**` | 5, 11, 12, 12, 13, 16, 17, 21, 24, 32, 36, 40 % | **17%** | 5–40% |
+| with fences | 3, 9, 13, 13, 14, 14, 15, 15, 16, 16, 28, 32 % | **15%** | 3–32% |
+| with tables | 12, 12, 13, 18 % (tables are the rarer shape) | **13%** | — |
 
-A separate per-character pass over a 3012-char message found **570 of 3012 reveal positions (19%)** showing
-literal syntax, first at char 266. `The **root ` renders as `<p>The **root</p>` — the reader watches
-punctuation appear and then get eaten.
+The per-message rates are listed rather than summarised because the sample size is not fixed — it is whatever
+this machine's newest 150 sessions hold, and it grew from three table messages to four between two runs of the
+script. A median over a moving sample is a band, not a constant.
+
+**These are rates across a sample, not one message's figure, and the distinction is the point.** An earlier
+draft of this record cited exact percentages from a single message each (16%, 14%, 16%, and a 19% from a
+per-character pass), which reads as a measurement of the phenomenon and is a measurement of three arbitrary
+messages — it also does not reproduce, because the sample is "the newest 150 sessions" and that set changes
+as sessions are created. The band does not: **every qualifying message tested shows literal syntax at some
+prefix, the first occurrence between character 58 and character 266, and the spread is 5–40%** with a median
+near a sixth. That survives the sample moving, and it is what the decision needs: on no message tested is the
+naive reveal clean, and on some it is wrong for two reveal positions in five.
+
+The first occurrences also move with the sample (char 38 to char 266 across runs), which is why they are
+given as a range. Three block-signature counts were single-message figures and are stated as such — they
+establish that restructuring happens, not how often it happens.
+
+The one-line demonstration is in [`scripts/verify-calm-transcript.mjs`](../../scripts/verify-calm-transcript.mjs),
+which reproduces both halves of this section on real sessions: `The **root ` renders as
+`<p>The **root</p>`, so the reader watches punctuation appear and then be eaten.
 
 **Blocks also restructure, counted by block signature.** The sequence of block-level tags changes 12 times
 for one prose message (13 distinct signatures), 15 times for a message with fences (16 signatures), and 4
@@ -174,8 +210,9 @@ commit per frame with no animation.**
 - The followed tail sits where the reader's eyes are, and the reader who disagrees gets a setting instead of a
   revert. The complaint that #92 and #132/#133 chased is answered without touching alignment, which is what
   produced five defects both times.
-- Streaming costs an order of magnitude less main-thread work, and the work no longer grows quadratically with
-  message length. That is invisible when it works and is the reason a long message stops stuttering.
+- Streaming costs about an order of magnitude less main-thread work, and the work no longer grows with the
+  square of message length — the number of parses becomes independent of how long the answer runs. That is
+  invisible when it works and is the reason a long message stops stuttering.
 - Nothing animates, so `prefers-reduced-motion` cannot be regressed by this change, and the "settled text
   fights the animation" defect is impossible rather than avoided.
 - The two halves are independently revertible: the anchor is CSS plus one preference, the pacing is one
