@@ -16,6 +16,9 @@ They are kept because each one is the reason a constraint or an invariant test e
 - Playwright's MCP server is ruled out as the sidecar: nothing host-side narrows its 25 tools ([#276]).
 - A CDP client of 183 lines replaces `playwright` for capture and probe, using `ws` ([#276]).
 - ADR-0015 proposes a browser sidecar as a sibling sandbox, driven by four host-side verbs ([#276]).
+- A session can no longer be handed a Chromium feature: `playwright-chrome` composed cleanly before ([#276]).
+- The sidecar's fragment is rendered from the shared deny set, so a new deny reaches it too ([#276]).
+- The renderer is denied `~/.npmrc` and the gh caches, which the base profile grants ([#276]).
 - A browser renders a local page under the sidecar's own profile with egress confined to one port ([#276]).
 - A two-verb host-side service is measured against shipping `playwright` for UI capture ([#276]).
 - A hand-written credential deny list failed open on `~/.gitconfig`, as C15c predicts ([#276]).

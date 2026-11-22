@@ -102,6 +102,24 @@ const FORBIDDEN_ENABLE = new Set([
   "keychain",
   "cloud-credentials",
   "cloud-storage",
+  // The browser features, closed here because a measurement showed that NOTHING else closes them.
+  //
+  // Before ADR-0015 the only thing keeping these out of a session was that no caller passed them: they were
+  // absent from this set, so `--enable=playwright-chrome` composed cleanly and would have granted the
+  // session `com.apple.pasteboard.1` (the user's clipboard), `com.apple.tccd`, the window server and read
+  // access to the Chrome app bundle - permanently, to every session. Clipboard read access is not a
+  // capability a coding agent has any use for, and the TCC grant is the user's privacy database.
+  //
+  // Measured (Phase 0): granting them does not even produce a pixel from inside a session, because the
+  // failure there is nesting (C1) and not a grant. So the widening bought nothing and cost everything.
+  //
+  // The sidecar does not go through this function - `sidecar-policy.ts` is a separate assembler with a
+  // constant feature set - so closing them here cannot block it.
+  "playwright-chrome",
+  "chromium-full",
+  "chromium-headless",
+  "agent-browser",
+  "browser-native-messaging",
 ]);
 
 /**

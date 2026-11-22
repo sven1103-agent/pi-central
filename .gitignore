@@ -60,3 +60,7 @@ spikes/*/harness/out.png
 # Spike harness runs: a Chrome profile and its outputs are artifacts, never inputs.
 spikes/*/harness/cdp-profile/
 spikes/*/harness/cdp-out.png
+
+# Private fixture root for the sidecar-policy tests: /tmp is refused by design (every session
+# can read it), and $HOME is unwritable under an agent harness.
+.test-private/

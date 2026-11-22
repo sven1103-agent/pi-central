@@ -42,18 +42,46 @@ test("the orchestrator imports no Pi runtime value -- only `import type` (ADR-00
   assert.deepEqual(offenders, [], `value imports of Pi found:\n${offenders.join("\n")}`);
 });
 
-test("Safehouse argv is assembled in exactly one module (ADR-0002)", () => {
-  // If a second call site appears, "every session's grant set is derived from one function"
-  // stops being true.
+test("Safehouse argv is assembled in exactly two modules, one per sandbox kind (ADR-0002, ADR-0015)", () => {
+  // If a third call site appears, "every session's grant set is derived from one function" stops being true.
+  //
+  // The second entry is deliberate and narrow: ADR-0015 adds a sidecar that is a SIBLING sandbox, not a
+  // session (C1 makes nesting impossible). It is a separate assembler precisely so it cannot inherit a
+  // session's grants — it takes no `cwd`, has a constant feature set, and renders its fragment from the
+  // shared denies. The pairing is asserted below rather than left to a comment.
   const builders = files.filter((file) => {
     const text = readFileSync(file, "utf8");
     return text.includes('"--workdir"');
   });
   assert.deepEqual(
-    builders.map((f) => relative(SRC, f)),
-    ["policy.ts"],
-    "Safehouse argv must only be assembled in policy.ts",
+    builders.map((f) => relative(SRC, f)).sort(),
+    ["policy.ts", "sidecar-policy.ts"],
+    "Safehouse argv must be assembled only by the session assembler and the sidecar assembler",
   );
+});
+
+test("the two assemblers cannot produce each other's argv (ADR-0015)", () => {
+  // The risk a second assembler introduces is not duplication, it is INHERITANCE: a helper shared by both
+  // would let a sidecar grant reach a session or a session's workdir reach the renderer. So each module
+  // must name only its own concerns.
+  // Comments stripped first. C20 records this defect: a guard string that also appears in the comment
+  // explaining the guard makes the assertion fire on correct code (and, worse, can make it pass on broken
+  // code). "the sidecar must not borrow the session assembler" matched the prose saying so.
+  const code = (file: string): string =>
+    readFileSync(join(SRC, file), "utf8")
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("*") && !line.trimStart().startsWith("//"))
+      .join("\n");
+  const session = code("policy.ts");
+  const sidecar = code("sidecar-policy.ts");
+
+  // A session can never be given a Chromium feature (see FORBIDDEN_ENABLE, which now closes them).
+  assert.match(session, /playwright-chrome/, "policy.ts must name the browser features it refuses");
+  // The sidecar never reads a workdir from its caller: no `cwd` in its spec, no `--workdir` argument value
+  // derived from one. Asserted structurally — the spec has no such field.
+  assert.ok(!/cwd\??:\s*string/.test(sidecar), "the sidecar spec must have no cwd parameter");
+  assert.ok(!sidecar.includes("composePolicy"), "the sidecar must not borrow the session assembler");
+  assert.ok(!session.includes("composeSidecarPolicy"), "a session must not borrow the sidecar assembler");
 });
 
 test("the orchestrator never passes --add-dirs (ADR-0002)", () => {

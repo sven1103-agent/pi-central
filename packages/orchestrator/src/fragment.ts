@@ -221,10 +221,7 @@ export function renderPolicyFragment(options: FragmentOptions = {}): string {
     "",
   ];
 
-  for (const block of HOST_DENIES) {
-    out.push(...block.comment.map((line) => (line === "" ? ";;" : `;; ${line}`)));
-    out.push(...block.rules, "");
-  }
+  out.push(...renderHostDenies());
 
   // --- The agent's own credentials -------------------------------------------------------
   // Placed after the host denies: the same `gitconfig`/`gh` names exist under both roots, and
@@ -284,6 +281,31 @@ export function renderPolicyFragment(options: FragmentOptions = {}): string {
   }
 
   return out.join("\n");
+}
+
+/**
+ * The host-credential denies alone — the part every sandboxed process needs.
+ *
+ * Exported separately because the UI sidecar needs exactly this block and nothing else
+ * (ADR-0015). It is a **separate entry point, not a copy**: the sidecar renders its fragment with
+ * this function, so a name added to `HOST_DENIES` reaches the renderer in the same commit that
+ * reaches a session.
+ *
+ * That is not tidiness, it is the defect the Phase 0C spike found by hand. A four-name deny list
+ * left `~/.gitconfig` readable while reporting the other three refused — C15c's rule that the unit
+ * of a path boundary is the directory and not a list of names under it. A second hand-written list
+ * would reproduce it whenever the first one changed.
+ *
+ * Deliberately **no** `agentRoot` grant and **no** keychain grant: the renderer is not an agent and
+ * resolves no provider key (ADR-0010, ADR-0015 §9).
+ */
+export function renderHostDenies(): string[] {
+  const out: string[] = [];
+  for (const block of HOST_DENIES) {
+    out.push(...block.comment.map((line) => (line === "" ? ";;" : `;; ${line}`)));
+    out.push(...block.rules, "");
+  }
+  return out;
 }
 
 /** Write the fragment into the state root, returning its path. Deterministic content. */
