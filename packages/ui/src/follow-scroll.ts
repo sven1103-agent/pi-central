@@ -26,45 +26,71 @@
  *   1. `tailStep` bounds how far one frame may move, so a burst becomes a glide.
  *   2. `readerMoved` distinguishes the reader's scroll from ours, by comparing what the browser reports with
  *      what we last wrote. A programmatic scroll never looks like a reader scroll, so it never un-pins.
- *   3. `shouldSettleInstantly` says when to skip the animation entirely — reduced motion, and a distance so
- *      large that gliding would be slower than simply arriving.
+ *   3. `shouldSettleInstantly` says when to skip the animation entirely — reduced motion, and a movement the
+ *      reader ASKED for, such as a restore or the jump pill.
  */
 
 /**
- * The fraction of the remaining distance covered per frame, before clamping.
+ * The most content may move per second, in px — and this is the constant that decides whether it FEELS smooth.
  *
- * 0.35 leaves ~7% after six frames and under 1% after twelve, so a normal burst settles in about 100–200ms —
- * long enough for the eye to track, short enough that it does not read as a separate animation the reader has
- * to wait for.
+ * ## Why this replaced a per-frame clamp
+ *
+ * The first version bounded each frame at 28px, which sounds smooth and measured as nothing of the kind. An
+ * exponential ease at 0.35 covers 35% of the distance in its first frame, so a 100px paragraph arrival peaked at
+ * **1680 px/sec — 24 times the top of comfortable reading.** That is not a glide the eye can track; it is a
+ * teleport that happens to take six frames, which is exactly what was reported: "it is abrupt… the user's eye is
+ * lost".
+ *
+ * A per-frame bound cannot express that, because the quantity that matters is a RATE. 28px/frame IS 1680 px/sec,
+ * which is why the bound looked reasonable per frame and was violent per second. The unit was the bug.
+ *
+ * ## The number
+ *
+ * Comfortable reading scroll runs at roughly 1–3 lines per second; a transcript line is ~23px, so 23–70 px/sec.
+ * 140 px/sec is six lines/sec: fast enough that the tail keeps up with a paragraph arriving every three-quarters
+ * of a second, slow enough that text is legible WHILE it moves rather than only after it stops.
+ *
+ * It sits above what a steady stream produces (240 chars/sec is ~70 px/sec, so that is not clamped at all), so
+ * the cap only ever governs a BURST — which is the motion that was objectionable.
  */
-export const TAIL_EASE = 0.35;
+export const TAIL_MAX_SPEED_PX_PER_SEC = 140;
 
 /**
- * The most one frame may move, in px.
+ * One frame at 60Hz, for converting the rate into a per-frame budget.
  *
- * This is the constant that turns a teleport into a glide. A paragraph arriving at once is 200–400px of new
- * content; moved whole in one frame it is a hop the eye cannot follow, and moved at 28px/frame it is a ~150ms
- * slide that reads as the page settling.
- *
- * It is deliberately far above the ~1.5px/frame a normal stream produces (a 3000-character answer over ten
- * seconds), so **steady streaming is not clamped at all** — the clamp exists only for bursts, and applying it
- * to the common case would lag the tail behind the text for no reason.
+ * Named rather than inlined, because the two are used together everywhere and a stray `60` elsewhere is how a
+ * velocity rule quietly becomes a per-frame rule again.
  */
-export const TAIL_MAX_STEP_PX = 28;
+export const FRAME_MS = 1000 / 60;
+
+/** The most one frame may move at that rate: about 2.3px. */
+export const TAIL_MAX_STEP_PX = (TAIL_MAX_SPEED_PX_PER_SEC * FRAME_MS) / 1000;
 
 /**
- * The largest distance that is GLIDED rather than simply arriving, as a fraction of the scrollport.
+ * The fraction of the remaining distance covered per frame, before the rate is applied.
  *
- * This constant exists because two requirements collide and there is no step size that satisfies both. A 900px
- * move cannot be both smooth and quick: at the burst bound it takes half a second, and at half a second it has
- * to take hops large enough to see. So the glide is limited to distances where a glide is actually better, and
- * anything larger is handled by `shouldSettleInstantly` — the reader was not tracking the tail anyway, so
- * arriving is the honest thing to show them.
- *
- * A quarter of the scrollport: past that, the reader is looking at a different part of the conversation than
- * the one that moved.
+ * Lowered from 0.35 to 0.18. The ease exists to stop the motion ending on a linear crawl that looks stuck — not
+ * to cover ground quickly, which is the rate cap's job. A gentler curve keeps the slope across the whole settle
+ * inside the comfortable band instead of spiking at its start.
  */
-export const TAIL_GLIDE_LIMIT_RATIO = 0.25;
+export const TAIL_EASE = 0.18;
+
+/**
+ * WHETHER A LONG DISTANCE GLIDES — and it does, which reverses an earlier decision in this same module.
+ *
+ * The first version refused to glide anything past a quarter of the scrollport, on the argument that a 900px
+ * move "cannot be both smooth and quick". That argument was measuring the wrong thing: with a correct RATE cap a
+ * long move is not a problem, it is just longer. At 140 px/sec a 600px arrival takes 4.3 seconds, which is
+ * exactly what "smooth" means — the reader sees the content slide rather than appearing.
+ *
+ * The operator reported the consequence of the old rule: "it is abrupt… the user's eye is lost". Every arrival
+ * over ~230px — a code block, a table, a tool result — took the instant path. So there is no distance limit any
+ * more; the only reasons to arrive instantly are the two in `shouldSettleInstantly`.
+ *
+ * The cost is real and is stated rather than hidden: opening a session at the end, or pressing the pill, now
+ * animates over several seconds. That is why those two cases pass `instant`: they are the reader ASKING to be
+ * somewhere, not content arriving underneath them.
+ */
 
 /** Closer than this and the movement is a rounding artefact; snap, or it never converges. */
 export const TAIL_SNAP_PX = 0.6;
@@ -91,8 +117,8 @@ export function tailStep(remaining: number): number {
   if (!Number.isFinite(remaining)) return 0;
   // At or past the target: snap, so the loop terminates instead of easing forever by fractions of a pixel.
   if (Math.abs(remaining) <= TAIL_SNAP_PX) return remaining;
-  // Eased, then bounded. The bound is unconditional: a step larger than this is a hop, whatever produced it, and
-  // distances big enough for that to matter are routed to `shouldSettleInstantly` instead of being glided badly.
+  // Eased, then bounded by the RATE. The bound is unconditional now: a step larger than this is a hop, whatever
+  // produced it, and bounding it is what makes a long arrival take longer rather than jump.
   const eased = remaining * TAIL_EASE;
   return Math.max(-TAIL_MAX_STEP_PX, Math.min(TAIL_MAX_STEP_PX, eased));
 }
@@ -120,18 +146,16 @@ export function readerMoved(
 /**
  * Should this follow arrive instantly instead of gliding?
  *
- * Two cases, and both are about not showing the reader an animation they did not ask for:
+ * Two reasons, and BOTH are about whose movement it is — not about how far.
  *
- *   - **Reduced motion.** The preference is already honoured in three places in the stylesheet; an animation
- *     that ignored it here would be a regression rather than a comfort. This is the fourth, and it is the one
- *     that cannot be expressed in CSS because the movement is written from JavaScript.
- *   - **Nothing to track.** A distance larger than the scrollport means the reader was not looking at the tail
- *     at all — a session opened at the end, a jump from the pill. Gliding across a screenful is slower than
- *     arriving, and the animation would be the only thing they saw.
+ *   - **Reduced motion.** Honoured in three places in the stylesheet already; this is the fourth, and the one that
+ *     cannot live in CSS because the movement is written from JavaScript.
+ *   - **The reader asked to be somewhere** — a restore on open, or the "Jump to latest" pill. Those pass
+ *     `instant` from the call site, because animating a request is showing the reader a delay they did not ask
+ *     for. Content arriving underneath them is the opposite case and always glides, however far it moved.
+ *
+ * There is deliberately no distance test here any more. A long arrival takes longer; that is the point.
  */
-export function shouldSettleInstantly(remaining: number, viewportHeight: number, reducedMotion: boolean): boolean {
-  if (reducedMotion) return true;
-  if (!Number.isFinite(remaining) || !Number.isFinite(viewportHeight)) return false;
-  if (viewportHeight <= 0) return true;
-  return Math.abs(remaining) > viewportHeight * TAIL_GLIDE_LIMIT_RATIO;
+export function shouldSettleInstantly(reducedMotion: boolean): boolean {
+  return reducedMotion;
 }

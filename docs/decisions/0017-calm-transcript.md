@@ -324,6 +324,35 @@ what a preview is for. It records three findings, in the order they arrived.
    glide never converges; remove the rounding tolerance and our own animation un-pins the reader — #86 exactly;
    ignore `prefers-reduced-motion` and the readers who asked for stillness get motion.
 
+   **A second correction, from watching it: the unit was wrong.** The implementation above bounded each frame at
+   28px, which sounds smooth and measured as nothing of the kind. An exponential ease at 0.35 covers 35% of the
+   distance in its first frame, so a 100px paragraph arrival peaked at **1680 px/sec — 24 times the top of
+   comfortable reading** (1–3 lines/sec, where a line is about 23px). That is not a glide the eye can track; it
+   is a teleport that happens to take six frames. Reported exactly as it felt: *"it is abrupt… the user's eye is
+   lost"*.
+
+   A per-frame bound cannot express that, because the quantity that matters is a RATE — 28px/frame *is* 1680
+   px/sec. The bound looked reasonable per frame and was violent per second. **The unit was the bug.** So the cap
+   is now `TAIL_MAX_SPEED_PX_PER_SEC = 140`: six lines/sec, fast enough to keep up with a paragraph arriving
+   every three-quarters of a second, slow enough that the text is legible while it moves rather than only after
+   it stops. Every distance now settles at that ceiling instead of spiking and decaying:
+
+   | arrival today | before | after |
+   |---|---|---|
+   | 99px (a paragraph) | peak 1680 px/sec, 0.2s | peak 140 px/sec, 0.9s |
+   | 581px (a table) | **instant teleport** | peak 140 px/sec, 4.3s |
+   | 900px (a code block) | **instant teleport** | peak 140 px/sec, 6.6s |
+
+   And **the distance limit is gone**. The previous rule refused to glide anything past a quarter of the
+   scrollport, on the argument that a long move "cannot be both smooth and quick". That argument measured the
+   wrong thing: with a correct rate cap a long move is not a problem, it is just longer — which is what smooth
+   means. The consequence of the old rule was that every arrival over ~230px took the instant path, and a code
+   block or a table is routinely larger, so the abrupt moves the report describes were the *guaranteed* ones.
+
+   `shouldSettleInstantly` therefore no longer takes a distance. It takes reduced motion only, and the two cases
+   where the READER asked to be somewhere (a restore on open, the Jump to latest pill) pass `instant` from the
+   call site — where it is knowable — rather than being inferred from a number.
+
    This is the change that answers the report. The anchor moves where the tail sits; the pacing in (b) is a CPU
    saving; **the scroll is the part the reader actually watches**, and it was the one part missing from this
    record.

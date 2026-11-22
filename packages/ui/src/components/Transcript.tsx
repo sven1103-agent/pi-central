@@ -527,7 +527,7 @@ export function TranscriptView({
   }, []);
 
   const followTail = useCallback(
-    (options: { force?: boolean } = {}) => {
+    (options: { force?: boolean; instant?: boolean } = {}) => {
       const container = containerRef.current;
       if (container === null) return;
       /*
@@ -540,7 +540,15 @@ export function TranscriptView({
       const remaining = target - container.scrollTop;
       if (!Number.isFinite(remaining) || remaining === 0) return;
 
-      if (shouldSettleInstantly(remaining, container.clientHeight, reducedMotion())) {
+      /*
+       * TWO reasons to arrive instead of gliding, and neither is a distance (ADR-0016).
+       *
+       * `instant` is set by the callers where the READER asked to be somewhere — a restore on open, the Jump to
+       * latest pill. Animating a request shows them a delay they did not ask for. Content arriving underneath them
+       * is the opposite case and always glides, however far it moved: that is the motion that was reported as
+       * abrupt, and it was abrupt precisely because it used to take this branch.
+       */
+      if (options.instant === true || shouldSettleInstantly(reducedMotion())) {
         stopFrames();
         container.scrollTop = target;
         lastWritten.current = container.scrollTop;
@@ -570,7 +578,9 @@ export function TranscriptView({
         // Read BACK, not the value assigned: the browser clamps and rounds, and the next comparison must be
         // against what it actually reports or the first clamped frame reads as the reader moving.
         lastWritten.current = box.scrollTop;
-        frameRef.current = requestAnimationFrame(step);
+        // Through `onFrame`, never `requestAnimationFrame` directly — this was the one path left calling it raw
+        // after the fallback was added, and it threw in jsdom while every other path was guarded.
+        frameRef.current = onFrame(step);
       };
       frameRef.current = onFrame(step);
     },
@@ -628,7 +638,7 @@ export function TranscriptView({
     setPinned(true);
     // `force`, because the whole point of re-arming is that following was OFF a moment ago — the flag has just been
     // set, and reading it again inside `followTail` would be a second decision about the same fact.
-    followTail({ force: true });
+    followTail({ force: true, instant: true });
   }, [followToken, followTail]);
 
 
@@ -695,7 +705,7 @@ export function TranscriptView({
      * `force: true`, because the reader has explicitly asked to go to the tail — `pinnedRef` has just been set, and
      * reading it again inside would be a second decision about a fact already decided here.
      */
-    followTail({ force: true });
+    followTail({ force: true, instant: true });
   }, [followTail]);
 
   const isEmpty = transcript.messages.length === 0 && transcript.tools.length === 0;
