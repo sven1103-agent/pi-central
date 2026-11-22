@@ -153,13 +153,16 @@ through a fixed verb set over CDP, with no new shipped dependency.**
 - **RSS is unmeasured.** The issue estimated 150–250 MB per sidecar. Per-session is the safe default for
   lifetime and token scoping; if a fleet makes it untenable, the fallback is one process with per-session
   origin scoping inside it, which is weaker.
-- **Chrome starts its own updater, and it is confined.** Some launches ran `GoogleUpdater --install`, which tried
-  `update.googleapis.com` and then `launchctl asuser 501 … --net-worker`. `spikes/ui-sidecar/harness/escape-probe.mjs`
-  runs the real composed policy and shows that a process started through `launchctl asuser` is refused on a
-  port outside the policy and cannot write outside the profile, exactly like a direct one, while the same
-  command succeeds unsandboxed. **Still unmeasured:** the updater's own request to `update.googleapis.com`
-  was never observed to leave the machine, only to fail on its first fetcher; the probe tests loopback ports,
-  not the internet.
+- **Chrome starts its own updater, and it cannot reach the internet.** Measured. Some launches run
+  `GoogleUpdater --install`, which posts to `update.googleapis.com` and then starts `launchctl asuser 501 …
+  --net-worker`. Two facts make that safe, both from `spikes/ui-sidecar/harness/escape-probe.mjs` against the
+  real composed policy: a process started through `launchctl asuser` is refused on a port outside the policy and
+  cannot write outside the profile, exactly like a direct one — so launchd is not an escape; and a request to
+  `update.googleapis.com` from inside fails with `curl: (6) Could not resolve host`, while the SAME request from
+  outside returns HTTP 404, so the host is reachable from the machine and the failure is the fragment's DNS deny.
+  Name resolution is denied separately because a `(remote ip)` deny does not reach unix sockets.
+  The updater is not silenced by a flag: it is confined, which is the property that matters if Chrome ever
+  starts a helper nobody anticipated.
 - **A scratch session has no browser.** No `cwd` means no dev server to reach; the verb reports
   "no browser for this session" rather than spawning something that can reach nothing.
 

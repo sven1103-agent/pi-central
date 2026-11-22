@@ -103,10 +103,13 @@ const results = [
     got.internet?.status !== 0,
     "curl exit " + String(got.internet?.status) + " " + String(got.internet?.stderr ?? "").slice(0, 90),
   ),
+  // Named for what it PROVES, which is less than it looks. dscacheutil exited 0 with no output; that is consistent
+  // with "resolution was refused", but also with the tool being unable to speak to mDNSResponder at all. The curl
+  // line above is the load-bearing one; this is corroboration.
   ok(
-    "name resolution for it fails too, so it cannot even be addressed",
+    "no address was obtained for it either (corroboration, not the proof)",
     !/ip_address|^\s*\d+\.\d+\.\d+\.\d+/m.test(JSON.stringify(got.dns ?? {})),
-    JSON.stringify(got.dns).slice(0, 110),
+    "dscacheutil exit " + String(got.dns?.status) + ", output " + JSON.stringify(got.dns ?? {}).slice(0, 90),
   ),
   ok("a write started THROUGH launchd outside the profile is also refused", !existsSync(markerAsuser), existsSync(markerAsuser) ? "ESCAPE: launchd wrote outside the sandbox" : ""),
 ];
