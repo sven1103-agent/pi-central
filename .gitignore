@@ -68,3 +68,4 @@ spikes/*/harness/cdp-out.png
 # Checkpoint captures: artifacts of a run, not of the repository.
 spikes/*/harness/sidecar-capture.png
 spikes/*/harness/cdp-out.png
+spikes/*/harness/sidecar-capture-policy.png
