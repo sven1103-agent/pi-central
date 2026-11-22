@@ -122,3 +122,46 @@ test("the harness relocates when its port is busy, and the launcher reports wher
   assert.match(launcher, /child\.kill\(/, "the child is taken down explicitly");
   assert.match(launcher, /process\.on\("exit", stop\)/, "…including on a normal exit");
 });
+test("the harness streams long enough to SCROLL, which is the behaviour it exists to show", () => {
+  /*
+   * Reported: "we cant observe scrolling, because the test is too short".
+   *
+   * Correct, and it is the same class of fault as the invisible fades: the harness was rendering something that
+   * could not exhibit the property under review. A 1292-character answer is five seconds of streaming, and with a
+   * 35vh tail anchor the first screenfuls fill without the tail ever moving off the fold — so the scroll, which
+   * is the entire subject, never happened.
+   *
+   * The threshold is not a frame count but a multiple of a screen: the answer must overflow several, because one
+   * screen of overflow is used up by the tail anchor before the newest line moves.
+   */
+  const main = source(harness("main.tsx"));
+  const target = Number(/TARGET_CHARS = (\d+)/.exec(main)?.[1]);
+  assert.ok(Number.isFinite(target), "the answer has a declared target length");
+  assert.ok(
+    target >= 6000,
+    `the answer must be several screens tall or following never has to move; target is ${target} characters`,
+  );
+
+  /*
+   * And it must be built from DIFFERING sections rather than one repeated paragraph. A wall of identical lines
+   * would make the bursty mode unrealistically uniform — the clamp exists for bursts of varying height, which is
+   * what real prose, lists, fences and tables produce.
+   */
+  const sections = main.slice(main.indexOf("const SECTIONS"), main.indexOf("const TARGET_CHARS"));
+  assert.ok(
+    /```/.test(sections),
+    "at least one fenced block, so the arrival heights differ rather than every delta being the same size",
+  );
+  assert.ok(/\| --- \|/.test(sections), "and a table, for the same reason");
+  assert.ok(/^- \*\*/m.test(sections) || /^\s+"\d\. \*\*/m.test(sections), "and a list");
+
+  // A speed control, because length and pace pull against each other: 42 seconds at 1x is too long to judge a
+  // settle, and the ladder must have no slow end for the same reason.
+  assert.match(main, /const SPEEDS = \[/, "the pace is adjustable");
+  const speeds = /const SPEEDS = \[([^\]]+)\]/.exec(main)?.[1] ?? "";
+  const values = speeds.split(",").map((v) => Number(v.trim()));
+  assert.ok(
+    values.every((v) => v >= 1),
+    `no speed below 1x: half speed on a ${target}-character answer is over a minute, which nobody sits through`,
+  );
+});

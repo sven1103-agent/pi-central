@@ -69,3 +69,20 @@ body {
   display: flex;
   padding: 0 18px;
 }
+
+.hx-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.hx-speed select {
+  font: inherit;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 3px 6px;
+}
