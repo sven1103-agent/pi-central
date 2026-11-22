@@ -559,7 +559,30 @@ export class Supervisor extends EventEmitter {
     // The environment carries the agent-scoped routing (ADR-0010 §3): GH_CONFIG_DIR and
     // GIT_CONFIG_GLOBAL point into the agent's own tree, and GIT_CONFIG_SYSTEM=/dev/null
     // removes the host's system git config as an independent route to the login keychain.
-    const env = { ...agentRoutingEnv(this.#config.agentRoot), ...(input.env ?? {}) };
+    /**
+     * Resolve the sidecar port, and spawn the sidecar BEFORE the session's policy is composed.
+     *
+     * The ordering is forced: the sidecar's bearer token has to reach Pi through the session environment, and
+     * `composePolicy` derives `--env-pass` from that environment (C15 — Safehouse runs the session under
+     * `env -i`, so a variable is delivered only when it is requested by name). Composing first would produce a
+     * session that could never present the token, and the failure would look like an unreachable server.
+     *
+     * The port resolves per session: an explicit `null` opts out, a number overrides the orchestrator default.
+     */
+    const sidecarPort =
+      input.sidecarPort === null ? undefined : (input.sidecarPort ?? this.#config.sidecarPort);
+    const sidecarHandle =
+      sidecarPort !== undefined && input.mode === "sandboxed"
+        ? this.#startSidecar(input.id, sidecarPort)
+        : undefined;
+
+    const env = {
+      ...agentRoutingEnv(this.#config.agentRoot),
+      ...(input.env ?? {}),
+      // The trusted channel (ADR-0010 §3). Absent when there is no sidecar, so nothing references a token that
+      // does not exist.
+      ...(sidecarHandle === undefined ? {} : { PI_CENTRAL_SIDECAR_TOKEN: sidecarHandle.token }),
+    };
 
     // Provider-key resolution needs keychain access (C13), and the grant is derived from the
     // provider configuration that is ACTUALLY in force rather than from an assumption.
@@ -666,55 +689,7 @@ export class Supervisor extends EventEmitter {
     };
     this.#sessions.set(session.id, session);
 
-    /**
-     * Spawn the UI sidecar beside the session, if one is configured (ADR-0015).
-     *
-     * **Eager, deliberately.** A stdio MCP server is started by PI, so the config entry decides whether a
-     * sidecar exists at all: there is no way to start it later without a `/reload` after writing the config,
-     * and the first thing the agent would learn about the feature is that it is not there yet. The browser
-     * inside stays lazy — `info` answers without launching one (measured), so a session that never calls a
-     * verb never pays for a renderer.
-     *
-     * A failure here does not fail the session. A browser is a capability, not a precondition: the agent can
-     * still do everything else, and a session with no sidecar simply has no browser.
-     *
-     * The port resolves per session: an explicit `null` opts out, an explicit number overrides the orchestrator's
-     * default, and "absent" means the default. Per-session is the right grain — the port was an orchestrator-wide
-     * variable only at first, which made testing ONE session require arming a whole app, and a fleet has a dev
-     * server per project anyway.
-     */
-    const sidecarPort =
-      input.sidecarPort === null
-        ? undefined
-        : (input.sidecarPort ?? this.#config.sidecarPort);
-
-    let sidecar: SidecarHandle | undefined;
-    if (sidecarPort !== undefined && input.mode === "sandboxed") {
-      try {
-        sidecar = spawnSidecar({
-          sessionId: session.id,
-          port: sidecarPort,
-          stateRoot: this.#config.stateRoot,
-          safehouse: this.#config.safehouse,
-          // NODE, not `pi`. The first version passed `config.pi` here and started the sidecar with Pi itself,
-          // which is not an interpreter for a .ts file -- the process died before printing anything and Pi
-          // reported only "Connection closed".
-          sidecar: process.execPath,
-          sidecarArgs: [join(import.meta.dirname, "sidecar.ts")],
-          // The GRANTED directory is the package root (the sandbox needs to traverse into src/), which is the
-          // parent of the directory this module lives in...
-          sidecarCodeDir: join(import.meta.dirname, ".."),
-          browser: this.#config.browser,
-          onLog: (line: string) => this.emit("log", session.id, line),
-        });
-        this.#sidecars.set(session.id, sidecar);
-      } catch (error) {
-        sidecar = undefined;
-        this.emit("log", session.id, `no UI sidecar for this session: ${(error as Error).message}`);
-      }
-    }
-
-    const launch = this.#buildLaunch(policy.launch, input.sessionPath, sidecar);
+    const launch = this.#buildLaunch(policy.launch, input.sessionPath, this.#sidecars.get(session.id));
     // The Inspector shows this string, so it has to be the argv that actually runs. It was computed from
     // `policy` before the sidecar existed, which showed a session without `--mcp-config` while the process
     // had one — a display that disagrees with reality in the one place that exists to be truthful (the house
@@ -1259,6 +1234,48 @@ export class Supervisor extends EventEmitter {
    * refusing to finish a session teardown because its browser had died first would be a worse outcome than a
    * stale log line.
    */
+  /**
+   * Spawn a session's sidecar, or return `undefined` when it cannot be started.
+   *
+   * Called BEFORE the session's policy is composed, because the sidecar's bearer token has to reach Pi through
+   * the session environment and `composePolicy` derives `--env-pass` from that environment (C15). Composing
+   * first would produce a session that could never present the token, and the failure would look like an
+   * unreachable server rather than a missing variable.
+   *
+   * **Eager, deliberately.** A sidecar is a process the ORCHESTRATOR owns (ADR-0015 §1 — it cannot be a child of
+   * the session, because Seatbelt does not nest). Starting it at spawn means the tool is simply there when the
+   * agent looks; the alternative is a `/reload` dance after writing the config, which teaches the agent that the
+   * feature is unreliable. The BROWSER inside stays lazy: `info` answers without launching one.
+   *
+   * A failure is logged and swallowed. A browser is a capability, not a precondition: the session is still
+   * useful without one, and a launch error in the transcript is noise nobody asked for.
+   */
+  #startSidecar(sessionId: string, port: number): SidecarHandle | undefined {
+    try {
+      const handle = spawnSidecar({
+        sessionId,
+        port,
+        stateRoot: this.#config.stateRoot,
+        safehouse: this.#config.safehouse,
+        // NODE, not `pi`. The first version passed `config.pi` and started the sidecar with Pi itself, which is
+        // not an interpreter for a .ts file: the process died before printing anything and Pi reported only
+        // "Connection closed".
+        sidecar: process.execPath,
+        sidecarArgs: [join(import.meta.dirname, "sidecar.ts")],
+        // Read-only access to the sidecar's own code. Without it a source-launched sidecar cannot start at all:
+        // the sandbox will not let the interpreter open a script outside its workdir.
+        sidecarCodeDir: join(import.meta.dirname, ".."),
+        browser: this.#config.browser,
+        onLog: (line: string) => this.emit("log", sessionId, line),
+      });
+      this.#sidecars.set(sessionId, handle);
+      return handle;
+    } catch (error) {
+      this.emit("log", sessionId, `no UI sidecar for this session: ${(error as Error).message}`);
+      return undefined;
+    }
+  }
+
   async #stopSidecar(id: string): Promise<void> {
     const sidecar = this.#sidecars.get(id);
     if (sidecar === undefined) return;

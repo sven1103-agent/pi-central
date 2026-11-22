@@ -24,7 +24,7 @@ function firstText(result: { content: { type: string }[] }): string {
   return block?.text ?? "";
 }
 
-const config = { executable: "/nonexistent/chrome", profileDir: "/nonexistent/profile", origin: "http://localhost:4173" };
+const config = { executable: "/nonexistent/chrome", profileDir: "/nonexistent/profile", origin: "http://localhost:4173", token: "t", port: 0 };
 
 /** A page thunk that records whether it was called, and fails loudly if the transport reaches for it. */
 function pageGate(): { page: () => Promise<never>; called: () => boolean } {
@@ -106,7 +106,7 @@ test("capture returns an IMAGE content block, not base64 inside a text block", a
   // appears in the transcript. The same bytes wrapped in a text block arrive as a wall of base64: thousands of
   // tokens spent on a string nobody can look at. A test asserting `content[0].type` is the only thing that
   // holds this, because both shapes "work" from the model's point of view.
-  const config = { executable: "/nonexistent/chrome", profileDir: "/nonexistent/profile", origin: "http://localhost:4173" };
+  const config = { executable: "/nonexistent/chrome", profileDir: "/nonexistent/profile", origin: "http://localhost:4173", token: "t", port: 0 };
   const fakePage = {
     setViewport: async () => {},
     navigate: async () => {},

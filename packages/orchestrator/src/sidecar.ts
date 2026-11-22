@@ -16,8 +16,7 @@
  * transport and the lifecycle, and it holds no policy of its own. That split is deliberate: the policy is
  * testable without a browser, and the transport is testable without a policy.
  */
-import { createInterface } from "node:readline";
-import { join } from "node:path";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { CdpPage } from "./sidecar-cdp-pipe.ts";
 import { decideTarget, parseVerb, PROBE_CHECKS, VERB_NAMES, type Refusal } from "./sidecar-control.ts";
 import { launchBrowser } from "./sidecar-browser.ts";
@@ -27,6 +26,15 @@ export interface SidecarConfig {
   executable: string;
   /** The sidecar's profile directory (private; the orchestrator refuses a shared temp root). */
   profileDir: string;
+  /**
+   * The bearer token every request must present.
+   *
+   * Load-bearing, not hygiene: loopback is reachable by every local process (C5), so this is the only thing that
+   * distinguishes the session that owns this sidecar from any other process on the machine.
+   */
+  token: string;
+  /** The port to listen on; 0 asks the OS, and the chosen port is printed on stderr. */
+  port: number;
   /**
    * The one origin this sidecar serves.
    *
@@ -242,48 +250,152 @@ export async function serve(config: SidecarConfig): Promise<void> {
   // The lifetime mechanism (ADR-0015 §11): stdin closing means the orchestrator is gone.
   process.stdin.once("end", () => void shutdown().then(() => process.exit(0)));
 
-  const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
-  for await (const line of lines) {
-    if (line.trim() === "") continue;
-    let message: { id?: number | string; method?: string; params?: Record<string, unknown> };
-    try {
-      message = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const id = message.id;
-    const reply = (result: unknown) =>
-      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
-
+  /**
+   * One MCP message in, one result out — no transport knowledge.
+   *
+   * Separate from both carriers on purpose: the protocol handling is identical over stdio and over HTTP, and it
+   * is the part with the security decisions (`handleRequest` owns the verb set and the URL policy). Keeping it
+   * out of the transport is what let the transport change without touching the policy.
+   */
+  const dispatch = async (
+    message: { id?: number | string; method?: string; params?: Record<string, unknown> },
+  ): Promise<{ reply?: unknown; notification?: boolean }> => {
     if (message.method === "initialize") {
-      reply({
-        protocolVersion: (message.params?.["protocolVersion"] as string) ?? "2025-06-18",
-        capabilities: { tools: {} },
-        serverInfo: { name: "pi-central-sidecar", version: "0" },
-      });
-      continue;
+      return {
+        reply: {
+          protocolVersion: (message.params?.["protocolVersion"] as string) ?? "2025-06-18",
+          capabilities: { tools: {} },
+          serverInfo: { name: "pi-central-sidecar", version: "0" },
+        },
+      };
     }
     if (message.method === "tools/list") {
-      reply({ tools: toolDefinitions() });
-      continue;
+      return { reply: { tools: toolDefinitions() } };
     }
     if (message.method === "tools/call") {
       const params = message.params ?? {};
       const name = String(params["name"] ?? "");
       const args = (params["arguments"] ?? {}) as Record<string, unknown>;
       try {
-        reply(await handleRequest(config, page, name, args));
+        return { reply: await handleRequest(config, page, name, args) };
       } catch (error) {
-        reply({
-          content: [{ type: "text", text: `sidecar error: ${(error as Error).message}` }],
-          isError: true,
-        });
+        return {
+          reply: {
+            content: [{ type: "text", text: `sidecar error: ${(error as Error).message}` }],
+            isError: true,
+          },
+        };
       }
-      continue;
     }
-    if (id !== undefined) reply({});
-  }
-  await shutdown();
+    // Notifications carry no id and expect no reply.
+    if (message.id === undefined) return { notification: true };
+    return { reply: {} };
+  };
+
+  /**
+   * MCP over streamable HTTP on loopback (ADR-0015 §1, amended).
+   *
+   * **Why not stdio, which was built first and is gone.** A stdio MCP server is spawned BY PI, so it inherits
+   * the session's sandbox: it becomes a child of the session rather than a sibling, which is the one
+   * arrangement ADR-0015 forbids and C1 makes impossible. Measured: it failed with `Path does not exist`,
+   * which is what a DENIED stat looks like — the reader-side processes cannot see their own policy, profile
+   * or code from inside the session.
+   *
+   * HTTP puts the process where the design always said it goes: the orchestrator spawns it as a sibling, and
+   * Pi merely connects. The cost is that a loopback endpoint is reachable by every session, so the bearer
+   * token below is load-bearing rather than hygiene. That is an honest trade, stated rather than hidden.
+   */
+  const server = createServer((request, response) => void onRequest(request, response));
+
+  const onRequest = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+    const path = (request.url ?? "").split("?")[0];
+    if (path !== "/mcp") {
+      response.writeHead(404, { "content-type": "text/plain" });
+      response.end("not found\n");
+      return;
+    }
+
+    /**
+     * The token is checked on EVERY request, including `initialize`.
+     *
+     * Loopback is not a boundary (C5): any local process can connect, so the token is the only thing
+     * distinguishing the session that owns this sidecar from any other. A missing or wrong token gets 401 with
+     * no detail, because naming which part was wrong helps only an attacker.
+     */
+    const authorization = request.headers.authorization ?? "";
+    if (authorization !== `Bearer ${config.token}`) {
+      response.writeHead(401, { "content-type": "text/plain" });
+      response.end("unauthorized\n");
+      return;
+    }
+
+    if (request.method !== "POST") {
+      response.writeHead(405, { "content-type": "text/plain", allow: "POST" });
+      response.end("this endpoint accepts POST only\n");
+      return;
+    }
+
+    let body = "";
+    for await (const chunk of request) {
+      body += String(chunk);
+      // A bounded body: the verbs take small arguments, and an unbounded read is a memory hole.
+      if (body.length > 1_000_000) {
+        response.writeHead(413, { "content-type": "text/plain" });
+        response.end("request too large\n");
+        return;
+      }
+    }
+
+    let message: { id?: number | string; method?: string; params?: Record<string, unknown> };
+    try {
+      message = JSON.parse(body);
+    } catch {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } }));
+      return;
+    }
+
+    let outcome: { reply?: unknown; notification?: boolean };
+    try {
+      outcome = await dispatch(message);
+    } catch (error) {
+      response.writeHead(500, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: message.id ?? null,
+          error: { code: -32603, message: (error as Error).message },
+        }),
+      );
+      return;
+    }
+
+    if (outcome.notification === true) {
+      response.writeHead(202);
+      response.end();
+      return;
+    }
+    // `application/json` rather than an SSE stream: this transport answers one request with one result, and
+    // pretending to stream would make the client wait for an end that never comes.
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id ?? null, result: outcome.reply }));
+  };
+
+  await new Promise<void>((done, fail) => {
+    server.once("error", fail);
+    server.listen(config.port, "127.0.0.1", () => done());
+  });
+  const address = server.address();
+  const bound = typeof address === "object" && address !== null ? address.port : config.port;
+  // Printed so the orchestrator can log the real port when it asked for 0. On stderr: stdout is not a channel
+  // here any more, and a line on the wrong stream would be invisible.
+  process.stderr.write(`sidecar listening on 127.0.0.1:${bound} origin=${config.origin}\n`);
+
+  process.once("SIGTERM", () => void shutdown().then(() => process.exit(0)));
+  process.once("SIGINT", () => void shutdown().then(() => process.exit(0)));
+  // The lifetime mechanism (ADR-0015 §11): the orchestrator holds our stdin, and closing it means it is gone.
+  process.stdin.once("end", () => void shutdown().then(() => process.exit(0)));
+  process.stdin.resume();
 }
 
 // --- entry point ---------------------------------------------------------------------------
@@ -296,11 +408,14 @@ if (isMain) {
   const executable = arg("executable");
   const profileDir = arg("profile");
   const origin = arg("origin");
-  if (executable === undefined || profileDir === undefined || origin === undefined) {
+  const token = arg("token");
+  const port = Number(arg("port") ?? "0");
+  if (executable === undefined || profileDir === undefined || origin === undefined || token === undefined) {
     process.stderr.write(
-      "usage: sidecar.ts --executable <chrome> --profile <dir> --origin <http://localhost:PORT>\n",
+      "usage: sidecar.ts --executable <chrome> --profile <dir> --origin <http://localhost:PORT> " +
+        "--token <secret> [--port N]\n",
     );
     process.exit(2);
   }
-  await serve({ executable, profileDir, origin });
+  await serve({ executable, profileDir, origin, token, port });
 }

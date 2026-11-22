@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mcpConfigArgs, spawnSidecar, type SidecarSpawn } from "../src/sidecar-supervise.ts";
+import { mcpConfigArgs, spawnSidecar, type SidecarHandle, type SidecarSpawn } from "../src/sidecar-supervise.ts";
 
 /**
  * The supervisor wiring (ADR-0015 §1, §11).
@@ -82,7 +82,16 @@ test("--mcp-config precedes any subcommand, because after it the flag is unrecog
   // Phase 0D measured `pi mcp list --mcp-config X` -> "Unknown option". Returning the flag as a list that
   // the caller prepends is what keeps that ordering true; a caller that appended it would reproduce the
   // probe's first failure.
-  const args = mcpConfigArgs({ configFile: "/state/mcp.json", origin: "http://localhost:4173", stop: async () => {}, gone: true });
+  const handle: SidecarHandle = {
+    configFile: "/state/mcp.json",
+    origin: "http://localhost:4173",
+    token: "t",
+    port: () => 47801,
+    ready: Promise.resolve(47801),
+    stop: async () => {},
+    gone: true,
+  };
+  const args = mcpConfigArgs(handle);
   assert.deepEqual(args, ["--mcp-config", "/state/mcp.json"]);
 });
 

@@ -21,6 +21,7 @@
  * *when* to spawn and *what to tell Pi*; it decides no grants — `composeSidecarPolicy` does, and it can
  * refuse.
  */
+import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -31,6 +32,12 @@ export interface SidecarHandle {
   configFile: string;
   /** The origin this sidecar serves, for the Inspector. */
   origin: string;
+  /** The bearer token, for delivery to Pi's environment (never into the config file). */
+  token: string;
+  /** The port the sidecar actually bound, once it said so. */
+  port: () => number | undefined;
+  /** Resolves once the sidecar has announced its port, or rejects when it exits first. */
+  ready: Promise<number>;
   /** Stop it and wait. Idempotent. */
   stop: () => Promise<void>;
   /** True once the process has exited, so a caller can reap without guessing. */
@@ -72,6 +79,21 @@ export interface SidecarSpawn {
  * @throws if the policy refuses the spec, or the process fails to start. Both are launch-time refusals: a
  *   sidecar that exists but cannot be confined is worse than none.
  */
+/** The first port a sidecar may use. High and uncommon, so it does not collide with a dev server. */
+const SIDECAR_PORT_BASE = 47800;
+
+/**
+ * A stable, per-session offset into the sidecar port range.
+ *
+ * Derived from the session id (`s1`, `s2`, …) and bounded, so two sidecars cannot drift into the same port.
+ * A session id that is not of that shape falls back to 0, which is safe: a collision then surfaces as a stated
+ * bind failure rather than a silent mix-up.
+ */
+function sessionOrdinal(sessionId: string): number {
+  const match = /^s(\d+)$/.exec(sessionId);
+  return match === null ? 0 : Number(match[1]) % 200;
+}
+
 export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
   const root = join(options.stateRoot, "sidecars", options.sessionId);
   const spec: SidecarSpec = {
@@ -93,27 +115,16 @@ export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
   const composed = composeSidecarPolicy(spec);
 
   mkdirSync(root, { recursive: true, mode: 0o700 });
-  const configFile = join(root, "mcp.json");
-  writeFileSync(
-    configFile,
-    JSON.stringify(
-      {
-        mcpServers: {
-          pi_central_sidecar: {
-            // stdio: no listening socket, so no port for another session to find (see sidecar.ts).
-            command: composed.launch.command,
-            args: composed.launch.args,
-            // The sidecar reads its own arguments; it takes nothing from the environment, and the session's
-            // sanitized env (C11) is not inherited here because this is a different process tree.
-            env: { PI_CENTRAL_SIDECAR: "1" },
-          },
-        },
-      },
-      null,
-      2,
-    ),
-    { mode: 0o600 },
-  );
+
+  /**
+   * The bearer token, generated here and never written into the config file.
+   *
+   * The config names it as `${PI_CENTRAL_SIDECAR_TOKEN}`, which Pi interpolates from its own environment — and
+   * C15 is why it must: Safehouse runs a session under `env -i`, so a variable reaches Pi only when it is
+   * requested by name via `--env-pass`. Putting the literal token in mcp.json would work and would also write a
+   * secret to a file that outlives the session.
+   */
+  const token = randomBytes(24).toString("hex");
 
   const child: ChildProcess = spawn(composed.launch.command, composed.launch.args, {
     // `stdin` is the lifetime mechanism: when this process dies or closes it, the sidecar exits on EOF.
@@ -123,7 +134,18 @@ export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
     env: { ...composed.launch.env },
   });
 
-  child.stderr?.on("data", (chunk) => options.onLog?.(String(chunk).trimEnd()));
+  // Every line, kept for the failure message AND offered to the port announcement below.
+  const pendingPortListeners: ((line: string) => void)[] = [];
+  let stderrTail = "";
+  child.stderr?.on("data", (chunk) => {
+    const text = String(chunk);
+    stderrTail = (stderrTail + text).slice(-4000);
+    for (const line of text.split("\n")) {
+      if (line.trim() === "") continue;
+      options.onLog?.(line.trimEnd());
+      for (const listener of pendingPortListeners) listener(line);
+    }
+  });
   child.stdout?.on("data", (chunk) => options.onLog?.(String(chunk).trimEnd()));
 
   let gone = false;
@@ -174,9 +196,55 @@ export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
     if (spawnError !== undefined) throw spawnError;
   };
 
+  /**
+   * A port chosen BEFORE the spawn, deterministically, so the config can name it.
+   *
+   * The first version asked the child for port 0 and waited for it to announce the real one. That is more
+   * correct in principle and it made `spawnSidecar` async, which made `start` async, which rippled into the
+   * transport and every test — a large change justified by a detail. Session ids are unique per orchestrator,
+   * so a base plus the id's number is unique too, and a collision with an unrelated process surfaces as a
+   * stated bind failure rather than a silent mix-up.
+   *
+   * `SIDECAR_PORT_BASE` is high and uncommon on purpose; the range is bounded so two sessions cannot drift
+   * into each other.
+   */
+  const port = SIDECAR_PORT_BASE + sessionOrdinal(options.sessionId);
+
+
+  /**
+   * The config is written AFTER the bind, because it must name the real port.
+   *
+   * The token is referenced by name, not written: Pi interpolates `${PI_CENTRAL_SIDECAR_TOKEN}` from its own
+   * environment, and C15 is why the variable must also be requested through `--env-pass` — Safehouse runs a
+   * session under `env -i`, so an inherited variable is discarded. A literal token here would work and would
+   * also leave a secret in a file that outlives the session.
+   */
+  const configFile = join(root, "mcp.json");
+  writeFileSync(
+    configFile,
+    JSON.stringify(
+      {
+        mcpServers: {
+          pi_central_sidecar: {
+            // A URL, not a command: the orchestrator owns the process, so Pi CONNECTS rather than spawning it
+            // inside the session's sandbox (which C1 makes impossible — measured as "Path does not exist").
+            url: `http://127.0.0.1:${port}/mcp`,
+            headers: { Authorization: "Bearer ${PI_CENTRAL_SIDECAR_TOKEN}" },
+          },
+        },
+      },
+      null,
+      2,
+    ),
+    { mode: 0o600 },
+  );
+
   return {
     configFile,
     origin: `http://localhost:${options.port}`,
+    token,
+    port: () => (gone ? undefined : port),
+    ready: Promise.resolve(port),
     stop,
     get gone() {
       return gone;
