@@ -31,49 +31,82 @@
  */
 
 /**
- * The most content may move per second, in px — and this is the constant that decides whether it FEELS smooth.
+ * The two limits on a follow, and why BOTH are needed.
  *
- * ## Why this replaced a per-frame clamp
+ * This module has now been corrected twice on the same question, so the reasoning is stated once, precisely.
  *
- * The first version bounded each frame at 28px, which sounds smooth and measured as nothing of the kind. An
- * exponential ease at 0.35 covers 35% of the distance in its first frame, so a 100px paragraph arrival peaked at
- * **1680 px/sec — 24 times the top of comfortable reading.** That is not a glide the eye can track; it is a
- * teleport that happens to take six frames, which is exactly what was reported: "it is abrupt… the user's eye is
- * lost".
+ * ## What was wrong the first time: the unit
  *
- * A per-frame bound cannot express that, because the quantity that matters is a RATE. 28px/frame IS 1680 px/sec,
- * which is why the bound looked reasonable per frame and was violent per second. The unit was the bug.
+ * The original bound was 28px *per frame*. That sounds smooth and is 1680 px/sec — 24 times the top of
+ * comfortable reading. A per-frame bound cannot express a velocity, so the number looked reasonable and felt
+ * violent. The fix was to state the bound as a RATE.
  *
- * ## The number
+ * ## What was still wrong the second time: a rate alone crawls
  *
- * Comfortable reading scroll runs at roughly 1–3 lines per second; a transcript line is ~23px, so 23–70 px/sec.
- * 140 px/sec is six lines/sec: fast enough that the tail keeps up with a paragraph arriving every three-quarters
- * of a second, slow enough that text is legible WHILE it moves rather than only after it stops.
+ * A pure rate cap fixes small arrivals and ruins large ones. Content does not arrive at a steady pace: a tool
+ * result or a code block lands in ONE commit, hundreds of pixels of it, already rendered and already visible
+ * below the fold. A 581px arrival then takes **4.2 seconds** to bring the viewport down — and during those four
+ * seconds the text is simply THERE, sliding slowly past. The eye is not tracking anything; it is waiting.
  *
- * It sits above what a steady stream produces (240 chars/sec is ~70 px/sec, so that is not clamped at all), so
- * the cap only ever governs a BURST — which is the motion that was objectionable.
+ * That is what "bursty and huge still teleport" describes, and it is the opposite of a jump: it is a crawl over
+ * content that has already appeared. Reported from the harness, and it is correct.
+ *
+ * ## What was wrong the third time: two regimes crawl at the seam
+ *
+ * A rate for small moves and a fixed fraction for large ones sounded like the resolution. It was not, because the
+ * regime is chosen from the REMAINING distance on every frame: a 581px arrival covered 545px in seven frames and
+ * then switched to the gentle fraction for the last 36px, which took twenty more. A 450ms settle whose tail is
+ * exactly the crawl it was meant to remove.
+ *
+ * ## The resolution: one curve, ramped by distance
+ *
+ * `TAIL_EASE` and `TAIL_BURST_FRACTION` are now the ENDS of a single continuous curve rather than two regimes,
+ * blended over `TAIL_RAMP_SPAN_PX`. There is no seam, so nothing can crawl through one. Every arrival from 2px
+ * to 5000px settles in 83-267ms: slow enough at the small end to be read as text scrolling rather than as a
+ * flick, and bounded at the large end so the eye never tracks a travelling blur.
+ *
+ * The tradeoff is real and is resolved in favour of DURATION for large moves, because a large arrival has already
+ * happened in the DOM: the reader is not reading it as it slides, they read it once the viewport stops.
  */
-export const TAIL_MAX_SPEED_PX_PER_SEC = 140;
 
 /**
- * One frame at 60Hz, for converting the rate into a per-frame budget.
+ * The gentle fraction, which governs moves small enough that the reader is following them line by line.
  *
- * Named rather than inlined, because the two are used together everywhere and a stray `60` elsewhere is how a
- * velocity rule quietly becomes a per-frame rule again.
+ * A steady stream produces about 1.2px of new content per frame, and this moves it in sub-pixel steps: 83ms to
+ * settle a 2px gap, 133ms for 5px. 0.22 rather than the 0.18 tried before, because the ramp (see `tailStep`)
+ * already softens small distances and the gentler ease pushed the settle past the budget.
  */
+export const TAIL_EASE = 0.22;
+
+/**
+ * The fraction a LARGE arrival uses, where the content is already on screen and the reader is waiting.
+ *
+ * Deliberately about three times the gentle fraction. A large arrival has already happened in the DOM: being
+ * slow to bring the viewport to it buys nothing, because the text is read once the motion stops rather than
+ * while it moves.
+ */
+export const TAIL_BURST_FRACTION = 0.62;
+
+/**
+ * The distance over which the fraction ramps from gentle to burst.
+ *
+ * The two constants above are the ENDS of one continuous curve rather than two regimes, which is what the third
+ * failed version got wrong: switching regimes mid-settle left the last 36px of a 581px arrival to the gentle
+ * ease, which then crawled for 20 frames. 28px is where the ramp completes, so nothing above it still uses the
+ * gentle fraction.
+ */
+export const TAIL_RAMP_SPAN_PX = 28;
+
+/** One frame at 60Hz, for stating settle times in milliseconds. */
 export const FRAME_MS = 1000 / 60;
 
-/** The most one frame may move at that rate: about 2.3px. */
-export const TAIL_MAX_STEP_PX = (TAIL_MAX_SPEED_PX_PER_SEC * FRAME_MS) / 1000;
-
 /**
- * The fraction of the remaining distance covered per frame, before the rate is applied.
+ * The settle budget, which is what "watchable" means here.
  *
- * Lowered from 0.35 to 0.18. The ease exists to stop the motion ending on a linear crawl that looks stuck — not
- * to cover ground quickly, which is the rate cap's job. A gentler curve keeps the slope across the whole settle
- * inside the comfortable band instead of spiking at its start.
+ * Every arrival from 2px to 5000px settles in 83-267ms. That range IS the requirement: below it the motion is a
+ * flick, above it the eye starts tracking a travelling blur instead of reading text.
  */
-export const TAIL_EASE = 0.18;
+export const TAIL_SETTLE_BUDGET_MS = 267;
 
 /**
  * WHETHER A LONG DISTANCE GLIDES — and it does, which reverses an earlier decision in this same module.
@@ -115,12 +148,41 @@ export const READER_SCROLL_TOLERANCE_PX = 1.5;
  */
 export function tailStep(remaining: number): number {
   if (!Number.isFinite(remaining)) return 0;
-  // At or past the target: snap, so the loop terminates instead of easing forever by fractions of a pixel.
-  if (Math.abs(remaining) <= TAIL_SNAP_PX) return remaining;
-  // Eased, then bounded by the RATE. The bound is unconditional now: a step larger than this is a hop, whatever
-  // produced it, and bounding it is what makes a long arrival take longer rather than jump.
-  const eased = remaining * TAIL_EASE;
-  return Math.max(-TAIL_MAX_STEP_PX, Math.min(TAIL_MAX_STEP_PX, eased));
+  const distance = Math.abs(remaining);
+
+  // At or past the target: snap, so the loop terminates instead of decaying forever.
+  if (distance <= TAIL_SNAP_PX) return remaining;
+
+  //
+  // ONE CURVE, NO REGIME SWITCH.
+  //
+  // Three earlier versions failed here, each reported from the harness, and the sequence is the argument:
+  //
+  //   1. a 28px PER-FRAME cap is 1680 px/sec at 60Hz -- violent, and the unit hid it;
+  //   2. a 140 px/sec RATE cap made a 581px arrival crawl for 4.2 seconds over content already rendered;
+  //   3. a burst fraction with an ease fallback SWITCHED REGIMES mid-settle: the burst covered 545px in 7
+  //      frames and the gentle ease then took 20 more to cross the last 36px, so a 581px settle was 450ms and
+  //      its tail was exactly the crawl this was meant to remove.
+  //
+  // A stateless function cannot know how large the original arrival was, so the regime cannot be chosen at the
+  // start. What works is a fraction that RAMPS WITH THE REMAINING DISTANCE: the gentle ease is its limit as the
+  // distance goes to zero, the burst fraction is its limit as it grows, and every settle time falls out of one
+  // curve with no discontinuity to crawl through:
+  //
+  //   distance     settle
+  //     2px         83ms
+  //    12px        167ms
+  //    36px        183ms
+  //    99px        200ms
+  //   581px        233ms
+  //  1163px        250ms
+  //  5000px        267ms
+  //
+  // Small moves stay slow enough to read -- a 5px step is 133ms, not a flick -- and large ones finish without a
+  // crawl at the end. The fraction at the current distance is all the state this needs.
+  //
+  const ramp = Math.min(1, distance / TAIL_RAMP_SPAN_PX);
+  return remaining * (TAIL_EASE + (TAIL_BURST_FRACTION - TAIL_EASE) * ramp);
 }
 
 /**

@@ -86,3 +86,19 @@ body {
   border-radius: 4px;
   padding: 3px 6px;
 }
+/* The live scroll readout: green while the motion is inside our budget, red when a jump happened. */
+.hx-probe {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ok-text);
+  padding: 3px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.hx-probe.is-jump {
+  color: var(--danger-text);
+  border-color: var(--danger);
+  background: var(--danger-tint);
+}

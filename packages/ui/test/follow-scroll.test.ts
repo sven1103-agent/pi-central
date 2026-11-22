@@ -11,8 +11,10 @@ import { readFileSync } from "node:fs";
 import {
   FRAME_MS,
   READER_SCROLL_TOLERANCE_PX,
-  TAIL_MAX_SPEED_PX_PER_SEC,
-  TAIL_MAX_STEP_PX,
+  TAIL_BURST_FRACTION,
+  TAIL_EASE,
+  TAIL_RAMP_SPAN_PX,
+  TAIL_SETTLE_BUDGET_MS,
   TAIL_SNAP_PX,
   readerMoved,
   shouldSettleInstantly,
@@ -73,71 +75,81 @@ test("a steady stream keeps up: the tail is never left behind the text", () => {
   }
 });
 
-test("a BURST becomes a glide rather than a teleport", () => {
+test("a BURST glides, and is over before the eye can track it", () => {
   /*
-   * The reported symptom. One paragraph arriving at once is 200-400px of new content; moved whole in a single
-   * frame the eye sees a hop. Each frame must move at most the bound, and the whole distance must still be
-   * covered in a handful of frames.
+   * The reported defect, and the two wrong fixes for it before this one.
    *
-   * Revert tailStep to `return remaining` and this fails on the first step: 300px in one frame.
-   */
-  const steps = glide(300);
-  assert.ok(steps.length > 6, `300px must take more than one frame to settle; took ${steps.length}`);
-  for (const [index, { step }] of steps.entries()) {
-    assert.ok(
-      Math.abs(step) <= TAIL_MAX_STEP_PX + 1e-9,
-      `frame ${index} moved ${step}px, above the ${TAIL_MAX_STEP_PX}px bound`,
-    );
-  }
-  assert.equal(steps.at(-1)?.remaining, 0, "and it must actually arrive, not approach forever");
-});
-
-test("gliding always terminates, and terminates quickly", () => {
-  /*
-   * An easing function that multiplies by a fraction NEVER reaches zero on its own — it halves forever. Without
-   * the snap, the animation would run for as long as the transcript is open, writing sub-pixel scroll positions
-   * every frame, which is a CPU leak that looks like a busy idle page.
+   * 1. A per-FRAME bound of 28px felt violent: it is 1680 px/sec at 60Hz.
+   * 2. A pure RATE bound of 140 px/sec made a 581px arrival take 4.2 seconds, crawling over content that was
+   *    already rendered — reported as "bursty and huge still teleport", which is the opposite of a jump and
+   *    equally wrong.
    *
-   * Remove the TAIL_SNAP_PX branch and this fails: the loop runs to its frame limit with a non-zero remainder.
+   * So a burst must be BOTH bounded and quick, and those conflict; the resolution is that the rate governs small
+   * moves and DURATION governs large ones. What must hold here is the duration, because the content has already
+   * arrived — being slow to bring the viewport to it buys the reader nothing.
    */
-  // Distances a glide is actually asked to cover. Anything past a quarter of a scrollport is routed to
-  // shouldSettleInstantly and never reaches this loop, which the next test covers.
-  for (const distance of [0.7, 5, 60, 300, 900]) {
-    const steps = glide(distance);
-    assert.equal(steps.at(-1)?.remaining, 0, `${distance}px must settle exactly`);
-    // Bound raised with the gentler rate: at 2.3px/frame a 900px settle legitimately takes ~400 frames, which is
-    // the point of the change rather than a defect. What must hold is that it TERMINATES exactly.
-    assert.ok(steps.length < 600, `${distance}px took ${steps.length} frames to settle`);
-  }
-});
-
-test("the glide is bounded by distance, not by a frame count", () => {
-  /*
-   * The two requirements collide and this test states the resolution rather than pretending they do not: a
-   * 900px move cannot be BOTH smooth and quick. At the 28px burst bound it takes half a second; to take less it
-   * has to hop visibly.
-   *
-   * So the glide is limited to distances where gliding is genuinely better — a quarter of the scrollport — and
-   * anything larger is routed to shouldSettleInstantly instead. The first version of this test asserted that
-   * `tailStep` alone bounded 20000px to 40 frames, which forced the step bound to grow with the distance and
-   * reintroduced the hop it was meant to remove. Two rules cannot both be satisfied by one number.
-   */
-  /*
-   * ANDREW: A LONG DISTANCE NOW GLIDES. This test used to require the opposite, and that requirement was the
-   * bug: every arrival over a quarter of the scrollport — a code block, a table, a tool result — took the
-   * instant path, which is what was reported as abrupt. With a correct RATE cap a long move is not a problem,
-   * it is just longer, so what must be asserted is that the motion stays inside the comfortable band however
-   * far it travels.
-   */
-  const long = glide(900);
-  const perFrame = long.map((entry) => Math.abs(entry.step));
-  const peakSpeed = (Math.max(...perFrame) / (FRAME_MS / 1000));
+  const steps = glide(581);
+  const settleMs = steps.length * FRAME_MS;
   assert.ok(
-    peakSpeed <= TAIL_MAX_SPEED_PX_PER_SEC + 1,
-    `a 900px arrival must never exceed the comfortable rate; peaked at ${peakSpeed.toFixed(0)} px/sec`,
+    settleMs <= TAIL_SETTLE_BUDGET_MS + 20,
+    `a 581px arrival took ${settleMs.toFixed(0)}ms; the budget is ${TAIL_SETTLE_BUDGET_MS}ms, or it is a crawl`,
   );
-  assert.equal(long.at(-1)?.remaining, 0, "and it must arrive, however long it takes");
-  assert.ok(long.length > 60, "900px at a readable rate takes real time — that IS the smoothing");
+  assert.ok(steps.length > 6, `it must still take several frames rather than one; took ${steps.length}`);
+  assert.equal(steps.at(-1)?.remaining, 0, "and it must arrive exactly");
+});
+
+test("a TRICKLE stays gentle: small moves settle slowly enough to be read", () => {
+  /*
+   * The case that must not regress. A steady stream produces about 1.2px of new content per frame, and the
+   * movement must follow it in sub-pixel steps rather than in hops — that is the motion a reader follows line by
+   * line, and it is the half that was already working before any of these fixes.
+   *
+   * What changed with the ramp: there is no longer a rate CAP to assert against, because the gentle fraction is
+   * the low end of a continuous curve. What must hold is the settle TIME at the small end, which is the property
+   * a reader actually experiences.
+   */
+  /*
+   * The floor is not the same at every size, and the first version of this test wrongly demanded one: a 1px gap
+   * settles in 50ms and that is CORRECT — the whole movement is smaller than a line, so there is nothing for the
+   * eye to follow and stretching it would be inventing a motion. The floor only matters once the move is a
+   * visible fraction of a line (~23px), so it is asserted from 5px up.
+   */
+  for (const distance of [5, 12]) {
+    const ms = glide(distance).length * FRAME_MS;
+    assert.ok(
+      ms >= 120,
+      `a ${distance}px move settled in ${ms.toFixed(0)}ms, which is a flick rather than a scroll`,
+    );
+    assert.ok(ms <= 250, `${distance}px took ${ms.toFixed(0)}ms, too slow for a trickle`);
+  }
+
+  // Sub-line movements are allowed to be quick, and must still arrive.
+  for (const distance of [1, 2]) {
+    const steps = glide(distance);
+    assert.equal(steps.at(-1)?.remaining, 0, `a ${distance}px gap must still close exactly`);
+    assert.ok(steps.length * FRAME_MS <= 150, "and not be stretched for the sake of it");
+  }
+
+  // The curve is continuous: the fraction at zero distance is the gentle one, and the ramp span is where it
+  // reaches the burst fraction. Asserted as arithmetic so a future edit to either constant is caught.
+  assert.ok(TAIL_EASE < TAIL_BURST_FRACTION, "the ramp must go from gentle to burst");
+  assert.ok(TAIL_RAMP_SPAN_PX > 0, "and it must have a span to complete over");
+});
+
+test("the settle is bounded in TIME at every distance, which is what makes it watchable", () => {
+  /*
+   * The property that replaced "bounded by distance": however far the viewport has to travel, the reader is not
+   * made to watch it for longer than the budget. That is the whole difference between a dissolve and a crawl.
+   */
+  for (const distance of [50, 99, 233, 581, 1163, 5000]) {
+    const steps = glide(distance);
+    const ms = steps.length * FRAME_MS;
+    assert.ok(
+      ms <= TAIL_SETTLE_BUDGET_MS + 20,
+      `${distance}px took ${ms.toFixed(0)}ms, above the ${TAIL_SETTLE_BUDGET_MS}ms budget`,
+    );
+    assert.equal(steps.at(-1)?.remaining, 0, `${distance}px must arrive exactly`);
+  }
 });
 
 test("a negative distance (content above the target) mirrors exactly", () => {
@@ -227,45 +239,3 @@ test("only the READER\u2019S OWN request is instant; content arriving always gli
   );
 });
 
-test("the motion NEVER exceeds the comfortable rate, which is what 'smooth' means here", () => {
-  /*
-   * THE TEST THAT WOULD HAVE CAUGHT THE REPORTED DEFECT, and the one the previous suite was missing.
-   *
-   * "When the transcript moves vertically, it is abrupt… the user's eye is lost." Measured against the old
-   * implementation that was precise: an ease of 0.35 with a 28px/frame cap moved a 100px paragraph arrival at a
-   * PEAK of 1680 px/sec — 24 times the top of comfortable reading. The old tests passed throughout, because every
-   * one of them asserted a bound on the STEP or the FRAME COUNT and none asserted a bound on the SPEED.
-   *
-   * A per-frame bound cannot express this: 28px/frame IS 1680 px/sec. The unit was the bug, so the assertion is in
-   * the unit that matters — px per second — and it holds for every distance, which is the property.
-   */
-  const SPEED = TAIL_MAX_SPEED_PX_PER_SEC;
-  const peakOf = (distance: number): number => {
-    const steps = glide(distance).map((entry) => Math.abs(entry.step));
-    return Math.max(...steps) / (FRAME_MS / 1000);
-  };
-
-  for (const distance of [1.5, 12, 99, 233, 581, 900, 5000]) {
-    const peak = peakOf(distance);
-    assert.ok(
-      peak <= SPEED + 1,
-      `a ${distance}px arrival peaked at ${peak.toFixed(0)} px/sec, above the ${SPEED} px/sec budget`,
-    );
-  }
-
-  /*
-   * AND THE ASSERTION MUST BE ABLE TO FAIL ON THE EASE, which is the subtle half.
-   *
-   * Reverting the ease to 0.35 leaves every other test green, because above ~12px the CAP is the binding
-   * constraint and the ease never gets to matter. Measured: at 20px both eases produce exactly the cap, so
-   * probing there proves nothing about the curve.
-   *
-   * The ease is only observable BELOW the cap, where it decides the whole step. At 5px of remaining distance an
-   * ease of 0.35 moves 1.75px in one frame (105 px/sec) against the gentler 0.18 at 0.9px (54 px/sec) - nearly
-   * double, on the small arrivals that happen constantly during a steady stream. That is the band pinned here.
-   */
-  const easeBound = peakOf(5);
-  const easeMessage = "a 5px arrival peaked at " + easeBound.toFixed(0) + " px/sec; the cap is " + SPEED +
-    ", so this only passes when the EASE is gentle. A 0.35 ease gives about 105 px/sec here.";
-  assert.ok(easeBound < SPEED * 0.6, easeMessage);
-});

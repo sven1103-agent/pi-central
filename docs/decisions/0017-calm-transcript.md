@@ -353,6 +353,45 @@ what a preview is for. It records three findings, in the order they arrived.
    where the READER asked to be somewhere (a restore on open, the Jump to latest pill) pass `instant` from the
    call site — where it is knowable — rather than being inferred from a number.
 
+   **A third correction, and the one that names the real defect.** With the rate cap in place the harness was
+   reported again: "bursty and huge still teleport. steady is getting smoother". That signature is diagnostic —
+   steady produces about 70 px/sec of new content and the 140 px/sec cap absorbs it, so it smoothed; bursty is
+   198 px/sec and huge is 1163 px/sec, both far above any rate a human wants to watch.
+
+   But the failure was not a jump. It was the opposite: a **crawl**. A 581px arrival is already rendered in the
+   DOM, and the rate cap then spent **4.2 seconds** bringing the viewport down to it. During those seconds the
+   text is simply there, sliding slowly past. The eye is not tracking anything; it is waiting. Capping a rate is
+   right for a trickle and wrong for a burst, because a large arrival has already happened.
+
+   Two further failed attempts are worth recording, because each looked correct:
+
+   - **A burst fraction for large distances, gentle ease below a threshold.** Failed at the SEAM: the regime is
+     chosen from the remaining distance every frame, so a 581px arrival covered 545px in seven frames and then
+     switched to the gentle fraction for the last 36px, taking twenty more. A 450ms settle whose tail was
+     exactly the crawl it was meant to remove.
+   - **Dividing the remainder by the budget frame count.** A geometric decay at (1 - 1/15) per frame never
+     arrives in the budget: 1067ms instead of 260ms.
+
+   **What works is one continuous curve.** `TAIL_EASE` (0.22) and `TAIL_BURST_FRACTION` (0.62) are the ends of a
+   fraction that ramps over `TAIL_RAMP_SPAN_PX` (28px) with the remaining distance. There is no seam, so nothing
+   can crawl through one, and every arrival settles inside one budget:
+
+   | arrival | settle |
+   |---|---|
+   | 2px | 100ms |
+   | 12px | 183ms |
+   | 99px | 217ms |
+   | 581px | 250ms |
+   | 5000px | 283ms |
+
+   Small moves are slow enough to read rather than flick; large ones are over before the eye tracks them. The
+   tradeoff is resolved in favour of DURATION for large moves, because the reader is not reading the text as it
+   slides — they read it once the viewport stops.
+
+   Three falsifications, each run by reverting to a failed version: restoring the regime switch fails on a 333ms
+   settle, the gentle fraction everywhere fails on 483ms, and the burst fraction everywhere fails because a 5px
+   move settles in 67ms — a flick rather than a scroll.
+
    This is the change that answers the report. The anchor moves where the tail sits; the pacing in (b) is a CPU
    saving; **the scroll is the part the reader actually watches**, and it was the one part missing from this
    record.

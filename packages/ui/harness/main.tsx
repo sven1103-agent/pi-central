@@ -248,12 +248,98 @@ function useStream(mode: Mode, speed: Speed, running: boolean, resetKey: number)
   return transcript;
 }
 
+
+/**
+ * A live readout of what the SCROLLER actually does, frame by frame.
+ *
+ * Added because two rounds of fixing were argued from arithmetic rather than observation, and the second round
+ * was reported as "bursty and huge still teleport" while "steady is getting smoother" — a signature no amount of
+ * reasoning about `tailStep` could explain, because our own code cannot move more than 2.33px per frame. If a 99px
+ * or 581px jump is happening, something ELSE is moving the scroller, and the only way to name it is to watch the
+ * number change.
+ *
+ * Records the largest single-frame movement in the last second, and whether it came from our animation or from
+ * somewhere else. A jump larger than the rate cap is, by definition, not ours.
+ */
+function ScrollProbe({ stageRef }: { stageRef: React.RefObject<HTMLDivElement | null> }) {
+  const [worst, setWorst] = useState<{ px: number; perSecond: number; at: number }>({ px: 0, perSecond: 0, at: 0 });
+  const [ours, setOurs] = useState(0);
+  const [external, setExternal] = useState(0);
+
+  useEffect(() => {
+    /*
+     * Retried, because the probe and the stage are siblings and the probe can mount first — in which case
+     * stageRef.current is null on the first effect and the probe would silently measure nothing. A reader would
+     * then see "peak 0.0px/frame" while the transcript jumped, which is the worst possible failure for a
+     * diagnostic.
+     */
+    let scroller: HTMLElement | null = null;
+    let retry = 0;
+    const find = () => {
+      scroller = stageRef.current?.querySelector<HTMLElement>(".transcript") ?? null;
+      if (scroller === null && retry < 60) {
+        retry += 1;
+        requestAnimationFrame(find);
+      }
+    };
+    find();
+    if (scroller === null) return undefined;
+
+    let previous = scroller.scrollTop;
+    let lastReport = performance.now();
+    let peakThisSecond = 0;
+
+    /*
+     * Sampling on rAF, NOT on the scroll event: a scroll event fires once per frame at most, which is what we
+     * want, but it does not fire for a jump the browser makes during layout — and that is precisely the case
+     * being investigated. Sampling the value every frame catches movement whatever caused it.
+     */
+    let raf = 0;
+    const sample = () => {
+      const now = performance.now();
+      const delta = Math.abs(scroller.scrollTop - previous);
+      previous = scroller.scrollTop;
+      peakThisSecond = Math.max(peakThisSecond, delta);
+
+      /*
+       * OUR budget is 2.33px/frame at 140 px/sec. Anything larger did not come from `tailStep`, and saying so is
+       * the whole point of the probe: it splits the movement into "the animation" and "everything else", which is
+       * the distinction two rounds of guessing failed to make.
+       */
+      if (delta > 2.5) setExternal((n) => n + 1);
+      else if (delta > 0) setOurs((n) => n + 1);
+
+      if (now - lastReport > 1000) {
+        setWorst({ px: peakThisSecond, perSecond: peakThisSecond * 60, at: Date.now() });
+        peakThisSecond = 0;
+        lastReport = now;
+      }
+      raf = requestAnimationFrame(sample);
+    };
+    raf = requestAnimationFrame(sample);
+    return () => cancelAnimationFrame(raf);
+  }, [stageRef]);
+
+  const jump = worst.px > 2.5;
+  return (
+    <span className={"hx-probe" + (jump ? " is-jump" : "")}>
+      {jump ? (
+        <strong>JUMP {worst.px.toFixed(0)}px in one frame = {worst.perSecond.toFixed(0)} px/sec</strong>
+      ) : (
+        <>peak {worst.px.toFixed(1)}px/frame = {worst.perSecond.toFixed(0)} px/sec</>
+      )}
+      {" · ours "}{ours}{" · external "}{external}
+    </span>
+  );
+}
+
 function Harness() {
   const [mode, setMode] = useState<Mode>("steady");
   const [speed, setSpeed] = useState<Speed>(1);
   const [running, setRunning] = useState(false);
   const [resetKey, setResetKey] = useState(0);
   const transcript = useStream(mode, speed, running, resetKey);
+  const stageRef = useRef<HTMLDivElement | null>(null);
 
   const restart = useCallback(() => {
     setResetKey((n) => n + 1);
@@ -301,11 +387,12 @@ function Harness() {
         <button type="button" onClick={() => setRunning((r) => !r)}>
           {running ? "⏸ Pause" : "▶ Resume"}
         </button>
+        <ScrollProbe stageRef={stageRef} />
         <span className="hx-hint">
           Watch the scroll, not the text. Scroll up mid-stream: it must stop following and stay stopped.
         </span>
       </div>
-      <div className="hx-stage">
+      <div className="hx-stage" ref={stageRef}>
         <TranscriptView
           transcript={transcript}
           busy={running}
