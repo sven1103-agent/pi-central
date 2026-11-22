@@ -158,14 +158,27 @@ try {
     // 90 s: long enough for a real capture on a slow page, short enough that a hang is reported while the
     // operator is still watching. The previous bound was three minutes, which is a long time to wait for a
     // result that is not coming.
-    const deadline = Date.now() + 90_000;
+    const deadline = Date.now() + 120_000;
+    // "Idle with a message" is ALSO true the instant the prompt is accepted, before the agent has started its
+    // turn -- the first version of this declared the session settled at once and stopped it mid-turn, so the
+    // capture never ran. A settle is: the session was seen BUSY, and is now idle on two consecutive ticks.
+    let sawBusy = false;
+    let idleTicks = 0;
+    const startedAt = Date.now();
     const tick = () => {
       // `get`, not `session`: the accessor is `Supervisor#get`. An earlier draft of this file used a name that
       // does not exist, and the resulting TypeError was reported as "the prompt was accepted: FAIL" — so the one
       // line that would have named the mistake was the failing assertion, not a hint.
       const session = supervisor.get(id);
-      if (session !== undefined && session.state === "idle" && (session.messageCount ?? 0) > 0) {
-        done("(the session settled; see its transcript in the UI, or the record count below)");
+      if (session !== undefined && session.state !== "idle") {
+        sawBusy = true;
+        idleTicks = 0;
+      } else if (session !== undefined && sawBusy) {
+        idleTicks += 1;
+      }
+      // Never seen busy after 20 s means the prompt did not start a turn; do not wait the full deadline.
+      if (idleTicks >= 2 || (!sawBusy && Date.now() - startedAt > 20_000)) {
+        done(sawBusy ? "(the session ran a turn and settled)" : "(the session never started a turn)");
         return;
       }
       if (Date.now() > deadline) {
@@ -185,7 +198,10 @@ try {
 // The transcript is the evidence, so fetch it rather than paraphrasing. `fetchTranscript` is the same call the
 // UI's file viewer makes, so what is printed here is what a reader would see.
 const transcript = await supervisor.fetchTranscript(id).catch(() => undefined);
+// ASSISTANT messages only. The user's prompt contains the literal phrase "NO SIDECAR TOOL", and a reply built from
+// every message matched the instruction I wrote rather than anything the agent said.
 const reply = (transcript?.messages ?? [])
+  .filter((message) => message.role === "assistant")
   .flatMap((message) => (Array.isArray(message.content) ? message.content : []))
   .filter((block) => block?.type === "text")
   .map((block) => String(block.text ?? ""))
@@ -200,6 +216,17 @@ if (reply !== "") {
   console.log("\n--- the session's reply ---");
   console.log(reply.slice(0, 1500));
   record("the reply does not report a missing sidecar tool", !/NO SIDECAR TOOL/i.test(reply));
+  // The outcome itself, not the model's prose about it: did the capture tool return an IMAGE block? That is the
+  // product question -- an agent seeing its own UI -- and it cannot be satisfied by a reply that merely
+  // mentions the word "screenshot".
+  const images = (transcript?.messages ?? [])
+    .flatMap((message) => (Array.isArray(message.content) ? message.content : []))
+    .filter((block) => block?.type === "image");
+  record(
+    "the capture tool returned an image the agent could see",
+    images.length > 0,
+    images.length > 0 ? images.length + " image block(s), first " + String(images[0].data ?? "").length + " base64 chars" : "no image block anywhere in the transcript",
+  );
 if (/NO SIDECAR TOOL/i.test(reply) && sidecarLog.length === 0) {
   // The most useful distinction available at this point: did the sidecar say ANYTHING?
   console.log("");
@@ -209,7 +236,6 @@ if (/NO SIDECAR TOOL/i.test(reply) && sidecarLog.length === 0) {
   console.log("");
   console.log("  The sidecar DID write the lines above. Those are its own words, not Pi's paraphrase of them.");
 }
-  record("the reply describes what was captured", /captur|screenshot|png|image/i.test(reply));
 }
 
 await supervisor.stopAll();
