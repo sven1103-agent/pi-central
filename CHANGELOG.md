@@ -10,7 +10,12 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
-<!-- Empty at tag time: a release cannot ship undocumented changes. -->
+### Added
+
+- A followed transcript holds its newest line above the window's foot, and the reader can put it back at the foot ([#279]).
+- Following the tail glides instead of teleporting, capped at one prose line per frame ([#279]).
+- The transcript's scrollbar is replaced by a fade at each end, so the reading column has one width ([#279]).
+- ADR-0017 records the anchor and the scroll, and defers the coalescing of streaming text to its own slice ([#279]).
 
 ## [0.14.0] — 2026-11-22
 
@@ -821,3 +826,4 @@ The spike that answered whether this was worth building.
 [#269]: https://github.com/sven1103-agent/pi-central/issues/269
 [#274]: https://github.com/sven1103-agent/pi-central/issues/274
 [#275]: https://github.com/sven1103-agent/pi-central/issues/275
+[#279]: https://github.com/sven1103-agent/pi-central/issues/279
