@@ -178,28 +178,44 @@ test("activating it scrolls to the newest content AND resumes following", () => 
     jumpButton().dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
   });
 
-  // At LEAST one, not exactly one: re-pinning changes state, which re-renders, which runs the
-  // follow effect — so this can legitimately scroll twice. Asserting an exact count would pin the
-  // test to an implementation detail of when React flushes, rather than to the behaviour.
-  assert.ok(intoViewCalls.length > before, "activating must scroll to the newest content");
-  // The element it scrolled to is the END sentinel, not some ancestor: scrolling the pane's top
-  // into view would move the reader to the wrong end.
-  assert.equal(intoViewCalls.at(-1).parentElement, scroller, "the end sentinel must be the target");
-  assert.equal(metrics.scrollTop, 2000, "and land at the bottom of the pane");
+  /*
+   * THE ASSERTION IS ON scrollTop, NOT ON scrollIntoView (ADR-0016).
+   *
+   * This used to require a scrollIntoView call and pinned the target to the END sentinel. Both encoded the old
+   * teleport: the component no longer calls scrollIntoView at all, because it glided by writing scrollTop — and
+   * scrollIntoView can move an ANCESTOR scroll port, which on a growing transcript means the whole window jumping.
+   *
+   * The numbers were wrong too. The scrollport is 500px and the content 2000px, so the furthest the browser can
+   * scroll is 1500; the old test demanded 2000, which the stub accepted only because it does not clamp. A real
+   * browser would have stopped at 1500 the whole time.
+   */
+  assert.equal(metrics.scrollTop, 2000 - 500, "landing at the bottom means the maximum scrollable offset");
+  assert.ok(
+    intoViewCalls.length === before,
+    "the glide writes scrollTop rather than calling scrollIntoView, so ancestors cannot be moved",
+  );
   assert.equal(jumpButton(), null, "and the control must go away, because it is pinned again");
 
-  // Following resumed, demonstrated rather than assumed: the follow effect runs on every render,
-  // so a re-render after the click must scroll the tail again. Had `jumpToLatest` scrolled without
-  // re-pinning, `pinnedRef` would still be false and this second scroll would not happen — which
-  // is the half-done implementation this test exists to catch.
-  const afterClick = intoViewCalls.length;
+  /*
+   * Following resumed, demonstrated rather than assumed.
+   *
+   * The OBSERVABLE is now scrollTop, not a scrollIntoView count, because the glide writes the offset (ADR-0016).
+   * The mechanism is unchanged and still worth testing: the content grows, the follow effect runs on the render,
+   * and the pane must move. Had jumpToLatest scrolled without re-pinning, pinnedRef would still be false and this
+   * second move would not happen — the half-done implementation this test exists to catch.
+   */
+  const tailBefore = metrics.scrollTop;
   act(() => {
-    // A new message arriving is what re-renders the pane during a run.
+    // A new message arriving is what re-renders the pane during a run — and makes it taller.
+    stubMetrics(scroller, { scrollHeight: 2600, clientHeight: 500, scrollTop: metrics.scrollTop });
     root.render(createElement(TranscriptView, {
       transcript: manyMessages(31), busy: true, sessionLabel: "s1",
     }));
   });
-  assert.equal(intoViewCalls.length, afterClick + 1, "a new turn must scroll the tail again");
+  assert.ok(
+    scroller.scrollTop > tailBefore,
+    `a new turn must move the tail again; it stayed at ${tailBefore}`
+  );
 });
 
 test("a scroll event while pinned keeps the control hidden", () => {
@@ -290,7 +306,16 @@ test("the lane is OBSERVED, so a height that arrives after paint still moves the
     // The image decodes: the lane got taller. The pane is following, so it must move with it.
     stubMetrics(scroller, { scrollHeight: 2600, clientHeight: 500, scrollTop: 1500 });
     observer.instances[0].trigger();
-    assert.equal(scroller.scrollTop, 2600, "the tail was followed to the new height, without waiting for a render");
+    /*
+     * The scrollport is 500px tall and the content is now 2600px, so the FURTHEST the browser can scroll is 2100.
+     * The old assertion demanded 2600, which the stub allowed only because it does not clamp — a real browser would
+     * have stopped at 2100. So this assertion was passing on an impossible value, and the glide merely exposed it.
+     */
+    assert.equal(
+      scroller.scrollTop,
+      2600 - 500,
+      "the tail was followed to the new height, without waiting for a render",
+    );
   } finally {
     observer.restore();
   }

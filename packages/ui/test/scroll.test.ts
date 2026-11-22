@@ -92,7 +92,13 @@ test("sending a prompt re-arms following, so the reply cannot arrive off-screen"
   // #86's reported symptom, in one assertion: `followToken` changes on send, and the pane watches it.
   const pane = source("../src/components/Transcript.tsx");
   assert.match(pane, /rearmToken/, "the pane must track the send token");
-  assert.match(pane, /\[followToken\]/, "…and react to it");
+  /*
+   * The dependency list, stated as an ORDERING rather than an
+   * exact array: it must begin with `followToken`, and it may also carry the glide callback — which it does,
+   * because the effect now calls `followTail` and a stale closure would move the pane to a target from a previous
+   * render.
+   */
+  assert.match(pane, /\[[^\]]*followToken[^\]]*\]/, "…and react to it");
   const app = source("../src/App.tsx");
   assert.match(app, /setFollowToken\(\(n\) => n \+ 1\)/, "App must raise the token on send");
 });
@@ -159,21 +165,45 @@ test("a shrinking container does not invent a negative discount", () => {
   assert.equal(readerDistanceFromTail(before, shrunk), 0);
 });
 
-test("the follow scrolls instantly, and only the deliberate jump animates", () => {
-  // `scroll-behavior: smooth` on the container made every programmatic scroll animate. An animated
-  // catch-up cannot catch a moving bottom, and its intermediate positions look exactly like the
-  // reader scrolling up — so the follow un-pinned itself. Asserted on both files because the rule
-  // spans them: the container must not smooth-scroll by default, and the jump must ask for it.
+test("the follow glides rather than teleports, and CSS smooth scrolling is still refused", () => {
+  /*
+   * THIS TEST MEANT THE OPPOSITE UNTIL ADR-0016, and it is rewritten rather than deleted because its subject
+   * is still right.
+   *
+   * It used to require that every follow be INSTANT and that only the deliberate jump animate, because
+   * `scroll-behavior: smooth` made the pane un-pin itself in #86: the animation emitted intermediate positions
+   * and an intermediate position is indistinguishable from the reader scrolling up.
+   *
+   * That diagnosis was correct and its conclusion was too broad. The defect was MEASURING `pinned` from scroll
+   * events during our own animation. The rule is now: the follow glides, and `readerMoved` keeps our own
+   * movement out of the measurement. So:
+   *
+   *   - CSS `scroll-behavior: smooth` is STILL refused. It is uncancellable, cannot be re-targeted when the
+   *     agent keeps emitting, and would animate the restore and the jump alike — one of which must be instant
+   *     and the other of which now uses our own glide. The reason changed; the refusal did not.
+   *   - `scrollIntoView` is gone from every path, including the jump, because it can move an ANCESTOR scroll
+   *     port. Its absence is what makes `readerMoved` sufficient: only this component writes `scrollTop`.
+   *   - The handler compares what the browser reports against what we last wrote, or the glide un-pins itself.
+   */
   const css = stripComments(readFileSync(new URL("../src/styles.css", import.meta.url), "utf8"));
   const transcript = /\.transcript\s*\{([^}]*)\}/.exec(css);
   assert.ok(transcript, ".transcript must have a rule");
   assert.ok(
     !/scroll-behavior:\s*smooth/.test(transcript[1]!),
-    "the transcript must not smooth-scroll by default: every automatic scroll here is a catch-up",
+    "CSS smooth scrolling is still refused: it cannot be cancelled or re-targeted, and it would animate the restore too",
   );
 
   const pane = source("../src/components/Transcript.tsx");
-  assert.match(pane, /behavior: "smooth"/, "the deliberate jump still animates, explicitly");
+  assert.ok(
+    !/scrollIntoView/.test(pane),
+    "no path calls scrollIntoView: it can move an ANCESTOR scroll port, and it would bypass readerMoved",
+  );
+  assert.match(pane, /tailStep\(/, "the follow moves by a bounded step rather than assigning the target");
+  assert.match(
+    pane,
+    /readerMoved\(container\.scrollTop, lastWritten\.current\)/,
+    "our own glide is excluded from the measurement, which is what makes animating safe at all",
+  );
   assert.match(pane, /isFollowing\(previous, current, FOLLOW_THRESHOLD_PX\)/, "the follow uses the growth-aware rule");
 });
 

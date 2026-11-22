@@ -298,6 +298,32 @@ what a preview is for. It records three findings, in the order they arrived.
    - the gap is **clamped per frame**, so a 300-character burst does not produce a 60px hop and a slow trickle
      does not produce sub-pixel creep that scrolls so slowly it looks stuck.
 
+   **Implemented, and where the design had to change to fit reality.** `packages/ui/src/follow-scroll.ts` holds
+   the arithmetic and `Transcript.tsx` routes all four movement paths through one `followTail`. Three things the
+   prose above did not anticipate:
+
+   - **Two of those rules conflict, and only one can win.** A bounded per-frame step and a bounded settle TIME
+     cannot both hold for a large distance: 900px at 28px/frame is half a second, and covering it faster means
+     hopping visibly. The resolution is that the glide is limited to a quarter of the scrollport and anything
+     larger simply arrives — past that the reader was not tracking the tail anyway. A first attempt made the
+     bound grow with the distance, which reintroduced the hop it existed to prevent; the test that asserted it
+     was rewritten rather than kept.
+   - **`scrollIntoView` is gone from every path, including the deliberate jump.** It can move an ANCESTOR scroll
+     port, and — more importantly — it writes a scroll position this component did not set, which would defeat
+     the `readerMoved` comparison outright. The jump now uses the same glide, which it previously did not: its
+     `behavior: "smooth"` was immediately overridden by a direct assignment, so it never actually animated.
+     That is an incidental defect this change removes.
+   - **The old tests were asserting the bug.** Three of them required an instant landing, and two required
+     `scrollTop === scrollHeight` — a value a real browser clamps, so they passed only because the stub does not
+     clamp. Each was rewritten against the behaviour rather than the implementation, and `scroll.test.ts`'s
+     "the follow scrolls instantly" test now asserts the opposite, with its subject (`scroll-behavior: smooth`
+     is still refused) intact.
+
+   Four falsifications, and each was run by reverting the rule that makes it true (see
+   `packages/ui/src/follow-scroll.ts`): remove the step clamp and a burst hops again; remove the snap and the
+   glide never converges; remove the rounding tolerance and our own animation un-pins the reader — #86 exactly;
+   ignore `prefers-reduced-motion` and the readers who asked for stillness get motion.
+
    This is the change that answers the report. The anchor moves where the tail sits; the pacing in (b) is a CPU
    saving; **the scroll is the part the reader actually watches**, and it was the one part missing from this
    record.
