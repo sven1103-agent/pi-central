@@ -218,11 +218,15 @@ if (launched.error) {
   const png = existsSync(outPng) && statSync(outPng).size > 0;
   record("browser launched and produced a PNG", png, "exit=" + (launched.code ?? launched.signal));
   if (!png) {
-    const interesting = /SEGV|crashpad|SingletonSocket|database is required|Operation not permitted|Failed to/i;
-    for (const line of (launched.stderr || "").split("\n")) {
-      if (interesting.test(line)) console.log("  " + line.trim());
-    }
-    console.log("  record the lines above VERBATIM -- they are the result of this check");
+    // Print the TAIL, not a filtered subset. The first version matched a list of known strings and
+    // printed nothing when the browser died a new way (a dyld failure matched none of them), which
+    // turned a diagnosable abort into a bare SIGABRT. A filter that can only recognise yesterday's
+    // failure is the C15c shape: the check ran and its answer was discarded.
+    const lines = (launched.stderr || "").split("\n").filter((l) => l.trim() !== "");
+    console.log("  --- last 12 lines of the browser's stderr, unfiltered ---");
+    for (const line of lines.slice(-12)) console.log("    " + line.trim());
+    if (lines.length === 0) console.log("    (nothing on stderr)");
+    console.log("  record those lines VERBATIM -- they are the result of this check");
   } else {
     const dims = spawnSync("sips", ["-g", "pixelWidth", "-g", "pixelHeight", outPng], { encoding: "utf8" });
     const w = /pixelWidth: (\d+)/.exec(dims.stdout || "");

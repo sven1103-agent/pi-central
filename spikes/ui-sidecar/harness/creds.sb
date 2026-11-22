@@ -1,0 +1,45 @@
+;; Shape C, check C3 — the renderer must not be able to read the host's credentials.
+;;
+;; WHY THIS FILE EXISTS AS A COPY OF A SUBSET OF `fragment.ts`: the first version of it was a
+;; hand-written name list (`~/.npmrc`, `~/.config/gh`, `~/.ssh`) and it FAILED OPEN on the one name
+;; it omitted — the probe read `~/.gitconfig` while reporting the other three refused. That is
+;; C15c exactly: "the unit of a path boundary is the directory, not a list of names under it", and
+;; a name list fails open on the next name nobody predicted, invisibly, because the rule still
+;; reads as protection.
+;;
+;; These are the same denials `renderPolicyFragment` already emits (HOST_DENIES), restated here so
+;; the spike can run without the orchestrator. The restatement is the hazard: when Phase 2 exists,
+;; the sidecar fragment must be RENDERED by that function, not copied from this file.
+
+;; Host git configuration. A PREFIX, not a literal: the base policy grants `(home-prefix
+;; "/.gitconfig")`, so `~/.gitconfig.local` and friends are covered too. A literal deny would miss
+;; them and still look like a boundary.
+(deny file-read*
+    (home-prefix "/.gitconfig")
+    (home-subpath "/.config/git")
+    (home-literal "/.gitattributes")
+)
+
+;; The npm token, and npm's other per-user config.
+(deny file-read* file-write*
+    (home-literal "/.npmrc")
+    (home-subpath "/.npm")
+)
+
+;; The host's GitHub CLI config, and the user's SSH world (the directory, not key names).
+(deny file-read* file-write*
+    (home-subpath "/.config/gh")
+)
+(deny file-read* file-write* file-read-metadata
+    (home-subpath "/.ssh")
+)
+
+;; The ssh-agent needs a NETWORK deny, because connect() on a unix socket is not a file read. The
+;; environment probe reports SSH_AUTH_SOCK is PRESENT in the sidecar (C4a: Safehouse's sanitized
+;; allowlist carries it), so the variable is not the control -- the connect is.
+(deny network-outbound
+    (remote unix-socket (path-regex #"^/private/tmp/com\.apple\.launchd\.[^/]+/Listeners$"))
+    (remote unix-socket (path-regex #"^/tmp/com\.apple\.launchd\.[^/]+/Listeners$"))
+    (remote unix-socket (path-regex #"^/private/var/run/com\.apple\.launchd\.[^/]+/Listeners$"))
+    (remote unix-socket (path-regex #"^/var/run/com\.apple\.launchd\.[^/]+/Listeners$"))
+)

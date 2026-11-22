@@ -12,14 +12,12 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Changed
 
-- The UI-sidecar spike briefs state no version, and their paths resolve, so `npm run verify` is green on
-  this branch again ([#276]).
-- Playwright's MCP server is ruled out as the sidecar: it exposes `browser_evaluate` and nothing
-  host-side can narrow it, so a session can call it with no credentials at all ([#276]).
-- A browser renders a local page under the sidecar's own profile while non-loopback egress, name
-  resolution and a second loopback port are refused ([#276]).
-- The next spike asks whether a two-verb host-side service covers UI capture with no `playwright`
-  dependency and a surface that is small by construction ([#276]).
+- The UI-sidecar spike briefs state no version and their paths resolve, so `verify` is green again ([#276]).
+- Playwright's MCP server is ruled out as the sidecar: nothing host-side narrows its 25 tools ([#276]).
+- A CDP client of 183 lines replaces `playwright` for capture and probe, using `ws` ([#276]).
+- A browser renders a local page under the sidecar's own profile with egress confined to one port ([#276]).
+- A two-verb host-side service is measured against shipping `playwright` for UI capture ([#276]).
+- A hand-written credential deny list failed open on `~/.gitconfig`, as C15c predicts ([#276]).
 
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
