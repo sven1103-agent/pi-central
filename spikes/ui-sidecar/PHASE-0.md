@@ -35,48 +35,91 @@ SingletonSocket and crashpad failures are precisely what `chromium-full.sb` and 
 exist to grant, and Safehouse's own `playwright-chrome.sb` sets `PLAYWRIGHT_MCP_SANDBOX=false` on the
 assumption that a browser launched *by the host* works. The next run must be from outside.
 
-## Check 1 — a pixel exists
+## Run it
 
-From a plain terminal, with a real page being served (any local app; `python3 -m http.server` is enough):
+The harness is under version control at [harness/shot.mjs](harness/shot.mjs), with its fixture
+([harness/page.html](harness/page.html)) and the fragment ([harness/loopback.sb](harness/loopback.sb)).
+It serves the page itself, so nothing else needs starting. **Three runs, in this order, on purpose:**
 
 ```bash
-mkdir -p /tmp/sidecar /tmp/sidecar-profile
-safehouse --workdir=/tmp/sidecar \
-          --enable=playwright-chrome \
-          -- node /tmp/sidecar/shot.mjs
+cd spikes/ui-sidecar/harness
+
+# 1. The baseline. No policy. If the browser cannot render HERE, the defect is Chromium, not the
+#    profile, and runs 2 and 3 answer nothing.
+node shot.mjs --control
+
+# 2. The sidecar's profile as Safehouse composes it. Expect the two egress checks to FAIL to be
+#    denied -- that is the "before" of the fragment, and it is what makes run 3 meaningful.
+safehouse --workdir="$PWD" --enable=playwright-chrome \
+  -- node shot.mjs --inside-sandbox --no-sandbox
+
+# 3. Same, with the loopback fragment. Now non-loopback and DNS must be REFUSED.
+safehouse --workdir="$PWD" --enable=playwright-chrome --append-profile="$PWD/loopback.sb" \
+  -- node shot.mjs --inside-sandbox --no-sandbox
 ```
 
-where `shot.mjs` launches Chromium through Playwright and writes `/tmp/sidecar/out.png`.
+Use the state root, **not `/tmp`**: `/tmp` and `/var/folders` are granted read/write to every session by
+the base profile, so a fixture there cannot demonstrate confinement.
 
-**PASS:** `out.png` exists, is a valid PNG, and shows the page rather than a blank frame.
-**FAIL:** the SEGV, the SingletonSocket bind, or a crashpad `--database is required` — then record the
-error verbatim and **stop**; the renderer choice changes (see "If it fails" below).
+The mode flag is required and each run checks it against reality. A `--control` run that is in fact
+sandboxed refuses to start, because it would report an outer sandbox's behaviour as Chromium's — the one
+mistake this check exists to prevent. The first draft of the harness had that flaw; it is named here
+because it is the shape the second draft would have had too.
 
-Note the flag sequence matters: the browser gets **its own** profile, so do **not** pass `--no-sandbox`
-here. `--no-sandbox` was only ever needed because a session's sandbox cannot host Chromium's inner one,
-and this process is not inside a session.
+### What each result means
+
+| Run | Check | PASS means |
+|---|---|---|
+| 1 | a PNG exists, 800×400 | Chromium can render at all on this machine |
+| 2 | a PNG exists **under the profile** | the sidecar's sandbox can host the renderer — **this is the claim** |
+| 2 | non-loopback reachable, DNS resolves | the "before": the base profile has no egress confinement |
+| 3 | both REFUSED | the appended fragment decides, not the base policy |
+| 3 | a PNG still exists | the confinement did not cost the capability (C12's shape) |
+
+**Open the PNG in run 1 and run 3.** A blank frame or a page of tofu is a FAIL even though a file
+exists, and the harness cannot tell — it checks dimensions, not content.
+
+**`--no-sandbox` is required under Safehouse** and is passed above for that reason. `safehouse --help`
+states it; `chromium-full.sb` explains why ("Chrome's internal helper sandbox re-init is blocked once
+Safehouse is already enforcing the outer Seatbelt sandbox"). An earlier version of this file said the
+opposite, which would have turned a pass into a recorded FAIL and re-opened the design over a flag.
 
 ## Check 2 — the loopback confinement holds
 
 Append a fragment **after** Safehouse's rules (SBPL is last-match-wins), and put it under
 version control as a fixture rather than retyping it:
 
+The fragment is [harness/loopback.sb](harness/loopback.sb). Two corrections to the version this brief
+first carried, both measured on this machine rather than reasoned about:
+
 ```scheme
-(deny network-outbound (remote ip))
-(allow network-outbound (remote ip "localhost:*") (remote ip "127.0.0.1:*"))
+(deny  network-outbound (remote ip))
+(allow network-outbound (remote ip "localhost:4173"))
+(deny  network-outbound (literal "/private/var/run/mDNSResponder"))
 ```
 
-```bash
-safehouse --workdir=/tmp/sidecar --append-profile=/tmp/sidecar/loopback.sb -- node /tmp/sidecar/shot.mjs
-```
+- **`(remote ip "127.0.0.1:*")` does not parse.** `sandbox-exec` refuses it with *"host must be `*` or
+  `localhost` in network address"* (exit 65). The expressible forms are `localhost:*` (every port) and
+  `localhost:<port>` (one). A v4 literal is not expressible at all — which also means **the port is the
+  unit of confinement, not the address.**
+- **A `(remote ip …)` deny does not touch unix sockets.** So the base profile's
+  `(allow network-outbound (literal "/private/var/run/mDNSResponder"))` survives it, and a confined
+  renderer could still emit attacker-visible DNS. It is denied explicitly above, and the harness reports
+  which way it actually behaves rather than which way it was assumed to.
 
-**PASS:** a page on `http://127.0.0.1:<port>` renders **and** any request to a non-loopback host (a
-plain `https://example.com` beacon is enough) fails, in the same process, same run.
-**FAIL:** either both succeed (the deny did not take effect — probably an ordering or specificity
-problem, the C15c lesson) or both fail (the allow was shadowed).
+**PASS:** a page on `http://localhost:<port>` renders **and** a non-loopback connection and a name
+resolution both fail, in the same process, same run.
+**FAIL:** both succeed (the deny did not take effect — an ordering or specificity problem, the C15c
+lesson), both fail (the allow was shadowed), or the browser only renders when the fragment is removed.
 
 Assert both directions in one process. Two separate runs cannot distinguish "denied" from "not tried",
 which is the mistake C15c records.
+
+One thing this check cannot establish, and a later shape depends on it: `localhost:<port>` is a **pin on
+the port, not on the peer**. The orchestrator's own control socket is on loopback too, so if it listens on
+a port the sidecar may reach, a confined renderer can dial it — and the transport performs no Origin, Host
+or token check. Record the orchestrator's port and whether the fragment's single allowed port excludes it;
+if the answer is "no", that is a finding for the issue, not a detail for later.
 
 ## If it fails
 

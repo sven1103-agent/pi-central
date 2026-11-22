@@ -1,0 +1,24 @@
+;; Phase 0, Check 2 — loopback confinement for the sidecar, appended AFTER Safehouse's rules.
+;;
+;; SBPL is last-match-wins, so the deny below overrides the base profile's
+;; (allow network-outbound (remote ip)) from 20-network.sb.
+;;
+;; Two measured facts this file encodes:
+;;
+;;   1. `127.0.0.1:*` is a PARSE ERROR on this machine -- "host must be * or localhost in
+;;      network address". The narrow forms are `localhost:*` (all ports) and
+;;      `localhost:<port>` (one port). A v4 literal is not expressible at all.
+;;   2. Playwright's MCP server binds IPv6 only: 127.0.0.1 refuses, localhost and [::1] answer.
+;;      So this fragment is the ONLY half of the pin -- the port must also be pinned
+;;      host-side, which is why Check 1 prints the bound addresses.
+;;
+;; Keep this port in step with PORT in shot.mjs.
+
+(deny network-outbound (remote ip))
+(allow network-outbound (remote ip "localhost:4173"))
+
+;; mDNSResponder is granted by 20-network.sb as a literal socket, and the deny above does not
+;; touch it -- a deny on (remote ip) filters addresses, not unix sockets. Leaving it open means
+;; a compromised renderer can still emit attacker-visible DNS. Denied here so the run reports
+;; which way it actually behaves rather than which way it was assumed to.
+(deny network-outbound (literal "/private/var/run/mDNSResponder"))
