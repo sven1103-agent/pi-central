@@ -127,7 +127,7 @@ test("the transcript keeps its own horizontal padding, and centres ONE lane", ()
     `per-child centring is #92's defect: a narrower child gets a different centre. Found: ${centred.join(", ")}`,
   );
 });
-test("the lane is centred by TWO EQUAL margins, and the companion does not steal one of them", () => {
+test("the LANE is centred by TWO EQUAL margins, and the companion does not steal one of them", () => {
   /*
    * The reported defect, and the bug in the first attempt at fixing it.
    *
@@ -141,6 +141,16 @@ test("the lane is centred by TWO EQUAL margins, and the companion does not steal
    *
    * The property is therefore SYMMETRY, and it is asserted as such: the template must name the same margin token twice
    * while centred. A literal anywhere in the outer two tracks is the bug.
+   *
+   * ## Why THREE tracks, after four were tried (issue #281)
+   *
+   * A four-track row — margin, prose, companion, margin — centres the INK and leaves equal air outside it. It also moves
+   * the prose ~180px left of the row's centre, which was reported as *"left pushed"* as soon as it shipped. The two
+   * properties are mutually exclusive, and the reader's priority was explicit: *"just keep the transcript centered, this
+   * is what matters."*
+   *
+   * So the companion sits in the trailing margin and the COMPOSITION reads right-heavy with the roster hidden. That is the
+   * accepted cost, recorded rather than hidden, and the alternative is worse: it moves the text being read.
    */
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(
     /\/\*[\s\S]*?\*\//g,
@@ -163,8 +173,8 @@ test("the lane is centred by TWO EQUAL margins, and the companion does not steal
    * centred, and differ only under `fill`, where the reader asked for the left edge specifically.
    */
   const centred = readingStyle({ sizePx: 15, measure: 80 });
-  assert.equal(centred["--reading-leading"], centred["--reading-trailing"], "equal margins ARE the centring");
-  assert.equal(centred["--reading-trailing-max"], "1fr", "the open panel's track keeps absorbing space, so the lane need not move");
+  assert.equal(centred["--reading-leading"], centred["--reading-trailing"], "equal margins ARE the centring of the lane");
+  assert.equal(centred["--reading-trailing-max"], "1fr", "the peek's open track keeps absorbing space, so the lane need not move");
   assert.match(centred["--reading-leading"], /^minmax\(0, 1fr\)$/, "flexible, so the pair of them split the free space");
   assert.match(centred["--reading-lane"], /^minmax\(0, \d+ch\)$/, "and the lane carries the reader\u2019s measure");
 
@@ -438,5 +448,59 @@ test("the transcript disables browser scroll anchoring, which was a second write
   assert.ok(
     !/overflow-anchor:\s*auto/.test(css),
     "and it must not be re-enabled elsewhere; `auto` is the default that caused the defect",
+  );
+});
+
+test("the prose and the composer share one width, which is now true by construction", () => {
+  /*
+   * MEASURED in a real window, before ADR-0017 removed the transcript's scrollbar:
+   *
+   *   .transcript  w=655  clientW=644      <- an 11px scrollbar inside the box
+   *   .transcript-lane    left=629 right=1236  w=608   mid=933
+   *   .composer-dock      left=629 right=1248  w=619   mid=938
+   *   .transcript-wrap                      mid=938
+   *
+   * The prose ended 12px short of the composer's right edge — the "two right edges" defect `img_35.png` recorded,
+   * returning through a box the earlier fix never considered — and the lane sat 5.5px left of the column's centre,
+   * because `margin-inline: auto` was centring 608px inside the 597px the scrollbar left.
+   *
+   * The cause was that `.transcript-footer` is a SIBLING of the scroller with no scrollbar, so `padding: 0 18px`
+   * resolved its width against 11px more than the scroller did. #281 patched that with a `--transcript-scrollbar`
+   * token and a `calc()` in the footer's padding.
+   *
+   * ADR-0017 (#279) removed the scrollbar instead, which is the better fix: there is no asymmetry left to
+   * compensate for, so the two boxes agree because they read the same 18px against the same width. This asserts the
+   * PROPERTY the token existed to buy — equal insets on both boxes — rather than the token, which is gone.
+   *
+   * Falsified by giving either box an asymmetric inset: the assertion reports which side differs.
+   */
+  const footer = rule(".transcript-footer") ?? "";
+  const pad = /padding:\s*([^;]+);/.exec(footer)?.[1]?.replace(/\s+/g, " ").trim() ?? "";
+  assert.ok(pad.length > 0, `the footer must declare its inset; got: ${footer}`);
+  /*
+   * Three values (top, inline, bottom) means the inline pair is SYMMETRIC by shorthand — one number for both sides.
+   * Four values would state them separately and could disagree, which is what this forbids.
+   */
+  assert.equal(
+    pad.split(" ").length,
+    3,
+    `the footer's inset must be one inline value for both sides, not two that can drift; got "${pad}"`,
+  );
+  /* The INLINE value — the middle term — is the one that must be 18px, the same number the scroller uses. */
+  assert.equal(
+    pad.split(" ")[1],
+    "18px",
+    `18px on both sides, as the scroller has; got "${pad}"`,
+  );
+
+  /*
+   * And the scroller keeps the SAME 18px. Asserted from the base rule, since the container query also sets
+   * `.transcript` and `rule()` returns the last match.
+   */
+  const transcript = /(?:^|\n)\.transcript\s*\{([^}]*)\}/.exec(css.replace(/\/\*[\s\S]*?\*\//g, ""))?.[1] ?? "";
+  assert.match(
+    transcript,
+    /padding:\s*var\(--sp-4\) 18px var\(--sp-4\) 18px/,
+    "the scroller insets 18px on both sides, which is what the footer must match",
   );
 });

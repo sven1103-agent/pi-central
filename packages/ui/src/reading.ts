@@ -225,6 +225,17 @@ function laneTracks(measure: ReadingPrefs["measure"]): Record<string, string> {
   /*
    * CENTRED: one flexible margin on each side, and the lane capped by the reader's measure. The two margins are the
    * same token because they must be the same width — that equality IS the centring.
+   *
+   * ## What is centred, and what that costs
+   *
+   * The PROSE. Not the prose-and-companion pair: a four-track row that centres the pair keeps equal air on both sides of
+   * the composition, and moves the text a reader is reading half a companion's width left of centre — measured at ~180px,
+   * reported as *"left pushed"*. The reader's call was explicit — *"just keep the transcript centered, this is what
+   * matters"* — so the lane holds the centre and the companion takes the trailing margin.
+   *
+   * The cost is recorded rather than hidden: with a 340px block on one side and empty margin on the other, the
+   * COMPOSITION reads right-heavy, most visibly with the session roster hidden. That is the price of a stable text column
+   * and it is paid deliberately.
    */
   return {
     "--reading-leading": "minmax(0, 1fr)",

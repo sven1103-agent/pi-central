@@ -60,7 +60,24 @@ function resolveRow({ containerPx, lanePx, leading, trailing, gap = GAP }) {
   return { left, lane: laneTrack, right, gaps, gap, total: left + gaps + laneTrack + right };
 }
 
-/** The three margins the module produces, as numbers or "flex". */
+/**
+ * The wide row's template, read from the STYLESHEET.
+ *
+ * `marginsFor` below resolves the module's tokens, and on its own that is not evidence about the layout: the module can
+ * emit four tokens while the rule that consumes them names three, and every arithmetic assertion would still pass. That
+ * gap is exactly how the three-track row survived a suite claiming to test centring, so the template the row actually
+ * uses is read here and the module's tokens are then resolved INTO it.
+ */
+function wideTemplate() {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const row = [...css.matchAll(/\.transcript-wrap\.has-header\s*\{([^}]*)\}/g)]
+    .map((match) => match[1])
+    .find((body) => /display:\s*grid/.test(body));
+  assert.ok(row, "the wide row must have a grid rule");
+  return (/grid-template-columns:\s*([^;]+);/.exec(row)?.[1] ?? "").replace(/\s+/g, " ").trim();
+}
+
+/** The four tracks the module produces, as numbers or "flex". */
 function marginsFor(measure) {
   const style = readingStyle({ sizePx: 15, measure });
   const read = (token) => {
@@ -77,19 +94,41 @@ function marginsFor(measure) {
   };
 }
 
-test("the lane's centre is the container's centre, at every window width", () => {
+test("the LANE's centre is the container's centre, at every window width", () => {
   /*
-   * THE reported property, and the one that failed. The prose used to be centred as a PAIR with the companion, so its
-   * centre sat half a companion left of the container's — about 170px at a 340px companion, which is exactly the offset
-   * the reader saw once the rail stopped filling the void.
+   * THE reported property, and the decision it settled.
+   *
+   * Two corrections, in order, and the second undid the first:
+   *
+   *   1. The prose used to be centred as a PAIR with the companion, so its centre sat half a companion left of the
+   *      container's — *"without the session list, the transcript is not centered anymore"*. Fixed by centring the LANE
+   *      and putting the companion in the trailing margin.
+   *   2. That left one margin holding a 340px block and its mirror empty, so the row was symmetric by arithmetic and
+   *      right-heavy by weight. A four-track row centred the INK instead — and moved the prose ~180px left of the row's
+   *      centre, reported immediately as *"left pushed"*.
+   *
+   * The reader's call: *"just keep the transcript centered, this is what matters."* So the LANE holds the centre and the
+   * composition's right-heaviness is the accepted cost. Both statements cannot be true at once; this file asserts the one
+   * that was chosen.
    *
    * Asserted across widths rather than at one, because the failure mode is width-dependent: a layout that is centred at
    * 1200 and not at 1600 is a layout whose arithmetic is wrong somewhere it did not show.
    *
-   * Falsified by making the trailing margin a literal (the bug that shipped): the offset becomes half of 340 on every
-   * width, and the first case reports it.
+   * Falsified by making a margin a literal (the bug that shipped) or by giving the companion its own track (the four-track
+   * row): the lane's offset becomes half of 340 on every width, and the first case reports it.
    */
   for (const containerPx of [1024, 1200, 1440, 1540, 1920, 2560]) {
+    /*
+     * The template the ROW actually uses, read from the stylesheet. Resolving the module's tokens alone is not evidence:
+     * a correctly-emitted pair of margins means nothing if the rule that consumes them names four tracks, which is exactly
+     * how a four-track row passed a suite claiming to test centring.
+     */
+    const template = wideTemplate();
+    assert.equal(
+      template,
+      "var(--reading-leading) var(--reading-lane) var(--reading-trailing)",
+      `the row must be three tracks with the companion in the trailing margin; got: ${template}`,
+    );
     const { leading, trailing } = marginsFor(80);
     const row = resolveRow({ containerPx, lanePx: chToPx(80), leading, trailing });
     const laneCentre = row.left + row.gap + row.lane / 2;
