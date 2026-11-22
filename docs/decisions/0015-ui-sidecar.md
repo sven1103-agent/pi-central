@@ -69,23 +69,29 @@ through a fixed verb set over CDP, with no new shipped dependency.**
 3. **The tool surface is small by construction, not by filtering.** The agent may choose *which* checks to
    run and never author the assertion. That answers #276's open question 2, and it is the difference between a
    reviewer and a defendant.
-4. **`ws` is the only code path, and it already ships.** CDP is JSON over a WebSocket; `Page.navigate`,
+4. **Pi is pointed at the sidecar by `--mcp-config`, at a path outside `~/.pi`.** Measured (Phase 0D):
+   `pi --mcp-config <file> mcp list` starts the configured server; the same command without the flag does
+   not. That placement is load-bearing, not cosmetic — `~/.pi` is writable from inside every session (C6),
+   so a design whose MCP configuration lived there would let the agent point Pi at a server of its choosing.
+   The flag also has to precede the subcommand: `pi mcp list --mcp-config …` reports "Unknown option",
+   which is how a probe nearly concluded the flag did not exist.
+5. **`ws` is the only code path, and it already ships.** CDP is JSON over a WebSocket; `Page.navigate`,
    `Page.captureScreenshot`, `Emulation.setDeviceMetricsOverride` and one `Runtime.evaluate` with a fixed
    expression cover both verbs in 183 lines. **No `playwright`, no Pi extension, no second protocol.**
-5. **Egress is pinned to one port, per session.** `(deny network-outbound (remote ip))` then re-allow
+6. **Egress is pinned to one port, per session.** `(deny network-outbound (remote ip))` then re-allow
    `localhost:<port>`, plus an explicit deny for the mDNSResponder socket, which a `(remote ip)` rule does not
    touch. The port is an **input** to the fragment renderer, never a constant.
-6. **The fragment is RENDERED by `renderPolicyFragment`, never written by hand.** The deny set is the one that
+7. **The fragment is RENDERED by `renderPolicyFragment`, never written by hand.** The deny set is the one that
    already exists for sessions — host gitconfig as a *prefix*, `~/.npm`, `~/.config/gh`, the `~/.ssh`
    directory — plus the launchd-listener network deny, because `SSH_AUTH_SOCK` reaches the sidecar by default
    (C4a) and the variable is not the control.
-7. **The URL policy lives in the sidecar.** Registered dev-server origins only; `file://`, `chrome://` and
+8. **The URL policy lives in the sidecar.** Registered dev-server origins only; `file://`, `chrome://` and
    arbitrary `https://` are refused with a structured error. Enforcement is host-side because the agent
    cannot rewrite what it cannot reach.
-8. **No path parameters.** The sidecar accepts no filesystem path and returns PNG bytes; it generates the
+9. **No path parameters.** The sidecar accepts no filesystem path and returns PNG bytes; it generates the
    filename, so a buggy or compromised sidecar cannot overwrite a file of its choosing.
-9. **No identity.** No keychain, no `~/.ssh`, no host git or gh config, no login (ADR-0010).
-10. **The sidecar dies with its session, by construction and by supervision.** macOS has no parent-death
+10. **No identity.** No keychain, no `~/.ssh`, no host git or gh config, no login (ADR-0010).
+11. **The sidecar dies with its session, by construction and by supervision.** macOS has no parent-death
     signal, so this is code: the sidecar holds the read end of a pipe from the session and exits on EOF, and
     the orchestrator reaps it. `kill -9` of the orchestrator must leave no live browser and no open port.
 
