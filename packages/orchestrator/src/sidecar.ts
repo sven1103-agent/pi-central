@@ -130,7 +130,7 @@ export async function handleRequest(
   page: () => Promise<CdpPage>,
   name: string,
   args: Record<string, unknown>,
-): Promise<{ content: { type: "text"; text: string }[]; isError?: boolean }> {
+): Promise<{ content: ToolContent[]; isError?: boolean }> {
   const parsed = parseVerb(name, args);
   if (parsed.kind === "refused") return refusal(parsed);
   const verb = parsed.verb;
@@ -160,8 +160,24 @@ export async function handleRequest(
 
   if (verb.kind === "capture") {
     const shot = await session.capture(verb.clip, verb.fullPage);
-    // Bytes out, no path: the CALLER decides where they go (ADR-0015 §9). The sidecar has no write surface.
-    return text(`data:image/png;base64,${shot.data}`);
+    /**
+     * An MCP IMAGE content block, not a base64 string in a text block.
+     *
+     * The difference is the whole user-visible feature. Pi forwards an image block as an image
+     * (`image(result.content[0])` reaches the model as an image, per its MCP documentation), so the picture
+     * arrives inline in the transcript. Wrapping the same bytes in `data:image/png;base64,…` inside a TEXT
+     * block would make the model read a wall of base64 and would render as nothing at all to the user —
+     * thousands of tokens spent on a string nobody can see.
+     *
+     * Still bytes, still no path: the sidecar writes nothing and names no file (ADR-0015 §9). What changes is
+     * the TYPE of the block, which is what decides whether a human ends up looking at the picture.
+     */
+    return {
+      content: [
+        { type: "image", data: shot.data, mimeType: "image/png" },
+        { type: "text", text: "captured the viewport at 1280x800" },
+      ],
+    };
   }
 
   if (verb.kind === "probe") {
@@ -172,6 +188,16 @@ export async function handleRequest(
   await session.click(verb.clickSelector);
   return text(`clicked ${JSON.stringify(verb.clickSelector)}`);
 }
+
+/**
+ * A block in an MCP `CallToolResult`.
+ *
+ * `image` is a first-class type in the protocol, and Pi forwards it as an image rather than as text — which is
+ * the difference between a picture in the transcript and a wall of base64 nobody can read.
+ */
+type ToolContent =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: string };
 
 const text = (body: string) => ({ content: [{ type: "text" as const, text: body }] });
 

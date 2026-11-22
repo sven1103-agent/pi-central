@@ -12,6 +12,18 @@ import { PROBE_CHECKS, VERB_NAMES } from "../src/sidecar-control.ts";
  * URL is a transport that can be made to spend resources by asking it for nothing.
  */
 
+/**
+ * The first TEXT block of a result.
+ *
+ * Narrowing rather than casting: `capture` now returns an IMAGE block followed by text, and a test that
+ * assumed text would silently read undefined from a perfectly good result. Making the union explicit is what
+ * forces each test to say which block it means.
+ */
+function firstText(result: { content: { type: string }[] }): string {
+  const block = result.content.find((entry) => entry.type === "text") as { text?: string } | undefined;
+  return block?.text ?? "";
+}
+
 const config = { executable: "/nonexistent/chrome", profileDir: "/nonexistent/profile", origin: "http://localhost:4173" };
 
 /** A page thunk that records whether it was called, and fails loudly if the transport reaches for it. */
@@ -44,7 +56,7 @@ test("info answers without launching a browser", () => {
   const gate = pageGate();
   return handleRequest(config, gate.page, "info", {}).then((result) => {
     assert.equal(gate.called(), false, "info must not spend a browser process to report a constant");
-    const body = JSON.parse(result.content[0]?.text ?? "{}") as { origin?: string; verbs?: string[] };
+    const body = JSON.parse(firstText(result)) as { origin?: string; verbs?: string[] };
     assert.equal(body.origin, config.origin);
     assert.deepEqual(body.verbs, [...VERB_NAMES]);
   });
@@ -55,7 +67,7 @@ test("a refused target answers without launching a browser", async () => {
     const gate = pageGate();
     const result = await handleRequest(config, gate.page, "capture", { url });
     assert.equal(gate.called(), false, `${url} must be refused before any browser work`);
-    const body = JSON.parse(result.content[0]?.text ?? "{}") as { kind?: string };
+    const body = JSON.parse(firstText(result)) as { kind?: string };
     assert.equal(body.kind, "refused", url);
   }
 });
@@ -64,7 +76,7 @@ test("an unknown verb is refused and does not launch", async () => {
   const gate = pageGate();
   const result = await handleRequest(config, gate.page, "browser_evaluate", { expression: "1+1" });
   assert.equal(gate.called(), false);
-  const body = JSON.parse(result.content[0]?.text ?? "{}") as { kind?: string; reason?: string };
+  const body = JSON.parse(firstText(result)) as { kind?: string; reason?: string };
   assert.equal(body.kind, "refused");
   assert.equal(body.reason, "unknown-verb");
 });
@@ -76,7 +88,7 @@ test("a verb carrying a smuggled CDP field is refused before the browser", async
     method: "Runtime.evaluate",
   });
   assert.equal(gate.called(), false);
-  const body = JSON.parse(result.content[0]?.text ?? "{}") as { kind?: string; message?: string };
+  const body = JSON.parse(firstText(result)) as { kind?: string; message?: string };
   assert.equal(body.kind, "refused");
   assert.match(body.message ?? "", /method/);
 });
@@ -87,4 +99,26 @@ test("a refused call is not an MCP error", async () => {
   const gate = pageGate();
   const result = await handleRequest(config, gate.page, "capture", { url: "http://example.com/" });
   assert.notEqual(result.isError, true);
+});
+
+test("capture returns an IMAGE content block, not base64 inside a text block", async () => {
+  // The difference is the whole user-visible feature. Pi forwards an `image` block as an image, so the picture
+  // appears in the transcript. The same bytes wrapped in a text block arrive as a wall of base64: thousands of
+  // tokens spent on a string nobody can look at. A test asserting `content[0].type` is the only thing that
+  // holds this, because both shapes "work" from the model's point of view.
+  const config = { executable: "/nonexistent/chrome", profileDir: "/nonexistent/profile", origin: "http://localhost:4173" };
+  const fakePage = {
+    setViewport: async () => {},
+    navigate: async () => {},
+    capture: async () => ({ data: "aGVsbG8=" }),
+  };
+  const result = await handleRequest(config, (async () => fakePage) as never, "capture", {
+    url: "http://localhost:4173/",
+  });
+  assert.equal(result.content[0]?.type, "image", "the first block must be an image");
+  const image = result.content[0] as unknown as { data?: string; mimeType?: string };
+  assert.equal(image.data, "aGVsbG8=", "the bytes pass through unchanged");
+  assert.equal(image.mimeType, "image/png");
+  // And a text block accompanies it, so the transcript says WHAT was captured.
+  assert.equal(result.content[1]?.type, "text");
 });

@@ -31,6 +31,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The sidecar drives its browser over a pipe rather than loopback, which its own egress rule blocks ([#276]).
 - A CDP `sessionId` rides the message envelope, so page commands reach the page and not the browser ([#276]).
 - The sidecar's captured PNG is byte-identical under the policy and without it ([#276]).
+- `capture` returns an MCP image block, so the picture reaches the transcript instead of base64 text ([#276]).
 - A browser renders a local page under the sidecar's own profile with egress confined to one port ([#276]).
 - A two-verb host-side service is measured against shipping `playwright` for UI capture ([#276]).
 - A hand-written credential deny list failed open on `~/.gitconfig`, as C15c predicts ([#276]).
