@@ -1,13 +1,12 @@
 /**
- * The sidecar process: four verbs over MCP stdio (ADR-0015).
+ * The sidecar process: four verbs over MCP streamable HTTP on loopback, behind a bearer token (ADR-0015 §12).
  *
- * ## Why stdio and not the HTTP transport
+ * ## Why HTTP and not stdio
  *
- * MCP over stdio is the only transport with no listening socket — so there is no port for another session
- * to find, and no bearer token to protect one with. The orchestrator already spawns this process under the
- * sidecar's Safehouse profile, so the confinement is the profile and the transport is a pipe the kernel
- * made. The alternative (HTTP + token) was measured to be a shared surface: Playwright's own server
- * answered any client with no auth at all (Phase 0B).
+ * A stdio server is spawned by Pi, so it lands inside the session's sandbox — a child, not a sibling, which C1
+ * forbids. HTTP lets the orchestrator own the process and Pi merely connect. The price is a listening socket
+ * that every session can reach, so the token is the access control (C5), not hygiene. The token arrives in
+ * the environment (`PI_CENTRAL_SIDECAR_TOKEN`), never on the command line.
  *
  * ## What this process will not do
  *

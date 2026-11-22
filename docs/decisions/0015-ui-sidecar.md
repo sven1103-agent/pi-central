@@ -75,7 +75,8 @@ through a fixed verb set over CDP, with no new shipped dependency.**
    so a design whose MCP configuration lived there would let the agent point Pi at a server of its choosing.
    The flag also has to precede the subcommand: `pi mcp list --mcp-config …` reports "Unknown option",
    which is how a probe nearly concluded the flag did not exist.
-5. **`ws` is the only code path, and it already ships.** CDP is JSON over a WebSocket; `Page.navigate`,
+5. **`ws` is the only dependency, and it already ships.** CDP is JSON; it travels over a pipe (decision 12),
+   not a WebSocket, because the sidecar's own egress rule blocked its connection to its own browser; `Page.navigate`,
    `Page.captureScreenshot`, `Emulation.setDeviceMetricsOverride` and one `Runtime.evaluate` with a fixed
    expression cover both verbs in 183 lines. **No `playwright`, no Pi extension, no second protocol.**
 6. **Egress is pinned to one port, per session.** `(deny network-outbound (remote ip))` then re-allow
@@ -94,6 +95,19 @@ through a fixed verb set over CDP, with no new shipped dependency.**
 11. **The sidecar dies with its session, by construction and by supervision.** macOS has no parent-death
     signal, so this is code: the sidecar holds the read end of a pipe from the session and exits on EOF, and
     the orchestrator reaps it. `kill -9` of the orchestrator must leave no live browser and no open port.
+12. **Pi reaches the sidecar over loopback HTTP with a bearer token; the browser is driven over a pipe.**
+    Amends the stdio design of decisions 1 and 4. A stdio MCP server is spawned by Pi inside the session's
+    sandbox, where it failed with `Path does not exist` (a denied stat) and would be a child rather than a
+    sibling. So the orchestrator spawns the sidecar and `mcp.json` names `http://127.0.0.1:<port>/mcp` with
+    `Authorization: Bearer ${PI_CENTRAL_SIDECAR_TOKEN}`. The token is 24 random bytes, checked on every
+    request including `initialize`, and forwarded with `--env-pass` because Safehouse rebuilds the
+    environment. The port is `47800 + the session's ordinal`, so the orchestrator knows it before the child
+    starts. **Consequence: a loopback port is reachable from every session (C5), so the token is the access
+    control.** CDP between the sidecar and Chrome uses fds 3 and 4, not a WebSocket.
+13. **Agents must call the typed function to receive the image.** Measured at Checkpoint B: through
+    `tools.mcp({ tool })` and the `tools.mcp__<server>({ tool })` proxy the result is the caption alone;
+    through `tools.mcp__pi_central_sidecar__capture` it carries the image block, shown with
+    `image(result.content[0])`. The tool description says so. Whether agents follow it unaided is untested.
 
 ## Consequences
 
@@ -122,6 +136,9 @@ through a fixed verb set over CDP, with no new shipped dependency.**
 - **RSS is unmeasured.** The issue estimated 150–250 MB per sidecar. Per-session is the safe default for
   lifetime and token scoping; if a fleet makes it untenable, the fallback is one process with per-session
   origin scoping inside it, which is weaker.
+- **Chrome starts its own updater.** A run's log showed `GoogleUpdater --install` posting to
+  `update.googleapis.com` and starting `launchctl asuser 501 … --net-worker`. Whether that process is
+  confined by the fragment, and whether the request left the machine, is **unmeasured**.
 - **A scratch session has no browser.** No `cwd` means no dev server to reach; the verb reports
   "no browser for this session" rather than spawning something that can reach nothing.
 
