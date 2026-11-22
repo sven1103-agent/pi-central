@@ -123,6 +123,8 @@ test("resuming an entry whose transcript was never written starts fresh instead 
       providerAgentDir: join(root, "provider"),
       home: root,
       installationRoot: undefined,
+      sidecarPort: undefined,
+      browser: "/nonexistent/chrome",
     });
     supervisor.on("error", () => {});
 
@@ -178,6 +180,8 @@ test("a STOPPED session is found by file, so resuming it is not refused as unkno
       providerAgentDir: join(root, "provider"),
       home: root,
       installationRoot: undefined,
+      sidecarPort: undefined,
+      browser: "/nonexistent/chrome",
     });
     supervisor.on("error", () => {});
 

@@ -23,6 +23,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Command, HistoricalSession, LiveSession, ModelOption, PiRecord } from "@pi-central/protocol";
 import { composePolicy, describe, type LaunchMode, type SessionSpec } from "./policy.ts";
+import { mcpConfigArgs, spawnSidecar, type SidecarHandle } from "./sidecar-supervise.ts";
 import { RpcProcess, type LaunchSpec } from "./rpc.ts";
 import { retryRefusal } from "./retry.ts";
 import { checkResumable } from "./resume.ts";
@@ -116,6 +117,14 @@ export class Supervisor extends EventEmitter {
   #config: Config;
   #sessions = new Map<string, LiveSession>();
   #processes = new Map<string, RpcProcess>();
+  /**
+   * UI sidecars, one per session that opted in (ADR-0015).
+   *
+   * Keyed by session so teardown can find it, and **absent** for most sessions: a sidecar exists only when a
+   * port is configured, because the port is what the fragment pins. No port means no browser, and a session
+   * that never sees one costs nothing.
+   */
+  #sidecars = new Map<string, SidecarHandle>();
   #created = 0;
   /**
    * The stats refreshes, coalesced per session (`stats.ts`).
@@ -640,7 +649,46 @@ export class Supervisor extends EventEmitter {
     };
     this.#sessions.set(session.id, session);
 
-    const rpc = new RpcProcess(this.#buildLaunch(policy.launch, input.sessionPath));
+    /**
+     * Spawn the UI sidecar beside the session, if one is configured (ADR-0015).
+     *
+     * **Eager, deliberately.** A stdio MCP server is started by PI, so the config entry decides whether a
+     * sidecar exists at all: there is no way to start it later without a `/reload` after writing the config,
+     * and the first thing the agent would learn about the feature is that it is not there yet. The browser
+     * inside stays lazy — `info` answers without launching one (measured), so a session that never calls a
+     * verb never pays for a renderer.
+     *
+     * A failure here does not fail the session. A browser is a capability, not a precondition: the agent can
+     * still do everything else, and the Inspector reports that this session has no sidecar rather than the
+     * transcript filling with a launch error nobody asked for.
+     */
+    let sidecar: SidecarHandle | undefined;
+    if (this.#config.sidecarPort !== undefined && input.mode === "sandboxed") {
+      try {
+        sidecar = spawnSidecar({
+          sessionId: session.id,
+          port: this.#config.sidecarPort,
+          stateRoot: this.#config.stateRoot,
+          safehouse: this.#config.safehouse,
+          sidecar: this.#config.pi,
+          sidecarArgs: [join(import.meta.dirname, "sidecar.ts")],
+          browser: this.#config.browser,
+          onLog: (line: string) => this.emit("log", session.id, line),
+        });
+        this.#sidecars.set(session.id, sidecar);
+      } catch (error) {
+        sidecar = undefined;
+        this.emit("log", session.id, `no UI sidecar for this session: ${(error as Error).message}`);
+      }
+    }
+
+    const launch = this.#buildLaunch(policy.launch, input.sessionPath, sidecar);
+    // The Inspector shows this string, so it has to be the argv that actually runs. It was computed from
+    // `policy` before the sidecar existed, which showed a session without `--mcp-config` while the process
+    // had one — a display that disagrees with reality in the one place that exists to be truthful (the house
+    // style there is the verbatim policy).
+    session.command = [launch.command, ...launch.args].join(" ");
+    const rpc = new RpcProcess(launch);
     this.#processes.set(session.id, rpc);
 
     rpc.on("record", (record: PiRecord) => this.#onRecord(session.id, record));
@@ -658,6 +706,9 @@ export class Supervisor extends EventEmitter {
       session.dialogs = [];
       this.#clearCompacting(session.id);
       this.#patch(session.id);
+      // A session whose Pi died gets no browser either. Without this the sidecar outlives the only thing that
+      // could have used it, and a failed session would leak a process until shutdown.
+      void this.#stopSidecar(session.id);
       this.emit("error", session.id, session.error);
     });
 
@@ -692,9 +743,14 @@ export class Supervisor extends EventEmitter {
    * safehouse one. The only value interpolated is a path validated to exist by
    * `checkResumable`; the argument shape is fixed.
    */
-  #buildLaunch(launch: LaunchSpec, sessionPath?: string): LaunchSpec {
-    if (!sessionPath) return launch;
-    return { ...launch, args: [...launch.args, "--session", sessionPath] };
+  #buildLaunch(launch: LaunchSpec, sessionPath?: string, sidecar?: SidecarHandle): LaunchSpec {
+    const extra: string[] = [];
+    // BEFORE any subcommand: `pi mcp list --mcp-config X` reports "Unknown option" (Phase 0D measured it,
+    // and a probe nearly concluded the flag did not exist because of the ordering).
+    extra.push(...mcpConfigArgs(sidecar));
+    if (sessionPath) extra.push("--session", sessionPath);
+    if (extra.length === 0) return launch;
+    return { ...launch, args: [...launch.args, ...extra] };
   }
 
   async #refreshState(id: string): Promise<void> {
@@ -1155,8 +1211,31 @@ export class Supervisor extends EventEmitter {
     // A stopped session has no compaction to guard: leaving the mark would refuse the next one after a resume.
     this.#clearCompacting(id);
     this.#patch(id);
+    await this.#stopSidecar(id);
     await rpc.stop();
     this.#processes.delete(id);
+  }
+
+  /**
+   * Take a session's sidecar down, and forget it.
+   *
+   * Called from every path that ends a session, because a sidecar outliving its session holds a browser and a
+   * port — the failure mode the pipe lifetime exists to prevent. The pipe is the backstop; this is the
+   * deliberate half, and both are kept: the pipe covers `kill -9` of this process, which no code here runs for.
+   *
+   * A stop failure is logged and swallowed. A sidecar already gone is the normal case during shutdown, and
+   * refusing to finish a session teardown because its browser had died first would be a worse outcome than a
+   * stale log line.
+   */
+  async #stopSidecar(id: string): Promise<void> {
+    const sidecar = this.#sidecars.get(id);
+    if (sidecar === undefined) return;
+    this.#sidecars.delete(id);
+    try {
+      await sidecar.stop();
+    } catch (error) {
+      this.emit("log", id, `sidecar teardown: ${(error as Error).message}`);
+    }
   }
 
   /**
@@ -1182,6 +1261,7 @@ export class Supervisor extends EventEmitter {
         session.dialogs = [];
         this.#clearCompacting(id);
         this.#patch(id);
+        await this.#stopSidecar(id);
         await rpc.stop();
         this.#processes.delete(id);
       }),

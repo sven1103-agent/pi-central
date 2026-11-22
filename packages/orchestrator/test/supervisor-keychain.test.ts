@@ -71,6 +71,8 @@ function configWithCommandProvider(): { root: string; config: Config } {
       providerAgentDir: provider,
       home: root,
       installationRoot: join(root, "installation"),
+      sidecarPort: undefined,
+      browser: "/nonexistent/chrome",
     },
   };
 }

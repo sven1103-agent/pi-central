@@ -208,6 +208,8 @@ async function harness(mode: "ok" | "slow" | "refuse"): Promise<Harness> {
     providerAgentDir: join(root, "provider"),
     home: root,
     installationRoot: join(root, "installation"),
+    sidecarPort: undefined,
+    browser: "/nonexistent/chrome",
   });
   supervisor.on("error", () => {});
 

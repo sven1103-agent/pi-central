@@ -32,6 +32,8 @@ function supervisorWith(cwd: string, root: string) {
     providerAgentDir: join(root, "provider"),
     home: root,
     installationRoot: join(root, "installation"),
+    sidecarPort: undefined,
+    browser: "/nonexistent/chrome",
   });
   // Without a listener, the launch failure this test run provokes becomes an unhandled exception
   // and fails the run for a reason unrelated to what is under test.

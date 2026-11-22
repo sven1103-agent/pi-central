@@ -182,6 +182,8 @@ test("a turn reports context usage and cost, so a long task is not unmeasured un
     providerAgentDir: join(root, "provider"),
     home: root,
     installationRoot: join(root, "installation"),
+    sidecarPort: undefined,
+    browser: "/nonexistent/chrome",
   });
   supervisor.on("error", () => {});
 

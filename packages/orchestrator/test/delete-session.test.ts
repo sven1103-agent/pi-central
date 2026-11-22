@@ -242,6 +242,8 @@ test("forgetFile drops a stopped entry, so a snapshot cannot restore it", async 
       providerAgentDir: join(root, "provider"),
       home: root,
       installationRoot: undefined,
+      sidecarPort: undefined,
+      browser: "/nonexistent/chrome",
     });
     supervisor.on("error", () => {});
 
@@ -282,6 +284,8 @@ test("forgetFile refuses a RUNNING session, so a live process is never orphaned"
       providerAgentDir: join(root, "provider"),
       home: root,
       installationRoot: undefined,
+      sidecarPort: undefined,
+      browser: "/nonexistent/chrome",
     });
     supervisor.on("error", () => {});
     const started = supervisor.start({ cwd });

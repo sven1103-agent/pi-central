@@ -164,6 +164,8 @@ test("a session started in the installation's own tree carries the warning", asy
       providerAgentDir: join(root, "provider"),
       home: root,
       installationRoot: root,
+      sidecarPort: undefined,
+      browser: "/nonexistent/chrome",
     });
     // The seam exists so this test can supply a path rather than depending on where the test file
     // happens to sit — the same reason every other path here is under a temp root.
@@ -229,6 +231,8 @@ test("the snapshot carries the installation root, so the sheet can evaluate it i
         providerAgentDir: join(root, "provider"),
         home: root,
         installationRoot: "/Users/x/git/pi-central",
+        sidecarPort: undefined,
+        browser: "/nonexistent/chrome",
       },
       { uiDir: null },
     );

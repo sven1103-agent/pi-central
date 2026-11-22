@@ -54,6 +54,8 @@ function configFor(root: string): Config {
     providerAgentDir: join(root, "provider"),
     home: root,
     installationRoot: join(root, "installation"),
+    sidecarPort: undefined,
+    browser: "/nonexistent/chrome",
   };
 }
 

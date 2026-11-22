@@ -230,6 +230,8 @@ function emptyConfig(): Config {
     // Explicitly undefined, so a transport test can never depend on where the test file happens to
     // sit in a checkout — the same reason every other path here is `/nonexistent`.
     installationRoot: undefined,
+    sidecarPort: undefined,
+    browser: "/nonexistent/chrome",
     home: "/Users/tester",
   };
 }

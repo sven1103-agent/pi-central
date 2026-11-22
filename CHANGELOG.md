@@ -25,6 +25,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The sidecar process serves its four verbs over MCP stdio, with no listening socket ([#276]).
 - A sidecar is spawned beside its session with an MCP config outside agent-writable `~/.pi` ([#276]).
 - Closing the sidecar's stdin takes it down, so a killed orchestrator leaves no browser behind ([#276]).
+- A sandboxed session with `PI_CENTRAL_SIDECAR_PORT` set is handed an MCP config and its own sidecar ([#276]).
+- The Inspector's command string now matches the argv that actually runs ([#276]).
 - A browser renders a local page under the sidecar's own profile with egress confined to one port ([#276]).
 - A two-verb host-side service is measured against shipping `playwright` for UI capture ([#276]).
 - A hand-written credential deny list failed open on `~/.gitconfig`, as C15c predicts ([#276]).

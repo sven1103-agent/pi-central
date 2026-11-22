@@ -80,6 +80,28 @@ export interface Config {
    * configuration **actually** is, rather than from an assumption (C13).
    */
   providerAgentDir: string;
+  /**
+   * The dev-server port a session's UI sidecar is allowed to reach, or `undefined` for no sidecar
+   * (ADR-0015).
+   *
+   * A **port, not an address**: SBPL cannot express `127.0.0.1:*` at all (measured — "host must be `*` or
+   * `localhost`"), so `localhost:<port>` is the only narrow egress rule and one port is all a fragment can
+   * pin.
+   *
+   * There is deliberately **no auto-grant**. An earlier draft granted on "the workdir sniffs as a frontend
+   * project", which is C15c's shape: a decision keyed on an input that appears nowhere in the policy. Instead
+   * the port is configuration, and absent configuration means the session gets no browser. The product answer
+   * is a gate at session creation (offered when the project looks like a dev server), which is a UI slice and
+   * not a policy one.
+   */
+  sidecarPort: number | undefined;
+  /**
+   * The browser the sidecar drives, resolved by configuration like `safehouse` and `pi`.
+   *
+   * Not distributed: a renderer is a host tool, and shipping one would add ~344 MB to a package whose only
+   * runtime dependency is `ws`.
+   */
+  browser: string;
 }
 
 /**
@@ -134,7 +156,23 @@ export function defaultConfig(): Config {
     // `installation-root.ts`. `defaultConfig` is the orchestrator's entry point, so resolving here
     // means the answer is the running installation and not whatever a config file claims.
     installationRoot: resolveInstallationRoot(),
+    sidecarPort: parsePort(process.env["PI_CENTRAL_SIDECAR_PORT"]),
+    browser:
+      process.env["PI_CENTRAL_BROWSER"] ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   };
+}
+
+/**
+ * Read a port from configuration, or `undefined` for no sidecar.
+ *
+ * A malformed value is `undefined` rather than a throw: the orchestrator must start for a user who typo'd a
+ * variable, and "no browser" is a stated state the Inspector can show. A throw here would make a typo a
+ * launch failure.
+ */
+function parsePort(value: string | undefined): number | undefined {
+  if (value === undefined || value.trim() === "") return undefined;
+  const port = Number(value);
+  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : undefined;
 }
 
 /**
