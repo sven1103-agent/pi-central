@@ -112,3 +112,28 @@ of this slice, and both halves were measured in one run.
 | Does the ssh-agent network deny actually refuse a connect? | a probe that attempts it, not an INFO line |
 | Does the renderer need the AppKit grants at all? | a bundled Chromium (`--enable=chromium-headless` plus the bundle path) — the only way to shrink the surface |
 | The parity gap: network-idle, console errors, teardown | a second slice of C1, or accept `playwright-core` (a library, no tool surface) |
+
+## Checkpoint A — the sidecar process, driven directly (PASSED)
+
+The whole pipeline except Pi's plumbing: a real MCP handshake over stdio, the policy refusals, a browser
+launched on first use, and PNG bytes back.
+
+```
+$ node drive-sidecar.mjs --control
+PASS  the sidecar answers initialize  -- {"name":"pi-central-sidecar","version":"0"}
+PASS  it advertises four verbs  -- act, capture, info, probe
+PASS  info reports the origin WITHOUT launching a browser
+PASS  an unregistered origin is refused  -- origin-not-registered
+PASS  a smuggled CDP method is refused  -- unknown argument "method"
+PASS  probe finds the deliberate overflow  -- [{"kind":"horizontal-overflow","selector":"#wide","by":744}]
+PASS  capture returns PNG bytes  -- 11708 bytes
+7/7 expectations held (control)
+```
+
+**The two verbs agree, computed by different paths.** `probe` reports `#wide` overflowing by 744 px (the
+bar starts at 24 px, is 2000 px wide, and the viewport is 1280). The PNG shows the same bar clipped at the
+viewport edge with a horizontal scrollbar. Neither number was derived from the other, which is the only
+reason their agreement is evidence.
+
+The `--as-spawned` variant (under Safehouse, with the rendered fragment) is still `verified/manual` and
+unrun: it needs `renderSidecarFragment` output written to a file first.

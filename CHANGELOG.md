@@ -23,6 +23,8 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The CDP driver behind those verbs interpolates no caller input into an expression ([#276]).
 - `pi --mcp-config` is measured to point a session at a config outside agent-writable `~/.pi` ([#276]).
 - The sidecar process serves its four verbs over MCP stdio, with no listening socket ([#276]).
+- A sidecar is spawned beside its session with an MCP config outside agent-writable `~/.pi` ([#276]).
+- Closing the sidecar's stdin takes it down, so a killed orchestrator leaves no browser behind ([#276]).
 - A browser renders a local page under the sidecar's own profile with egress confined to one port ([#276]).
 - A two-verb host-side service is measured against shipping `playwright` for UI capture ([#276]).
 - A hand-written credential deny list failed open on `~/.gitconfig`, as C15c predicts ([#276]).

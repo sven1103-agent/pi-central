@@ -64,3 +64,7 @@ spikes/*/harness/cdp-out.png
 # Private fixture root for the sidecar-policy tests: /tmp is refused by design (every session
 # can read it), and $HOME is unwritable under an agent harness.
 .test-private/
+
+# Checkpoint captures: artifacts of a run, not of the repository.
+spikes/*/harness/sidecar-capture.png
+spikes/*/harness/cdp-out.png

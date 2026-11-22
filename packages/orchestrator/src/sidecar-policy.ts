@@ -58,6 +58,14 @@ export interface SidecarSpec {
   safehouse: string;
   /** The sidecar executable: a fixed binary driven by the four verbs (ADR-0015 §2). */
   sidecar: string;
+  /**
+   * Arguments placed before the sidecar's own flags, e.g. the script path when `sidecar` is `node`.
+   *
+   * Exists because Phase 2 runs the sidecar from source, and the argv shape must still be fixed: binary,
+   * then its own flags. A test uses it to substitute a stand-in that exercises the lifetime without a
+   * browser. It is NOT caller-controlled — the supervisor resolves it from configuration, like `pi`.
+   */
+  sidecarArgs?: string[];
 }
 
 export interface ComposedSidecar {
@@ -81,6 +89,13 @@ export function composeSidecarPolicy(spec: SidecarSpec): ComposedSidecar {
   assertPrivateLocation(spec.profileDir, "profile");
   assertPrivateLocation(spec.fragmentDir, "fragment");
 
+  // The profile directory is created here, not by the browser launcher.
+  //
+  // It is the launch's `cwd` as well as Chrome's `--user-data-dir`, so a missing one makes `spawn` fail with
+  // ENOENT naming the BINARY — a misleading error that points at the wrong file. Creating it beside the
+  // fragment means the launch spec is satisfiable by construction.
+  mkdirSync(resolve(spec.profileDir), { recursive: true, mode: 0o700 });
+
   const dir = resolve(spec.fragmentDir);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const fragmentFile = join(dir, `${spec.id}.sb`);
@@ -96,6 +111,7 @@ export function composeSidecarPolicy(spec: SidecarSpec): ComposedSidecar {
     `--append-profile=${fragmentFile}`,
     "--",
     spec.sidecar,
+    ...(spec.sidecarArgs ?? []),
     "--port",
     "0",
     "--no-sandbox",
