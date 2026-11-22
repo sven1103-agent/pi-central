@@ -9,7 +9,7 @@
  * rather than inferring "streaming" from having seen a delta (C8).
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { PROTOCOL_VERSION, supportsCompact, supportsDelete, supportsPlaces, supportsRetry, supportsReveal, type Control, type HistoricalSession, type InstallFacts, type LiveSession, type ModelOption } from "@pi-central/protocol";
+import { PROTOCOL_VERSION, supportsCompact, supportsDelete, supportsPlaces, supportsReload, supportsRetry, supportsReveal, type Control, type HistoricalSession, type InstallFacts, type LiveSession, type ModelOption } from "@pi-central/protocol";
 import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
 import { ActivityBar } from "./components/ActivityBar.tsx";
 import { ConfirmDelete } from "./components/ConfirmDelete.tsx";
@@ -187,6 +187,18 @@ export function App() {
   const [tab, setTab] = useState<Tab>("sessions");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [confirmStop, setConfirmStop] = useState<LiveSession | undefined>(undefined);
+  /**
+   * The sessions awaiting a reload confirmation (issue #274).
+   *
+   * Only ever set for a session that is WORKING, because that is the only case in which a reload destroys something:
+   * Pi refuses to reload mid-run ("Wait for the current response to finish before reloading"), so the reader has to
+   * choose between "wait" and "abandon this run". An idle session reloads without a dialog — a confirmation asked for
+   * an action with no cost trains a reader to dismiss confirmations.
+   *
+   * A list rather than one id so the confirmation can be stated per session without a second piece of state, and so
+   * two presses in flight cannot overwrite each other's intent.
+   */
+  const [confirmReload, setConfirmReload] = useState<LiveSession | undefined>(undefined);
   /**
    * The session awaiting a delete confirmation (issue #150).
    *
@@ -1254,6 +1266,35 @@ export function App() {
 
   const transcript = transcriptFor(state, focused?.id);
   const fleet = fleetCounts(state);
+
+  /*
+   * Ask for the focused session's toolset, and ask AGAIN after a reload (issue #274).
+   *
+   * ## Why this is an effect rather than a control the reader presses
+   *
+   * The acceptance criterion is that Pi Central can SAY a session is stale. A check behind a button is a check that
+   * only ever runs when the reader already suspects the answer — the reader this exists for is the one who added a
+   * skill, sees no way to use it, and has no idea that a reload is what was missing.
+   *
+   * ## Why it keyed on the reload moment, not only on the id
+   *
+   * `reloading` goes true and then false around a reload. Including it in the dependency list is what makes the
+   * readout refresh when the reload FINISHES, rather than keeping a "changed" verdict on a session that has just
+   * picked the change up — a stale staleness claim is worse than none, because it teaches the reader that the
+   * warning is noise.
+   *
+   * ## Why it is gated on the protocol
+   *
+   * A v11 orchestrator answers `bad control: unknown kind 'toolset'`, and an effect would turn that into one error
+   * per focus change. The same rule the `install` re-check follows.
+   */
+  const toolsetWanted = supportsReload(state.install?.protocol);
+  const toolsetSessionId = focused?.id;
+  const toolsetReloading = focused?.reloading === true;
+  useEffect(() => {
+    if (!toolsetWanted || toolsetSessionId === undefined || toolsetReloading) return;
+    send({ kind: "toolset", sessionId: toolsetSessionId });
+  }, [toolsetWanted, toolsetSessionId, toolsetReloading, send]);
   // HOME arrives with the first snapshot, so it is undefined until then. Paths render in full
   // for that instant rather than showing a wrong abbreviation.
   const home = state.home;
@@ -1347,6 +1388,34 @@ export function App() {
       send({ kind: "rename", sessionId: focused.id, name });
     },
     [focused, send],
+  );
+
+  /**
+   * Ask to reload one session's resources (issue #274).
+   *
+   * ## Why the shell decides whether a confirmation is needed
+   *
+   * Three call sites (the header bar, the composer's command row, the panel) must not each decide. The rule is one
+   * sentence: a reload DURING A RUN is a dialog, because Pi will not reload while it is working and the confirmation
+   * is therefore asking whether to abandon the run; an idle session is reloaded directly, because there is nothing to
+   * lose and a confirmation with no cost behind it is noise.
+   *
+   * ## Why the busy test is `streaming` rather than `hasProcess`
+   *
+   * Pi's own condition is `isStreaming` (and `isCompacting`). A session that is idle but compacting needs the same
+   * treatment for the same reason — Pi refuses both — so the dialog is opened when `state` is `streaming` OR a
+   * compaction is outstanding, and the wording names whichever it was.
+   */
+  const requestReload = useCallback(
+    (session: LiveSession) => {
+      const busy = session.state === "streaming" || session.compacting === true;
+      if (!busy) {
+        send({ kind: "reload", sessionId: session.id });
+        return;
+      }
+      setConfirmReload(session);
+    },
+    [send],
   );
 
   const onStartSession = useCallback(() => {
@@ -1571,7 +1640,7 @@ export function App() {
       const shortcut = resolveShortcut(event, {
         // The model list editor is a modal too (issue #265): a chord acting on the session behind it would be a
         // keystroke aimed at a surface the reader is not looking at — the same rule as a delete confirmation.
-        modalOpen: pendingDelete !== undefined || confirmStop !== undefined || settingsOpen || modelListOpen,
+        modalOpen: pendingDelete !== undefined || confirmStop !== undefined || confirmReload !== undefined || settingsOpen || modelListOpen,
         keysOpen,
         sheetOpen,
         inField: isEditableTarget(event.target as TargetLike | null),
@@ -1586,7 +1655,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [shellShortcuts, pendingDelete, confirmStop, settingsOpen, modelListOpen, keysOpen, sheetOpen]);
+  }, [shellShortcuts, pendingDelete, confirmStop, confirmReload, settingsOpen, modelListOpen, keysOpen, sheetOpen]);
 
   const platform = detectPlatform(typeof navigator === "undefined" ? undefined : navigator.userAgent);
 
@@ -1842,7 +1911,7 @@ export function App() {
             `resolveShortcut`, and a helper that both call would be the third place to update when a modal is added —
             this line and that call site are each one line, and the test asserts both stand down.
           */
-          modalOpen={pendingDelete !== undefined || confirmStop !== undefined || settingsOpen || keysOpen || modelListOpen}
+          modalOpen={pendingDelete !== undefined || confirmStop !== undefined || confirmReload !== undefined || settingsOpen || keysOpen || modelListOpen}
           retryAvailable={supportsRetry(state.install?.protocol)}
           onRetryRow={(row) => {
             // Only a live session has a handle to retry with; a row that is not running has no process to
@@ -1993,6 +2062,20 @@ export function App() {
                         const target = focusedSession(state);
                         if (target === undefined) return;
                         send({ kind: "compact", sessionId: target.id });
+                      },
+                    }
+                  : {}),
+                /*
+                 * Reload (issue #274). Gated on the protocol for the same reason as Compact — a v11 orchestrator answers
+                 * `bad control: unknown kind 'reload'` — and routed through `requestReload`, which is the one place that
+                 * knows a busy session needs a question first.
+                 */
+                ...(supportsReload(state.install?.protocol)
+                  ? {
+                      onReload: () => {
+                        const target = focusedSession(state);
+                        if (target === undefined) return;
+                        requestReload(target);
                       },
                     }
                   : {}),
@@ -2183,6 +2266,31 @@ export function App() {
                     },
                   }
                 : {})}
+              {...(supportsReload(state.install?.protocol)
+                ? {
+                    onReload: () => {
+                      if (focused) requestReload(focused);
+                    },
+                  }
+                : {})}
+              /*
+                The toolset (issue #274). Asked for whenever the panel is showing a session, and again on every reload
+                of THIS session — a readout that kept saying "changed" after a successful reload would make the reader
+                reload twice.
+
+                Keyed on the session id AND the reload moment rather than a bare id, so a reload that finished
+                invalidates it: `reloading` going from true back to false is the signal, and the dependency list below
+                expresses exactly that.
+              */
+              toolset={tab === "sessions" && focused ? state.toolsets[focused.id] : undefined}
+              toolsetError={tab === "sessions" && focused ? state.toolsetErrors[focused.id] : undefined}
+              {...(supportsReload(state.install?.protocol)
+                ? {
+                    onRefreshToolset: () => {
+                      if (focused) send({ kind: "toolset", sessionId: focused.id });
+                    },
+                  }
+                : {})}
               onForget={() => {
                 if (focused?.sessionFile) dispatch({ kind: "forget", path: focused.sessionFile });
               }}
@@ -2313,6 +2421,24 @@ export function App() {
           onConfirm={() => {
             send({ kind: "stop", sessionId: confirmStop.id });
             setConfirmStop(undefined);
+          }}
+        />
+      )}
+
+      {/*
+        Reloading a session that is WORKING (issue #274).
+
+        The dialog exists for one reason, and the wording says it: Pi refuses to reload while it is streaming or
+        compacting, so the only way to reload now is to abandon the run. The reader is choosing between waiting and
+        losing the work in flight, and that is not a choice a button in a chrome row may make silently.
+      */}
+      {confirmReload && (
+        <ConfirmReload
+          session={confirmReload}
+          onCancel={() => setConfirmReload(undefined)}
+          onConfirm={() => {
+            send({ kind: "reload", sessionId: confirmReload.id, interrupt: true });
+            setConfirmReload(undefined);
           }}
         />
       )}
@@ -2662,6 +2788,7 @@ function SessionView({
               onSend={onSend}
               onClearQueueAndStop={onClearQueueAndStop}
               onCompact={controls?.onCompact}
+              onReload={controls?.onReload}
               restored={restored}
               onRestored={onRestored}
               draft={draft}
@@ -2726,6 +2853,94 @@ export function ErrorStrip({ message, onDismiss }: { message: string; onDismiss:
         <button type="button" className="btn" onClick={onDismiss}>
           Dismiss
         </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Confirming a reload of a session that is working (issue #274).
+ *
+ * ## Why a dialog here, when a reload is not destructive
+ *
+ * Nothing is deleted, and the transcript survives — so the first instinct is to send the control and let Pi refuse.
+ * That is wrong for a reason that is about the RUN rather than the file: Pi will not reload while it is working, so
+ * the only way to honour the press is to abandon whatever the session is doing. A reader who loses a three-minute
+ * tool sequence to a button that said "Reload resources" has been misled by the button, not by Pi.
+ *
+ * ## The wording
+ *
+ * It names the session (by the label the rail and the header use), the state the reader is interrupting, and what a
+ * reload does NOT touch — the working directory and the transcript. Two of those are reassurance the reader needs in
+ * order to judge; the third is the cost, and it is stated as an interruption rather than softened into "this may take
+ * a moment".
+ *
+ * ## Focus
+ *
+ * `Keep the run` takes focus, following `ConfirmStop` and `ConfirmDelete`: an `Enter` carried over from the composer
+ * must cancel rather than abandon a run.
+ */
+function ConfirmReload({
+  session,
+  onCancel,
+  onConfirm,
+}: {
+  session: LiveSession;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const cancelOf = useRef(onCancel);
+  cancelOf.current = onCancel;
+
+  useEffect(() => {
+    // Mount-only: focus enters on OPEN, and a broadcast-driven re-render is not an open.
+    cancelRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") cancelOf.current();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // Named rather than generic: a compaction and a run are different work, and what is lost differs.
+  const working = session.compacting === true ? "compaction" : "run";
+
+  return (
+    <div className="modal-backdrop" onClick={onCancel} role="presentation">
+      <div
+        className="modal"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="reload-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h3 id="reload-title">Reload while this session is working?</h3>
+        <p style={{ marginBottom: 8 }}>
+          <strong>{displayName(session)}</strong>
+          <span className="mono" style={{ display: "block", fontSize: "var(--fs-xs)", color: "var(--dim)" }}>
+            {session.cwd}
+          </span>
+        </p>
+        <p style={{ marginBottom: 8 }}>
+          Pi cannot reload while it is running, so reloading now <strong>abandons the current {working}</strong>. What it
+          has already written stays in the transcript.
+        </p>
+        <p style={{ marginBottom: 16, fontSize: "var(--fs-sm)", color: "var(--dim)" }}>
+          A reload re-reads extensions, skills, prompt templates, MCP servers and context files. The session keeps its
+          transcript, its working directory and its handle — nothing is forked and no new session appears.
+        </p>
+        <div className="dialog-actions">
+          <button type="button" className="btn btn-danger" onClick={onConfirm}>
+            Abandon the {working} and reload
+          </button>
+          <button type="button" className="btn" ref={cancelRef} onClick={onCancel}>
+            Keep the {working} running
+          </button>
+        </div>
       </div>
     </div>
   );

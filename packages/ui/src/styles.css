@@ -1963,6 +1963,37 @@ button { font: inherit; color: inherit; }
 .composer-command:disabled { opacity: 0.55; cursor: default; }
 
 /*
+ * A quiet control that sits inside a sentence or a panel row (issue #274).
+ *
+ * `display: inline` and `font: inherit` on purpose: "Not checked. [Check for changes]" has to read as one line, and
+ * `.btn` sets a padding and border that would push the words onto their own row beside a 96px label column. Colour
+ * and hover still come from `.btn-quiet`, so it is recognisably the same kind of control as every other quiet
+ * button rather than a new species.
+ */
+.btn-inline {
+  display: inline;
+  font: inherit;
+  padding: 1px 6px;
+  margin-left: 2px;
+}
+
+/*
+ * The toolset's evidence list (issue #274).
+ *
+ * A path per row, in the mono face, wrapping rather than overflowing: these are absolute paths into the agent
+ * directory and a project's own config directory, and they are the reader's evidence for what was compared.
+ * `break-all` for the same reason `.settings-mono` uses it — a filesystem path has no spaces to break at.
+ */
+.toolset-paths {
+  margin: 4px 0 0;
+  padding-left: 14px;
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  word-break: break-all;
+}
+.toolset-paths li { margin-bottom: 2px; }
+
+/*
  * The follow toggle: a SWITCH with its label beside it.
  *
  * A pill whose only difference between states is a word is a label wearing a button's clothes — `auto-follow off` "reads

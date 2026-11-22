@@ -40,9 +40,11 @@ import {
   PROTOCOL_VERSION,
   COMPACT_SINCE_PROTOCOL,
   INSTALL_FACTS_SINCE_PROTOCOL,
+  RELOAD_SINCE_PROTOCOL,
   RETRY_SINCE_PROTOCOL,
   REVEAL_SINCE_PROTOCOL,
   supportsCompact,
+  supportsReload,
   supportsInstall,
   supportsRetry,
   supportsReveal,
@@ -213,4 +215,27 @@ test("reveal's two kinds are in the pinned surface, so neither can slip in unbum
   // and leave a silently-failing control on screen.
   assert.ok(kindsOf("Control").includes("reveal"), "the reveal control must be in the surface");
   assert.ok(kindsOf("Event").includes("osActionError"), "the refusal event must be in the surface");
+});
+
+test("supportsReload gates on the version that introduced the control, not on equality", () => {
+  // The consequence of getting this wrong is a control that answers `bad control: unknown kind 'reload'` — for the
+  // reader who pressed it precisely because a tool was missing, a message that explains nothing about why.
+  assert.equal(supportsReload(11), false, "v11 has no reload control");
+  assert.equal(supportsReload(RELOAD_SINCE_PROTOCOL), true, "the version that introduced it");
+  assert.equal(supportsReload(RELOAD_SINCE_PROTOCOL + 1), true, "a later version still has it");
+  // Unknown is "the handshake has not finished", not "old" — the convention `supportsRetry` documents.
+  assert.equal(supportsReload(undefined), true);
+  assert.equal(RELOAD_SINCE_PROTOCOL, 12);
+});
+
+test("the reload pair and the toolset pair are both in the pinned surface", () => {
+  // Four kinds, two of each direction, and the two halves fail differently: without `reload` the UI offers a button
+  // that errors; without `toolset`/`toolsetError` a staleness claim could never be made or refused, and a UI that
+  // expected them would show silence for a check it asked for.
+  assert.ok(kindsOf("Control").includes("reload"), "the reload control must be in the surface");
+  assert.ok(kindsOf("Control").includes("toolset"), "the toolset question must be in the surface");
+  assert.ok(kindsOf("Event").includes("toolset"), "its answer must be in the surface");
+  // The failure event is NOT optional: without it, "the check could not be asked" and "the check found nothing"
+  // would collapse into one, which is the fabricated-clean-result failure C14 describes.
+  assert.ok(kindsOf("Event").includes("toolsetError"), "and so must its refusal");
 });

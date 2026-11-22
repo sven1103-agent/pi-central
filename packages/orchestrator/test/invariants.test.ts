@@ -225,3 +225,47 @@ test("keychain code never passes a password on a command line", () => {
     assert.ok(!/["']-p["']/.test(code), `a password flag appears in code: ${code}`);
   }
 });
+
+test("nothing reloads a session without a client asking (issue #274)", () => {
+  /*
+   * The acceptance criterion, as a property of the source: "the reload path is explicit, never automatic — no file
+   * watcher restarts or reloads a session on its own".
+   *
+   * A file watcher is the obvious shape for "tell me when a skill appears", and it is the one shape this feature
+   * must not take: a reload shuts Pi's extension instances down and rebinds them, so a watcher would abort whatever
+   * the session was doing whenever an editor saved a file in `.pi/`. The check that this cannot happen silently is
+   * that the orchestrator contains no filesystem watcher and no scheduler at all — its only timers are the command
+   * deadlines in `rpc.ts`.
+   *
+   * `setTimeout` is allowed because it is how those deadlines are expressed; `setInterval`, `fs.watch`,
+   * `fs.watchFile` and `chokidar` are not, because each of them runs work on a clock rather than on a request.
+   */
+  const offenders: string[] = [];
+  for (const file of files) {
+    const text = readFileSync(file, "utf8");
+    for (const pattern of ["setInterval", "watchFile", "fs.watch", "chokidar", "FSEvent"]) {
+      if (text.includes(pattern)) offenders.push(`${relative(SRC, file)}: ${pattern}`);
+    }
+  }
+  assert.deepEqual(offenders, [], `the orchestrator must act on requests only:\n${offenders.join("\n")}`);
+});
+
+test("the reload capability is a command Pi Central's own extension registers, not a Pi RPC command", () => {
+  /*
+   * ADR-0015's decision, held in place. Two ways this could silently regress:
+   *
+   *   - someone adds `{ type: "reload" }` to the supervisor's `Command` union, on the belief that Pi has one. Pi
+   *     does not, so the command would answer `Unknown command: reload` and the feature would look broken;
+   *   - someone replaces the extension with `prompt("/reload")`, which Pi treats as a MESSAGE for the model — it
+   *     would answer as a prompt and the reload would never happen.
+   */
+  const piSurface = readFileSync(join(SRC, "..", "..", "protocol", "src", "pi.ts"), "utf8");
+  assert.ok(!/type: "reload"/.test(piSurface), "Pi has no RPC `reload` command, so the union must not claim one");
+
+  const supervisor = readFileSync(join(SRC, "supervisor.ts"), "utf8");
+  assert.ok(!/prompt", message: "\/reload"/.test(supervisor), "`/reload` is a built-in TUI command and would not run");
+  assert.match(supervisor, /RELOAD_COMMAND/, "the reload must go through the extension's command name");
+
+  const extension = readFileSync(join(SRC, "reload-extension.ts"), "utf8");
+  assert.match(extension, /ctx\.reload\(\)/, "and that command is what reaches ctx.reload()");
+});

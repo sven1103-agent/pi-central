@@ -1,3 +1,38 @@
+# Security
+
+Two things worth knowing before reading the vulnerability process below: the one place Pi Central writes code that
+another process executes, and why it does.
+
+## Pi Central provisions one extension into the agent directory (ADR-0015)
+
+A running session cannot re-read its resources — Pi discovers extensions, skills, prompt templates, themes and MCP
+servers once, at startup — and Pi's only reload entry point is `/reload`, a **built-in TUI command** that Pi
+excludes from `get_commands` because it would not execute if sent via `prompt`. An **extension-registered** command
+is therefore the only route a subprocess RPC client can take to `ctx.reload()`, so Pi Central installs one.
+
+**An extension runs inside the Pi process with Pi's own OS permissions.** Provisioning one is a trust decision, not a
+convenience, and it is the only step in this product where Pi Central writes code that something else runs.
+
+What bounds it:
+
+| Property | Why |
+|---|---|
+| **One command, one call** | The file registers `pi-central:reload` and its handler is `await ctx.reload(); return;`. Nothing else — asserted by `reload-extension.test.ts`, which fails if a second `registerCommand` or any `import` appears. |
+| **A constant, not anything derived** | The source is a string in `packages/orchestrator/src/reload-extension.ts`. No prompt, session, working directory or configuration value reaches it. |
+| **Its own directory** | `<agentDir>/pi-central/extensions/reload.js`, so it cannot be confused with the reader's extensions, listed among them, or removed by an action meant for their own. |
+| **0600 in a 0700 directory** | A world-writable directory above an executed file would let anything replace it. |
+| **Namespaced** | `pi-central:reload`; Pi keeps the first registration, so a reader's own `/reload` command wins and this one never shadows it. |
+| **Best-effort** | An agent tree Pi Central does not own (`external` ownership, ADR-0010 §5) is not written to. Provisioning then yields nothing, the session still starts, and the reload control reports that the command is not loaded — instead of reloading nothing and calling it success. |
+
+**What it can do, stated plainly.** As an extension it could — if it were different code — inspect prompts, tool
+calls, files, credentials and session history. The protection is that it is thirty lines of constant text with a test
+that fails when it grows, not that Pi confines it. Read the file before trusting the reload control; that is the
+whole of the assurance.
+
+**When this should go away.** An RPC `reload` command in Pi would remove the installed file entirely. ADR-0015
+records the trade-off and both routes, so a later reader does not re-litigate it — and so nobody builds the second
+mechanism beside the first.
+
 # Dependency vulnerability management
 
 How Pi Central finds out that something it ships has a known vulnerability, where that shows up, and

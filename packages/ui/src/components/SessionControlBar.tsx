@@ -51,6 +51,14 @@ export interface SessionControlCaps {
    * affordance exists.
    */
   onCompact?: (() => void) | undefined;
+  /**
+   * Open the reload confirmation (issue #274).
+   *
+   * Absent when the connected orchestrator speaks an older protocol, and the SHELL withholds it further for a
+   * session with no process — the same division as `onCompact`, so the bar, the panel and the composer cannot
+   * disagree about when a reload is offered.
+   */
+  onReload?: (() => void) | undefined;
 }
 
 /**
@@ -118,6 +126,28 @@ function ControlIcon({ control }: { control: string }) {
           <path d="M8 13.5v-4M5.5 11.5 8 9l2.5 2.5" />
         </svg>
       );
+    case "reload":
+      /*
+       * A circular arrow, drawn as an open arc with an arrowhead rather than the closed ring Unicode uses for
+       * "refresh" (U+27F3), which renders as tofu in some fallbacks — the defect that made `⌫` an empty box.
+       *
+       * The gap in the stroke is what makes it read as a rotation rather than as a circle: an unbroken ring at 16px
+       * is a dot with a hole in it.
+       */
+      return (
+        <svg {...common}>
+          <path d="M13 8a5 5 0 1 1-1.9-3.9" />
+          <path d="M13.5 2.5v3h-3" />
+        </svg>
+      );
+    case "reload-unavailable":
+      // Reachable only if the shell offers the control it has gated off; drawn as the generic dot rather than
+      // inventing a second mark for a state that should not occur.
+      return (
+        <svg {...common}>
+          <circle cx="8" cy="8" r="5" />
+        </svg>
+      );
     case "forget":
       /*
        * A list with a minus, NOT an eye with a slash.
@@ -154,6 +184,7 @@ export function SessionControlBar({
   onForget,
   onDelete,
   onCompact,
+  onReload,
 }: { session: LiveSession } & SessionControlCaps) {
   /*
    * Built from `sessionControlsFor`, so WHICH actions exist is decided in one place and stays a tested pure function.
@@ -167,6 +198,7 @@ export function SessionControlBar({
     ...(onForget === undefined ? {} : { onForget }),
     ...(onDelete === undefined ? {} : { onDelete }),
     ...(onCompact === undefined ? {} : { onCompact }),
+    ...(onReload === undefined ? {} : { onReload }),
   });
 
   if (controls.length === 0) return null;

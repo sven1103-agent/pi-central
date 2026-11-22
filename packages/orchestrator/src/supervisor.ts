@@ -21,7 +21,7 @@
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { Command, HistoricalSession, LiveSession, ModelOption, PiRecord } from "@pi-central/protocol";
+import type { Command, HistoricalSession, LiveSession, ModelOption, PiRecord, ToolsetStatus } from "@pi-central/protocol";
 import { composePolicy, describe, type LaunchMode, type SessionSpec } from "./policy.ts";
 import { RpcProcess, type LaunchSpec } from "./rpc.ts";
 import { retryRefusal } from "./retry.ts";
@@ -35,6 +35,8 @@ import { KEYCHAIN_FILE, inspectProviderAuth, readStore } from "./agent-store.ts"
 import { assessAgentCapabilities, agentKeychainPath } from "./capabilities.ts";
 import { createKeychainProbe, type KeychainCheck, type KeychainProbe } from "./keychain.ts";
 import { renderPolicyFragment } from "./fragment.ts";
+import { inspectToolset } from "./toolset.ts";
+import { RELOAD_COMMAND, provisionReloadExtension } from "./reload-extension.ts";
 import {
   listDirectory,
   readFileForDisplay,
@@ -64,6 +66,16 @@ export const EMPTY_PROMPT_WITH_IMAGES = "See the attached image.";
  * would have produced a perfectly good summary a few seconds later.
  */
 const COMPACT_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * How long a manual `reload` may take before its command is considered unanswered (issue #274).
+ *
+ * Generous, and measured rather than guessed: a reload re-resolves every package, reloads settings, shuts
+ * down the extension instances and rebinds new ones, and MCP servers reconnect. On this machine, with a
+ * handful of extensions, the command answers in well under a second — so a minute is not a tight bound but it
+ * is far enough above the normal case that a failure is reported as a failure rather than as slowness.
+ */
+const RELOAD_TIMEOUT_MS = 60_000;
 import { interpretRecord } from "./state.ts";
 import { RefreshCoalescer, applyStats, readStats } from "./stats.ts";
 
@@ -142,6 +154,27 @@ export class Supervisor extends EventEmitter {
    * sending a second compaction into that state is exactly what the guard exists to prevent.
    */
   #compactRequests = new Set<string>();
+  /**
+   * When each session last loaded its resources — its start, or its last reload (issue #274).
+   *
+   * Kept here rather than on `LiveSession` for the reason `#compacting` is: it is a fact about a MOMENT in
+   * this process's life, not something Pi reported, and the toolset check needs the moment the session
+   * actually read its resources. A resumed session's real start is the resume, not the file's first line, so
+   * reading it from the transcript would answer a different question.
+   *
+   * Absent means "this process never saw it", which is reported as `unknown` freshness rather than assumed
+   * fresh — exactly the case of a session restored by an earlier orchestrator and then described by this one.
+   */
+  #resourcesLoadedAt = new Map<string, number>();
+  /**
+   * Manual reloads in flight, by session id (issue #274).
+   *
+   * Pi refuses a reload while a run is in flight, so the guard cannot be `session.state`: the whole point of
+   * the control is a session that is BUSY and stale. What must be refused is a SECOND reload while this one
+   * has not answered — the same shape as `#compactRequests`, and the same consequence if it were missing: two
+   * reloads racing would leave the second's `session_start` arriving after the first's rebound instances.
+   */
+  #reloading = new Set<string>();
   /**
    * Which sessions were open, so a restart can reopen them (issue #185).
    *
@@ -563,12 +596,21 @@ export class Supervisor extends EventEmitter {
           })
         : undefined;
 
+    /*
+     * Pi Central's own reload command, provisioned into the agent directory and loaded with `--extension` (issue
+     * #274, ADR-0015). Written on EVERY spawn so an upgraded Pi Central cannot leave an older copy behind, and
+     * deliberately best-effort: an agent tree the reader owns is not Pi Central's to write into (ADR-0010 §5), so
+     * a failure here costs the reload control and nothing else — the session still starts.
+     */
+    const reloadExtension = provisionReloadExtension(this.#config.providerAgentDir);
+
     const spec: SessionSpec = {
       id: input.id,
       cwd: input.cwd,
       mode: input.mode,
       safehouse: this.#config.safehouse,
       pi: this.#config.pi,
+      ...(reloadExtension === undefined ? {} : { extension: reloadExtension }),
       env,
       ...(fragment !== undefined
         ? { policyFragment: fragment, fragmentDir: this.#config.fragmentDir }
@@ -606,6 +648,13 @@ export class Supervisor extends EventEmitter {
       // about the keychain rather than claiming it is fine.
       ...(this.#keychainCheck === undefined ? {} : { keychainState: this.#keychainCheck }),
     });
+
+    /*
+     * A session that has just spawned is, by construction, current: Pi discovered its resources a moment ago.
+     * Recorded HERE because this is the only place that knows the moment — and the toolset check is unusable
+     * without it, since "newer than what?" has no answer otherwise (issue #274).
+     */
+    this.#resourcesLoadedAt.set(input.id, Date.now());
 
     const session: LiveSession = {
       id: input.id,
@@ -648,6 +697,7 @@ export class Supervisor extends EventEmitter {
       session.state = "failed";
       session.error = error.message;
       this.#clearCompacting(session.id);
+      this.#clearReloading(session.id);
       this.#patch(session.id);
       this.emit("error", session.id, error.message);
     });
@@ -657,6 +707,7 @@ export class Supervisor extends EventEmitter {
       session.error = describeExitFailure(code, signal, stderr);
       session.dialogs = [];
       this.#clearCompacting(session.id);
+      this.#clearReloading(session.id);
       this.#patch(session.id);
       this.emit("error", session.id, session.error);
     });
@@ -1129,6 +1180,134 @@ export class Supervisor extends EventEmitter {
     }
   }
 
+  /**
+   * Make this session re-read its resources (issue #274).
+   *
+   * ## Why the mechanism is a command, and not `ctx.reload()` from here
+   *
+   * This process is not inside Pi. `ctx.reload()` belongs to an extension running in the session's own
+   * process, and Pi's RPC surface has no `reload` command — `/reload` is a built-in TUI command, excluded from
+   * `get_commands` because it "would not execute if sent via `prompt`" (Pi's `rpc-commands.md`). What IS
+   * reachable is an extension-registered command, which `get_commands` returns and `prompt` runs with a `/`
+   * prefix. So Pi Central provisions one extension (`reload-extension.ts`, ADR-0015) and sends its name.
+   *
+   * ## Why the send is awaited, and what its answer means
+   *
+   * Pi answers `prompt` as soon as the command is accepted, with `disposition: "handled"` for an extension
+   * command: no run starts, so `agent_settled` never follows and waiting for one would hang. The reload itself
+   * has not finished at that point, so the moment is recorded when the answer arrives — which is slightly late
+   * rather than slightly early, and therefore conservative: a file written DURING the reload reads as changed
+   * rather than as included, and the safe direction for a staleness claim is to over-report.
+   *
+   * ## A failure must not read as success
+   *
+   * `ctx.reload()` can throw, and Pi reports a throwing command handler as an `extension_error` record while the
+   * `prompt` response still says `success: true, disposition: "handled"` — measured, not assumed. Reporting that
+   * as a successful reload is exactly the "session that has lost its extensions and says nothing" the issue
+   * forbids, so the extension errors seen during the call are collected and rethrown here.
+   *
+   * ## `interrupt`
+   *
+   * Pi refuses to reload mid-run ("Wait for the current response to finish before reloading"). A reader who
+   * asked for the reload anyway has confirmed that the RUN is affected — that is what the confirmation in the
+   * UI names — so this aborts first, then reloads. Nothing is aborted unless the caller said so: the default is
+   * to refuse with Pi's own sentence, which the UI shows.
+   */
+  async reload(id: string, options: { interrupt?: boolean } = {}): Promise<void> {
+    const rpc = this.#processes.get(id);
+    const session = this.#sessions.get(id);
+    if (!session) throw new Error(`no such session: ${id}`);
+    if (!rpc || !rpc.running) {
+      throw new Error("this session is not running, so it has no resources to reload");
+    }
+    if (this.#reloading.has(id)) throw new Error("a reload is already running for this session");
+
+    this.#reloading.add(id);
+    session.reloading = true;
+    this.#patch(id);
+    const errors: string[] = [];
+    /*
+     * ONE argument, because this listens to the PROCESS rather than to the supervisor.
+     *
+     * `RpcProcess` emits `record` with the record alone, while `Supervisor` emits `(id, record)` — a difference
+     * that is invisible in the type system (both are `EventEmitter`s) and produced exactly the silent failure this
+     * listener exists to prevent: with the supervisor's shape, `sessionId` was the record and `record` was
+     * `undefined`, so the handler threw on its first line and a broken reload was reported as a working one.
+     */
+    const onRecord = (record: PiRecord): void => {
+      if (record.type === "extension_error" && String(record.event ?? "") === "command") {
+        errors.push(String(record.error ?? "the reload command failed"));
+      }
+    };
+    rpc.on("record", onRecord);
+    try {
+      if (options.interrupt === true && session.state === "streaming") {
+        // Before the reload, never after: Pi refuses a reload while streaming, so the order is not a preference.
+        await rpc.send({ type: "abort" }, 30_000);
+      }
+      const data = (await rpc.send({ type: "prompt", message: `/${RELOAD_COMMAND}` }, RELOAD_TIMEOUT_MS)) as
+        | { disposition?: string }
+        | undefined;
+      /*
+       * `started` or `queued` means Pi did NOT run the command — it took the text as a prompt for the model,
+       * which happens whenever the extension is not loaded (an agent directory the reader owns and Pi Central
+       * could not write into, say). Treating that as a reload would send `/pi-central:reload` to the model as a
+       * task and report success. `handled` is the ONLY disposition that means the command ran.
+       */
+      if (data?.disposition !== "handled") {
+        throw new Error(
+          `Pi accepted the reload as a prompt rather than running it (disposition: ${String(data?.disposition)}). ` +
+            "Pi Central's reload command is not loaded in this session, so nothing was reloaded.",
+        );
+      }
+      if (errors.length > 0) throw new Error(`the reload failed: ${errors.join("; ")}`);
+      this.#resourcesLoadedAt.set(id, Date.now());
+      // Re-read the state rather than assume: a reload rebinds the extension instances, so the model, the
+      // thinking level and the streaming flag are read FRESH from Pi afterwards — the rule `setModel` follows,
+      // and for a stronger reason here.
+      await this.#refreshState(id);
+    } finally {
+      rpc.off("record", onRecord);
+      this.#reloading.delete(id);
+      session.reloading = false;
+      this.#patch(id);
+    }
+  }
+
+  /**
+   * What can honestly be said about this session's toolset (issue #274).
+   *
+   * Synchronous and plain `fs`, at the orchestrator's UID: it reads directory metadata inside the session's
+   * OWN cwd and Pi's agent directory, which is the orchestrator's business — the same reasoning as `listFiles`
+   * (ADR-0007). No sandbox is involved, and nothing inside a session is asked.
+   *
+   * A session with no live process is still answered: "is this session stale" is a question about the session,
+   * not about its process, and the answer is what tells a reader whether resuming would pick anything new up.
+   * `resourcesLoadedAt` is `undefined` in that case, so the freshness is `unknown` rather than a fabricated
+   * `unchanged`.
+   */
+  toolset(id: string): ToolsetStatus {
+    const session = this.#sessions.get(id);
+    if (!session) throw new Error(`no such session: ${id}`);
+    return inspectToolset({
+      agentDir: this.#config.providerAgentDir,
+      cwd: session.cwd,
+      resourcesLoadedAt: this.#resourcesLoadedAt.get(id),
+    });
+  }
+
+  /** Is a reload outstanding for this session? (issue #274) */
+  #isReloading(id: string): boolean {
+    return this.#reloading.has(id);
+  }
+
+  /** Drop a reload mark for a session that is going away, and say so on its next update. */
+  #clearReloading(id: string): void {
+    this.#reloading.delete(id);
+    const session = this.#sessions.get(id);
+    if (session) session.reloading = false;
+  }
+
   /** Is a compaction outstanding for this session? Requests count before Pi announces the start (issue #263). */
   #isCompacting(id: string): boolean {
     return this.#compacting.has(id) || this.#compactRequests.has(id);
@@ -1154,6 +1333,9 @@ export class Supervisor extends EventEmitter {
     if (this.#rememberOpenSessions) this.#open.forget(session.sessionFile);
     // A stopped session has no compaction to guard: leaving the mark would refuse the next one after a resume.
     this.#clearCompacting(id);
+    // Same for a reload in flight (issue #274): the process is about to answer nothing, and a latch would refuse
+    // every reload after the resume.
+    this.#clearReloading(id);
     this.#patch(id);
     await rpc.stop();
     this.#processes.delete(id);
@@ -1181,6 +1363,7 @@ export class Supervisor extends EventEmitter {
         session.state = "stopped";
         session.dialogs = [];
         this.#clearCompacting(id);
+        this.#clearReloading(id);
         this.#patch(id);
         await rpc.stop();
         this.#processes.delete(id);

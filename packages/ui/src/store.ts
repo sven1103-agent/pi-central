@@ -21,6 +21,7 @@ import type {
   LiveSession,
   ModelOption,
   PiRecord,
+  ToolsetStatus,
 } from "@pi-central/protocol";
 import { applyRecord, emptyTranscript, seedTranscript, type Transcript } from "./transcript.ts";
 import {
@@ -156,6 +157,16 @@ export interface UiState {
   thinkingLevels: Record<string, string[]>;
   thinkingLevelErrors: Record<string, string>;
   /**
+   * What could be established about each session's toolset, from `toolset` (issue #274).
+   *
+   * Request-shaped rather than a field on `LiveSession`, for the reason `models` is: the answer is read from the
+   * filesystem, and a session update is broadcast on every Pi record. Absent means "not asked yet" — which the
+   * UI renders as silence, never as "current".
+   */
+  toolsets: Record<string, ToolsetStatus>;
+  /** Why a session's toolset could not be established. Distinct from `unknown` freshness, which is an answer. */
+  toolsetErrors: Record<string, string>;
+  /**
    * The queued messages' TEXTS, keyed by session id, from `queue_update` records.
    *
    * The count lives in `LiveSession.pending`; this is the content. The two can disagree after a
@@ -189,6 +200,8 @@ export function initialState(): UiState {
     modelErrors: {},
     thinkingLevels: {},
     thinkingLevelErrors: {},
+    toolsets: {},
+    toolsetErrors: {},
     queues: {},
     restoredQueue: {},
     focusedId: undefined,
@@ -618,6 +631,19 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
       return {
         ...state,
         thinkingLevelErrors: { ...state.thinkingLevelErrors, [event.sessionId]: event.message },
+      };
+
+    case "toolset": {
+      // A successful read CLEARS the previous error, so a retry that worked does not leave a stale failure on
+      // screen — the same rule `models` follows.
+      const { [event.sessionId]: _cleared, ...toolsetErrors } = state.toolsetErrors;
+      return { ...state, toolsets: { ...state.toolsets, [event.sessionId]: event.status }, toolsetErrors };
+    }
+
+    case "toolsetError":
+      return {
+        ...state,
+        toolsetErrors: { ...state.toolsetErrors, [event.sessionId]: event.message },
       };
 
     case "queue":

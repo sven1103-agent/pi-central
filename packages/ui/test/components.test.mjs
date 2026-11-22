@@ -3764,3 +3764,130 @@ test("an orchestrator that does not report the keychain produces NO row, rather 
   assert.ok(!/Agent keychain/.test(html), "no reported state means no row");
   assert.ok(!/unlocked|locked/.test(html), `no state may be invented: ${html}`);
 });
+
+// --- Reloading a session's resources (issue #274) --------------------------------------------
+
+test("a running session offers Reload, and its title states what it does not touch", async () => {
+  const { sessionControlsFor } = await server.ssrLoadModule("/src/components/Inspector.tsx");
+  const controls = sessionControlsFor(session({ state: "idle" }), { onReload() {}, retryAvailable: true });
+  const reload = controls.find((c) => c.key === "reload");
+  assert.ok(reload, `an idle session can be reloaded, got ${JSON.stringify(controls.map((c) => c.key))}`);
+  // The reassurance is the point: a reader deciding whether to press this needs to know the transcript and the
+  // directory survive, because a reload sounds like it might restart the session.
+  assert.match(reload.title, /transcript/);
+  assert.match(reload.title, /working directory/);
+});
+
+test("a session with no process does NOT offer Reload, because there is nothing to deliver it to", async () => {
+  const { sessionControlsFor } = await server.ssrLoadModule("/src/components/Inspector.tsx");
+  for (const state of ["stopped", "failed", "registered"]) {
+    const keys = sessionControlsFor(session({ state }), { onReload() {}, retryAvailable: true }).map((c) => c.key);
+    assert.ok(!keys.includes("reload"), `${state} must not offer Reload, got ${JSON.stringify(keys)}`);
+  }
+});
+
+test("a reload in flight says so, and is not pressable a second time", async () => {
+  // The orchestrator refuses the second press anyway, but a control that invites a refusal is not a control — the
+  // same rule the compaction control follows.
+  const { sessionControlsFor } = await server.ssrLoadModule("/src/components/Inspector.tsx");
+  const reload = sessionControlsFor(session({ state: "idle", reloading: true }), { onReload() {}, retryAvailable: true })
+    .find((c) => c.key === "reload");
+  assert.equal(reload.label, "Reloading resources");
+  assert.equal(reload.disabled, true);
+});
+
+const toolsetStatus = (over = {}) => ({
+  freshness: "unchanged",
+  resourcesLoadedAt: Date.UTC(2026, 0, 2, 3, 4, 5),
+  watched: [{ scope: "project", kind: "skills", path: "/w/.pi/skills", mtimeMs: 1 }],
+  unwatched: ["MCP servers registered from an installed package"],
+  unreadable: [],
+  ...over,
+});
+
+test("a changed toolset says the session may not have what was just installed", async () => {
+  const { Inspector } = await server.ssrLoadModule("/src/components/Inspector.tsx");
+  const html = renderToString(createElement(Inspector, {
+    session: session({ state: "idle" }),
+    home: undefined,
+    onStop() {}, onRename() {},
+    toolset: toolsetStatus({ freshness: "changed" }),
+    onRefreshToolset() {},
+  }));
+  assert.match(html, /Changed since this session loaded them/);
+  // And does not claim the reload already happened: the check reports a FILE, not a resource set.
+  assert.ok(!/up to date/i.test(html), "a changed toolset must not be described as current");
+});
+
+test("an unchanged toolset names what it could NOT see, rather than implying the session is current", async () => {
+  // The acceptance criterion this protects: "must not imply freshness it has not checked". A claim of "no change"
+  // is a claim about the locations listed beside it — and there are sources no directory walk can reach.
+  const { Inspector } = await server.ssrLoadModule("/src/components/Inspector.tsx");
+  const html = renderToString(createElement(Inspector, {
+    session: session({ state: "idle" }),
+    home: undefined,
+    onStop() {}, onRename() {},
+    toolset: toolsetStatus(),
+    onRefreshToolset() {},
+  }));
+  const body = text(html);
+  assert.match(body, /No change in the 1 location/);
+  assert.match(body, /cannot see MCP servers registered from an installed package/);
+  assert.ok(!/up to date|current/i.test(body), `no freshness claim beyond what was checked: ${body}`);
+});
+
+test("an UNKNOWN toolset says it cannot tell, and never renders as unchanged", async () => {
+  // The three answers are three sentences on purpose. Rendering "no change" for a check that could not read a
+  // directory would be the fabricated-clean-result failure C14 describes, and the reader would connect nothing.
+  const { Inspector } = await server.ssrLoadModule("/src/components/Inspector.tsx");
+  const unreadable = toolsetStatus({ freshness: "unknown", unreadable: [{ path: "/w/.pi/prompts", code: "EACCES" }] });
+  const html = renderToString(createElement(Inspector, {
+    session: session({ state: "idle" }),
+    home: undefined,
+    onStop() {}, onRename() {},
+    toolset: unreadable,
+    onRefreshToolset() {},
+  }));
+  const body = text(html);
+  assert.match(body, /Cannot tell/);
+  assert.match(body, /could not be read/, "the reason must be stated, not only the verdict");
+  assert.ok(!/No change in/.test(body), "an unknown answer must not be worded as an unchanged one");
+});
+
+test("a toolset question that could not be asked is an error, not an answer", async () => {
+  const { Inspector } = await server.ssrLoadModule("/src/components/Inspector.tsx");
+  const html = renderToString(createElement(Inspector, {
+    session: session({ state: "idle" }),
+    home: undefined,
+    onStop() {}, onRename() {},
+    toolsetError: "no such session: s7",
+    onRefreshToolset() {},
+  }));
+  assert.match(text(html), /Could not check: no such session/);
+});
+
+test("the composer offers Reload beside Compact, and both say what they cost", async () => {
+  const html = renderToString(createElement(Composer, {
+    session: session({ state: "idle" }),
+    state: initialState(),
+    unavailableReason: undefined,
+    onSend() {}, onClearQueueAndStop() {},
+    onCompact() {}, onReload() {},
+  }));
+  const body = text(html);
+  assert.match(body, /Compact context/);
+  assert.match(body, /Reload resources/);
+  // Two entries in ONE group, which is what the composer-commands list was drawn for.
+  assert.match(html, /aria-label="Composer commands"/);
+});
+
+test("the composer does not offer Reload for a session with no process", async () => {
+  const html = renderToString(createElement(Composer, {
+    session: session({ state: "stopped" }),
+    state: initialState(),
+    unavailableReason: undefined,
+    onSend() {}, onClearQueueAndStop() {},
+    onReload() {},
+  }));
+  assert.ok(!/Reload resources/.test(text(html)), "a stopped session has nothing to deliver the command to");
+});
