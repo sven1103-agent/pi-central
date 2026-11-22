@@ -89,6 +89,14 @@ export interface StartRequest {
    */
   sidecarPort?: number | null;
   /**
+   * Ask for a UI sidecar on an ASSIGNED port (ADR-0015 §14).
+   *
+   * The client's way of saying "the reader turned this on", so the picker can offer it for one session without the
+   * orchestrator default being on for every session. It cannot grant a browser the machine does not have: that is
+   * still configuration's decision, which is why the flag alone does nothing when no browser is configured.
+   */
+  sidecar?: boolean;
+  /**
    * Extra environment values for this session — the trusted channel for the agent's own
    * credentials (ADR-0010). Never sourced from `process.env` by the caller.
    */
@@ -378,6 +386,7 @@ export class Supervisor extends EventEmitter {
       enable: request.enable,
       env: request.env,
       ...(request.sidecarPort === undefined ? {} : { sidecarPort: request.sidecarPort }),
+      ...(request.sidecar === undefined ? {} : { sidecar: request.sidecar }),
     });
   }
 
@@ -560,6 +569,8 @@ export class Supervisor extends EventEmitter {
     previousError?: string | undefined;
     /** Per-session override (ADR-0015): a number pins the port, `null` opts out entirely. */
     sidecarPort?: number | null;
+    /** Per-session opt-IN, so a client can turn the browser on without a global default. */
+    sidecar?: boolean;
   }): StartResult | StartFailure {
     // A resumed session must reopen its file; a new one gets a fresh name.
     //
@@ -583,7 +594,7 @@ export class Supervisor extends EventEmitter {
         ? undefined
         : (input.sidecarPort ??
           this.#config.sidecarPort ??
-          (this.#config.sidecar === true ? this.#assignDevPort(input.id) : undefined));
+          (this.#config.sidecar === true || input.sidecar === true ? this.#assignDevPort(input.id) : undefined));
     const sidecarHandle =
       sidecarPort !== undefined && input.mode === "sandboxed"
         ? this.#startSidecar(input.id, sidecarPort)
@@ -681,6 +692,7 @@ export class Supervisor extends EventEmitter {
       state: "starting",
       mode: input.mode,
       isolation: policy.isolation,
+      ...(sidecarHandle === undefined ? {} : { sidecarOrigin: sidecarHandle.origin }),
       command: describe(policy),
       scratch: isScratch(this.#config, input.cwd),
       messageCount: 0,

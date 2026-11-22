@@ -53,6 +53,14 @@ export interface UiState {
    */
   installationRoot: string | undefined;
   /**
+   * Whether the session picker should offer a UI sidecar (ADR-0015 §15).
+   *
+   * From the snapshot, because it is a property of the installation: a machine without a configured browser must not
+   * be offered one. Absent means no -- which is also what an orchestrator older than this field means, and what keeps
+   * this additive rather than a breaking change.
+   */
+  sidecarOffered: boolean;
+  /**
    * Facts about the running installation, for the Settings surface (issue #58).
    *
    * `undefined` until the first snapshot, and in principle forever when talking to an orchestrator
@@ -182,6 +190,7 @@ export function initialState(): UiState {
     historyTotal: 0,
     home: undefined,
     installationRoot: undefined,
+    sidecarOffered: false,
     install: undefined,
     transcripts: {},
     transcriptErrors: {},
@@ -470,6 +479,7 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
         historyTotal: event.historyTotal,
         home: event.home,
         installationRoot: event.installationRoot,
+        sidecarOffered: event.sidecarOffered === true,
         install: event.install,
         focusedId,
         ready: true,

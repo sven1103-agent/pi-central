@@ -72,6 +72,14 @@ export interface LiveSession {
   mode: "sandboxed" | "direct";
   /** Human-readable description of the isolation actually in force. */
   isolation: string;
+  /**
+   * The dev-server address this session's UI sidecar can see, when it has one (ADR-0015).
+   *
+   * The ORIGIN rather than the port, because the sidecar serves exactly one and the session was told which: a
+   * reader looking at a session that cannot see their preview needs the address that would work, not a number
+   * they have to reassemble. Absent for a session with no browser.
+   */
+  sidecarOrigin?: string | undefined;
   /** The exact command line, for display. Never executed verbatim from here. */
   command: string;
   scratch: boolean;
@@ -183,6 +191,13 @@ export type Control =
        * single session require arming a whole app — which is a design smell, not a convenience problem.
        */
       sidecarPort?: number;
+      /**
+       * Give this session a UI sidecar on a port Pi Central assigns (ADR-0015 §14).
+       *
+       * An explicit `sidecarPort` still wins, and this cannot grant the capability where it is not offered — the
+       * orchestrator decides that, so a client cannot turn a browser on for a machine that has none.
+       */
+      sidecar?: boolean;
     }
   /**
    * Re-spawn a session that FAILED, in the directory it already had (issue #11).
@@ -513,6 +528,18 @@ export type Event =
        * breaking change to fix a cosmetic one.
        */
       install?: InstallFacts | undefined;
+      /**
+       * Whether the session picker should offer a UI sidecar (ADR-0015 §15).
+       *
+       * A property of the INSTALLATION, not of a session, so it belongs with the other installation facts: a machine
+       * with no browser configured must not be offered one, and offering it there would turn "capability missing"
+       * into "capability present and broken". Absent means no, which is also what an older orchestrator means.
+       *
+       * NO version bump, by the same rule the `install` field above follows: an absent optional field is ignored by
+       * both sides, and the absent case is a tested state (the store defaults to "not offered"). Bumping would fail
+       * `wire-surface.test.ts`, whose whole point is that a version moves only with the set of KINDS.
+       */
+      sidecarOffered?: boolean | undefined;
       /** True history total, as distinct from the length of `history`. */
       historyTotal: number;
       /**

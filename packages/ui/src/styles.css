@@ -2071,6 +2071,22 @@ select.btn { font-family: var(--sans); }
 }
 .dialog-body .title { font-size: var(--fs-base); font-weight: 600; margin: 0 0 var(--sp-1); }
 .dialog-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-3); flex-wrap: wrap; }
+/* The browser toggle sits in the action row, pushed away from the buttons so it reads as an OPTION of the dialog
+   rather than as a third action. `margin-left: auto` (not an extra spacer element) is what puts it left of Open
+   while still leaving Open at the right edge, which is where every file dialog puts its outcome. */
+.dialog-actions .sidecar-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+  margin-right: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  cursor: pointer;
+  user-select: none;
+}
+.dialog-actions .sidecar-toggle input { accent-color: var(--accent); cursor: pointer; }
+.dialog-actions .sidecar-toggle:has(input:disabled) { opacity: 0.5; cursor: default; }
 .dialog-body input[type="text"], .dialog-body textarea {
   width: 100%;
   background: var(--bg);

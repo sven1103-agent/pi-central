@@ -103,6 +103,15 @@ export interface Config {
    */
   sidecar?: boolean;
   /**
+   * Offer the UI sidecar in the session picker, whatever the default is.
+   *
+   * Separate from `sidecar` because they answer different questions. `sidecar` is the app's default for sessions
+   * started from the header; this decides whether a reader CHOOSING a directory is shown the choice at all. A
+   * capability nobody can find is not a product, and a capability offered with no way to supply the browser is not
+   * either — so the gate is this flag AND a resolved browser.
+   */
+  sidecarOffered?: boolean;
+  /**
    * The browser the sidecar drives, resolved by configuration like `safehouse` and `pi`.
    *
    * Not distributed: a renderer is a host tool, and shipping one would add ~344 MB to a package whose only
@@ -165,6 +174,7 @@ export function defaultConfig(): Config {
     installationRoot: resolveInstallationRoot(),
     sidecarPort: parsePort(process.env["PI_CENTRAL_SIDECAR_PORT"]),
     sidecar: process.env["PI_CENTRAL_SIDECAR"] === "1",
+    sidecarOffered: process.env["PI_CENTRAL_SIDECAR"] === "1",
     browser:
       process.env["PI_CENTRAL_BROWSER"] ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   };

@@ -53,6 +53,7 @@ export function OpenDirectorySheet({
   onChooserChange,
   onClose,
   onOpen,
+  sidecarOffered,
 }: {
   /** Where Pi Central is running from, or `undefined` if it could not be identified (issue #25). */
   installationRoot: string | undefined;
@@ -87,9 +88,27 @@ export function OpenDirectorySheet({
   chooser?: ChooserPrefs | undefined;
   onChooserChange?: ((next: ChooserPrefs) => void) | undefined;
   onClose: () => void;
-  onOpen: (cwd: string) => void;
+  /**
+   * Commit the selection. `sidecar` is the reader's answer to the browser toggle, and it travels with the commit
+   * rather than being a separate request: one dialog, one outcome.
+   */
+  onOpen: (cwd: string, sidecar?: boolean) => void;
+  /**
+   * Whether to offer the browser toggle at all (ADR-0015 §15).
+   *
+   * Off when the installation has no browser configured. Offering a switch that silently does nothing would be worse
+   * than not offering it: the reader would conclude the feature is broken rather than absent.
+   */
+  sidecarOffered?: boolean | undefined;
 }) {
   const [path, setPath] = useState(initialPath);
+  /**
+   * Off by default.
+   *
+   * A browser is a process and a port per session, so it is something the reader asks for rather than something they
+   * discover afterwards. The toggle is only rendered when the installation offers one at all.
+   */
+  const [sidecar, setSidecar] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   /**
@@ -225,7 +244,7 @@ export function OpenDirectorySheet({
 
   /** Commit the ONE selection. The only place a session is started from this dialog. */
   const commit = () => {
-    if (problem === undefined) onOpen(effectivePath);
+    if (problem === undefined) onOpen(effectivePath, sidecar);
   };
 
   return (
@@ -256,7 +275,8 @@ export function OpenDirectorySheet({
           <DirectoryChooser
             state={places}
             recent={recent}
-            onChooseRecent={(cwd) => onOpen(cwd)}
+            // A recent row commits, so it carries the toggle's current answer too: the reader set it before choosing.
+            onChooseRecent={(cwd) => onOpen(cwd, sidecar)}
             sort={chooser?.sort ?? defaultSort()}
             showHidden={chooser?.showHidden === true}
             onSort={(next) => onChooserChange?.({ ...(chooser ?? defaultChooserPrefs()), sort: next })}
@@ -408,6 +428,22 @@ export function OpenDirectorySheet({
             <button type="button" className="btn btn-ghost" onClick={onClose}>
               Cancel
             </button>
+            {sidecarOffered === true && (
+              /*
+               * Beside Open, because it is part of what will be opened. A checkbox rather than a switch: it reads as
+               * one option of this dialog rather than a setting, and it needs no label of its own beyond the sentence
+               * that says what the session gets.
+               */
+              <label className="sidecar-toggle" title="A browser in its own sandbox, so this session can see a dev server on its assigned port">
+                <input
+                  type="checkbox"
+                  checked={sidecar}
+                  onChange={(event) => setSidecar(event.target.checked)}
+                  disabled={problem !== undefined}
+                />
+                <span>Let it see my dev server</span>
+              </label>
+            )}
             <button type="submit" className="btn btn-primary-sheet" disabled={problem !== undefined}>
               Open
             </button>

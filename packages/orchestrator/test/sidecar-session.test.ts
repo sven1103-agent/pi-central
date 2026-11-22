@@ -56,6 +56,9 @@ function config(over: Record<string, unknown> = {}) {
     home: base,
     installationRoot: join(base, "installation"),
     sidecarPort: undefined as number | undefined,
+    // Off unless a test turns it on: the app default, and the SUBJECT of the opt-in tests.
+    sidecar: false as boolean | undefined,
+    sidecarOffered: true as boolean | undefined,
     browser: "/nonexistent/chrome",
     ...over,
   };
@@ -384,4 +387,47 @@ test("the sidecar entry is resolved for the installation that exists, not for on
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
+});
+
+test("a session can opt IN per session, without the app default being on", () => {
+  if (skip) return console.log(skip);
+  // The UI gate's request shape: the picker sends `sidecar: true` for one session. Without this the only way to get a
+  // browser would be a global switch, so a reader who wanted one for a single frontend task could not have it.
+  const state = join(root as string, "opt-in");
+  const app = new Supervisor(config({ stateRoot: state }) as never, { rememberOpenSessions: false });
+  app.on("error", () => {});
+  app.on("log", () => {});
+  const asked = app.start({ cwd: root as string, mode: "sandboxed", sidecar: true });
+  const plain = app.start({ cwd: root as string, mode: "sandboxed" });
+  assert.ok(asked.ok && plain.ok);
+  if (!asked.ok || !plain.ok) return;
+  assert.ok(
+    existsSync(join(state, "sidecars", asked.session.id, "mcp.json")),
+    "an explicit opt-in must arm the session even with the default off",
+  );
+  assert.ok(
+    !existsSync(join(state, "sidecars", plain.session.id, "mcp.json")),
+    "and a session that did not ask must stay without one",
+  );
+  // The event the UI reads to show which address the browser can see.
+  assert.match(asked.session.sidecarOrigin ?? "", /^http:\/\/localhost:\d+$/, "the session must report its browser's origin");
+  assert.equal(plain.session.sidecarOrigin, undefined, "a session with no browser must report no origin");
+  return app.stopAll().then(() => undefined);
+});
+
+test("a per-session opt-in cannot grant a browser that the installation does not offer", () => {
+  if (skip) return console.log(skip);
+  // Both halves of the gate: the client may ask, and the orchestrator still decides. A machine with no browser
+  // configured, or an app with the feature off, must not be turned on by a control message.
+  const app = new Supervisor(config({ stateRoot: join(root as string, "no-grant") }) as never, {
+    rememberOpenSessions: false,
+  });
+  app.on("error", () => {});
+  const started = app.start({ cwd: root as string, mode: "direct", sidecar: true });
+  assert.ok(started.ok);
+  if (!started.ok) return;
+  // A DIRECT session applies no policy at all, so a sidecar beside it would be confined by nothing: that refusal is
+  // the existing rule, and an opt-in must not bypass it.
+  assert.equal(started.session.sidecarOrigin, undefined, "an opt-in must not arm an unsandboxed session");
+  return app.stopAll().then(() => undefined);
 });

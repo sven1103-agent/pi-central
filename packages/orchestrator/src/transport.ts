@@ -359,6 +359,8 @@ export class Transport {
       home: this.#config.home,
       installationRoot: this.#config.installationRoot,
       install: this.#snapshotInstallFacts(),
+      // Absent when the installation does not offer one, and absent is what an older orchestrator sends too.
+      ...(this.#config.sidecarOffered === true ? { sidecarOffered: true } : {}),
     });
 
     // Then the CURRENT conversation for each live session, FETCHED rather than replayed.
@@ -457,6 +459,7 @@ export class Transport {
           // Validated where it is used, not here: start() returns a structured failure, and a bad port reads better
           // as a message beside the session than as a dropped control message.
           ...(control.sidecarPort === undefined ? {} : { sidecarPort: control.sidecarPort }),
+          ...(control.sidecar === undefined ? {} : { sidecar: control.sidecar }),
         });
         if (!result.ok) {
           this.#broadcast({ kind: "error", message: result.message });

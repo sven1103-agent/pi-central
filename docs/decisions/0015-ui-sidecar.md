@@ -125,6 +125,14 @@ through a fixed verb set over CDP, with no new shipped dependency.**
     starts with `&` is not in the session's process group, so teardown never reached it: three were still
     listening after the runs had exited. A port Pi Central *assigned* is therefore reaped when its session stops
     (never an explicit or pinned port, which may be someone's own dev server).
+15. **The capability is offered where it can work, and off unless asked for.** `PI_CENTRAL_SIDECAR=1` turns it on
+    for the installation; the directory picker then shows one checkbox, "Let it see my dev server", and the choice
+    travels with the start request as an opt-IN (`Control.start.sidecar`). The checkbox is rendered only when the
+    orchestrator reports `sidecarOffered` on the snapshot — a machine with no configured browser is not offered a
+    switch that would do nothing, because an inert control reads as a broken feature rather than an absent one.
+    `LiveSession.sidecarOrigin` then shows the reader which address the session can see, and the Inspector renders
+    it. **No protocol bump:** both fields are optional and absent means the old behaviour, which is the same rule the
+    snapshot's `install` field follows, and `wire-surface.test.ts` moves the version only with the set of kinds.
 
 ## Consequences
 

@@ -1384,9 +1384,11 @@ export function App() {
   );
 
   const onOpenDirectory = useCallback(
-    (cwd: string) => {
+    (cwd: string, sidecar?: boolean) => {
       dispatch({ kind: "expectNewSession" });
-      send({ kind: "start", cwd });
+      // The browser choice travels with the request, and is only ever an opt-IN: the orchestrator still decides whether
+      // this installation can offer one at all (ADR-0015 §15).
+      send({ kind: "start", cwd, ...(sidecar === true ? { sidecar: true } : {}) });
       // The ONE place the picker remembers a place to begin: a session was actually started here.
       rememberOpenedDirectory(cwd);
       setSheetOpen(false);
@@ -2273,6 +2275,7 @@ export function App() {
       {sheetOpen && (
         <OpenDirectorySheet
           installationRoot={state.installationRoot}
+          sidecarOffered={state.sidecarOffered}
           home={state.home}
           /* Derived from history, not stored (issue #149). `state.history` is the newest page, which is
              exactly the right input: "recent" cannot be older than the page it is drawn from. */
