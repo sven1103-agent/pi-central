@@ -70,36 +70,97 @@
  */
 
 /**
- * THE CEILING, and it is the one constant that decides whether this feels smooth.
+ * THE TUNABLE PARAMETERS, at runtime rather than baked in.
  *
- * One line of prose per frame. A transcript line is about 23px, so this is ~1400 px/sec at 60Hz — the speed at
- * which scrolling text reads as MOVEMENT rather than as a jump. Every earlier version bounded something else
- * (per-second rate, total settle time, a burst fraction) and each let a single frame move 15 lines, which the
- * eye sees as a teleport no matter how brief the total settle is.
+ * Four versions of this module shipped a different fixed curve, and each was reported wrong from the harness.
+ * The lesson is not that a fifth constant is needed — it is that these are TASTE values and the person watching
+ * the motion is the only one who can set them. So they live in one object with a setter, and the harness exposes
+ * a slider for each.
  *
- * The cost is stated where it is paid: a 2000px arrival takes 1.45 seconds, and a 5000px one about 3.6. That is
- * correct — a long arrival is a long slide — and it is why large arrivals are the case to watch for in review.
+ * Every field is documented with what it does and what it costs, because a slider without a stated consequence is
+ * just a number to fiddle with.
  */
-export const TAIL_MAX_STEP_PX = 23.25;
+export interface FollowConfig {
+  /**
+   * The hard per-frame ceiling, in px — the bound that decides whether motion reads as movement or as a jump.
+   *
+   * One prose line is about 23px, so 23 is "one line per frame". Below ~12 the settle becomes visibly slow on a
+   * large arrival; above ~40 the eye starts seeing hops. The SETTLE TIME of a big arrival is this divided into
+   * its distance, so this is also the knob for "how long does a burst take".
+   */
+  maxStepPx: number;
+  /**
+   * The gentle fraction of the remaining distance, for a SMALL movement.
+   *
+   * Decides the shape of a trickle, where the ceiling never engages. Higher reaches the target sooner and reads
+   * as crisper; lower is softer and can feel laggy once it is near the snap threshold.
+   */
+  ease: number;
+  /**
+   * The brisk fraction, for a LARGE movement.
+   *
+   * Only matters near the ceiling: with a high value a burst travels at the maximum allowed rate from its first
+   * frame instead of easing into it.
+   */
+  burstFraction: number;
+  /**
+   * The distance over which the fraction ramps from gentle to brisk.
+   *
+   * Smaller makes the change abrupt at a threshold; larger makes small arrivals slower than they need to be.
+   */
+  rampSpanPx: number;
+  /**
+   * Closer than this and the movement is a rounding artefact: snap, or it never converges.
+   *
+   * Also a subtle feel knob — it is the size of the final step, so a large value ends the motion with a small
+   * visible tick.
+   */
+  snapPx: number;
+}
 
 /**
- * The gentle fraction, for the shape of a SMALL movement.
+ * The shipped defaults, and the starting point for tuning.
  *
- * Below `TAIL_RAMP_SPAN_PX` this decides the step and the ceiling never engages, so a steady stream (~1.2px of
- * new content per frame) moves in sub-pixel increments that read as text scrolling.
+ * `maxStepPx` is the one that matters most: every earlier version bounded something else (a per-second rate, a
+ * total settle time, a burst fraction) and each let a single frame move fifteen lines. The frame is the unit the
+ * eye sees, so the frame is what is bounded.
  */
-export const TAIL_EASE = 0.22;
+export const FOLLOW_DEFAULTS: FollowConfig = {
+  maxStepPx: 23.25,
+  ease: 0.22,
+  burstFraction: 0.9,
+  rampSpanPx: 28,
+  snapPx: 0.6,
+};
+
+/** The live values. Mutated only through `setFollowConfig`, so one writer and one place to look. */
+export const followConfig: FollowConfig = { ...FOLLOW_DEFAULTS };
 
 /**
- * The brisk fraction, for the shape of a LARGE movement.
+ * Replace one or more parameters.
  *
- * Reaches the ceiling quickly, so a burst covers ground at the maximum rate the eye allows rather than easing
- * into it — the ceiling is what makes it safe, not the fraction.
+ * Clamped rather than trusted, because this is fed by sliders and by `localStorage`: a zero or negative ceiling
+ * would divide the settle by zero, and a NaN would propagate into `scrollTop` where a browser reads it as 0 and
+ * sends the reader to the top of the transcript.
  */
-export const TAIL_BURST_FRACTION = 0.9;
+export function setFollowConfig(patch: Partial<FollowConfig>): FollowConfig {
+  const positive = (value: unknown, fallback: number): number =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+  const unit = (value: unknown, fallback: number): number =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 1 ? value : fallback;
 
-/** The distance over which the fraction ramps from gentle to brisk. */
-export const TAIL_RAMP_SPAN_PX = 28;
+  followConfig.maxStepPx = positive(patch.maxStepPx, followConfig.maxStepPx);
+  followConfig.ease = unit(patch.ease, followConfig.ease);
+  followConfig.burstFraction = unit(patch.burstFraction, followConfig.burstFraction);
+  followConfig.rampSpanPx = positive(patch.rampSpanPx, followConfig.rampSpanPx);
+  followConfig.snapPx = positive(patch.snapPx, followConfig.snapPx);
+  return followConfig;
+}
+
+/** Back to the shipped values. */
+export function resetFollowConfig(): FollowConfig {
+  return setFollowConfig(FOLLOW_DEFAULTS);
+}
 
 /** One frame at 60Hz, for stating settle times in milliseconds. */
 export const FRAME_MS = 1000 / 60;
@@ -147,7 +208,7 @@ export function tailStep(remaining: number): number {
   const distance = Math.abs(remaining);
 
   // At or past the target: snap, so the loop terminates instead of decaying forever.
-  if (distance <= TAIL_SNAP_PX) return remaining;
+  if (distance <= followConfig.snapPx) return remaining;
 
   //
   // ONE CURVE, AND A HARD PER-FRAME CEILING.
@@ -180,9 +241,10 @@ export function tailStep(remaining: number): number {
   // ceiling -- gentle at small distances, brisk at large ones -- while the ceiling guarantees no frame is ever
   // a teleport.
   //
-  const ramp = Math.min(1, distance / TAIL_RAMP_SPAN_PX);
-  const shaped = remaining * (TAIL_EASE + (TAIL_BURST_FRACTION - TAIL_EASE) * ramp);
-  return Math.max(-TAIL_MAX_STEP_PX, Math.min(TAIL_MAX_STEP_PX, shaped));
+  const ramp = Math.min(1, distance / followConfig.rampSpanPx);
+  const shaped = remaining * (followConfig.ease + (followConfig.burstFraction - followConfig.ease) * ramp);
+  const ceiling = followConfig.maxStepPx;
+  return Math.max(-ceiling, Math.min(ceiling, shaped));
 }
 
 /**

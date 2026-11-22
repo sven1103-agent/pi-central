@@ -102,3 +102,99 @@ body {
   border-color: var(--danger);
   background: var(--danger-tint);
 }
+/* --- the tuning panel ---------------------------------------------------------------- */
+
+.hx-tuning {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+  font-size: 11px;
+}
+
+.hx-tune {
+  display: grid;
+  grid-template-columns: auto 110px auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 1px 6px;
+  color: var(--dim);
+}
+
+.hx-tune-name {
+  font-family: var(--mono);
+  color: var(--text);
+}
+
+.hx-tune input[type="range"] {
+  width: 110px;
+}
+
+.hx-tune-value {
+  font-family: var(--mono);
+  color: var(--accent-text);
+  min-width: 48px;
+  text-align: right;
+}
+
+/* The note spans the whole row, so it explains the slider without widening it. */
+.hx-tune-note {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  opacity: 0.65;
+}
+
+.hx-tuning button {
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 9px;
+  border-radius: 4px;
+  cursor: pointer;
+  background: var(--panel-3);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+}
+
+/* The live config, copyable so a setting can be pasted into a report. */
+.hx-config {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ok-text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 7px;
+  max-width: 46ch;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+/* The settle table: what the CURRENT values cost, so a slider is legible as well as felt. */
+.hx-settle {
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.hx-settle th {
+  text-align: right;
+  padding: 0 6px;
+  font-weight: 600;
+  color: var(--dim);
+  border-bottom: 1px solid var(--line);
+}
+
+.hx-settle td {
+  text-align: right;
+  padding: 1px 6px;
+}
+
+/* A row whose peak step exceeded the cap: the arithmetic and the setting disagree. */
+.hx-settle tr.is-over td {
+  color: var(--danger-text);
+}

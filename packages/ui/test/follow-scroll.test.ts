@@ -11,11 +11,10 @@ import { readFileSync } from "node:fs";
 import {
   FRAME_MS,
   READER_SCROLL_TOLERANCE_PX,
-  TAIL_BURST_FRACTION,
-  TAIL_MAX_STEP_PX,
-  TAIL_EASE,
-  TAIL_RAMP_SPAN_PX,
-  TAIL_SNAP_PX,
+  FOLLOW_DEFAULTS,
+  followConfig,
+  resetFollowConfig,
+  setFollowConfig,
   readerMoved,
   shouldSettleInstantly,
   tailStep,
@@ -91,9 +90,9 @@ test("NO frame ever moves more than one line, at any distance", () => {
     const steps = glide(distance);
     for (const [index, entry] of steps.entries()) {
       assert.ok(
-        Math.abs(entry.step) <= TAIL_MAX_STEP_PX + 0.01,
+        Math.abs(entry.step) <= followConfig.maxStepPx + 0.01,
         `${distance}px arrival moved ${Math.abs(entry.step).toFixed(1)}px on frame ${index}` +
-          `, above the ${TAIL_MAX_STEP_PX}px (one line) ceiling`,
+          `, above the ${followConfig.maxStepPx}px (one line) ceiling`,
       );
     }
     assert.equal(steps.at(-1)?.remaining, 0, `${distance}px must still arrive exactly`);
@@ -205,3 +204,35 @@ test("only the READER\u2019S OWN request is instant; content arriving always gli
   );
 });
 
+
+test("tuning is clamped, so a slider cannot break the scroller", () => {
+  /*
+   * The parameters are now settable at runtime, which is the point: four fixed curves were each reported wrong
+   * from the harness, and the values are taste. But a slider is a source of nonsense — a zero ceiling divides the
+   * settle by zero, and a NaN propagates into scrollTop where a browser reads it as 0 and sends the reader to the
+   * TOP of the transcript.
+   *
+   * So the setter clamps rather than trusts, and the defaults are restored afterwards so the rest of the suite
+   * sees the shipped values.
+   */
+  try {
+    setFollowConfig({ maxStepPx: 0 });
+    assert.ok(followConfig.maxStepPx > 0, "a zero ceiling must be refused");
+    setFollowConfig({ maxStepPx: -5 });
+    assert.ok(followConfig.maxStepPx > 0, "so must a negative one");
+    setFollowConfig({ maxStepPx: Number.NaN });
+    assert.ok(Number.isFinite(followConfig.maxStepPx), "and a NaN");
+    setFollowConfig({ ease: 0 });
+    assert.ok(followConfig.ease > 0, "a zero fraction would never move");
+    setFollowConfig({ ease: 5 });
+    assert.ok(followConfig.ease <= 1, "a fraction above 1 would overshoot the target");
+
+    // A legal value IS applied, or the panel would be decoration.
+    setFollowConfig({ maxStepPx: 40 });
+    assert.equal(followConfig.maxStepPx, 40, "a legal value must be applied");
+    assert.ok(Math.abs(tailStep(1000)) <= 40.01, "and the step must respect it immediately");
+  } finally {
+    resetFollowConfig();
+  }
+  assert.deepEqual({ ...followConfig }, { ...FOLLOW_DEFAULTS }, "reset restores every shipped value");
+});

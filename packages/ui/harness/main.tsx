@@ -27,7 +27,15 @@ import { StrictMode, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { TranscriptView } from "../src/components/Transcript.tsx";
 import { applyRecord, emptyTranscript, type Transcript } from "../src/transcript.ts";
-import { TAIL_MAX_STEP_PX, FRAME_MS } from "../src/follow-scroll.ts";
+import {
+  FRAME_MS,
+  FOLLOW_DEFAULTS,
+  followConfig,
+  resetFollowConfig,
+  setFollowConfig,
+  tailStep,
+  type FollowConfig,
+} from "../src/follow-scroll.ts";
 import "../src/styles.css";
 import "./harness.css";
 
@@ -341,6 +349,116 @@ function ScrollProbe({ stageRef }: { stageRef: React.RefObject<HTMLDivElement | 
   );
 }
 
+
+/**
+ * THE TUNING PANEL.
+ *
+ * Four fixed curves were shipped and each was reported wrong from this harness. The conclusion is not that a
+ * fifth constant is needed — it is that these are TASTE values, and the person watching the motion is the only one
+ * who can set them. So every parameter is a slider, the effect is immediate, and the current settle times are
+ * printed so a setting can be understood as well as felt.
+ */
+const TUNING: { key: keyof FollowConfig; label: string; min: number; max: number; step: number; unit: string; note: string }[] = [
+  {
+    key: "maxStepPx",
+    label: "per-frame cap",
+    min: 4,
+    max: 80,
+    step: 0.25,
+    unit: "px",
+    note: "the one that matters most — one prose line is ~23px",
+  },
+  { key: "ease", label: "gentle fraction", min: 0.04, max: 0.9, step: 0.01, unit: "", note: "shape of a trickle" },
+  { key: "burstFraction", label: "burst fraction", min: 0.1, max: 1, step: 0.01, unit: "", note: "shape of a burst" },
+  { key: "rampSpanPx", label: "ramp span", min: 4, max: 200, step: 1, unit: "px", note: "where gentle becomes brisk" },
+  { key: "snapPx", label: "snap", min: 0.1, max: 4, step: 0.1, unit: "px", note: "size of the final step" },
+];
+
+/** What each arrival costs under the CURRENT settings, so a slider movement is legible as well as felt. */
+function settleTable(): { distance: number; frames: number; ms: number; peak: number }[] {
+  return [23, 99, 233, 581, 1163, 2000].map((distance) => {
+    let remaining = distance;
+    let frames = 0;
+    let peak = 0;
+    while (Math.abs(remaining) > 0.001 && frames < 5000) {
+      const step = tailStep(remaining);
+      peak = Math.max(peak, Math.abs(step));
+      remaining -= step;
+      frames += 1;
+    }
+    return { distance, frames, ms: Math.round((frames * FRAME_MS)), peak: Math.round(peak) };
+  });
+}
+
+function TuningPanel() {
+  const [values, setValues] = useState<FollowConfig>({ ...followConfig });
+  const [, force] = useState(0);
+
+  const update = (key: keyof FollowConfig, value: number) => {
+    // Applied to the LIVE config immediately, so the next frame of the running stream uses it — no restart, and
+    // no rebuild. That is the whole point of the panel.
+    setFollowConfig({ [key]: value } as Partial<FollowConfig>);
+    setValues({ ...followConfig });
+    force((n) => n + 1);
+  };
+
+  return (
+    <div className="hx-tuning">
+      {TUNING.map(({ key, label, min, max, step, unit, note }) => (
+        <label key={key} className="hx-tune">
+          <span className="hx-tune-name">{label}</span>
+          <input
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={values[key]}
+            onChange={(event) => update(key, Number(event.target.value))}
+          />
+          <span className="hx-tune-value">
+            {values[key]}
+            {unit}
+          </span>
+          <span className="hx-tune-note">{note}</span>
+        </label>
+      ))}
+      <button
+        type="button"
+        onClick={() => {
+          resetFollowConfig();
+          setValues({ ...followConfig });
+          force((n) => n + 1);
+        }}
+      >
+        Reset to shipped
+      </button>
+      <code className="hx-config">
+        {JSON.stringify(Object.fromEntries(TUNING.map(({ key }) => [key, followConfig[key]])), null, 0)}
+      </code>
+      <table className="hx-settle">
+        <thead>
+          <tr>
+            <th>arrival</th>
+            <th>frames</th>
+            <th>settle</th>
+            <th>peak step</th>
+          </tr>
+        </thead>
+        <tbody>
+          {settleTable().map((row) => (
+            <tr key={row.distance} className={row.peak > values.maxStepPx + 0.5 ? "is-over" : undefined}>
+              <td>{row.distance}px</td>
+              <td>{row.frames}</td>
+              <td>{row.ms}ms</td>
+              <td>{row.peak}px</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function Harness() {
   const [mode, setMode] = useState<Mode>("steady");
   const [speed, setSpeed] = useState<Speed>(1);
@@ -400,6 +518,7 @@ function Harness() {
           Watch the scroll, not the text. Scroll up mid-stream: it must stop following and stay stopped.
         </span>
       </div>
+      <TuningPanel />
       <div className="hx-stage" ref={stageRef}>
         <TranscriptView
           transcript={transcript}
