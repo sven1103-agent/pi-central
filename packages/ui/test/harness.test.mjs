@@ -165,3 +165,49 @@ test("the harness streams long enough to SCROLL, which is the behaviour it exist
     `no speed below 1x: half speed on a ${target}-character answer is over a minute, which nobody sits through`,
   );
 });
+test("the harness offers only arrival rates the product actually produces", () => {
+  /*
+   * THE CORRECTION THAT ENDED SIX ROUNDS OF DEAD-END TUNING.
+   *
+   * The harness had four modes: slow, steady, "bursty" (340 chars in ONE frame) and "huge" (2000 chars in one
+   * frame). The last two were inventions of the harness. `transport.ts` broadcasts each `record` as it arrives with
+   * NO batching, so the arrival rate is Pi\u2019s own token rate — roughly 20-100 tokens/sec, which at about four
+   * characters per token is 80-400 chars/sec. Nothing in the product emits a paragraph in one commit.
+   *
+   * So the scroll curve was tuned, for six rounds, against an arrival pattern that does not exist. Reported
+   * plainly: "we have no bursty or huge mode in Pi Central. So we are chasing sth we dont offer."
+   *
+   * This test holds the lesson: every mode is a RATE, and no mode delivers text in discrete bursts.
+   */
+  const main = source(harness("main.tsx"));
+
+  const modes = /type Mode = ([^;]+);/.exec(main)?.[1] ?? "";
+  assert.ok(modes.length > 0, "the modes are declared");
+  for (const invented of ["bursty", "huge"]) {
+    assert.ok(
+      !modes.includes(invented),
+      `"${invented}" was an invented arrival pattern, not a product behaviour — do not reintroduce it`,
+    );
+  }
+
+  /*
+   * And no mode may deliver a BLOCK of text in one frame.
+   *
+   * A `frame % N === 0` guard is legitimate for a trickle — the slow mode delivers one character every fourth
+   * frame, which is a genuine token rate. What is not legitimate is a guard that delivers HUNDREDS of characters
+   * at once, because that is the invented burst shape: text appearing in a jump rather than a stream.
+   */
+  const delta = /function deltaSize\([^)]*\)[^{]*\{([\s\S]*?)\n\}/.exec(main)?.[1] ?? "";
+  assert.ok(delta.length > 0, "deltaSize is present");
+
+  // Every literal handed to `scaled(...)` must be a token-sized amount, not a block.
+  const amounts = [...delta.matchAll(/scaled\((\d+)\)/g)].map((match) => Number(match[1]));
+  assert.ok(amounts.length > 0, "the modes declare their rates");
+  for (const amount of amounts) {
+    assert.ok(
+      amount <= 32,
+      `a mode delivers ${amount} characters per frame, which is a block rather than a token stream;` +
+        " the product sends text_delta per token, so no mode may exceed ~32 chars (a fast model at 60Hz)",
+    );
+  }
+});

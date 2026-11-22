@@ -15,10 +15,17 @@
  * ## The four modes, because "smooth" is only meaningful against a comparison
  *
  *   1. **1× steady** — a realistic trickle. The tail should follow continuously with no visible jump.
- *   2. **bursty** — paragraphs arriving whole, which is what real models do when a tool returns. This is the
+ *   2. **fast** — ~960 chars/s, the ceiling a token stream realistically reaches.
  *      case the per-frame clamp exists for.
  *   3. **slow** — a token every few frames, where nothing should move at all for long stretches.
- *   4. **huge** — thousands of characters at once, which is routed to an instant settle rather than a glide.
+ *
+ * ## What was REMOVED, and why
+ *
+ * There used to be bursty (340 chars in one frame) and huge (2000 in one frame). Both were inventions of
+ * this harness, not behaviour of the product: transport.ts broadcasts every record as it arrives with no
+ * batching, so the arrival rate is Pi’s own token rate. Six rounds of tuning were spent against those modes
+ * before the operator stopped it: Pi Central has no bursty or huge mode, so we were chasing something we do
+ * not offer.
  *
  * And a scroll-behaviour switch, so the reader can feel the difference between gliding and teleporting rather
  * than being told about it.
@@ -157,13 +164,26 @@ function nextDelta(full: string, from: number, size: number): { delta: string; t
   return { delta: full.slice(from, to), to };
 }
 
-type Mode = "steady" | "bursty" | "slow" | "huge";
+type Mode = "steady" | "slow" | "fast";
 
+/*
+ * ONLY RATES PI CENTRAL ACTUALLY PRODUCES.
+ *
+ * The first version had "bursty" (340 chars in one frame) and "huge" (2000 chars in one frame). Both were
+ * invented by this harness: `transport.ts:942` broadcasts each `record` as it arrives with NO batching, so the
+ * arrival rate is Pi's own token rate — roughly 20-100 tokens/sec, which at ~4 chars/token is 80-400 chars/sec.
+ * The editor never emits a paragraph in one commit.
+ *
+ * Six rounds of scroll tuning were spent against those invented modes, and the report that finally stopped it was
+ * the right one: "we have no bursty or huge mode in Pi Central. So we are chasing sth we dont offer."
+ *
+ * These three spans the real range: a slow model, a typical one, a fast one. If a genuine burst case is ever
+ * found in the product it must be demonstrated from a real session first, not simulated here.
+ */
 const MODE_LABEL: Record<Mode, string> = {
-  steady: "1× steady",
-  bursty: "bursty (paragraphs)",
-  slow: "slow (a trickle)",
-  huge: "huge (2000 at once)",
+  slow: "slow (~15 chars/s)",
+  steady: "steady (~240 chars/s)",
+  fast: "fast (~960 chars/s)",
 };
 
 /**
@@ -176,8 +196,8 @@ const MODE_LABEL: Record<Mode, string> = {
  *
  * The ladder is 1x to 8x and deliberately has no slow end: the answer is 10 000 characters, so half speed
  * would be 84 seconds and a quarter nearly three minutes, which nobody sits through. To watch a SINGLE
- * settle closely, the useful move is not a slower stream but a shorter one -- pick the huge mode at 1x and
- * watch one 2000-character arrival glide in about four seconds.
+ * settle closely, the useful move is not a slower stream but a SHORTER one: pause, restart, and watch the
+ * first screenful fill at 1x.
  */
 const SPEEDS = [1, 2, 4, 8] as const;
 type Speed = (typeof SPEEDS)[number];
@@ -186,16 +206,14 @@ type Speed = (typeof SPEEDS)[number];
  * How much text arrives per frame, by mode and speed.
  *
  * The base rates are per frame at 60Hz, so `steady` at 1× is 240 characters per second — a fast model. `slow` is
- * 15/s, a cautious one. `bursty` and `huge` are quantised to a 30-frame interval so the arrival is genuinely
- * uneven: a paragraph or a screenful, then nothing, which is what a tool returning looks like on the wire.
+ * 15/s, a cautious one, and 960/s a fast one. All three are rates a real token stream produces.
  */
 function deltaSize(mode: Mode, frame: number, speed: Speed): number {
   const scaled = (base: number) => Math.max(1, Math.round(base * speed));
   if (mode === "steady") return scaled(4);
   if (mode === "slow") return frame % 4 === 0 ? scaled(1) : 0;
-  if (mode === "huge") return frame % 30 === 0 ? scaled(2000) : 0;
-  // bursty: a whole paragraph roughly every half second, nothing in between
-  return frame % 30 === 0 ? scaled(340) : 0;
+  // fast: 16 chars/frame ~= 960 chars/sec, the ceiling of what a token stream realistically reaches.
+  return scaled(16);
 }
 
 function useStream(mode: Mode, speed: Speed, running: boolean, resetKey: number) {
@@ -370,9 +388,9 @@ const TUNING: { key: keyof FollowConfig; label: string; min: number; max: number
     max: 80,
     step: 0.25,
     unit: "px",
-    note: "THE ONLY ONE THAT AFFECTS burst/huge — one prose line is ~23px",
+    note: "the bound that decides jump vs movement — one prose line is ~23px",
   },
-  { key: "ease", label: "gentle fraction", min: 0.04, max: 0.9, step: 0.01, unit: "", note: "TRICKLE ONLY — no effect on burst/huge" },
+  { key: "ease", label: "gentle fraction", min: 0.04, max: 0.9, step: 0.01, unit: "", note: "dominates at real token rates" },
   { key: "burstFraction", label: "burst fraction", min: 0.1, max: 1, step: 0.01, unit: "", note: "only the last ~26px, because the cap binds first" },
   { key: "rampSpanPx", label: "ramp span", min: 4, max: 200, step: 1, unit: "px", note: "where gentle becomes brisk" },
   { key: "snapPx", label: "snap", min: 0.1, max: 4, step: 0.1, unit: "px", note: "size of the final step" },
