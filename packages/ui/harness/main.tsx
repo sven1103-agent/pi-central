@@ -388,12 +388,12 @@ const TUNING: { key: keyof FollowConfig; label: string; min: number; max: number
     max: 80,
     step: 0.25,
     unit: "px",
-    note: "the bound that decides jump vs movement — one prose line is ~23px",
+    note: "NOT REACHED at real rates: the tail settles ~2.6px behind, far below the cap",
   },
-  { key: "ease", label: "gentle fraction", min: 0.04, max: 0.9, step: 0.01, unit: "", note: "dominates at real token rates" },
-  { key: "burstFraction", label: "burst fraction", min: 0.1, max: 1, step: 0.01, unit: "", note: "only the last ~26px, because the cap binds first" },
-  { key: "rampSpanPx", label: "ramp span", min: 4, max: 200, step: 1, unit: "px", note: "where gentle becomes brisk" },
-  { key: "snapPx", label: "snap", min: 0.1, max: 4, step: 0.1, unit: "px", note: "size of the final step" },
+  { key: "ease", label: "gentle fraction", min: 0.005, max: 0.9, step: 0.005, unit: "", note: "DOMINANT at real token rates — the whole distance is multiplied by it" },
+  { key: "burstFraction", label: "burst fraction", min: 0.01, max: 1, step: 0.01, unit: "", note: "WEAK unless ramp span is small — see below" },
+  { key: "rampSpanPx", label: "ramp span", min: 4, max: 200, step: 1, unit: "px", note: "mostly off at real rates: the ramp weight stays near 0.09" },
+  { key: "snapPx", label: "snap", min: 0.1, max: 4, step: 0.1, unit: "px", note: "NOT REACHED at real rates" },
 ];
 
 /** What each arrival costs under the CURRENT settings, so a slider movement is legible as well as felt. */
@@ -439,10 +439,43 @@ function TuningPanel() {
     force((n) => n + 1);
   };
 
+  /*
+   * THE DISTANCE THE TAIL ACTUALLY SETTLES AT, at a real token rate.
+   *
+   * This is the number that decides which sliders can do anything, and it is ~2.6px — an order of magnitude below
+   * the per-frame cap (23.25px) and the snap threshold is 0.6px, also below it. So the cap and the snap can never
+   * fire, and the ROOT of this panel is `ease`: it multiplies the whole distance, not a part of it.
+   *
+   * That was reported from the chair before it was derived here — "per-frame cap does not make a noticeable
+   * effect, same for ramp span and snap" — and the arithmetic agrees exactly. Printed live so a slider that cannot
+   * matter is visibly labelled rather than silently disappointing.
+   */
+  const arrivalPx = 4 / 80 * 23.25;
+  let settleDistance = 0;
+  for (let frame = 0; frame < 400; frame += 1) {
+    settleDistance += arrivalPx;
+    if (Math.abs(settleDistance) > 0.001) settleDistance -= tailStep(settleDistance);
+  }
+  const reach = {
+    maxStepPx: followConfig.maxStepPx / Math.max(settleDistance, 0.01),
+    snapPx: followConfig.snapPx / Math.max(settleDistance, 0.01),
+    rampSpanPx: Math.max(settleDistance, 0.01) / followConfig.rampSpanPx,
+  };
+  const live = (key: keyof FollowConfig): string => {
+    if (key === "maxStepPx") return reach.maxStepPx > 2 ? `${reach.maxStepPx.toFixed(0)}x above reach` : "within reach";
+    if (key === "snapPx") return reach.snapPx < 1 ? `${(1 / reach.snapPx).toFixed(0)}x below reach` : "within reach";
+    if (key === "rampSpanPx") return `ramp weight ${Math.min(1, reach.rampSpanPx).toFixed(2)}`;
+    return "ACTIVE";
+  };
+
   return (
     <div className="hx-tuning">
+      <p className="hx-tuning-truth">
+        At a real token rate the tail settles <b>{settleDistance.toFixed(2)}px</b> behind the text. Anything
+        below that number can shape the motion; anything above it cannot fire at all.
+      </p>
       {TUNING.map(({ key, label, min, max, step, unit, note }) => (
-        <label key={key} className="hx-tune">
+        <label key={key} className={`hx-tune${live(key).startsWith("ACTIVE") ? " hx-tune-active" : ""}`}>
           <span className="hx-tune-name">{label}</span>
           <input
             type="range"
@@ -456,6 +489,7 @@ function TuningPanel() {
             {values[key]}
             {unit}
           </span>
+          <span className="hx-tune-reach">{live(key)}</span>
           <span className="hx-tune-note">{note}</span>
         </label>
       ))}

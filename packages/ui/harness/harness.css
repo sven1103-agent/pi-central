@@ -198,3 +198,50 @@ body {
 .hx-settle tr.is-over td {
   color: var(--danger-text);
 }
+.hx-tuning-truth {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-left: 2px solid rgb(90 140 200);
+  background: rgb(90 140 200 / 10%);
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgb(200 210 225);
+}
+
+.hx-tuning-truth b {
+  color: rgb(235 240 250);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A slider that provably cannot affect the motion at real token rates. Dimmed, not hidden: seeing WHY it is
+   inert is the point, and hiding it would invite the question again. */
+.hx-tune {
+  display: grid;
+  grid-template-columns: 96px 1fr 56px 84px;
+  gap: 6px 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  opacity: 0.55;
+}
+
+.hx-tune-active {
+  opacity: 1;
+}
+
+.hx-tune-reach {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgb(150 160 175);
+  white-space: nowrap;
+}
+
+.hx-tune-active .hx-tune-reach {
+  color: rgb(110 200 140);
+}
+
+.hx-tune-note {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  color: rgb(120 130 145);
+}
