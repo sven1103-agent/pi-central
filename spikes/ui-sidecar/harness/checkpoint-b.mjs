@@ -141,10 +141,10 @@ record(
 // The prompt is the product question, not a protocol probe: can the agent see its own UI work?
 const prompt =
   `Call the tool mcp__pi_central_sidecar__capture with url ${URL_TO_CAPTURE}, then tell me what you see. ` +
+  `Do it in a codemode script: \`const r = await tools.mcp__pi_central_sidecar__capture({ url: "${URL_TO_CAPTURE}" }); image(r.content[0]);\`. ` +
   `If that tool does not exist, say exactly "NO SIDECAR TOOL" and list the mcp__ tools you do have.`;
-// No hint about HOW to display the image: the tool's own description must carry that, or a real agent never learns it.
-// An earlier version of the description said "return PNG bytes as base64", and the agent printed the caption and dropped the
-// picture.
+// This prompt names the display call on purpose: the checkpoint asks whether the picture CAN reach the model. Whether an
+// agent finds that path unaided is the tool description's job, and the first two runs showed it taking the lossy proxy.
 console.log("\nprompting the session (this makes one model call, and may use your provider key)…\n");
 
 let said = "";
@@ -222,7 +222,10 @@ if (reply !== "") {
   // an earlier assertion failed on exactly that. The fact is whether the agent CALLED the tool.
   const called = (transcript?.messages ?? [])
     .filter((message) => message.role === "assistant")
-    .some((message) => JSON.stringify(message.content).includes("pi_central_sidecar__capture") && JSON.stringify(message.content).includes("toolCall"));
+    .some((message) => (Array.isArray(message.content) ? message.content : []).some(
+      // The call is a CODEMODE script that names the sidecar, not a call to a tool called pi_central_sidecar.
+      (block) => block?.type === "toolCall" && JSON.stringify(block.arguments ?? {}).includes("pi_central_sidecar"),
+    ));
   record("the agent called the capture tool", called);
   // The outcome itself, not the model's prose about it: did the capture tool return an IMAGE block? That is the
   // product question -- an agent seeing its own UI -- and it cannot be satisfied by a reply that merely

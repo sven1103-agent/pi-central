@@ -65,6 +65,8 @@ export function toolDefinitions(): ToolDefinition[] {
         "Screenshot the registered dev server. Returns the PNG as an image content block, first in `content`, " +
         "followed by a one-line caption. Writes no file. From a codemode script the image reaches you only if " +
         "the script shows it: `image(result.content[0])`; printing the text alone discards the picture. " +
+        "Call the typed function `mcp__pi_central_sidecar__capture({ url })`: the `mcp({ tool })` proxy and the " +
+        "`mcp__pi_central_sidecar({ tool })` namespace form return only the caption as a string. " +
         "Prefer `probe` first: a screenshot costs thousands of tokens.",
       inputSchema: {
         type: "object",
