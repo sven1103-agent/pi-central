@@ -1,3 +1,3 @@
-2026/11/22-10:09:54.201 5bd3b5 Reusing MANIFEST /Users/sven1103/git/pi-central/pi-central-sidecar/spikes/ui-sidecar/harness/profile/Default/shared_proto_db/MANIFEST-000001
-2026/11/22-10:09:54.201 5bd3b5 Recovering log #3
-2026/11/22-10:09:54.201 5bd3b5 Reusing old log /Users/sven1103/git/pi-central/pi-central-sidecar/spikes/ui-sidecar/harness/profile/Default/shared_proto_db/000003.log 
+2026/11/22-10:13:55.540 5c2d4d Reusing MANIFEST /Users/sven1103/git/pi-central/pi-central-sidecar/spikes/ui-sidecar/harness/profile/Default/shared_proto_db/MANIFEST-000001
+2026/11/22-10:13:55.541 5c2d4d Recovering log #3
+2026/11/22-10:13:55.541 5c2d4d Reusing old log /Users/sven1103/git/pi-central/pi-central-sidecar/spikes/ui-sidecar/harness/profile/Default/shared_proto_db/000003.log 

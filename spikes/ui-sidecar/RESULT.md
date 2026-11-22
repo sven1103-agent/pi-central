@@ -1,7 +1,7 @@
 # Phase 0 — result: a browser renders under the sidecar's profile, and loopback is confined
 
-**Status:** ✅ **PASSED** (5/5 in the control run and 5/5 in the fragment run; 3/5 in the middle run,
-which is the expected "before").
+**Status:** ✅ **PASSED** (5/5 control, 3/5 under the bare profile — the expected "before" — and 6/6 with
+the loopback fragment).
 **Issue:** [#276](https://github.com/sven1103-agent/pi-central/issues/276)
 **Brief:** [PHASE-0.md](PHASE-0.md) · **Harness:** [harness/shot.mjs](harness/shot.mjs)
 **Environment:** macOS, run from a plain (unsandboxed) terminal. Versions are deliberately not recorded
@@ -34,7 +34,7 @@ safehouse --workdir="$PWD" --enable=playwright-chrome --append-profile="$PWD/loo
 | Check | 1 · control | 2 · sidecar profile | 3 · + loopback fragment |
 |---|---|---|---|
 | loopback :4173 reachable | PASS | PASS | PASS |
-| second loopback port :4174 | (baseline: reachable) | **reachable** | not yet re-run |
+| second loopback port :4174 | — | **reachable** | **REFUSED (`EPERM`)** — the port is pinned, not the address |
 | non-loopback host | (baseline: reachable) | **reachable — no confinement** | **REFUSED (`EPERM`)** |
 | name resolution | (baseline: works) | **works — no confinement** | **REFUSED (no answer)** |
 | browser produced a PNG | PASS | **PASS** | **PASS** |
@@ -47,7 +47,13 @@ closed one either (C15c).
 
 **The composite claim is confirmed.** The browser launches under its own Safehouse profile with
 `--enable=playwright-chrome`, renders a real page to a PNG at the requested size, and does so *while*
-non-loopback egress and name resolution are refused.
+a non-loopback host, name resolution, **and a second loopback port** are all refused.
+
+The last of those is the one that makes the egress fragment worth having. A pin on `localhost:<port>`
+would be decorative if it still admitted every other loopback port — the orchestrator's control socket
+lives there, and its transport performs no Origin, Host or token check. Measured: it does not. So a
+compromised renderer cannot dial the orchestrator, and the fragment is a boundary rather than a
+formality.
 
 ## What the screenshots showed
 
@@ -88,7 +94,7 @@ clipboard, not the desktop surface.
 
 | Question | How to settle it |
 |---|---|
-| Is a **second loopback port** reachable under the fragment? | the check is in the harness; re-run command 3. If :4174 answers, a confined renderer can still dial the orchestrator's control socket, which performs no Origin, Host or token check |
+| Which port does the sidecar pin, per session? | each session's dev server is ephemeral, so the fragment is per-session; the shape that composes it must take the port as an input, not a constant |
 | Does the renderer need the desktop grants at all? | bisect from `--disable-gpu` upward; if a smaller set renders, the surface shrinks |
 | Is `probe` derivable without Playwright? | the next brief (shape C) — a thin host-side verb server driving `playwright-core` directly |
 
