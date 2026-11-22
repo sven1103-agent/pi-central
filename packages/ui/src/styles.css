@@ -154,6 +154,13 @@
    * must be DEFINED, because the failure is silent and lands somewhere unrelated to the line that caused it.
    */
   --companion-width: 340px;
+
+  /*
+   * ROOM AFTER THE LAST LINE (ADR-0017). Defaulted here as well as in `reading.ts` so the anchor holds before the
+   * reader's preference is read — the first paint of a session must not show the tail at the foot and then jump.
+   * `reading.ts` is the single writer once it runs; this is the same value, stated where the stylesheet can see it.
+   */
+  --tail-space: min(35vh, 24rem);
   --fs-lg: 18px;
 
   --sh-1: 0 1px 0 rgba(255, 255, 255, 0.03);
@@ -2219,6 +2226,24 @@ button { font: inherit; color: inherit; }
   max-width: var(--reading-measure);
   margin-inline: auto;
   font-size: var(--fs-base);
+  /*
+   * THE TAIL ANCHOR (ADR-0016), so the newest line is not pinned to the window's foot.
+   *
+   * Padding ON THE LANE, not a spacer element. A spacer would be a new child of this element, and the lane's own
+   * child-count rules — `.transcript-lane > .turn-user:first-child` just below — would then be correct for N
+   * children and wrong at N+1 (C20). Padding adds height without changing what any child-count rule counts.
+   *
+   * It must be PADDING-BOTTOM rather than margin, because margin at the end of a scroll container collapses and
+   * leaves the space outside the scrollable area, which is indistinguishable from no space at all.
+   *
+   * The end sentinel is the LAST CHILD OF THE SCROLLER, after this lane. Both follow paths go to maximum scroll,
+   * and that lands below this padding only because the padding is content ABOVE the sentinel. Moving the sentinel
+   * inside or above the lane would anchor to the padding's end and reproduce the complaint exactly.
+   *
+   * `--tail-space` is written by `readingStyle` from the reader's `tail` preference: the anchor mechanism always
+   * applies, and `"foot"` sets the value to 0px.
+   */
+  padding-bottom: var(--tail-space, 0px);
 }
 
 /*
@@ -5759,6 +5784,38 @@ select.btn { font-family: var(--sans); }
   color: var(--dim);
 }
 .reading-row input[type="range"] { width: 100%; accent-color: var(--accent); }
+/*
+ * THE "NEWEST LINE" CHOICE (ADR-0016).
+ *
+ * A fieldset rather than a range, because this is a choice and not a quantity: two named positions, no third value
+ * to slide to. The ADR refuses a "top" setting — it doubles the space under the tail for a complaint nobody made.
+ *
+ * Laid out as a row to match the two sliders above it, so the panel reads as one list of transcript settings.
+ */
+.reading-tail {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 2px var(--sp-2);
+  border: 0;
+  padding: 0;
+  margin: 0 0 6px;
+  font-size: var(--fs-xs);
+  color: var(--dim);
+}
+.reading-tail legend {
+  padding: 0;
+  grid-column: 1;
+  line-height: 1.7;
+}
+.reading-tail label {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.7;
+  cursor: pointer;
+}
+.reading-tail input { accent-color: var(--accent); }
 .reading-row input[type="range"]:disabled { opacity: 0.4; }
 .reading-value { color: var(--text); text-align: right; }
 /*
