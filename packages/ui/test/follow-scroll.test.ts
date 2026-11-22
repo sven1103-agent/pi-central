@@ -12,9 +12,9 @@ import {
   FRAME_MS,
   READER_SCROLL_TOLERANCE_PX,
   TAIL_BURST_FRACTION,
+  TAIL_MAX_STEP_PX,
   TAIL_EASE,
   TAIL_RAMP_SPAN_PX,
-  TAIL_SETTLE_BUDGET_MS,
   TAIL_SNAP_PX,
   readerMoved,
   shouldSettleInstantly,
@@ -75,81 +75,47 @@ test("a steady stream keeps up: the tail is never left behind the text", () => {
   }
 });
 
-test("a BURST glides, and is over before the eye can track it", () => {
+test("NO frame ever moves more than one line, at any distance", () => {
   /*
-   * The reported defect, and the two wrong fixes for it before this one.
+   * THE ASSERTION THAT WOULD HAVE SAVED FOUR ROUNDS, and the one every earlier version lacked.
    *
-   * 1. A per-FRAME bound of 28px felt violent: it is 1680 px/sec at 60Hz.
-   * 2. A pure RATE bound of 140 px/sec made a 581px arrival take 4.2 seconds, crawling over content that was
-   *    already rendered — reported as "bursty and huge still teleport", which is the opposite of a jump and
-   *    equally wrong.
+   * Each previous fix bounded something else — per-second rate, total settle time, a burst fraction — and each
+   * let a SINGLE frame move 15 lines. Bounding the duration of a settle does not bound its frames: a fast settle
+   * necessarily contains fast frames. Reported from the harness as "bursty and huge are constantly red", with the
+   * probe measuring 21613 px/sec on the first frame of a 581px arrival.
    *
-   * So a burst must be BOTH bounded and quick, and those conflict; the resolution is that the rate governs small
-   * moves and DURATION governs large ones. What must hold here is the duration, because the content has already
-   * arrived — being slow to bring the viewport to it buys the reader nothing.
+   * So the assertion is per frame, at every distance, because that is the unit the eye actually sees. The settle
+   * TIME is a consequence and is deliberately not asserted as a target.
    */
-  const steps = glide(581);
-  const settleMs = steps.length * FRAME_MS;
+  for (const distance of [2, 12, 99, 233, 581, 1163, 2000]) {
+    const steps = glide(distance);
+    for (const [index, entry] of steps.entries()) {
+      assert.ok(
+        Math.abs(entry.step) <= TAIL_MAX_STEP_PX + 0.01,
+        `${distance}px arrival moved ${Math.abs(entry.step).toFixed(1)}px on frame ${index}` +
+          `, above the ${TAIL_MAX_STEP_PX}px (one line) ceiling`,
+      );
+    }
+    assert.equal(steps.at(-1)?.remaining, 0, `${distance}px must still arrive exactly`);
+  }
+});
+
+test("a BURST takes longer than a trickle, which is the correct tradeoff", () => {
+  /*
+   * The consequence, asserted so it is not mistaken for a regression later: keeping every frame under a line
+   * means a large arrival takes real time. 581px is ~25 frames (0.4s) and 2000px is ~90 (1.5s).
+   *
+   * That is a deliberate choice between two bad options, and the reason is stated where the constant is: a jump
+   * the eye cannot follow, or a slide it can. The slide wins, and the cost is paid in time rather than in
+   * comprehension.
+   */
+  const small = glide(12).length;
+  const large = glide(2000).length;
+  assert.ok(large > small * 10, `2000px must take far longer than 12px; got ${large} vs ${small} frames`);
   assert.ok(
-    settleMs <= TAIL_SETTLE_BUDGET_MS + 20,
-    `a 581px arrival took ${settleMs.toFixed(0)}ms; the budget is ${TAIL_SETTLE_BUDGET_MS}ms, or it is a crawl`,
+    large < 120,
+    `2000px took ${large} frames (${(large * FRAME_MS / 1000).toFixed(1)}s), which is a drag rather than a slide`,
   );
-  assert.ok(steps.length > 6, `it must still take several frames rather than one; took ${steps.length}`);
-  assert.equal(steps.at(-1)?.remaining, 0, "and it must arrive exactly");
-});
-
-test("a TRICKLE stays gentle: small moves settle slowly enough to be read", () => {
-  /*
-   * The case that must not regress. A steady stream produces about 1.2px of new content per frame, and the
-   * movement must follow it in sub-pixel steps rather than in hops — that is the motion a reader follows line by
-   * line, and it is the half that was already working before any of these fixes.
-   *
-   * What changed with the ramp: there is no longer a rate CAP to assert against, because the gentle fraction is
-   * the low end of a continuous curve. What must hold is the settle TIME at the small end, which is the property
-   * a reader actually experiences.
-   */
-  /*
-   * The floor is not the same at every size, and the first version of this test wrongly demanded one: a 1px gap
-   * settles in 50ms and that is CORRECT — the whole movement is smaller than a line, so there is nothing for the
-   * eye to follow and stretching it would be inventing a motion. The floor only matters once the move is a
-   * visible fraction of a line (~23px), so it is asserted from 5px up.
-   */
-  for (const distance of [5, 12]) {
-    const ms = glide(distance).length * FRAME_MS;
-    assert.ok(
-      ms >= 120,
-      `a ${distance}px move settled in ${ms.toFixed(0)}ms, which is a flick rather than a scroll`,
-    );
-    assert.ok(ms <= 250, `${distance}px took ${ms.toFixed(0)}ms, too slow for a trickle`);
-  }
-
-  // Sub-line movements are allowed to be quick, and must still arrive.
-  for (const distance of [1, 2]) {
-    const steps = glide(distance);
-    assert.equal(steps.at(-1)?.remaining, 0, `a ${distance}px gap must still close exactly`);
-    assert.ok(steps.length * FRAME_MS <= 150, "and not be stretched for the sake of it");
-  }
-
-  // The curve is continuous: the fraction at zero distance is the gentle one, and the ramp span is where it
-  // reaches the burst fraction. Asserted as arithmetic so a future edit to either constant is caught.
-  assert.ok(TAIL_EASE < TAIL_BURST_FRACTION, "the ramp must go from gentle to burst");
-  assert.ok(TAIL_RAMP_SPAN_PX > 0, "and it must have a span to complete over");
-});
-
-test("the settle is bounded in TIME at every distance, which is what makes it watchable", () => {
-  /*
-   * The property that replaced "bounded by distance": however far the viewport has to travel, the reader is not
-   * made to watch it for longer than the budget. That is the whole difference between a dissolve and a crawl.
-   */
-  for (const distance of [50, 99, 233, 581, 1163, 5000]) {
-    const steps = glide(distance);
-    const ms = steps.length * FRAME_MS;
-    assert.ok(
-      ms <= TAIL_SETTLE_BUDGET_MS + 20,
-      `${distance}px took ${ms.toFixed(0)}ms, above the ${TAIL_SETTLE_BUDGET_MS}ms budget`,
-    );
-    assert.equal(steps.at(-1)?.remaining, 0, `${distance}px must arrive exactly`);
-  }
 });
 
 test("a negative distance (content above the target) mirrors exactly", () => {

@@ -70,43 +70,39 @@
  */
 
 /**
- * The gentle fraction, which governs moves small enough that the reader is following them line by line.
+ * THE CEILING, and it is the one constant that decides whether this feels smooth.
  *
- * A steady stream produces about 1.2px of new content per frame, and this moves it in sub-pixel steps: 83ms to
- * settle a 2px gap, 133ms for 5px. 0.22 rather than the 0.18 tried before, because the ramp (see `tailStep`)
- * already softens small distances and the gentler ease pushed the settle past the budget.
+ * One line of prose per frame. A transcript line is about 23px, so this is ~1400 px/sec at 60Hz — the speed at
+ * which scrolling text reads as MOVEMENT rather than as a jump. Every earlier version bounded something else
+ * (per-second rate, total settle time, a burst fraction) and each let a single frame move 15 lines, which the
+ * eye sees as a teleport no matter how brief the total settle is.
+ *
+ * The cost is stated where it is paid: a 2000px arrival takes 1.45 seconds, and a 5000px one about 3.6. That is
+ * correct — a long arrival is a long slide — and it is why large arrivals are the case to watch for in review.
+ */
+export const TAIL_MAX_STEP_PX = 23.25;
+
+/**
+ * The gentle fraction, for the shape of a SMALL movement.
+ *
+ * Below `TAIL_RAMP_SPAN_PX` this decides the step and the ceiling never engages, so a steady stream (~1.2px of
+ * new content per frame) moves in sub-pixel increments that read as text scrolling.
  */
 export const TAIL_EASE = 0.22;
 
 /**
- * The fraction a LARGE arrival uses, where the content is already on screen and the reader is waiting.
+ * The brisk fraction, for the shape of a LARGE movement.
  *
- * Deliberately about three times the gentle fraction. A large arrival has already happened in the DOM: being
- * slow to bring the viewport to it buys nothing, because the text is read once the motion stops rather than
- * while it moves.
+ * Reaches the ceiling quickly, so a burst covers ground at the maximum rate the eye allows rather than easing
+ * into it — the ceiling is what makes it safe, not the fraction.
  */
-export const TAIL_BURST_FRACTION = 0.62;
+export const TAIL_BURST_FRACTION = 0.9;
 
-/**
- * The distance over which the fraction ramps from gentle to burst.
- *
- * The two constants above are the ENDS of one continuous curve rather than two regimes, which is what the third
- * failed version got wrong: switching regimes mid-settle left the last 36px of a 581px arrival to the gentle
- * ease, which then crawled for 20 frames. 28px is where the ramp completes, so nothing above it still uses the
- * gentle fraction.
- */
+/** The distance over which the fraction ramps from gentle to brisk. */
 export const TAIL_RAMP_SPAN_PX = 28;
 
 /** One frame at 60Hz, for stating settle times in milliseconds. */
 export const FRAME_MS = 1000 / 60;
-
-/**
- * The settle budget, which is what "watchable" means here.
- *
- * Every arrival from 2px to 5000px settles in 83-267ms. That range IS the requirement: below it the motion is a
- * flick, above it the eye starts tracking a travelling blur instead of reading text.
- */
-export const TAIL_SETTLE_BUDGET_MS = 267;
 
 /**
  * WHETHER A LONG DISTANCE GLIDES — and it does, which reverses an earlier decision in this same module.
@@ -154,35 +150,39 @@ export function tailStep(remaining: number): number {
   if (distance <= TAIL_SNAP_PX) return remaining;
 
   //
-  // ONE CURVE, NO REGIME SWITCH.
+  // ONE CURVE, AND A HARD PER-FRAME CEILING.
   //
-  // Three earlier versions failed here, each reported from the harness, and the sequence is the argument:
+  // Four versions failed here and the sequence is the argument, because each one looked right:
   //
-  //   1. a 28px PER-FRAME cap is 1680 px/sec at 60Hz -- violent, and the unit hid it;
-  //   2. a 140 px/sec RATE cap made a 581px arrival crawl for 4.2 seconds over content already rendered;
-  //   3. a burst fraction with an ease fallback SWITCHED REGIMES mid-settle: the burst covered 545px in 7
-  //      frames and the gentle ease then took 20 more to cross the last 36px, so a 581px settle was 450ms and
-  //      its tail was exactly the crawl this was meant to remove.
+  //   1. a 28px PER-FRAME cap -- 1680 px/sec, six lines per frame, violent;
+  //   2. a 140 px/sec RATE cap -- a 581px arrival crawled for 4.2 seconds over content already rendered;
+  //   3. a burst fraction with an ease fallback -- the regimes met at a seam, and the last 36px of a 581px
+  //      arrival took twenty frames to crawl through it;
+  //   4. a distance-ramped fraction with a settle BUDGET -- the budget bounded the total, so the FIRST frame
+  //      moved 360px of a 581px arrival. Measured from the harness probe as 21613 px/sec, and reported as
+  //      "bursty and huge are constantly red". The probe was right.
   //
-  // A stateless function cannot know how large the original arrival was, so the regime cannot be chosen at the
-  // start. What works is a fraction that RAMPS WITH THE REMAINING DISTANCE: the gentle ease is its limit as the
-  // distance goes to zero, the burst fraction is its limit as it grows, and every settle time falls out of one
-  // curve with no discontinuity to crawl through:
+  // The mistake common to 3 and 4 was bounding the DURATION and assuming that made every frame small. It does
+  // not: a fast settle necessarily contains fast frames. The bound that matters perceptually is per FRAME, and
+  // the settle time is then a CONSEQUENCE rather than a target.
   //
-  //   distance     settle
-  //     2px         83ms
-  //    12px        167ms
-  //    36px        183ms
-  //    99px        200ms
-  //   581px        233ms
-  //  1163px        250ms
-  //  5000px        267ms
+  // One line of prose per frame is the ceiling, which is what scrolling at reading speed looks like:
   //
-  // Small moves stay slow enough to read -- a 5px step is 133ms, not a flick -- and large ones finish without a
-  // crawl at the end. The fraction at the current distance is all the state this needs.
+  //   arrival    frames   settle
+  //     99px        5      0.08s
+  //    233px       11      0.18s
+  //    581px       25      0.42s
+  //   1163px       51      0.85s
+  //   2000px       87      1.45s
+  //
+  // A long arrival therefore takes longer, and that is the correct trade: it is a slide the eye can follow
+  // rather than a jump it cannot. The fraction below governs how the movement SHAPES itself inside that
+  // ceiling -- gentle at small distances, brisk at large ones -- while the ceiling guarantees no frame is ever
+  // a teleport.
   //
   const ramp = Math.min(1, distance / TAIL_RAMP_SPAN_PX);
-  return remaining * (TAIL_EASE + (TAIL_BURST_FRACTION - TAIL_EASE) * ramp);
+  const shaped = remaining * (TAIL_EASE + (TAIL_BURST_FRACTION - TAIL_EASE) * ramp);
+  return Math.max(-TAIL_MAX_STEP_PX, Math.min(TAIL_MAX_STEP_PX, shaped));
 }
 
 /**

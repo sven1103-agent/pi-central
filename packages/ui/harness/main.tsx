@@ -27,6 +27,7 @@ import { StrictMode, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { TranscriptView } from "../src/components/Transcript.tsx";
 import { applyRecord, emptyTranscript, type Transcript } from "../src/transcript.ts";
+import { TAIL_MAX_STEP_PX, FRAME_MS } from "../src/follow-scroll.ts";
 import "../src/styles.css";
 import "./harness.css";
 
@@ -302,11 +303,18 @@ function ScrollProbe({ stageRef }: { stageRef: React.RefObject<HTMLDivElement | 
       peakThisSecond = Math.max(peakThisSecond, delta);
 
       /*
-       * OUR budget is 2.33px/frame at 140 px/sec. Anything larger did not come from `tailStep`, and saying so is
-       * the whole point of the probe: it splits the movement into "the animation" and "everything else", which is
-       * the distinction two rounds of guessing failed to make.
+       * JUDGED AGAINST THE REAL CEILING, imported rather than hardcoded.
+       *
+       * The previous version used a 2.5px threshold carried over from an older constant, so it reported EVERY
+       * frame as a jump once the ceiling became one line (23px) — a probe that is always red is a probe nobody
+       * reads. The threshold is now the ceiling the module actually enforces, plus half a pixel for the browser
+       * rounding `scrollTop` to a device pixel.
+       *
+       * The distinction it draws is still the useful one: a movement at or below the ceiling is OUR animation, and
+       * anything above it came from somewhere else — a clamp, an anchoring jump, or a caller passing `instant`.
        */
-      if (delta > 2.5) setExternal((n) => n + 1);
+      const ceiling = TAIL_MAX_STEP_PX + 0.5;
+      if (delta > ceiling) setExternal((n) => n + 1);
       else if (delta > 0) setOurs((n) => n + 1);
 
       if (now - lastReport > 1000) {
@@ -320,13 +328,13 @@ function ScrollProbe({ stageRef }: { stageRef: React.RefObject<HTMLDivElement | 
     return () => cancelAnimationFrame(raf);
   }, [stageRef]);
 
-  const jump = worst.px > 2.5;
+  const jump = worst.px > TAIL_MAX_STEP_PX + 0.5;
   return (
     <span className={"hx-probe" + (jump ? " is-jump" : "")}>
       {jump ? (
         <strong>JUMP {worst.px.toFixed(0)}px in one frame = {worst.perSecond.toFixed(0)} px/sec</strong>
       ) : (
-        <>peak {worst.px.toFixed(1)}px/frame = {worst.perSecond.toFixed(0)} px/sec</>
+        <>peak {worst.px.toFixed(1)}px of {(TAIL_MAX_STEP_PX).toFixed(0)}px/frame</>
       )}
       {" · ours "}{ours}{" · external "}{external}
     </span>
