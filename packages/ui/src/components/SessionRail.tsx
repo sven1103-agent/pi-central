@@ -65,6 +65,8 @@ export function SessionRail({
   firstPromptFor,
   openAsDrawer = false,
   onCloseDrawer,
+  onPeekPointerEnter,
+  onPeekPointerLeave,
   prefs = defaultRailPrefs(),
   onToggleFolded,
 }: {
@@ -152,6 +154,18 @@ export function SessionRail({
   openAsDrawer?: boolean;
   /** Close the drawer. Called after choosing a session, so a selection does not leave the overlay covering it. */
   onCloseDrawer?: (() => void) | undefined;
+  /**
+   * Keeps a HOVER PREVIEW alive while the pointer is on the list itself.
+   *
+   * A preview that could only be looked at is worse than none: the reader hovers the control, sees the session they want,
+   * and the list disappears the moment they move toward it — *"i cant because leaving the icon closes the roster again"*.
+   * So the preview is a real surface, and these two callbacks are how it stays open long enough to be used.
+   *
+   * Absent means no preview is in play: a docked column and a summoned drawer need neither, because neither depends on
+   * where the pointer is.
+   */
+  onPeekPointerEnter?: (() => void) | undefined;
+  onPeekPointerLeave?: (() => void) | undefined;
   /**
    * The reader's rail preferences (issue #275): density and which sections are folded.
    *
@@ -264,6 +278,15 @@ export function SessionRail({
       id="session-rail"
       className={`rail${openAsDrawer ? " open" : ""}`}
       aria-label="Sessions"
+      /*
+        THE LIST ITSELF IS PART OF THE HOVER AREA.
+
+        Moving from the control to the list crosses a gutter, and a preview that ended on the first stray pixel would be
+        unusable — which is exactly what was reported. These two only exist while a preview is in play; a docked column
+        and a summoned drawer pass neither, so nothing about them changes.
+      */
+      onPointerEnter={onPeekPointerEnter}
+      onPointerLeave={onPeekPointerLeave}
     >
       <div className="rail-start">
         {/* The PRIMARY action, first in the rail, with no path field anywhere near it (US-1). */}

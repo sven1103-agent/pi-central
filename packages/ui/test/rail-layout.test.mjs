@@ -155,3 +155,114 @@ test("no literal rail width survives outside the custom property's fallback", ()
     "no track, width or offset may pin the rail to a literal",
   );
 });
+
+test("hovering the list control previews the roster, and the preview can be USED", () => {
+  /*
+   * The request: *"when i hover the \"Show list\" icon, i want to quickly see the roster"*. A press is a decision and a
+   * glance at which sessions are running is not, so the control previews on hover.
+   *
+   * ## The first version was see-only, reported from use
+   *
+   * *"when i hover and i see a session where i want to take action, i cant because leaving the icon closes the roster
+   * again, and clicking it closes it as well"* — two independent defects, both from treating "preview" as a boolean:
+   *
+   *   1. **Unreachable.** The pointer must travel from the bar to the list across a gutter. The preview closed on the
+   *      first stray pixel, so it could be looked at and not touched. It was also `pointer-events: none`, which made the
+   *      unreachability a rule rather than an accident.
+   *   2. **A press dismissed it.** The control toggles on `railShown`, and a preview counted as shown — so clicking the
+   *      preview took the HIDE branch and the list vanished under the click.
+   *
+   * So the preview is a THREE-state thing: hover follows the pointer across two zones, a press promotes it to pinned, and
+   * only a pinned preview can be pressed away. These assertions state that, plus the one thing a preview must still never
+   * do: dim the window, or persist.
+   *
+   * Falsified by any of: closing on the control's own leave (unreachable); a press that falls through to the hide branch;
+   * `pointer-events: none` on the preview.
+   */
+  assert.match(
+    app,
+    /const \[railPeekMode, setRailPeekMode\] = useState<"none" \| "hover" \| "pinned">\("none"\)/,
+    "three states: hover, pinned, none — a boolean cannot express 'shown but not committed'",
+  );
+  assert.match(app, /const railHovering = railPreviewable && railPeekMode === "hover"/);
+  assert.match(app, /const railPinnedOpen = railPreviewable && railPeekMode === "pinned"/);
+
+  /*
+   * (1) REACHABILITY. One pair of handlers, attached to BOTH the control and the list, and the delay is on leave only so
+   * crossing the gutter is one continuous hover.
+   */
+  assert.match(app, /const previewEnter = useCallback/, "one enter handler for both zones");
+  assert.match(app, /const previewLeave = useCallback/, "and one leave handler");
+  const leave = /const previewLeave = useCallback\(\(\) => \{([\s\S]*?)\}\);\n/.exec(app)?.[1] ?? "";
+  assert.ok(leave.length > 0, "the leave handler must exist");
+  assert.match(leave, /setTimeout\(/, "a delay rather than an immediate close");
+  assert.match(leave, /\b220\b/, "long enough to cross the gutter to the list");
+  assert.match(
+    leave,
+    /current === "hover" \? "none" : current/,
+    "and it closes ONLY a hover: a pinned preview outlives the pointer",
+  );
+  assert.match(app, /onPointerEnter=\{previewEnter\}/, "the control enters the preview");
+  assert.match(
+    app,
+    /onPeekPointerEnter=\{railHovering \? previewEnter : undefined\}/,
+    "and so does the LIST, or moving toward a row ends the preview",
+  );
+  assert.match(app, /onPeekPointerLeave=\{railHovering \? previewLeave : undefined\}/);
+
+  const rail = read("components/SessionRail.tsx");
+  assert.match(rail, /onPointerEnter=\{onPeekPointerEnter\}/, "the rail really applies them, not just declares them");
+  assert.match(rail, /onPointerLeave=\{onPeekPointerLeave\}/);
+
+  const peek = rule(".panes.is-rail-peek .rail") ?? "";
+  assert.ok(peek.length > 0, "the preview needs a rule of its own");
+  assert.ok(
+    !/pointer-events:\s*none/.test(peek),
+    "the preview is interactive: a surface you cannot reach cannot be acted on, which is the reported defect",
+  );
+  assert.match(peek, /box-shadow:\s*none/, "and it is the list itself, not a floating panel to deal with");
+
+  /*
+   * (2) A PRESS PROMOTES. It returns before the ordinary toggle, so the hide branch cannot also run.
+   */
+  assert.match(app, /const togglePeekPinned = useCallback/, "a press has its own handler");
+  assert.match(
+    app,
+    /if \(railPeeking\) \{\s*togglePeekPinned\(\);\s*return;/,
+    "a press on the preview promotes it and RETURNS — the hide branch must not also run",
+  );
+  assert.match(
+    app,
+    /setRailPeekMode\(\(current\) => \(current === "pinned" \? "none" : "pinned"\)\)/,
+    "hover becomes pinned, pinned becomes nothing",
+  );
+
+  /*
+   * (3) AND THE TWO THINGS A PREVIEW STILL MUST NOT DO: dim the window, or remember itself.
+   */
+  const backdropAt = app.indexOf('className="rail-backdrop"');
+  const gates = [...app.slice(0, backdropAt).matchAll(/\{([^{}]+?)\s*&&\s*\(/g)]
+    .map((match) => match[1].trim())
+    .filter((gate) => !/^\/\*/.test(gate));
+  assert.equal(
+    gates.at(-1),
+    "railOverlay",
+    `only a SUMMONED drawer may dim the window; a preview that dimmed it would make a glance cost a commitment`,
+  );
+
+  const hoverHandlers = /onPointerEnter=\{previewEnter\}[\s\S]*?onClick=\{/.exec(app)?.[0] ?? "";
+  assert.ok(hoverHandlers.length > 0, "the handlers must be on the control");
+  assert.ok(
+    !/setRailPrefsAndPersist|setRailPrefs\b/.test(hoverHandlers),
+    "hovering must never write the reader's persisted preference",
+  );
+
+  /*
+   * Bounded to where it means something: the page with a list, the window that can afford one, and the list being away.
+   */
+  assert.match(
+    app,
+    /const railPreviewable = tab === "sessions" && !railIsDrawer && !railDocked/,
+    "no preview on a page without a list, in the drawer's width, or beside a list already showing",
+  );
+});

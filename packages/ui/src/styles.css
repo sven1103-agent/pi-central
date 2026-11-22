@@ -91,6 +91,18 @@
    * fifth of a difference.
    */
   --gauge-width: 120px;
+  /*
+   * THE TRANSCRIPT'S SCROLLBAR, as a number two rules have to agree on.
+   *
+   * `.transcript` is a vertical scroller, so its `clientWidth` is 11px narrower than its box while the content
+   * overflows — and ZERO narrower when it does not. `.transcript-footer` is a SIBLING and has no scrollbar, so with
+   * `padding: 0 18px` it resolved its width against 11px more than the scroller did: the composer's right edge sat 12px
+   * past the prose's, which is the "two right edges" defect `img_35.png` recorded, returning through a box the fix never
+   * considered.
+   *
+   * Measured, not assumed: `w=655 clientW=644` on `.transcript`, and `::-webkit-scrollbar { width: 10px }` below.
+   */
+  --transcript-scrollbar: 11px;
 
   --fs-2xs: 10px;
   --fs-xs: 11px;
@@ -131,6 +143,15 @@
   --reading-leading: minmax(0, 1fr);
   --reading-lane: minmax(0, 80ch);
   --reading-trailing: minmax(0, 1fr);
+  /*
+   * A four-track row's tokens, deliberately NOT defined.
+   *
+   * `--reading-companion` and `--reading-outer` existed for one round, while the row centered the prose and the companion
+   * together. That arrangement put the prose permanently off-centre — *"left pushed"* — and it is gone; the prose is what
+   * is centred, so the row is three tracks and these two have no reader. Leaving the declaration without a reader is the
+   * mirror of the `--companion-width` defect recorded below (a `var()` with no definition, silently invalid), so they are
+   * removed rather than left as an invitation to reintroduce the fourth track by adding a single declaration.
+   */
   /*
    * The CEILING of the trailing track when the peek panel is open, beside the token that is its resting size.
    *
@@ -387,6 +408,43 @@ button { font: inherit; color: inherit; }
   background: var(--panel);
   border-right: 1px solid var(--line-strong);
   box-shadow: var(--sh-2);
+}
+
+/*
+ * A HOVER PREVIEW of the roster, which is the overlay's SHAPE with the drawer's commitments removed.
+ *
+ * Reported from use: *"when i hover the \"Show list\" icon, i want to quickly see the roster"*. A press is a decision and
+ * a glance is not, so hovering shows what pressing would — and `is-rail-peek` is the class that says "this appeared under
+ * a pointer, not under a command".
+ *
+ * ## What differs from the summoned drawer
+ *
+ * The POSITION is the same, and deliberately so: a preview that appeared somewhere else would teach the reader the wrong
+ * place. What goes is everything that belongs to a commitment:
+ *
+ *   - no backdrop, because there is nothing to dismiss — the pointer is still moving, and a click on a dim would close
+ *     something the reader never opened;
+ *   - no shadow, because a shadow says "this floats above the page, and you must deal with it". A preview is the list
+ *     itself, briefly, and it should look like the list.
+ *
+ * ## What it must NOT take away: the ability to be used
+ *
+ * The first version was `pointer-events: none`, on the reasoning that the preview sat under a pointer still on the activity
+ * bar and must not eat the click that would commit it. That reasoning was wrong about what the reader is doing: the whole
+ * point of seeing the list is to act on a row in it, and a surface you cannot reach is worse than no surface — reported,
+ * accurately, as *"i cant because leaving the icon closes the roster again"*.
+ *
+ * So the preview is fully interactive, and the hover area covers the control AND the list (`onPeekPointerEnter/Leave` on
+ * the rail). Only the BACKDROP is withheld: there is nothing to dismiss, and a click on a dim must not close a list the
+ * reader is using.
+ *
+ * ## Why it does not animate
+ *
+ * A 100ms fade is right for a drawer the reader asked for, and wrong for one that has to be gone before a click lands.
+ * `prefers-reduced-motion` already removes transitions elsewhere; here there is nothing to remove.
+ */
+.panes.is-rail-peek .rail {
+  box-shadow: none;
 }
 
 /*
@@ -2003,6 +2061,17 @@ button { font: inherit; color: inherit; }
    */
   padding: var(--sp-4) 18px var(--sp-4) 18px;
   min-height: 0;
+  /*
+   * THE GUTTER IS ALWAYS RESERVED, and it is not a micro-optimisation.
+   *
+   * `overflow-y: auto` shows the scrollbar only once the content overflows, so the lane's usable width changed by 11px
+   * the moment a conversation grew past one screen — every line re-wrapped and the prose shifted sideways mid-read. With
+   * the gutter reserved, the width is the same at the first message and the thousandth.
+   *
+   * It also gives `clientWidth` a value that does not depend on the content, which is what lets the footer below line up
+   * with it by arithmetic instead of by luck.
+   */
+  scrollbar-gutter: stable;
   /*
    * NO `scroll-behavior: smooth`, and that is a correctness fix rather than a taste one (issue #86).
    *
@@ -4558,6 +4627,118 @@ select.btn { font-family: var(--sans); }
   width: 100%;
   max-width: var(--companion-width);
   min-width: 0;
+  /*
+   * THE FRAME IS ITS OWN SIZE CONTAINER, so the details are laid out by the WIDTH THEY HAVE.
+   *
+   * This is the fix for the panel that clipped its own content on the left (issue #281). The details' stat row needs
+   * 346px — a 120px gauge, the label, the cost and three 32px controls — and it was handed 304px in the wide column and
+   * 252px inside the peek panel. Nothing wrapped, because `.session-header` and `.header-stats` are `nowrap` by
+   * design (a freely-wrapping row was once a four-row header), so the overflow was simply clipped by
+   * `.session-peek-panel`'s `overflow-x: hidden`. Focusing the Model `<select>` inside the panel then scrolled that
+   * clipped box right, which put the leftmost content out of view mid-glyph — the reported defect, and `scrollLeft > 0`
+   * is its only trace.
+   *
+   * Keying the compact form off the ANCESTOR (`@container transcript` + `.has-header >`) is what made this invisible in
+   * the peek: the reading-focus row carries `has-peek`, never `has-header`, so every compact rule written for the narrow
+   * band matched nothing inside the panel. A container on the frame itself fixes both frames with one set of rules, and
+   * is the same discipline as #92's lesson — the layout is a property of the box, not of who its parent happens to be.
+   *
+   * NOT styled by its own query: CSS Containment says a container is not matched by the rules that name it, which is the
+   * defect `@container transcript` already records. The rules below style `.session-header` and its descendants, which
+   * are INSIDE this element.
+   */
+  container-type: inline-size;
+  container-name: companion;
+}
+
+/*
+ * THE DETAILS AT A NARROW WIDTH — whichever frame they are in.
+ *
+ * Two placements reach this: the peek panel (about 250px at a 960px window) and the wide column whenever the content is
+ * wider than 360px of usable box. The rule is a priority order, the same one the narrow band already follows: identity
+ * and the two decision-changing numbers stay, and the row that cannot fit WRAPS rather than overflowing.
+ *
+ * Wrapping is the honest answer for a block this narrow. The alternative — dropping the controls or the cost — removes
+ * the session's only actions from the surface that exists to hold them, and an ellipsized control is a defect while a
+ * second line is not.
+ */
+@container companion (max-width: 360px) {
+  /*
+   * The identity row may wrap. It is `nowrap` in the base rule for a measured reason (a freely-wrapping header was once
+   * four rows tall), so the permission is scoped to the widths where wrapping is the only option.
+   */
+  .session-header { flex-wrap: wrap; }
+  /*
+   * The stat row wraps, and this is the one that fixes the reported clipping. `space-between` still holds while there is
+   * one line; when the controls do not fit beside the meter they take a line of their own, at the trailing edge.
+   */
+  .header-stats {
+    flex-wrap: wrap;
+    row-gap: var(--sp-2);
+  }
+  /*
+   * The gauge is MAGNITUDE, not a measurement: it is read by comparing fills, and 120px of bar is worth less than a
+   * control that is reachable. Capped here so the meter, its label and the cost normally share the first line and the
+   * controls keep the second.
+   */
+  .context-meter-track { width: 64px; }
+  /*
+   * The pickers keep their labels — this frame is a column with room to read them — but the selects may not exceed the
+   * box. `max-width: none` on the base rule was sized for a 340px companion; here the box is narrower than that.
+   */
+  .picker-select { max-width: 100%; }
+  .picker-display { max-width: 100%; }
+  /*
+   * The picker's WRAPPER may shrink here. The base rule pins `flex-shrink: 0` with a 44ch cap so a control never clips
+   * its own label (issues #92, #96) — correct in a 340px column, and wrong in a 250px box, where a control that refuses
+   * to shrink is width the row cannot have.
+   */
+  .picker-field { flex-shrink: 1; min-width: 0; max-width: 100%; }
+  /* A provider id is an identifier with no spaces; without this it is a single unbreakable word wider than the box. */
+  .picker-provider { overflow-wrap: anywhere; }
+
+  /*
+   * NO CHILD MAY BE WIDER THAN THE BOX, enforced for every child rather than the ones I happened to think of.
+   *
+   * This is the C20 rule applied to a container query. The details are a deep tree — identity, stats, three controls, a
+   * provider line, two pickers with wrappers and overlays — and the overflow that reached the reader was 24px from a
+   * child nobody had enumerated: the measured `headerW=244, scrollW=268` at a 1233px window, where the grid had given
+   * this column 217px because both margins are `minmax(0, 1fr)` and split the leftover evenly.
+   *
+   * A `min-width: 0` on a flex/grid item is what allows it to shrink below its content's intrinsic width, and
+   * `max-width: 100%` is what stops it painting past its parent when it does not. Applied to the descendants of every
+   * row in this block, the declarations cannot go stale when a fact is added to the header: a new child inherits the
+   * guarantee without anyone remembering this rule exists. Enumerating the current children would be exactly the
+   * mistake this file keeps recording.
+   */
+  .session-header > *,
+  .header-stats > *,
+  .header-lower > *,
+  .picker-grid > *,
+  .picker-controls > *,
+  .picker > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+  /*
+   * And the rows themselves, since `max-width` on a child does not help when the ROW is laid out at its content's
+   * width. These are the four boxes the details are built from.
+   */
+  .session-header,
+  .header-stats,
+  .header-lower,
+  .picker-grid,
+  .picker-controls,
+  .picker {
+    min-width: 0;
+    max-width: 100%;
+  }
+  /*
+   * The location line and its button wrap rather than overflowing. The path already truncates, but "New session here"
+   * is `flex: none` with `white-space: nowrap` — two declarations that are right when it sits beside a path in a 340px
+   * column and are exactly what pushes a 217px one over.
+   */
+  .where-row { flex-wrap: wrap; }
 }
 
 /*
@@ -4730,6 +4911,21 @@ select.btn { font-family: var(--sans); }
  */
 .transcript-wrap.has-header {
   display: grid;
+  /*
+   * THREE TRACKS: margin, prose, companion-in-the-margin.
+   *
+   * The PROSE is what is centred, and that is a decision rather than a side effect (issue #281, final). A four-track row
+   * — margin, prose, companion, margin — centres the INK instead, which sounds better and is not: the prose then sits
+   * permanently half a companion's width LEFT of the row's centre, ~180px of it, and that was reported as *"left pushed"*
+   * the moment it shipped. Centring the ink and centring the prose are different statements and only one can hold.
+   *
+   * The reader's priority, stated plainly: *"just keep the transcript centered, this is what matters."* So the lane is
+   * centred and the companion occupies the trailing margin. The cost is the one this file has recorded since #275: with a
+   * 340px block on one side and nothing on the other, the COMPOSITION reads right-heavy, most visibly with the session
+   * roster hidden. That is accepted, and the alternative is worse, because it moves the text a reader is reading.
+   *
+   * Falsified by the four-track row: the prose leaves the container's centre by half the companion's width.
+   */
   grid-template-columns:
     var(--reading-leading)
     var(--reading-lane)
@@ -4778,6 +4974,10 @@ select.btn { font-family: var(--sans); }
  * instead of where it sorts, and sorting is what silently reorders a stacked layout.
  */
 .transcript-wrap.has-header .transcript-main { grid-column: 2; }
+/*
+ * The companion in the trailing track — the margin the centred lane does not use. Its track is `--reading-trailing`,
+ * `minmax(0, 1fr)` while centred, so it takes whatever is left and narrows when the window is tight.
+ */
 .transcript-wrap.has-header .transcript-header { grid-column: 3; }
 
 /*
@@ -4916,8 +5116,17 @@ select.btn { font-family: var(--sans); }
    */
   .transcript-wrap.has-header > .transcript-header {
     position: static;
-    /* Full width across the top, and no longer a floating box. */
+    /*
+     * Full width across the top, and no longer a floating box — which means the CAP has to go too.
+     *
+     * `max-width: var(--companion-width)` on the base rule is right for the column ("exactly the companion's width,
+     * narrower when there is no room") and wrong for the band: it left a 340px block in a 920px row, so the header sat at
+     * the top-left of the conversation like a floating card instead of spanning it. `width: 100%` was already here; the
+     * cap is what defeated it, and a cap that survives beside `width: 100%` is the kind of declaration pair that reads
+     * as agreeing and is not (issue #281).
+     */
     width: 100%;
+    max-width: none;
     flex: none;
     padding: 0;
     display: block;
@@ -5007,7 +5216,13 @@ select.btn { font-family: var(--sans); }
    * paragraph and the lane had two right edges (`img_35.png`). The two boxes now resolve the same cap in the same
    * available width.
    */
-  padding: 0 18px var(--sp-2);
+  /*
+   * …and the SCROLLBAR's width on the trailing side, because the scroller's usable width excludes it and this box's does
+   * not. Trailing only: the gutter is on the trailing edge, so that is the side that differs. Without this the two
+   * boxes were 11px apart on the right — the lane's right edge stopping short of the composer's — while both were
+   * correct against their own parents, which is why no assertion in this repository caught it.
+   */
+  padding: 0 calc(18px + var(--transcript-scrollbar)) var(--sp-2) 18px;
 }
 .composer-dock {
   /*

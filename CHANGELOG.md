@@ -10,7 +10,15 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
-<!-- Empty at tag time: a release cannot ship undocumented changes. -->
+### Fixed
+
+- The session's details are laid out by the width they actually have, so the peek panel no longer clips its own content on the left ([#281]).
+- A focused control inside the peek panel no longer leaves a horizontal offset behind it ([#281]).
+- The session band spans the conversation instead of stopping at the details column's width ([#281]).
+- No child of the session details is wider than the box it is given, so the block no longer paints past the row's right edge into the panel ([#281]).
+- The prose and the composer end on the same right edge again, and the reading column keeps its width when a transcript grows past one screen ([#281]).
+- The transcript stays centred in the reading row in every state, with the session's details occupying the trailing margin ([#281]).
+- Hovering the session list's control previews the roster, and the preview can be used: it follows the pointer onto the list and a press pins it open ([#281]).
 
 ## [0.14.0] — 2026-11-22
 
@@ -821,3 +829,4 @@ The spike that answered whether this was worth building.
 [#269]: https://github.com/sven1103-agent/pi-central/issues/269
 [#274]: https://github.com/sven1103-agent/pi-central/issues/274
 [#275]: https://github.com/sven1103-agent/pi-central/issues/275
+[#281]: https://github.com/sven1103-agent/pi-central/issues/281

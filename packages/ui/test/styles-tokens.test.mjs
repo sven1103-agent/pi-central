@@ -155,6 +155,18 @@ test("the two tokens the wide layout reads are the ones the module writes", () =
     assert.ok(template.includes(`var(${token})`), `the wide layout's template must name ${token}`);
     assert.ok(declared.has(token), `and ${token} must be declared`);
   }
-  // Every track is a token: a literal in the outer two is the asymmetry that pushed the prose to the edge.
+  /*
+   * Every track is a token: a literal in an outer track is the asymmetry that pushed the prose to the edge, and a
+   * literal for the companion is the `340px` third track that shipped once already.
+   */
   assert.ok(!/\d+px/.test(template), `no literal track widths, got "${template.replace(/\s+/g, " ").trim()}"`);
+  /*
+   * And the two MARGINS are the same token — that equality is the centring. Counted rather than compared against a
+   * literal, so a rename cannot satisfy it by accident.
+   */
+  const leading = template.match(/var\(--reading-leading\)/g)?.length ?? 0;
+  assert.equal(leading, 1, `the leading margin is named once, got ${leading}`);
+  assert.match(template, /var\(--reading-lane\)/, "the lane has its own track");
+  assert.match(template, /var\(--reading-trailing\)/, "and the companion the trailing one");
+  assert.ok(!/reading-(outer|companion)/.test(template), "no four-track tokens left in a three-track row");
 });

@@ -120,6 +120,8 @@ export function SessionPeek({
    * Opening is immediate because a reader who moved the pointer here has already decided.
    */
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  /** The scrolling box, so a focus that scrolled it sideways can be undone — see `onFocusCapture` below. */
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const enter = useCallback(() => {
     if (closeTimer.current !== undefined) clearTimeout(closeTimer.current);
     closeTimer.current = undefined;
@@ -176,6 +178,23 @@ export function SessionPeek({
        * as leaving and close the thing the reader is using.
        */
       onFocus={() => setFocusedWithin(true)}
+      /*
+       * A FOCUS THAT SCROLLED THE PANEL SIDEWAYS IS PUT BACK.
+       *
+       * `overflow-x: hidden` does not prevent horizontal scrolling — it prevents the BAR. Programmatic scrolling still
+       * works, and the browser performs it: focusing an element wider than its scrollport scrolls the nearest scrollable
+       * ancestor to reveal it. So tabbing to the Model `<select>` inside a panel whose content was 90px too wide moved the
+       * box right and clipped the leftmost glyph of every line — reported as the panel "clipping its own content on the
+       * left" while the right side had room to spare, which is the signature of `scrollLeft > 0` (issue #281).
+       *
+       * The CSS now makes the content fit, so this should never have anything to undo. It is here because the failure is
+       * invisible to a reader — nothing looks broken, one side of the box is simply gone — and "the content fits" is a
+       * promise made by rules that live in a different file from the focus that broke it.
+       */
+      onFocusCapture={() => {
+        const panel = panelRef.current;
+        if (panel !== null && panel.scrollLeft !== 0) panel.scrollLeft = 0;
+      }}
       onBlur={(event) => {
         if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
         setFocusedWithin(false);
@@ -229,6 +248,7 @@ export function SessionPeek({
       <div
         className="session-peek-panel"
         id="session-peek-panel"
+        ref={panelRef}
         aria-hidden={!open}
         {...(open ? {} : { inert: true })}
       >

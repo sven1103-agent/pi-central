@@ -411,6 +411,113 @@ export function App() {
    * is the shape a narrow window FORCES, not the shape a preference chooses, so the two no longer share a rule.
    */
   const railOverlay = railIsDrawer && railOpen && tab === "sessions";
+
+  /**
+   * A PREVIEW of the list, while the pointer rests on its control.
+   *
+   * The request: *"when i hover the \"Show list\" icon, i want to quickly see the roster"*. The list is one press away,
+   * but a press is a decision and a glance at "which sessions are running" is not — so hovering the control shows the
+   * roster the way pressing it would, and leaving puts it back.
+   *
+   * ## Why its own state, and not `railOpen`
+   *
+   * `railOpen` is the DRAWER's open state — a deliberate summon, closed by Escape, by the backdrop or by choosing a row.
+   * Sharing it would make hover leave the drawer genuinely open, so a reader who happened to pass the pointer over the
+   * control would come back to a list they never asked for. Hover is transient by definition: it ends when the pointer
+   * leaves, and nothing outlives it.
+   *
+   * And it must never write `railPrefs.hidden`, which is the reader's PERSISTED choice. A preview that persisted would
+   * turn "glance at the list" into "change my layout, and remember it".
+   *
+   * ## Why it is bounded by the same conditions as the press
+   *
+   * `railPreview` is only meaningful when the list is AWAY, on the page that has one, and above the breakpoint — below
+   * it the drawer is the shape and `railOpen` owns it. Previewing a list that is already docked would be a no-op with a
+   * full-window repaint, and previewing on History would show a list that page does not have.
+   */
+  /*
+   * THREE states, because "hover" and "click" are different commitments.
+   *
+   * The first version had two (preview or not) and was unusable in both directions — reported from use:
+   *
+   *   - *"leaving the icon closes the roster again"*: the pointer must travel from the control to the list across a
+   *     gutter, and a preview that ends on the first stray pixel cannot be acted on;
+   *   - *"clicking it closes it as well"*: the control toggled on `railShown`, a preview counted as shown, so a press on
+   *     the preview took the HIDE branch and the list vanished under the click.
+   *
+   * So:
+   *
+   *   - `"hover"` follows the pointer across the control AND the list, and closes after a grace period on leave;
+   *   - `"pinned"` is what a press promotes it to: it outlives the pointer, takes a backdrop, and closes on Escape or by
+   *     choosing a row — the drawer's contract;
+   *   - `"none"`.
+   *
+   * Bounded by the same conditions as the press: the page that has a list, the window that can afford one as an
+   * overlay, and the list being away.
+   */
+  const [railPeekMode, setRailPeekMode] = useState<"none" | "hover" | "pinned">("none");
+  const railPreviewable = tab === "sessions" && !railIsDrawer && !railDocked;
+  const railHovering = railPreviewable && railPeekMode === "hover";
+  const railPinnedOpen = railPreviewable && railPeekMode === "pinned";
+  const railPeeking = railHovering || railPinnedOpen;
+  /**
+   * The leave delay's handle.
+   *
+   * A ref rather than state: it is a timer, nothing rendered depends on it, and re-rendering on every pointer move is
+   * what makes a hover surface feel sticky. Cleared on unmount, or a timer that fires after the shell is gone would call
+   * a setter on a dead component.
+   */
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(
+    () => () => {
+      if (previewTimer.current !== undefined) clearTimeout(previewTimer.current);
+    },
+    [],
+  );
+
+  /**
+   * ONE hover area: the control and the list are the same gesture.
+   *
+   * Two separate handler pairs would each start their own timer and close the list while the other zone still held the
+   * pointer. The gutter between the bar and the panel is a few pixels, and crossing it is not a decision to dismiss.
+   *
+   * A PINNED preview is never re-entered or demoted by the pointer: it is a commitment, and only a press or Escape ends
+   * it.
+   */
+  const previewEnter = useCallback(() => {
+    if (previewTimer.current !== undefined) clearTimeout(previewTimer.current);
+    previewTimer.current = undefined;
+    if (!railPreviewable) return;
+    setRailPeekMode((current) => (current === "pinned" ? current : "hover"));
+  }, [railPreviewable]);
+  const previewLeave = useCallback(() => {
+    if (previewTimer.current !== undefined) clearTimeout(previewTimer.current);
+    previewTimer.current = setTimeout(() => {
+      // Only a HOVER closes on leave. A pinned one outlives the pointer entirely.
+      setRailPeekMode((current) => (current === "hover" ? "none" : current));
+    }, 220);
+  }, []);
+  /**
+   * A press PROMOTES the preview, and only a pinned one can be pressed away.
+   *
+   * The reported bug was a press that took the HIDE branch because a preview counted as shown. This states the intent
+   * rather than toggling a derived boolean: hover becomes pinned, pinned becomes nothing.
+   */
+  const togglePeekPinned = useCallback(() => {
+    if (previewTimer.current !== undefined) clearTimeout(previewTimer.current);
+    previewTimer.current = undefined;
+    if (!railPreviewable) return;
+    setRailPeekMode((current) => (current === "pinned" ? "none" : "pinned"));
+  }, [railPreviewable]);
+
+  /*
+   * A preview cannot survive the reason it was allowed: the page changing, the window crossing the breakpoint, or the
+   * list arriving as a column. Left standing, it would either duplicate a docked list or hold an overlay over a page
+   * that has no roster at all.
+   */
+  useEffect(() => {
+    if (!railPreviewable && railPeekMode !== "none") setRailPeekMode("none");
+  }, [railPreviewable, railPeekMode]);
   /** Is the list on the page at all? The one question the activity bar asks. */
   const railShown = railDocked || railOverlay;
 
@@ -426,7 +533,12 @@ export function App() {
     (panel.collapsed ? " is-collapsed" : "") +
     (tab === "history" ? " is-pageless" : "") +
     (railDocked ? "" : " is-rail-less") +
-    (railOverlay ? " is-rail-overlay" : "");
+    (railOverlay || railPeeking ? " is-rail-overlay" : "") +
+    /*
+     * A HOVER preview and a PINNED one differ in one thing: whether the window behind them is dimmed. Both are usable and
+     * both appear where pressing would put them — only the backdrop says "this is a commitment you must dismiss".
+     */
+    (railHovering ? " is-rail-peek" : "");
   const persistRail = useCallback((next: RailPrefs) => {
     try {
       localStorage.setItem(RAIL_PREFS_KEY, serializeRailPrefs(next));
@@ -1956,6 +2068,14 @@ export function App() {
         />
       )}
 
+      {/*
+        NO BACKDROP FOR A PREVIEW.
+
+        The backdrop exists so a SUMMONED drawer can be dismissed by clicking away from it. A preview was not summoned:
+        it appeared under a pointer that is still moving, and it goes the moment that pointer leaves. Dimming the window
+        for it — or worse, letting a click on the dim close a list the reader never opened — would make a glance cost a
+        commitment.
+      */}
       {railOverlay && (
         /*
           The backdrop is the drawer's close affordance for a pointer, and it is a real button so it is reachable by
@@ -2055,7 +2175,41 @@ export function App() {
               aria-controls="session-rail"
               title={railShown ? "Hide the session list" : "Show the session list"}
               aria-label={railShown ? "Hide the session list" : "Show the session list"}
+              /*
+                THE PREVIEW, on the way in and on the way out.
+                
+                A grace period on LEAVE and none on ENTER, the same convention the peek tab uses and for the same measured
+                reason: moving the pointer diagonally across the corner dips out for a few pixels, and without the delay
+                the list strobes — appearing and vanishing while the reader aims. Opening is immediate because a reader
+                whose pointer is already here has asked.
+                
+                Cleared on BLUR as well, not only on leave: a reader who tabs to the control, moves the pointer, then
+                leaves has no pointer-leave to fire, and a preview left standing would be a list nobody summoned.
+              */
+              onPointerEnter={previewEnter}
+              onPointerLeave={previewLeave}
+              /*
+                Opening a preview on FOCUS, and leaving it alone on BLUR.
+                
+                A keyboard reader who tabs here should see what a pointer reader sees, so focus previews too. But blur must
+                NOT close a pinned preview: tabbing to the list itself blurs this control, and closing it then would make
+                the list unreachable exactly as the pointer version was (`onBlur` clears only the hover half — see
+                `previewLeave`, which the pinned state ignores).
+              */
+              onFocus={previewEnter}
+              onBlur={previewLeave}
               onClick={() => {
+                /*
+                  A press PROMOTES the preview rather than dismissing it.
+                  
+                  The reported bug: a preview counted as "shown", so the toggle took the HIDE branch and the list vanished
+                  under the click. `togglePeekPinned` states the intent — hover becomes pinned, pinned becomes nothing —
+                  and it returns before the ordinary toggle so the two can never both act.
+                */
+                if (railPeeking) {
+                  togglePeekPinned();
+                  return;
+                }
                 if (railShown) {
                   if (railIsDrawer) setRailOpen(false);
                   else setRailPrefsAndPersist((current) => ({ ...current, hidden: true }));
@@ -2173,7 +2327,16 @@ export function App() {
           */
           firstPromptFor={rowPrompt}
           focusedId={state.focusedId}
-          openAsDrawer={railOverlay}
+          openAsDrawer={railOverlay || railPeeking}
+          /*
+            THE LIST ITSELF EXTENDS THE HOVER AREA (reported: *"leaving the icon closes the roster again"*).
+            
+            Only while a HOVER preview is showing: a pinned preview outlives the pointer, and a docked column or a
+            summoned drawer has no preview to keep alive. Passing them unconditionally would attach hover handlers to the
+            column and close nothing — harmless, but it would also mean the drawer had two owners of "when do I close".
+          */
+          onPeekPointerEnter={railHovering ? previewEnter : undefined}
+          onPeekPointerLeave={railHovering ? previewLeave : undefined}
           onCloseDrawer={() => setRailOpen(false)}
           prefs={railPrefs}
           onToggleFolded={toggleRailFolded}

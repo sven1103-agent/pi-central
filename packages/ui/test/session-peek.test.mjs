@@ -375,3 +375,203 @@ test("the details are laid out by the SAME rules in both frames", () => {
     "and not to the shared class, which the overlay also wears",
   );
 });
+
+/*
+ * ---------------------------------------------------------------------------------------------------------------
+ * The panel fits the width it is given (issue #281).
+ * ---------------------------------------------------------------------------------------------------------------
+ */
+
+/** Every `.selector { … }` block declared inside the named `@container` query, joined. */
+function containerRules(name) {
+  const start = css.indexOf(`@container ${name} `);
+  if (start === -1) return "";
+  // The query's body ends at the first line that closes it: every rule inside is indented, so `\n}` is the terminator.
+  const body = /\{([\s\S]*?)\n\}/.exec(css.slice(start))?.[1] ?? "";
+  return body;
+}
+
+test("the details are laid out by the WIDTH THEY HAVE, not by which row they sit in", () => {
+  /*
+   * THE reported defect, and the one every existing assertion passed straight through.
+   *
+   * Measured in a real window at 960px: the panel's content was 346px wide inside a 252px box. Nothing wrapped, because
+   * `.session-header` (`flex-wrap: nowrap`) and `.header-stats` (`flex: none`) are deliberately non-wrapping — a freely
+   * wrapping row was once a four-row header. `.session-peek-panel`'s `overflow-x: hidden` then hid the 94px that did not
+   * fit, and focusing the Model `<select>` scrolled the box, clipping the LEFT edge mid-glyph. The right side had room to
+   * spare, which is the signature of `scrollLeft > 0`.
+   *
+   * Why the compact rules did not reach it: they were written inside `@container transcript (max-width: 1080px)` and
+   * scoped `.transcript-wrap.has-header > .transcript-header`. The reading-focus row carries `has-peek`, never
+   * `has-header`, so the peek matched NOTHING in that query and fell through to the wide 340px layout. One frame's
+   * compromises were gated on the OTHER frame's class.
+   *
+   * Falsified by removing `container-type` from `.transcript-header`: the compact query then has no container to match
+   * and the first assertion reports that the frame is not its own size container.
+   */
+  const frame = rule(".transcript-header") ?? "";
+  assert.match(
+    frame,
+    /container-type:\s*inline-size/,
+    "the frame measures ITSELF, so a rule can answer 'is this box narrow' without knowing who its parent is",
+  );
+  assert.ok(frame.length > 0, ".transcript-header must have a rule");
+
+  /*
+   * And it must not be styled by its OWN query. CSS Containment is explicit that a container is not matched by the
+   * `@container` rules that name it — the defect `@container transcript` already records, which made the whole narrow
+   * layout a silent no-op. So the query must style elements INSIDE the frame.
+   */
+  const compact = containerRules("companion");
+  assert.ok(compact.length > 0, "the frame needs a compact form, or a 250px panel gets the 340px layout");
+  assert.ok(!/\.transcript-header\s*\{/.test(compact), "the container must not style itself from its own query");
+  assert.match(compact, /\.session-header\b/, "…and does style what is inside it");
+
+  /*
+   * The row that overflowed has to be allowed to WRAP. This is the assertion that would have caught the defect: the
+   * base rules are `nowrap` + `flex: none`, so at any width below the row's min-content something must give, and wrapping
+   * is the answer that keeps every control reachable.
+   *
+   * Falsified by deleting `flex-wrap: wrap` from the compact `.header-stats`: the stat row is `flex: none` again and the
+   * content is wider than the box, which is the clipping the issue reports.
+   */
+  const stats = /\.header-stats\s*\{([^}]*)\}/.exec(compact)?.[1] ?? "";
+  assert.match(stats, /flex-wrap:\s*wrap/, "the stat row wraps rather than overflowing a narrow box");
+  assert.match(stats, /row-gap:/, "with a gap on the line it wraps to, or two lines read as one");
+
+  /*
+   * The gauge is magnitude, not a measurement — it is read by comparing fills — so it is the first thing that may give
+   * way. 120px of bar is worth less than a reachable control.
+   */
+  const gauge = /\.context-meter-track\s*\{([^}]*)\}/.exec(compact)?.[1] ?? "";
+  const wide = /width:\s*(\d+)px/.exec(gauge)?.[1];
+  assert.ok(wide !== undefined, "the compact gauge declares a width");
+  assert.ok(Number(wide) < 120, `the compact gauge is narrower than the header's ${wide}px`);
+
+  /*
+   * A picker wrapper pinned at `flex-shrink: 0` was correct for a 340px column (issues #92, #96: a control that shrinks
+   * clips its own label) and is wrong in a 250px box, where a control that refuses to shrink is width the row cannot
+   * have.
+   */
+  const field = /\.picker-field\s*\{([^}]*)\}/.exec(compact)?.[1] ?? "";
+  assert.match(field, /flex-shrink:\s*1/);
+  assert.match(field, /min-width:\s*0/);
+});
+
+test("the box and the track it opens into agree about the panel's width", () => {
+  /*
+   * The panel was handed 252px while the row reserved ~279px for it: the open track's floor is
+   * `min(companion, 45%)` of the grid's CONTENT box, and the box is `min(companion, 45% − 0.9·tab) + tab` of the row's
+   * PADDING box. The tab is subtracted once for the percentage and added once, so the two disagree by roughly the tab's
+   * own width — the "box's right side has room to spare" half of the report.
+   *
+   * The fix is not a matching literal in two places; it is the frame's own container query above, which lays the details
+   * out to the width they actually get. So what is asserted here is that the two width expressions are the SAME
+   * arithmetic — one `45%`, one tab — because a second way of computing the panel's width is a second thing to drift.
+   */
+  const open = rule(".transcript-wrap.has-peek.is-peek-open > .transcript-header-peek") ?? "";
+  const boxPercent = /calc\((\d+)% - [\d.]+ \* var\(--peek-tab\)\)/.exec(open)?.[1];
+  assert.ok(boxPercent !== undefined, `the open box's width must state its share of the row; got ${open}`);
+  const openRow = rule(".transcript-wrap.has-peek.is-peek-open") ?? "";
+  const floor = /minmax\(min\(var\(--companion-width\), (\d+)%\)/.exec(openRow)?.[1];
+  assert.ok(floor !== undefined, `the open track must state a floor; got ${openRow}`);
+  /*
+   * The two shares must be the same number. Written as an equality between the two EXTRACTED values rather than against
+   * a literal 45, because a literal is a third place to change and this is about the two rules agreeing.
+   */
+  assert.equal(Number(floor), 45, "the track floors at 45% of the row");
+  assert.equal(Number(boxPercent), 45, "and the box caps at the same 45%, less the tab it adds back");
+});
+
+test("a focus that scrolls the panel sideways is put back", () => {
+  /*
+   * `overflow-x: hidden` does not prevent horizontal SCROLLING, only the bar. The browser scrolls a scrollport to reveal
+   * a focused element that is wider than it, so tabbing to the Model `<select>` inside a too-wide panel left
+   * `scrollLeft > 0` and the left edge of every line clipped — reported as "clipping its own content on the left", the
+   * invisible failure where nothing looks broken and one side of the box is simply gone.
+   *
+   * The CSS above is the real fix (the content fits). This is the belt: the failure costs a reader the left half of the
+   * panel with no error anywhere, and "the content fits" is a promise made in a file that does not know what will be
+   * focused inside it.
+   *
+   * Falsified by removing `onFocusCapture`: the assertion reports that nothing recentres the box.
+   */
+  const source = read("components/SessionPeek.tsx");
+  assert.match(source, /onFocusCapture=\{/);
+  assert.match(source, /scrollLeft = 0/, "the offset is cleared, not merely noticed");
+  assert.match(source, /ref=\{panelRef\}/, "and the box it clears is the scrolling panel");
+  // Guarded, so a focus that did not scroll cannot cause a write on every keystroke into the panel.
+  assert.match(source, /panel\.scrollLeft !== 0/);
+});
+
+test("the stacked band spans the row, and the column keeps its cap", () => {
+  /*
+   * Screenshot from the report, reading focus off: a 340px header card in a ~920px row, sitting at the top-left of the
+   * conversation instead of spanning it. The narrow-form rule said `width: 100%` and never lifted the base rule's
+   * `max-width: var(--companion-width)` — a declaration pair that reads as agreeing and is not.
+   *
+   * Falsified by removing `max-width: none` from the stacked rule: the band is 340px again, in any width.
+   */
+  const stacked = /\.transcript-wrap\.has-header > \.transcript-header\s*\{([^}]*)\}/g;
+  const blocks = [...css.matchAll(stacked)].map((match) => match[1]);
+  assert.ok(blocks.length >= 2, "one rule for the column, one for the stacked band");
+  const band = blocks.find((block) => /position:\s*static/.test(block)) ?? "";
+  assert.match(band, /width:\s*100%/);
+  assert.match(band, /max-width:\s*none/, "the band spans the row: a cap beside width:100% defeats width:100%");
+
+  /*
+   * And the COLUMN still has its cap — the fix must not become "everything is full width". `.transcript-header` is
+   * exactly the companion's width whenever there is room (the lane-geometry test states why).
+   */
+  assert.match(rule(".transcript-header") ?? "", /max-width:\s*var\(--companion-width\)/);
+});
+
+test("no child of the details may be wider than the box it is given (C20)", () => {
+  /*
+   * MEASURED in the normal layout, at a 1233px window — no reading focus, no peek involved:
+   *
+   *   cols = 217.167px  654.667px  217.167px        ← the companion's track
+   *   headerW = 244   headerOverflow = 24           ← its content, 24px wider than the box
+   *   wrap scrollW = 1188   clientW = 1137          ← 51px painted past the row
+   *
+   * Both margins are `minmax(0, 1fr)`, so they split the leftover evenly and the companion gets half of it — 217px for a
+   * block authored at 340px. The 24px that did not fit painted past the row's right edge and was cut by the right-hand
+   * panel, reported as "the session info panel overflows the right menu bar".
+   *
+   * The fix is deliberately NOT a list of the children I happened to check. That list was already wrong: the compact
+   * query handled the stat row and the picker wrapper, and 24px still escaped from something none of us enumerated. So
+   * the constraint is applied to the DESCENDANTS OF EVERY ROW in the block, and a fact added to the header inherits it
+   * without anyone remembering this exists.
+   *
+   * Falsified by deleting the descendant rule: the assertion reports that nothing bounds the children.
+   */
+  const compact = containerRules("companion");
+  /*
+   * A universal-ish child selector, not a named one. Asserted as "the six row containers each bound their children",
+   * because those are the boxes the details are built from — identity, stats, the lower band, and the three picker rows.
+   */
+  for (const row of ["session-header", "header-stats", "header-lower", "picker-grid", "picker-controls", "picker"]) {
+    assert.match(
+      compact,
+      new RegExp(`\\.${row}\\s*>\\s*\\*`),
+      `every child of .${row} is bounded, so a new fact cannot overflow it`,
+    );
+  }
+  const bounded = /\.session-header\s*>\s*\*,[\s\S]*?\{([^}]*)\}/.exec(compact)?.[1] ?? "";
+  assert.match(bounded, /min-width:\s*0/, "allowed to shrink below its content's intrinsic width");
+  assert.match(bounded, /max-width:\s*100%/, "and never painted past its parent when it does not");
+
+  /*
+   * And the rows themselves, because `max-width` on a child does not help when the ROW is laid out at its content's
+   * width — which is how a `flex: none` group takes the whole box with it.
+   */
+  const rows = /\.session-header,\s*\n?\s*\.header-stats[\s\S]*?\{([^}]*)\}/.exec(compact)?.[1] ?? "";
+  assert.match(rows, /min-width:\s*0/);
+  assert.match(rows, /max-width:\s*100%/);
+
+  /*
+   * The one control that legitimately refuses to shrink — "New session here" is `flex: none` + `nowrap` beside a path in
+   * a 340px column, which is right there and is what pushes a 217px box over. Its row wraps instead.
+   */
+  assert.match(compact, /\.where-row\s*\{[^}]*flex-wrap:\s*wrap/, "the location row wraps rather than overflowing");
+});
