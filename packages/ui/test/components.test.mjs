@@ -2248,9 +2248,20 @@ test("the jump control floats in a band, anchored to the scroller", () => {
     `the control's ${offset}px offset must sit inside the ${strip}px band, or it is drawn above it — over the text`,
   );
 
-  // And structurally: the pill must be a child of the viewport, not of the column that also holds the composer.
+  /*
+   * And structurally: the pill must be a child of the viewport, not of the column that also holds the composer.
+   *
+   * The opening tag is matched loosely on `className="transcript-viewport"` rather than as an exact
+   * `<div className="transcript-viewport">`, because the element gained a `data-overflow` attribute when the
+   * scrollbar was replaced by the two end-fades (ADR-0016). The stricter match failed for that reason — the
+   * assertion doing its job, but on the wrong property: what this test is about is WHERE the pill sits, not what
+   * attributes the viewport carries.
+   */
   const source = readFileSync(new URL("../src/components/Transcript.tsx", import.meta.url), "utf8");
-  const view = /<div className="transcript-viewport">([\s\S]*?)\{\/\*\s*\n\s*THE COMPOSER LIVES HERE/.exec(source)?.[1] ?? "";
+  const viewportAt = source.indexOf('className="transcript-viewport"');
+  const composerAt = source.indexOf("THE COMPOSER LIVES HERE");
+  assert.ok(viewportAt >= 0 && composerAt > viewportAt, "the viewport and the composer comment must both exist");
+  const view = source.slice(viewportAt, composerAt);
   assert.match(view, /jump-latest/, "the pill is rendered inside the viewport");
   assert.ok(!/transcript-footer/.test(view), "…and the composer is NOT, or the anchor would include it");
 });

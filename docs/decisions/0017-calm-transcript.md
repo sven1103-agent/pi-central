@@ -251,11 +251,62 @@ commit per frame with no animation.**
    *burstiness* by batching commits; it does not add delay. The text that has been received is the text on
    screen at the end of every frame, which is what makes constraint 4 free: there is nothing to fight the
    authoritative replace.
-5. **The reveal (pacing) option is deferred, not rejected, and its precondition is fixed here.** If a reader
-   later asks for a typewriter, the record that adds it must pace the **presentation of received text** and
-   must never slice the source: the literal-syntax census above is the measurement that rules out the naive
-   version, and a `prefers-reduced-motion` gate is a condition of the option existing at all. It is behind a
-   preference when it comes, never the default.
+### (c) The scrollbar goes, and the scroll moves smoothly rather than teleporting
+
+**This section exists because looking at the rendered preview overturned the recommendation above**, which is
+what a preview is for. It records three findings, in the order they arrived.
+
+1. **The scrollbar is not a scrollbar problem, it is the wrong instrument.** Viewed at 1512×982 with a 370px
+   tail anchor, the transcript's thumb spanned most of a 909px scrollport and read as a second unowned vertical
+   edge beside the prose. Making it thinner had already been tried and did not help, because the fault is not
+   its weight: **a following reader is at the end by construction**, so a position indicator answers a question
+   they do not have. It is **removed** (`scrollbar-width: none`, plus the webkit path), and replaced with a
+   **fade at each end of the column** — top when `scrollTop > 0`, bottom when the reader is not at the end —
+   which answers the only two questions they do have. Both fades are `aria-hidden` and `pointer-events: none`:
+   they are decoration, and the words "Jump to latest" already state the same fact for anyone who cannot see a
+   gradient.
+
+2. **Coalescing commits is invisible, and this record sold it as comfort.** The stream preview was built to
+   show per-token against per-frame, and the operator reported no difference — correctly, because both sides
+   committed inside the same `requestAnimationFrame` and the browser painted them at identical moments. That is
+   not a flaw in the demo, it is arithmetic about displays: two commit rates above the refresh rate are
+   unwatchable as a difference, and below it there is nothing to batch. Measured: at 75 tokens/s a
+   3000-character message costs 608 ms of main-thread parsing today and 428 ms coalesced — **6% of a core
+   against 4%** — and the longest single re-parse of the whole message is ~4.9 ms against a 16.7 ms frame, so
+   even at 400 tokens/s the work fits. **The coalescer is kept, and its justification is narrowed to CPU
+   headroom.** It is not, and must not be described as, a comfort improvement.
+
+3. **The stutter is in the SCROLL, not the text, and nothing above addresses it.** The operator's correction,
+   and it is the important one: *"producing the tokens is not the issue, it is how smooth the scrolling
+   happens"*. Measured against that reading, every follow path in `Transcript.tsx` is a **teleport**:
+   `container.scrollTop = container.scrollHeight`, `endRef.scrollIntoView({ block: "end" })`, and the
+   `ResizeObserver` assignment — each an instant jump to a new position, once per commit, with no interpolation.
+   Coalescing reduces how OFTEN that happens; it does nothing about how each one looks.
+
+   So: **the follow scroll animates, and it is allowed to.** The standing prohibition comes from #86, where
+   `scroll-behavior: smooth` made the pane un-pin itself — the animation emitted intermediate positions, and an
+   intermediate position is indistinguishable from the reader scrolling up. That diagnosis was right and its
+   conclusion was too broad. The defect was **measuring `pinned` from scroll events during a programmatic
+   animation, not the animation**. The rule is therefore:
+
+   - the follow scroll interpolates toward the tail, re-targeting each frame as new content arrives;
+   - **`pinned` is decided from reader input only** — wheel, touch, key, scrollbar drag — and a
+     programmatic scroll is excluded from the measurement, which is what #86 should have said;
+   - a reader's own input **cancels** an in-flight animation immediately, so the pane never fights them;
+   - `prefers-reduced-motion: reduce` makes it instant, which is the existing three-place pattern in this
+     stylesheet and not a new gate;
+   - the gap is **clamped per frame**, so a 300-character burst does not produce a 60px hop and a slow trickle
+     does not produce sub-pixel creep that scrolls so slowly it looks stuck.
+
+   This is the change that answers the report. The anchor moves where the tail sits; the pacing in (b) is a CPU
+   saving; **the scroll is the part the reader actually watches**, and it was the one part missing from this
+   record.
+
+**What this reorders.** The slicing is now: the anchor (a) and the scrollbar (1) together, since both are CSS
+plus one measurement and both change what the surface looks like; then the follow scroll (3), which is the
+comfort fix; then the coalescer (b), which is a CPU fix and can ship whenever. **The paced reveal (5) is
+demoted rather than deferred** — with the scroll smooth, a deliberate text pacing is no longer obviously wanted,
+and it should be revisited only if the scroll alone does not answer the complaint.
 
 ## Consequences
 

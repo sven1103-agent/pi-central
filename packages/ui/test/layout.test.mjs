@@ -265,3 +265,57 @@ test("the prompt field holds three lines before it scrolls", () => {
     "the field's scrollbar uses the shared slim thumb",
   );
 });
+
+test("the transcript has NO scrollbar, and reports its ends with a fade instead (ADR-0016)", () => {
+  /*
+   * The report: on a 1512x982 window the transcript scrollbar drew a vertical rule most of the column tall,
+   * reading as a second unowned edge beside the prose. It was already slim and inset; the problem was that a
+   * position bar is the wrong instrument here, because a following reader is at the end by construction and has
+   * no use for a position indicator at all.
+   *
+   * What replaces it answers the only two questions a reader has — "is there more above me" and "is there more
+   * below me" — with a fade at each end of the column.
+   *
+   * Both halves are asserted, because either alone is a regression: removing the bar without the fades leaves the
+   * reader with no indication at all, and the fades without removing the bar is the defect plus decoration.
+   */
+  const transcript = rule(".transcript");
+  assert.ok(transcript, ".transcript must have a rule");
+  assert.match(transcript, /scrollbar-width:\s*none/, "the platform scrollbar is suppressed");
+  assert.match(css, /\.transcript::-webkit-scrollbar\s*\{\s*display:\s*none/, "and the webkit path too");
+  assert.ok(
+    !/\.transcript::-webkit-scrollbar-thumb/.test(css),
+    "the thumb rules must be GONE, not merely overridden: a leftover thumb is the defect still in the file",
+  );
+
+  /*
+   * The two fades, each on the correct edge of the viewport.
+   *
+   * Matched against the whole stylesheet rather than through `rule()`, because that helper returns the LAST rule
+   * whose selector matches — and the last rule mentioning these selectors is the `opacity: 1` that shows them,
+   * not the one that positions them. Asserting on the helper would have checked the wrong declaration.
+   */
+  assert.match(
+    css,
+    /\.transcript-fade\.is-top\s*\{[^}]*top:\s*0/,
+    "the upper fade sits at the top edge of the viewport",
+  );
+  assert.match(
+    css,
+    /\.transcript-fade\.is-bottom\s*\{[^}]*bottom:\s*var\(--jump-strip\)/,
+    "the lower fade stops above the reserved band, so it never covers the pill",
+  );
+  // They must not eat clicks: an overlay that swallowed one would make the last line un-selectable.
+  assert.match(
+    css,
+    /\.transcript-fade\s*\{[^}]*pointer-events:\s*none/,
+    "the fades are overlay-only, so a click on the last line still lands on the text",
+  );
+
+  // And they appear from ONE measurement, which is the handler that already decides `pinned`.
+  const source = readFileSync(new URL("../src/components/Transcript.tsx", import.meta.url), "utf8");
+  assert.match(source, /data-overflow=/, "the viewport reports its overflow state");
+  const handler = /const onScroll = \(\) => \{([\s\S]*?)container\.addEventListener/.exec(source)?.[1] ?? "";
+  assert.match(handler, /setOverflow\(/, "the fades are driven by the scroll handler, not a second listener");
+  assert.match(handler, /setPinned\(following\)/, "the same handler that decides following, so they cannot disagree");
+});

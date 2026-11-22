@@ -276,6 +276,14 @@ export function TranscriptView({
    * and never show it — a control that exists but is never visible.
    */
   const [pinned, setPinned] = useState(true);
+  /**
+   * Which ends of the scroller have content the reader cannot see (ADR-0016).
+   *
+   * Replaces the scrollbar, which drew a vertical rule longer than the message it belonged to. Held as one
+   * object so a single measurement updates both ends together, and so the two can never report a state the
+   * scroll position does not have.
+   */
+  const [overflow, setOverflow] = useState<{ up: boolean; down: boolean }>({ up: false, down: false });
 
   /**
    * Is the peek panel showing? Written by `SessionPeek`, read by the WRAPPER's track widths.
@@ -337,6 +345,18 @@ export function TranscriptView({
       // about whether the reader is at the bottom.
       pinnedRef.current = following;
       setPinned(following);
+      /*
+       * The two fades are driven from the SAME measurement as the follow decision (ADR-0016).
+       *
+       * With the scrollbar gone, "is there more above / below" is the only position information left, so it
+       * must not be computed twice or from a second source. `up` is any scroll at all; `down` is the same
+       * question `following` answers, and deriving it here rather than from `pinned` keeps a re-render from
+       * being able to disagree with the ref the follow effect reads.
+       */
+      setOverflow({
+        up: container.scrollTop > 1,
+        down: !following,
+      });
       /*
        * Do NOT record a position measured before there is content to scroll (issue #141, follow-up).
        *
@@ -672,7 +692,19 @@ export function TranscriptView({
         reading column. Anchored to the column it sat under the composer — 44px from a bottom edge that is below the
         input — so the control meant for the conversation appeared over the thing you type into.
       */}
-      <div className="transcript-viewport">
+      <div
+        className="transcript-viewport"
+        data-overflow={[overflow.up ? "up" : "", overflow.down ? "down" : ""].filter(Boolean).join(" ")}
+      >
+      {/*
+        THE TWO FADES, which replace the scrollbar (ADR-0016).
+
+        Decoration, so both are aria-hidden: the content still scrolls, the keyboard still moves it, and the
+        "Jump to latest" pill still states in words that there is newer output below. A reader who cannot see a
+        gradient loses no information, and a screen reader is not told twice.
+      */}
+      <div className="transcript-fade is-top" aria-hidden="true" />
+      <div className="transcript-fade is-bottom" aria-hidden="true" />
       <div
         className="transcript"
         ref={containerRef}
