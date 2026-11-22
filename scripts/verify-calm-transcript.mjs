@@ -168,17 +168,93 @@ function assistantTexts(file) {
   return [...out];
 }
 
-const files = walk(STORE).sort((a, b) => b.modified - a.modified).slice(0, 150);
+/*
+ * THE CORPUS EXCLUDES THE SESSION RUNNING THIS SCRIPT, and that is not tidiness.
+ *
+ * The first version took the newest 150 session files. The session executing the command is the newest of
+ * all, so the "prose message" this script sampled was a previous assistant reply written BY this very
+ * conversation — measured and confirmed: the sample began "Your run was worth more than mine — it
+ * disagreed with the ADR in three places", which is the assistant's own output from the round before.
+ *
+ * That is circular in the way that matters. The corpus is meant to represent what a reader follows, and it
+ * was instead sampling the thing being written about, in a session whose length changes every time the
+ * script is discussed. It would also have quietly invalidated the band in the ADR, which is stated as a
+ * property of real transcripts.
+ *
+ * Excluding by session id is not enough on its own: a resumed or sibling session holds the same messages.
+ * So the exclusion is by session FILE, and the count of what was dropped is printed rather than silently
+ * omitted — an invisible filter on a corpus is indistinguishable from a small corpus.
+ */
+const ownSession = process.env.PI_SESSION_FILE;
+const files = walk(STORE)
+  .filter((file) => file.path !== ownSession)
+  .sort((a, b) => b.modified - a.modified)
+  .slice(0, 150);
+
 const corpus = [];
+let excludedFromOwnSession = 0;
 for (const file of files) {
   for (const text of assistantTexts(file)) {
     if (text.length >= 600 && text.length <= 3200) corpus.push(text);
+  }
+}
+if (ownSession !== undefined) {
+  for (const text of assistantTexts({ path: ownSession })) {
+    if (text.length >= 600 && text.length <= 3200) excludedFromOwnSession += 1;
   }
 }
 
 if (corpus.length === 0) {
   console.error(`No assistant message of 600-3200 characters found under ${STORE}. Run a session first.`);
   process.exit(1);
+}
+
+if (excludedFromOwnSession > 0) {
+  console.log(
+    `corpus: ${corpus.length} messages from ${files.length} sessions` +
+      ` (excluded ${excludedFromOwnSession} from the session running this script)`,
+  );
+  console.log("");
+}
+
+/*
+ * WHERE THE PARSE WORK ACTUALLY IS (part 1 only).
+ *
+ * The 600-3200 character filter above exists so the cost measurement has messages long enough to time, and
+ * that filter is unrepresentative in a way worth printing: the median assistant message is ~109 characters.
+ * Per-delta parse work is ~N^2/8 character-parses, so the total is dominated by the longest few messages —
+ * which is why the coalescer's benefit is a function of message length and why a single ratio cannot
+ * describe it.
+ */
+if (part === 1) {
+  const everyLength = [];
+  for (const file of files) {
+    for (const text of assistantTexts(file)) if (text.trim()) everyLength.push(text.length);
+  }
+  everyLength.sort((a, b) => a - b);
+  const totalWork = everyLength.reduce((sum, n) => sum + (n * n) / 8, 0);
+  const bands = [
+    ["under 200", 0, 200],
+    ["200-600", 200, 600],
+    ["600-1500", 600, 1500],
+    ["1500-2500", 1500, 2500],
+    ["2500-4000", 2500, 4000],
+    ["4000+", 4000, Infinity],
+  ];
+  console.log("");
+  console.log(
+    `=== where the parse work is (all ${everyLength.length} assistant messages, not just the sampled ones) ===`,
+  );
+  console.log(`  median ${everyLength[Math.floor(everyLength.length / 2)]} chars`);
+  console.log("  band        messages   share of work");
+  for (const [label, low, high] of bands) {
+    const inBand = everyLength.filter((n) => n >= low && n < high);
+    const work = inBand.reduce((sum, n) => sum + (n * n) / 8, 0);
+    console.log(
+      `  ${label.padEnd(11)} ${String(inBand.length).padStart(6)}` +
+        `   ${((work / totalWork) * 100).toFixed(1)}%`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
