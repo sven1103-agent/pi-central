@@ -136,9 +136,13 @@ through a fixed verb set over CDP, with no new shipped dependency.**
 - **RSS is unmeasured.** The issue estimated 150–250 MB per sidecar. Per-session is the safe default for
   lifetime and token scoping; if a fleet makes it untenable, the fallback is one process with per-session
   origin scoping inside it, which is weaker.
-- **Chrome starts its own updater.** A run's log showed `GoogleUpdater --install` posting to
-  `update.googleapis.com` and starting `launchctl asuser 501 … --net-worker`. Whether that process is
-  confined by the fragment, and whether the request left the machine, is **unmeasured**.
+- **Chrome starts its own updater, and it is confined.** Some launches ran `GoogleUpdater --install`, which tried
+  `update.googleapis.com` and then `launchctl asuser 501 … --net-worker`. `spikes/ui-sidecar/harness/escape-probe.mjs`
+  runs the real composed policy and shows that a process started through `launchctl asuser` is refused on a
+  port outside the policy and cannot write outside the profile, exactly like a direct one, while the same
+  command succeeds unsandboxed. **Still unmeasured:** the updater's own request to `update.googleapis.com`
+  was never observed to leave the machine, only to fail on its first fetcher; the probe tests loopback ports,
+  not the internet.
 - **A scratch session has no browser.** No `cwd` means no dev server to reach; the verb reports
   "no browser for this session" rather than spawning something that can reach nothing.
 
