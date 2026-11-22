@@ -672,6 +672,7 @@ export class Supervisor extends EventEmitter {
           safehouse: this.#config.safehouse,
           sidecar: this.#config.pi,
           sidecarArgs: [join(import.meta.dirname, "sidecar.ts")],
+          sidecarCodeDir: join(import.meta.dirname, ".."),
           browser: this.#config.browser,
           onLog: (line: string) => this.emit("log", session.id, line),
         });

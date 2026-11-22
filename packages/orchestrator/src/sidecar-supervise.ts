@@ -47,6 +47,13 @@ export interface SidecarSpawn {
   safehouse: string;
   /** The sidecar executable: a fixed binary (or an interpreter), driven by a fixed verb set. */
   sidecar: string;
+  /**
+   * The directory the sidecar's code lives in, granted read-only to the sandbox.
+   *
+   * Measured: without it a source-launched sidecar never starts — the interpreter cannot open a script
+   * outside its workdir, and the failure is a silent hang with no output and no exit.
+   */
+  sidecarCodeDir: string;
   /** Arguments before the sidecar's own flags — the script path when `sidecar` is an interpreter. */
   sidecarArgs?: string[];
   /** The browser executable, resolved by configuration. */
@@ -77,6 +84,7 @@ export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
     // The sidecar is a NODE SCRIPT here rather than a compiled binary, because Phase 2 runs from source.
     // The argv shape is what matters and it is fixed: executable, then two flags with validated values.
     sidecar: options.sidecar,
+    sidecarCodeDir: options.sidecarCodeDir,
     ...(options.sidecarArgs === undefined ? {} : { sidecarArgs: options.sidecarArgs }),
   };
 

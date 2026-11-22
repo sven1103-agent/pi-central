@@ -59,6 +59,19 @@ export interface SidecarSpec {
   /** The sidecar executable: a fixed binary driven by the four verbs (ADR-0015 §2). */
   sidecar: string;
   /**
+   * The directory the sidecar's own code lives in, granted READ-ONLY.
+   *
+   * Required because the sidecar is started from source in Phase 2 (`node <install>/sidecar.ts`), and a
+   * sandboxed process cannot read a file outside its workdir. Measured: without this grant the process never
+   * starts — no error, no output, no exit — because the interpreter cannot open the script it was asked to
+   * run. A silent hang is the worst failure shape available, so the grant is part of the launch spec rather
+   * than a caller's afterthought.
+   *
+   * Narrow on purpose: a directory, read-only, no execute-through-write. The sidecar's workdir remains its
+   * profile, which is the only thing it may write.
+   */
+  sidecarCodeDir: string;
+  /**
    * Arguments placed before the sidecar's own flags, e.g. the script path when `sidecar` is `node`.
    *
    * Exists because Phase 2 runs the sidecar from source, and the argv shape must still be fixed: binary,
@@ -104,9 +117,17 @@ export function composeSidecarPolicy(spec: SidecarSpec): ComposedSidecar {
   // so the sidecar cannot rewrite the rules that confine it.
   writeFileSync(fragmentFile, renderSidecarFragment({ port: spec.port }), { mode: 0o600 });
 
+  if (!spec.sidecarCodeDir.startsWith("/")) {
+    throw new Error(`sidecarCodeDir must be absolute: ${JSON.stringify(spec.sidecarCodeDir)}`);
+  }
+  assertPrivateLocation(spec.sidecarCodeDir, "code");
+
   const args: string[] = [
     "--workdir",
     resolve(spec.profileDir),
+    // The code, read-only. Without it a source-launched sidecar never starts: the interpreter cannot open a
+    // script outside the workdir, and the failure is a silent hang rather than an error.
+    `--add-dirs-ro=${resolve(spec.sidecarCodeDir)}`,
     `--enable=${SIDECAR_ENABLE}`,
     `--append-profile=${fragmentFile}`,
     "--",

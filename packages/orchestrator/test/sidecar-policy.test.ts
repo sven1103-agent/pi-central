@@ -64,6 +64,8 @@ session, and $HOME is unwritable here). Set PI_CENTRAL_TEST_PRIVATE_ROOT to a pr
 const dir = workdir ?? "/nonexistent";
 
 const base: Omit<SidecarSpec, "id" | "port"> = {
+  // Read-only access to the sidecar's own code: without it a source-launched sidecar cannot start at all.
+  sidecarCodeDir: join("/nonexistent-code", "orchestrator"),
   profileDir: join(dir, "profile"),
   fragmentDir: join(dir, "policy"),
   safehouse: "safehouse",

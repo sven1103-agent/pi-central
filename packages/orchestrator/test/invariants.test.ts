@@ -84,11 +84,34 @@ test("the two assemblers cannot produce each other's argv (ADR-0015)", () => {
   assert.ok(!session.includes("composeSidecarPolicy"), "a session must not borrow the sidecar assembler");
 });
 
-test("the orchestrator never passes --add-dirs (ADR-0002)", () => {
+test("a SESSION is never given --add-dirs or --add-dirs-ro (ADR-0002)", () => {
+  // The original assertion was a bare substring check over every source file, so it could not tell
+  // `--add-dirs` (read-WRITE) from `--add-dirs-ro` (read-only) and it fired the moment the sidecar needed a
+  // read-only grant for its own code. Fixing it by loosening the pattern would have lost the protection; this
+  // fixes it by asking the right question.
+  //
+  // The rule ADR-0002 states is about SESSIONS: a session's grant set derives from its workdir, and a
+  // hand-added directory is exactly the union that ADR exists to prevent. A sidecar is a sibling with a fixed,
+  // narrow purpose and no model in it, and it is the only assembler allowed the read-only form.
+  const session = readFileSync(join(SRC, "policy.ts"), "utf8");
+  for (const flag of ["--add-dirs", "--add-dirs-ro"]) {
+    assert.ok(!session.includes(flag), `policy.ts must not reference ${flag}`);
+  }
+
+  // Everywhere else, the read-WRITE form stays forbidden outright.
   for (const file of files) {
     const text = readFileSync(file, "utf8");
-    assert.ok(!text.includes("--add-dirs"), `${relative(SRC, file)} references --add-dirs`);
+    const name = relative(SRC, file);
+    assert.ok(!/--add-dirs(?!-ro)/.test(text), `${name} references --add-dirs (read-write)`);
   }
+
+  // And the read-only form may appear ONLY in the sidecar assembler, which grants its own code.
+  const roUsers = files.filter((file) => readFileSync(file, "utf8").includes("--add-dirs-ro"));
+  assert.deepEqual(
+    roUsers.map((file) => relative(SRC, file)).sort(),
+    ["sidecar-policy.ts"],
+    "only the sidecar may take a read-only extra directory",
+  );
 });
 
 test("wide-read is refused, never enabled", () => {

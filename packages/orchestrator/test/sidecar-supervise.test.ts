@@ -51,6 +51,7 @@ const options = (over: Partial<SidecarSpawn> = {}): SidecarSpawn => ({
   stateRoot: root ?? "/nonexistent",
   safehouse: process.execPath,
   sidecar: process.execPath,
+  sidecarCodeDir: root ?? "/nonexistent",
   sidecarArgs: ["-e", FAKE],
   browser: "/nonexistent/chrome",
   ...over,

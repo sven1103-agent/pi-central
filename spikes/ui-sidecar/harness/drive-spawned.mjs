@@ -61,6 +61,10 @@ const child = spawn(
   [
     "--workdir",
     profileDir,
+    // The sidecar runs from source, and a sandboxed process cannot open a script outside its workdir.
+    // Without this the process never starts: no output, no exit, nothing (measured — it produced the first
+    // silent hang this harness saw).
+    "--add-dirs-ro=" + REPO,
     "--enable=playwright-chrome",
     "--append-profile=" + fragmentPath,
     "--",
@@ -78,6 +82,24 @@ const child = spawn(
 
 let stderr = "";
 child.stderr.on("data", (chunk) => (stderr += String(chunk)));
+
+// A HANG is the failure this harness produced once, and it produced no diagnostics at all: the sidecar could
+// not open its own script inside the Sandbox, so it never wrote a byte to stdout and never exited. A drive
+// with no deadline turns that into "nothing happens", which is the least useful possible report.
+const DEADLINE_MS = 90_000;
+const deadline = setTimeout(() => {
+  console.error("\nFAIL  the drive exceeded " + DEADLINE_MS / 1000 + "s with no answer.");
+  console.error("  --- sidecar stderr --- ");
+  for (const line of stderr.trim().split("\n").slice(-15)) console.error("  " + line);
+  if (stderr.trim() === "") {
+    console.error("  (nothing on stderr: the process never started. A sandboxed sidecar needs READ access to");
+    console.error("   its own code -- --add-dirs-ro=<install dir> -- or node cannot open the script.)");
+  }
+  child.kill("SIGKILL");
+  server.close();
+  process.exit(1);
+}, DEADLINE_MS);
+child.once("exit", () => clearTimeout(deadline));
 
 let nextId = 1;
 const pending = new Map();
