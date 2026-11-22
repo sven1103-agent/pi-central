@@ -197,3 +197,32 @@ test("the sidecar's own launch forwards its token, because Safehouse discards th
     "the forwarded name must exist in the environment",
   );
 });
+
+test("every safehouse flag precedes the separator, and none leaks to the sidecar", () => {
+  if (skipReason) return console.log(skipReason);
+  const { launch } = composeSidecarPolicy(spec());
+  const separator = launch.args.indexOf("--");
+  assert.ok(separator > 0, "the separator must exist");
+
+  const safehouseArgs = launch.args.slice(0, separator);
+  const sidecarArgs = launch.args.slice(separator + 1);
+
+  // The defect this holds: `--env-pass` was appended AFTER the separator, so safehouse passed it through as an
+  // argument to the sidecar's own command line. node forwarded it, the sidecar rejected it as unknown, and Pi
+  // reported "Nothing is listening" -- a bind-failure message for a misplaced argument. Measured once already.
+  for (const flag of ["--env-pass=", "--enable=", "--append-profile=", "--add-dirs-ro=", "--workdir"]) {
+    assert.ok(
+      safehouseArgs.some((arg) => arg.startsWith(flag)),
+      `${flag} must be a SAFEHOUSE argument, before the separator`,
+    );
+    assert.ok(
+      !sidecarArgs.some((arg) => arg.startsWith(flag)),
+      `${flag} leaked into the sidecar's own argv`,
+    );
+  }
+
+  // And the reverse: the sidecar's flags must not appear on safehouse's side, where they would be rejected.
+  for (const flag of ["--executable", "--profile", "--origin", "--port"]) {
+    assert.ok(!safehouseArgs.includes(flag), `${flag} belongs to the sidecar, not to safehouse`);
+  }
+});
