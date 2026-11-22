@@ -10,6 +10,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+<!-- Empty at tag time: a release cannot ship undocumented changes. -->
+
+## [0.14.0] — 2026-11-22
+
 ### Added
 
 - The session list's width, density and visibility are the reader's, remembered across restarts, with a resize handle and a Session list section in Settings ([#275]).
