@@ -11,7 +11,21 @@
  *
  *   node escape-probe.mjs
  */
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
+
+// ASYNC on purpose. The listeners live in this process, and a blocking spawnSync froze them: the first run of this
+// probe timed out on the allowed port and the listeners saw nothing, so both controls failed and proved nothing.
+const run = (command, args, options = {}) =>
+  new Promise((done) => {
+    const child = spawn(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => (stdout += d));
+    child.stderr.on("data", (d) => (stderr += d));
+    const timer = setTimeout(() => child.kill("SIGKILL"), 60000);
+    child.on("close", (status) => { clearTimeout(timer); done({ status, stdout, stderr }); });
+    child.on("error", (error) => { clearTimeout(timer); done({ status: null, stdout, stderr: String(error) }); });
+  });
 import { createServer } from "node:http";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
@@ -47,8 +61,8 @@ const composed = composeSidecarPolicy({
 });
 // Control, UNSANDBOXED: the same launchctl trick must work from here, or "refused" below proves nothing.
 const uid = String(process.getuid());
-spawnSync("/bin/launchctl", ["asuser", uid, "/usr/bin/curl", "-sS", "-m", "3", "-o", "/dev/null", "http://127.0.0.1:" + BLOCKED_PORT + "/control-asuser"], { timeout: 8000 });
-const r = spawnSync(composed.launch.command, composed.launch.args, { cwd: composed.launch.cwd, env: composed.launch.env, encoding: "utf8", timeout: 60000 });
+await run("/bin/launchctl", ["asuser", uid, "/usr/bin/curl", "-sS", "-m", "3", "-o", "/dev/null", "http://127.0.0.1:" + BLOCKED_PORT + "/control-asuser"]);
+const r = await run(composed.launch.command, composed.launch.args, { cwd: composed.launch.cwd, env: composed.launch.env });
 for (const s of servers) s.close();
 
 const line = (r.stdout ?? "").split("\n").find((l) => l.startsWith("RESULT "));
