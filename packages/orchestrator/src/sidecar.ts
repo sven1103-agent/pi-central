@@ -411,10 +411,13 @@ if (isMain) {
   const executable = arg("executable");
   const profileDir = arg("profile");
   const origin = arg("origin");
-  // The token arrives in the ENVIRONMENT, not the argv: `ps` shows another process's arguments, so a secret on
-  // the command line is readable by anything that can list processes. The flag is still accepted for a manual
-  // run, where there is no launcher to set the variable.
-  const token = process.env["PI_CENTRAL_SIDECAR_TOKEN"] ?? arg("token");
+  // The FLAG wins, and the variable is the fallback. That order is load-bearing, not stylistic.
+  //
+  // The orchestrator both sets the variable and forwards it with `--env-pass`, so in production the two agree. If
+  // the variable won, then any process able to influence the sidecar's environment could substitute the token and
+  // have the orchestrator's own config point at a sidecar opened by someone else — and it would look like a
+  // working session. A measured test asserts the launch token is the accepted one with a conflicting variable set.
+  const token = arg("token") ?? process.env["PI_CENTRAL_SIDECAR_TOKEN"];
   const port = Number(arg("port") ?? "0");
   if (executable === undefined || profileDir === undefined || origin === undefined || token === undefined) {
     process.stderr.write(
