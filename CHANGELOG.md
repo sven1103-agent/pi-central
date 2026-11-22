@@ -10,6 +10,11 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+### Changed
+
+- The UI-sidecar spike briefs state no version, and their paths resolve, so `npm run verify` is green on
+  this branch again ([#276]).
+
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
 ## [0.13.0] — 2026-11-21
@@ -785,3 +790,4 @@ The spike that answered whether this was worth building.
 [#263]: https://github.com/sven1103-agent/pi-central/issues/263
 [#265]: https://github.com/sven1103-agent/pi-central/issues/265
 [#269]: https://github.com/sven1103-agent/pi-central/issues/269
+[#276]: https://github.com/sven1103-agent/pi-central/issues/276
