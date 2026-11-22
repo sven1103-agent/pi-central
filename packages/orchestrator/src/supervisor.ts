@@ -75,6 +75,13 @@ export interface StartRequest {
   mode?: LaunchMode;
   enable?: string[];
   /**
+   * The dev-server port this session's sidecar may reach (ADR-0015), overriding the orchestrator default.
+   *
+   * `null` disables the sidecar for this session even when a default is configured, so a scratch session can
+   * opt out without changing global configuration.
+   */
+  sidecarPort?: number | null;
+  /**
    * Extra environment values for this session — the trusted channel for the agent's own
    * credentials (ADR-0010). Never sourced from `process.env` by the caller.
    */
@@ -356,7 +363,15 @@ export class Supervisor extends EventEmitter {
       }
     }
 
-    return this.#spawn({ id, cwd, mode, name: request.name, enable: request.enable, env: request.env });
+    return this.#spawn({
+      id,
+      cwd,
+      mode,
+      name: request.name,
+      enable: request.enable,
+      env: request.env,
+      ...(request.sidecarPort === undefined ? {} : { sidecarPort: request.sidecarPort }),
+    });
   }
 
   /**
@@ -536,6 +551,8 @@ export class Supervisor extends EventEmitter {
     env?: Record<string, string> | undefined;
     sessionPath?: string | undefined;
     previousError?: string | undefined;
+    /** Per-session override (ADR-0015): a number pins the port, `null` opts out entirely. */
+    sidecarPort?: number | null;
   }): StartResult | StartFailure {
     // A resumed session must reopen its file; a new one gets a fresh name.
     //
@@ -659,15 +676,24 @@ export class Supervisor extends EventEmitter {
      * verb never pays for a renderer.
      *
      * A failure here does not fail the session. A browser is a capability, not a precondition: the agent can
-     * still do everything else, and the Inspector reports that this session has no sidecar rather than the
-     * transcript filling with a launch error nobody asked for.
+     * still do everything else, and a session with no sidecar simply has no browser.
+     *
+     * The port resolves per session: an explicit `null` opts out, an explicit number overrides the orchestrator's
+     * default, and "absent" means the default. Per-session is the right grain — the port was an orchestrator-wide
+     * variable only at first, which made testing ONE session require arming a whole app, and a fleet has a dev
+     * server per project anyway.
      */
+    const sidecarPort =
+      input.sidecarPort === null
+        ? undefined
+        : (input.sidecarPort ?? this.#config.sidecarPort);
+
     let sidecar: SidecarHandle | undefined;
-    if (this.#config.sidecarPort !== undefined && input.mode === "sandboxed") {
+    if (sidecarPort !== undefined && input.mode === "sandboxed") {
       try {
         sidecar = spawnSidecar({
           sessionId: session.id,
-          port: this.#config.sidecarPort,
+          port: sidecarPort,
           stateRoot: this.#config.stateRoot,
           safehouse: this.#config.safehouse,
           sidecar: this.#config.pi,

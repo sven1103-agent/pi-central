@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { Supervisor } from "../src/supervisor.ts";
 import { mcpConfigArgs } from "../src/sidecar-supervise.ts";
@@ -114,4 +114,39 @@ test("a sidecar is not spawned for a direct (unsandboxed) session", () => {
     );
   }
   return supervisor.stopAll().then(() => undefined);
+});
+
+test("the sidecar port resolves per session: override, opt-out, or default", () => {
+  // Three cases that must not collapse, because each is a different intention:
+  //   a number -> THIS session gets a sidecar on that port
+  //   null     -> this session opts OUT even though the app configures a default
+  //   absent   -> the app's default applies
+  if (skip) return console.log(skip);
+  const app = new Supervisor(config({ sidecarPort: 4173, stateRoot: join(root as string, "resolve") }) as never, {
+    rememberOpenSessions: false,
+  });
+  app.on("error", () => {});
+
+  const optedOut = app.start({ cwd: root as string, mode: "sandboxed", sidecarPort: null });
+  assert.equal(optedOut.ok, true);
+  if (optedOut.ok) {
+    assert.ok(
+      !existsSync(join(root as string, "resolve", "sidecars", optedOut.session.id, "mcp.json")),
+      "an explicit null must opt a session out even when the app configures a default",
+    );
+  }
+
+  const overridden = app.start({ cwd: root as string, mode: "sandboxed", sidecarPort: 5173 });
+  assert.equal(overridden.ok, true);
+  if (overridden.ok) {
+    const configFile = join(root as string, "resolve", "sidecars", overridden.session.id, "mcp.json");
+    assert.ok(existsSync(configFile), "an explicit number must arm this session");
+    // The port does not appear in mcp.json — that file names the COMMAND. It appears in the rendered FRAGMENT,
+    // which is what pins egress. The first version of this assertion looked in the config and failed on correct
+    // code, because it assumed the port travelled with the argv rather than with the policy.
+    const fragment = join(root as string, "resolve", "sidecars", overridden.session.id, "policy", `${overridden.session.id}.sb`);
+    assert.ok(existsSync(fragment), "the fragment is the artifact that pins the port");
+    assert.match(readFileSync(fragment, "utf8"), /localhost:5173/, "an override must pin THAT port, not the default");
+  }
+  return app.stopAll().then(() => undefined);
 });

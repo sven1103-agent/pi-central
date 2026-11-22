@@ -454,6 +454,9 @@ export class Transport {
           ...(control.cwd ? { cwd: control.cwd } : {}),
           ...(control.name ? { name: control.name } : {}),
           ...(control.mode ? { mode: control.mode } : {}),
+          // Validated where it is used, not here: start() returns a structured failure, and a bad port reads better
+          // as a message beside the session than as a dropped control message.
+          ...(control.sidecarPort === undefined ? {} : { sidecarPort: control.sidecarPort }),
         });
         if (!result.ok) {
           this.#broadcast({ kind: "error", message: result.message });

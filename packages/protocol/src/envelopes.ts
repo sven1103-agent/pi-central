@@ -170,7 +170,20 @@ export interface ModelOption {
 /** Commands the UI may send. A closed union — the UI cannot name an arbitrary operation. */
 export type Control =
   | { kind: "list" }
-  | { kind: "start"; cwd?: string; name?: string; mode?: "sandboxed" | "direct" }
+  | {
+      kind: "start";
+      cwd?: string;
+      name?: string;
+      mode?: "sandboxed" | "direct";
+      /**
+       * The dev-server port this session's UI sidecar may reach, if any (ADR-0015).
+       *
+       * Per SESSION rather than per orchestrator, because the fragment pins egress to exactly one port and a
+       * fleet has more than one dev server. It was an environment variable first, and that made testing a
+       * single session require arming a whole app — which is a design smell, not a convenience problem.
+       */
+      sidecarPort?: number;
+    }
   /**
    * Re-spawn a session that FAILED, in the directory it already had (issue #11).
    *
