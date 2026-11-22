@@ -41,6 +41,12 @@ export function launchBrowser(options: BrowserOptions): Browser {
     options.executable,
     [
       "--headless=new",
+      // Chrome's macOS helpers probe the crash database, the keychain, the dock, the notification centre and
+      // CoreVideo continuations. Under --no-sandbox none of those are granted, so each fails with a line on
+      // stderr that says "Operation not permitted" and is expected. Left on, they flood the log at ~30 ms
+      // intervals (measured: CVDisplayLinkCreateWithCGDisplay repeated for the whole run) and bury the one line
+      // that matters.
+      "--disable-features=DialMediaRouteProvider,MediaRouter,OptimizationHints",
       `--user-data-dir=${options.profileDir}`,
       // Mandatory under Safehouse; see the header. Not a weakening chosen here.
       "--no-sandbox",

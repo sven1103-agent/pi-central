@@ -40,6 +40,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The sidecar's own `--port` and token are passed to it, and the token travels in the environment ([#276]).
 - The sidecar's launch forwards its token with `--env-pass`, which Safehouse requires ([#276]).
 - A safehouse flag can no longer be placed after the `--`, where it becomes the sidecar's argument ([#276]).
+- The checkpoint harness collapses Chrome's expected macOS noise instead of burying the result in it ([#276]).
 - A browser renders a local page under the sidecar's own profile with egress confined to one port ([#276]).
 - A two-verb host-side service is measured against shipping `playwright` for UI capture ([#276]).
 - A hand-written credential deny list failed open on `~/.gitconfig`, as C15c predicts ([#276]).

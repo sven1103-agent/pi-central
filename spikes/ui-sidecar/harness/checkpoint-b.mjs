@@ -92,9 +92,31 @@ supervisor.on("error", () => {});
  * paraphrased "Connection closed (…)" summary. A harness that filters the evidence it exists to collect is
  * asking the reader to guess.
  */
+/**
+ * The sidecar's log, with the EXPECTED browser noise collapsed.
+ *
+ * Chrome under `--no-sandbox` fails every macOS integration it probes — crashpad, keychain, dock, the
+ * notification centre, CoreVideo continuations — and says so on stderr, repeatedly. Those lines are not errors
+ * here: they are the profile doing its job. Printed in full they buried the one line that mattered, so the
+ * noise is counted and summarised while everything else is still printed verbatim.
+ *
+ * Deliberately an allow-list of KNOWN noise, not a filter for lines containing "error": a real failure names a
+ * path, a grant or a token, so it does not match these patterns.
+ */
+const NOISE = [
+  /crashpad/i, /SecItemCopyMatching/i, /Keychain lookup failed/i, /bootstrap_check_in/i,
+  /NSNotificationCenter|notification center/i, /dock_plist/i, /Encryption is not available/i,
+  /CVDisplayLinkCreateWithCGDisplay/i, /IOPMAssertionCreate/i, /process_requirement/i,
+  /allocator multiple times/i, /Dropped sandbox-denied path from PATH/i,
+];
 const sidecarLog = [];
+let suppressed = 0;
 supervisor.on("log", (_id, line) => {
   sidecarLog.push(line);
+  if (NOISE.some((pattern) => pattern.test(line))) {
+    suppressed += 1;
+    return;
+  }
   console.log("  [sidecar] " + line);
 });
 
@@ -133,7 +155,10 @@ try {
   // reflects it in the session state it patches. Reading the authoritative state beats listening for one event
   // name out of many — the first version of this waited on an "event" channel that does not exist.
   said = await new Promise((done) => {
-    const deadline = Date.now() + 180_000;
+    // 90 s: long enough for a real capture on a slow page, short enough that a hang is reported while the
+    // operator is still watching. The previous bound was three minutes, which is a long time to wait for a
+    // result that is not coming.
+    const deadline = Date.now() + 90_000;
     const tick = () => {
       // `get`, not `session`: the accessor is `Supervisor#get`. An earlier draft of this file used a name that
       // does not exist, and the resulting TypeError was reported as "the prompt was accepted: FAIL" — so the one
@@ -144,6 +169,8 @@ try {
         return;
       }
       if (Date.now() > deadline) {
+        // The distinction that matters when this fires: did the sidecar SAY anything? A silent sidecar means the
+        // verb never returned, which is a browser-operation hang rather than a slow page.
         done("(timed out waiting for the session to settle)");
         return;
       }
@@ -166,6 +193,9 @@ const reply = (transcript?.messages ?? [])
   .trim();
 
 record("the session produced a reply", reply !== "", said);
+if (suppressed > 0) {
+  console.log(`  [sidecar] (${suppressed} expected browser-integration lines suppressed: crashpad, keychain, dock, CoreVideo)`);
+}
 if (reply !== "") {
   console.log("\n--- the session's reply ---");
   console.log(reply.slice(0, 1500));
