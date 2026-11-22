@@ -125,7 +125,10 @@ try {
   said = await new Promise((done) => {
     const deadline = Date.now() + 180_000;
     const tick = () => {
-      const session = supervisor.session(id);
+      // `get`, not `session`: the accessor is `Supervisor#get`. An earlier draft of this file used a name that
+      // does not exist, and the resulting TypeError was reported as "the prompt was accepted: FAIL" — so the one
+      // line that would have named the mistake was the failing assertion, not a hint.
+      const session = supervisor.get(id);
       if (session !== undefined && session.state === "idle" && (session.messageCount ?? 0) > 0) {
         done("(the session settled; see its transcript in the UI, or the record count below)");
         return;

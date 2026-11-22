@@ -132,13 +132,23 @@ test("an id that is not identifier-shaped is refused", () => {
   }
 });
 
-test("the sidecar env cannot inherit the orchestrator's", () => {
+test("the sidecar env carries PATH and nothing else", () => {
   if (skipReason) return console.log(skipReason);
   const { launch } = composeSidecarPolicy(spec());
-  // `spawn` inherits `process.env` when `env` is omitted, which would hand the renderer every ambient
-  // secret (C4a/C11). An explicit empty object is the smallest honest answer.
+  // `spawn` inherits `process.env` when `env` is omitted, which would hand the renderer every ambient secret
+  // (C4a/C11). So the object is EXPLICIT — but it cannot be empty, and that was a measured defect: with no
+  // `PATH` a bare command name does not resolve, and the sidecar failed to spawn with `spawn safehouse ENOENT`
+  // while every other part of the wiring was correct.
   assert.ok(launch.env !== undefined, "env must be present, or spawn inherits");
-  assert.deepEqual(launch.env, {});
+  assert.deepEqual(
+    Object.keys(launch.env).sort(),
+    ["PATH"],
+    "PATH to resolve the launcher, and nothing a renderer could use",
+  );
+  // And no secret-shaped name survives, which is the property the empty object was standing in for.
+  for (const name of Object.keys(launch.env)) {
+    assert.ok(!/(TOKEN|SECRET|KEY|PASSWORD|AUTH|HOME)/i.test(name), `unexpected variable ${name}`);
+  }
 });
 
 test("a session can never be given a Chromium feature, and the sidecar is the only assembler that can", () => {

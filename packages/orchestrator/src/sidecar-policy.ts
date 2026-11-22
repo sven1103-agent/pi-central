@@ -46,7 +46,17 @@ export const SIDECAR_ENABLE = "playwright-chrome";
  */
 export const SHARED_TEMP_ROOTS = ["/tmp", "/private/tmp", "/var/folders", "/private/var/folders"] as const;
 
+/** A minimal PATH, so the launcher resolves even when the orchestrator was started without one. */
+const DEFAULT_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+
 export interface SidecarSpec {
+  /**
+   * The `PATH` this launch may use. Defaults to the orchestrator's own, then to a minimal one.
+   *
+   * Exists because an empty environment cannot resolve a bare command name -- measured: the sidecar failed to
+   * spawn with `spawn safehouse ENOENT` while every other part of the wiring was correct.
+   */
+  path?: string | undefined;
   /** Identifier for the fragment file name. Identifier-shaped, validated like a session id. */
   id: string;
   /** The dev-server port egress is pinned to. Per session, because a fleet has more than one. */
@@ -144,9 +154,16 @@ export function composeSidecarPolicy(spec: SidecarSpec): ComposedSidecar {
       args,
       cwd: resolve(spec.profileDir),
       // Deliberately NOT `buildSessionEnv`: the sidecar is not an agent, and the session allowlist carries
-      // names a renderer has no use for (C11). An empty environment plus what Safehouse computes is the
-      // smallest honest answer, and an explicit object means `spawn` cannot inherit `process.env` (C4a).
-      env: {},
+      /**
+       * Deliberately NOT `buildSessionEnv`: the sidecar is not an agent, and the session allowlist carries names
+       * a renderer has no use for (C11). An explicit object also means `spawn` cannot inherit `process.env` (C4a).
+       *
+       * But it cannot be EMPTY either, and that was a real defect: with no `PATH`, a bare command name is not
+       * resolvable, so spawning `safehouse` failed with ENOENT and the sidecar never started. Sessions never hit
+       * this because `buildSessionEnv` supplies a `PATH`. The sidecar gets the minimum a process needs to resolve
+       * its own binary, and nothing else -- no HOME, no credentials, no inherited secrets.
+       */
+      env: { PATH: spec.path ?? process.env["PATH"] ?? DEFAULT_PATH },
     },
     isolation: `Safehouse sidecar profile=${spec.profileDir} enable=${SIDECAR_ENABLE} egress=localhost:${spec.port}`,
     fragmentFile,
