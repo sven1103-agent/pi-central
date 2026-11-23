@@ -201,6 +201,7 @@ workspaces and the agent root, and how to verify the install.
 | [docs/RELEASING.md](docs/RELEASING.md) | Cutting a release: the version source, the tag, provenance, rollback |
 | [docs/SECURITY.md](docs/SECURITY.md) | What the vulnerability scan covers, where results appear, and the gate |
 | [docs/INCREMENTS.md](docs/INCREMENTS.md) · [docs/ROADMAP.md](docs/ROADMAP.md) | How work is sequenced, and the long view |
+| [docs/UI-SIDECAR-DESIGN-OPTIONS.md](docs/UI-SIDECAR-DESIGN-OPTIONS.md) | The session browser: four verbs vs a containerised MCP server, with diagrams |
 | [docs/decisions/](docs/decisions/) | Architecture decision records |
 | [packages/ui/DESIGN.md](packages/ui/DESIGN.md) | The UI design system, as implemented |
 

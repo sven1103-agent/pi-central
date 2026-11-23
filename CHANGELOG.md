@@ -52,6 +52,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - Running from a checkout refuses to launch a different installed package, naming the override ([#276]).
 - A checkout run refuses to adopt an unidentified running orchestrator, naming the pid to stop ([#276]).
 - The session instruction says when a project cannot serve its own orchestrator, and what to serve instead ([#276]).
+- `docs/UI-SIDECAR-DESIGN-OPTIONS.md` compares the four verbs with a containerised MCP browser, in diagrams ([#276]).
 - A browser renders a local page under the sidecar's own profile with egress confined to one port ([#276]).
 - A two-verb host-side service is measured against shipping `playwright` for UI capture ([#276]).
 - A hand-written credential deny list failed open on `~/.gitconfig`, as C15c predicts ([#276]).
