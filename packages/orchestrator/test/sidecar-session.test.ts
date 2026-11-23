@@ -6,6 +6,7 @@ import { createServer } from "node:net";
 import { spawn } from "node:child_process";
 import { existsSync as fileExists } from "node:fs";
 import { Supervisor, resolveSidecarEntry } from "../src/supervisor.ts";
+import { renderPolicyFragment } from "../src/fragment.ts";
 import {
   DEV_PORT_BASE,
   devPortFor,
@@ -484,4 +485,30 @@ test("the session's own directory decides the appendix, through the prompt argum
   assert.match(own, /This project IS Pi Central/, "a Pi Central checkout must be told");
   assert.doesNotMatch(other, /This project IS Pi Central/, "and another project must not be");
   assert.deepEqual(sidecarPromptArgs(undefined, dir), [], "no sidecar, no instruction");
+});
+
+test("the config-directory grant is passed only for a session that has a sidecar", () => {
+  if (skip) return console.log(skip);
+  // The wiring, not just the renderer. A session WITH a sidecar that did not get the grant shows "0 servers configured"
+  // while the sidecar sits listening -- measured, and invisible from every other angle. A session WITHOUT one that got
+  // the grant would be an unexplained capability.
+  //
+  // Asserted on the rendered policy through the public renderer plus a source check of the call site, because the
+  // supervisor writes ONE fragment file that the last spawn overwrites: reading it back cannot attribute it to a
+  // session, which is how the first version of this test failed.
+  const withDir = renderPolicyFragment({
+    agentRoot: join(root as string, "agent"),
+    sidecarConfigDir: join(root as string, "sidecars", "s1"),
+  });
+  assert.match(withDir, /The UI sidecar's config/);
+  const withoutDir = renderPolicyFragment({ agentRoot: join(root as string, "agent") });
+  assert.doesNotMatch(withoutDir, /The UI sidecar's config/);
+
+  const source = readFileSync(join(import.meta.dirname, "..", "src", "supervisor.ts"), "utf8");
+  assert.match(
+    source,
+    /sidecarHandle === undefined[\s\S]{0,120}\{\}\s*:\s*\{\s*sidecarConfigDir:/,
+    "the grant must be conditional on the handle, and name the sidecar's own directory",
+  );
+  assert.match(source, /stateRoot, "sidecars", input\.id/, "and the directory must be the one spawnSidecar writes to");
 });

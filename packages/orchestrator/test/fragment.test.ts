@@ -285,6 +285,9 @@ test("the fragment composes into valid SBPL (parse check)", { skip: !canValidate
         agentRoot: "/state/agents/default",
         keychain: true,
         keychainPath: "/state/agents/default/agent.keychain-db",
+        // The real path has TWO spaces in it ("Application Support"), which is exactly the kind of value an unquoted
+        // SBPL literal would break on. Included in the parse check so that cannot ship.
+        sidecarConfigDir: "/Users/someone/Library/Application Support/pi-central-dev/sidecars/s1",
       }),
     ].join("\n"),
   );
@@ -313,4 +316,30 @@ test("a deliberately broken fragment DOES report a syntax error (the check has t
     output = String((error as { stderr?: Buffer }).stderr ?? "");
   }
   assert.match(output, /syntax error/i);
+});
+
+test("the sidecar config is readable by the session, and only that directory", () => {
+  // MEASURED FAILURE this prevents: the mcp.json existed, named the right loopback URL, and the sidecar was listening
+  // and answering 401 -- yet Pi reported "0 servers configured", because opening the file it had been told about was a
+  // denied read. From Pi's side a denied read is indistinguishable from a missing file.
+  const dir = "/Users/someone/Library/Application Support/pi-central-dev/sidecars/s1";
+  const policy = renderPolicyFragment({ agentRoot: "/state/agents/default", sidecarConfigDir: dir });
+
+  assert.match(policy, /The UI sidecar's config/, "the grant must be a named section, not an anonymous allow");
+  // Ancestors AND the directory: SBPL needs every component, and Safehouse emits none for a non-workdir path.
+  assert.ok(policy.includes('(literal "/Users/someone/Library/Application Support")'), "an ancestor with spaces must be quoted");
+  assert.ok(
+    policy.includes(`(allow file-read* (subpath ${JSON.stringify(dir)}))`),
+    "the directory itself must be granted, not only its ancestors",
+  );
+  // READ-only: a session has no business writing the config that names its own sidecar.
+  assert.ok(!policy.includes(`(allow file-read* file-write* (subpath ${JSON.stringify(dir)}))`));
+  // And bounded: the grant is the sidecar directory, not the whole state root.
+  assert.ok(!policy.includes('(subpath "/Users/someone/Library/Application Support/pi-central-dev")'));
+});
+
+test("no sidecar means no grant, so a plain session gains nothing", () => {
+  const policy = renderPolicyFragment({ agentRoot: "/state/agents/default" });
+  assert.ok(!policy.includes("The UI sidecar's config"), "a session without a sidecar must not get the grant");
+  assert.ok(!policy.includes("sidecars"), "and no mention of a directory it does not have");
 });

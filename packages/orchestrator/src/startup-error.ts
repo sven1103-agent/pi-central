@@ -85,3 +85,23 @@ export function describeBuiltUi(uiDir: string): string {
   // whether it predates your last edit.
   return `${identity.entry} (built ${identity.builtAt.slice(0, 16).replace("T", " ")})`;
 }
+
+/**
+ * One line stating whether a session browser is offered, and why not when it is not.
+ *
+ * Every confusion of the last several rounds was resolved by making a value visible rather than by reasoning about it:
+ * which UI is served, which package is launched, which protocol is spoken. The sidecar had no equivalent line, so
+ * "Pi reports 0 servers" could mean the config was never written, the token was wrong, or the file was unreadable --
+ * and telling those apart took a filesystem inspection on the machine.
+ *
+ * Printed at startup, beside `UI build:`, so it answers the question before a session is started.
+ */
+export function describeSidecar(options: {
+  offered: boolean;
+  browser: string;
+  browserExists: boolean;
+}): string {
+  if (!options.offered) return "not offered (set PI_CENTRAL_SIDECAR=1 to offer it per session)";
+  if (!options.browserExists) return `OFFERED BUT UNSABLE: no browser at ${options.browser}`;
+  return `offered, browser ${options.browser}`;
+}

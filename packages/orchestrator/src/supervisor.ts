@@ -638,6 +638,12 @@ export class Supervisor extends EventEmitter {
         ? renderPolicyFragment({
             agentRoot: this.#config.agentRoot,
             ...(keychainNeeded ? { keychain: true, keychainPath } : {}),
+            // Only when this session HAS a sidecar: the grant is for the directory holding its mcp.json, and Pi is the
+            // process that must read it. Measured failure this prevents: the file existed, the sidecar was answering,
+            // and Pi reported "0 servers configured" because the open was denied.
+            ...(sidecarHandle === undefined
+              ? {}
+              : { sidecarConfigDir: join(this.#config.stateRoot, "sidecars", input.id) }),
           })
         : undefined;
 
