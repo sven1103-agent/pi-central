@@ -71,6 +71,7 @@ import {
   toggleFolded,
   type RailPrefs,
 } from "./rail-prefs.ts";
+import { effectiveSidecar, readSidecarPref, writeSidecarPref, type SidecarPref } from "./sidecar-prefs.ts";
 import { RailResizer } from "./components/RailResizer.tsx";
 import { ShortcutSheet } from "./components/ShortcutSheet.tsx";
 import {
@@ -372,6 +373,15 @@ export function App() {
    * with a stored value — gets exactly what they stored, and a reader with nothing stored gets the open default. The
    * roster-size default is applied by the effect below, once, when the roster says how big it is.
    */
+  /*
+    The reader's own answer about a session browser (ADR-0018 §15c), read once from `localStorage`.
+
+    `undefined` means no opinion, which is NOT `false`: an installation whose default comes from `PI_CENTRAL_SIDECAR=1`
+    must still give new sessions a browser to a reader who has never touched this, and a reader who has turned it off
+    must not get one back on the next launch.
+  */
+  const [sidecarPref, setSidecarPref] = useState<SidecarPref>(readSidecarPref);
+
   const [railPrefs, setRailPrefs] = useState<RailPrefs>(() => {
     try {
       return parseRailPrefs(localStorage.getItem(RAIL_PREFS_KEY), 0);
@@ -1741,8 +1751,9 @@ export function App() {
      * It is not a choice here, because a scratch session has no directory to serve yet. Sending the default explicitly
      * means the two paths agree by construction, and the Inspector states the outcome either way.
      */
-    send({ kind: "start", ...(state.sidecarDefault ? { sidecar: true } : {}) });
-  }, [send, state.sidecarDefault]);
+    const sidecar = effectiveSidecar(sidecarPref, state.sidecarOffered, state.sidecarDefault);
+    send({ kind: "start", ...(sidecar ? { sidecar: true } : {}) });
+  }, [send, sidecarPref, state.sidecarOffered, state.sidecarDefault]);
 
   /**
    * Ask for the chooser's places, or for one directory inside them (issue #76, ADR-0012).
@@ -1774,9 +1785,16 @@ export function App() {
   const onOpenDirectory = useCallback(
     (cwd: string, sidecar?: boolean) => {
       dispatch({ kind: "expectNewSession" });
-      // The browser choice travels with the request, and is only ever an opt-IN: the orchestrator still decides whether
-      // this installation can offer one at all (ADR-0015 §15).
-      send({ kind: "start", cwd, ...(sidecar === true ? { sidecar: true } : {}) });
+      /*
+        The reader's answer travels with the request, including when it is `false`.
+        
+        It used to forward only `true` — `...(sidecar === true ? { sidecar: true } : {})` — so an unticked box sent
+        NOTHING, which the orchestrator reads as "no opinion" and answers with the installation's default. The checkbox
+        was therefore decorative in a second place: the orchestrator had already been taught that `false` means "no
+        browser", and this line dropped the `false` before it ever got there. Found by following one click from the
+        dialog to the wire rather than by testing either end.
+      */
+      send({ kind: "start", cwd, ...(sidecar === undefined ? {} : { sidecar }) });
       // The ONE place the picker remembers a place to begin: a session was actually started here.
       rememberOpenedDirectory(cwd);
       setSheetOpen(false);
@@ -2905,6 +2923,20 @@ export function App() {
             })
           }
           railMaxWidth={railMaxWidth(viewportWidth)}
+          sessionBrowser={
+            state.sidecarOffered
+              ? {
+                  pref: sidecarPref,
+                  // Only meaningful when the reader has no opinion of their own, so it is passed rather than folded in:
+                  // the panel states it only in that case.
+                  installDefault: state.sidecarDefault,
+                  onChange: (next) => {
+                    setSidecarPref(next);
+                    writeSidecarPref(next);
+                  },
+                }
+              : undefined
+          }
           onClose={() => {
             setSettingsOpen(false);
             settingsTriggerRef.current?.focus();
@@ -2931,7 +2963,12 @@ export function App() {
         <OpenDirectorySheet
           installationRoot={state.installationRoot}
           sidecarOffered={state.sidecarOffered}
-          sidecarDefault={state.sidecarDefault}
+          /*
+            The reader's own answer, so the picker's box starts where the switch in Settings left it. Passing
+            `state.sidecarDefault` here was the bug: the box then showed the INSTALLATION's default and ignored a reader
+            who had turned the feature off, so the control contradicted the outcome in the opposite direction.
+          */
+          sidecarDefault={effectiveSidecar(sidecarPref, state.sidecarOffered, state.sidecarDefault)}
           home={state.home}
           /* Derived from history, not stored (issue #149). `state.history` is the newest page, which is
              exactly the right input: "recent" cannot be older than the page it is drawn from. */

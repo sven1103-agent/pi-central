@@ -119,15 +119,16 @@ A session cannot look at its own work. It is inside Safehouse, and **Seatbelt do
 ([C1](docs/CONSTRAINTS.md)) — so it can start a dev server, but it cannot start a browser to look at one. In
 practice an agent writes a page and then tells you to check it, or guesses.
 
-Pi Central can give it eyes. Switch the feature on in the environment Pi Central starts from:
+Pi Central can give it eyes. Open **Settings → Session browser** and turn on *Preview its work in a browser*.
+Where a browser is present the switch is there; where one is not, it says so and which path it looked at.
 
-```bash
-PI_CENTRAL_SIDECAR=1 pi-central
-```
+Then tick the box in the directory picker when you open a directory, or leave it to the setting for every new
+session. The browser is a **second Safehouse sandbox beside the first**, not a wider one, because nesting is
+impossible: the orchestrator spawns it, just as it spawns `pi`.
 
-Then tick **Preview its work in a browser** when you open a directory — or, with
-`PI_CENTRAL_SIDECAR=1` set, every new session gets one. The browser is a **second Safehouse sandbox beside the
-first**, not a wider one, because nesting is impossible: the orchestrator spawns it, just as it spawns `pi`.
+For a scripted or daemon launch, `PI_CENTRAL_SIDECAR=1` sets the default instead — useful when Pi Central is
+started from a service that sets the environment anyway. The in-app switch overrides it either way, and it exists
+because a dock PWA or a Finder-launched `.app` inherits no shell environment at all.
 
 What that buys: the session runs its dev server on the port it is told to use (`PI_CENTRAL_DEV_PORT`, which is
 `48000` plus its session number), and opens `http://localhost:<port>` in its own browser. It gets **four verbs** —
@@ -149,8 +150,8 @@ same request from the host answers 404. It holds no agent identity at all: no ke
 in one session cannot read another session's conversation. It costs one browser launch per session that uses it,
 and stopping the session stops the browser and removes its config, policy and profile.
 
-If you do not want it, leave `PI_CENTRAL_SIDECAR` unset: the control is then not shown at all, rather than shown
-and inert. The full reasoning, including the renderer's `--no-sandbox` concession, is
+If you do not want it, switch it off — or, on a machine with no browser, the control is simply not shown, rather
+than shown and inert. The full reasoning, including the renderer's `--no-sandbox` concession, is
 [ADR-0018](docs/decisions/0018-ui-sidecar.md).
 
 Why this shape and not a containerised MCP browser — the alternatives, with diagrams and the measurements that

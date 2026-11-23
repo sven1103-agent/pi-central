@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import {
   checkWorkspaceRoot,
+  defaultConfig,
   isScratch,
   resolveAgentRoot,
   scratchDirFor,
@@ -112,4 +113,32 @@ test("an empty explicit value is ignored rather than resolving to the filesystem
   const chosen = resolveAgentRoot("/state", { PI_CENTRAL_AGENT_ROOT: "" }, home);
   assert.equal(chosen.managed, true);
   assert.notEqual(chosen.agentRoot, "");
+});
+
+test("the session browser is OFFERED when a browser exists, with no environment variable at all", () => {
+  /*
+   * The defect this holds: `sidecarOffered` was `PI_CENTRAL_SIDECAR === "1"`, so the environment was the only way to
+   * offer the feature. A dock PWA or a Finder-launched .app inherits no shell environment, so the shipped, documented way
+   * to run Pi Central was the one way the feature could never be turned on -- and nothing said why.
+   *
+   * Pointing PI_CENTRAL_BROWSER at a binary that exists proves it is a CAPABILITY question: the answer must be "offered"
+   * with no PI_CENTRAL_SIDECAR in sight, and "not offered" for a path that is not there. The second half is the half that
+   * would otherwise show a checkbox on a machine with no browser, where every capture fails.
+   */
+  const saved = { browser: process.env["PI_CENTRAL_BROWSER"], sidecar: process.env["PI_CENTRAL_SIDECAR"] };
+  try {
+    delete process.env["PI_CENTRAL_SIDECAR"];
+    // Any path that exists will do; the check is `existsSync`, not "is it Chromium".
+    process.env["PI_CENTRAL_BROWSER"] = process.execPath;
+    assert.equal(defaultConfig().sidecarOffered, true, "a present browser is enough to offer it");
+    assert.equal(defaultConfig().sidecar, false, "but it is still not the DEFAULT for new sessions");
+
+    process.env["PI_CENTRAL_BROWSER"] = "/nonexistent/chrome-for-this-test";
+    assert.equal(defaultConfig().sidecarOffered, false, "and no browser means no switch to show");
+  } finally {
+    if (saved.browser === undefined) delete process.env["PI_CENTRAL_BROWSER"];
+    else process.env["PI_CENTRAL_BROWSER"] = saved.browser;
+    if (saved.sidecar === undefined) delete process.env["PI_CENTRAL_SIDECAR"];
+    else process.env["PI_CENTRAL_SIDECAR"] = saved.sidecar;
+  }
 });

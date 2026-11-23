@@ -140,6 +140,22 @@ through a fixed verb set over CDP, with no new shipped dependency.**
     real run — ticking and unticking produced the same session. The snapshot therefore carries `sidecarDefault` as well
     as `sidecarOffered`, because "may I offer this" and "is it on unless you say no" are different questions and the
     checkbox needs both to start in the right state and to say so when it is a default.
+15c. **The switch is in the app, and `sidecarOffered` is a capability, not a second switch.** As first written the
+    feature could only be enabled with `PI_CENTRAL_SIDECAR=1`, which makes the environment the only path in. That works
+    in a terminal and fails in exactly the case this product advertises: a dock PWA or a Finder-launched `.app` inherits
+    no shell environment, so the reader could not reach the feature at all and nothing told them why. `sidecarOffered` is
+    therefore `existsSync(browser)` — the gate the config doc comment already claimed — and the reader's **default** is a
+    preference in Settings, stored in `localStorage` beside `railPrefs` because it is a fact about this reader rather than
+    about the machine. `PI_CENTRAL_SIDECAR=1` sets the same default for a scripted launch; the in-app switch overrides it
+    either way. **The reader's answer still travels per request**, so there is no server-side remembered default to
+    disagree with the switch on screen. Proven by `config.test.ts` (offered with no env var when a browser exists, not
+    offered when it does not) and `sidecar-gate.test.mjs` (precedence in both directions, and absence is not `false`).
+15d. **A `false` that never reached the wire was the checkbox being decorative a second time.** `onOpenDirectory`
+    forwarded only `true` — `...(sidecar === true ? { sidecar: true } : {})` — so an unticked box sent *nothing*, which the
+    orchestrator reads as "no opinion" and answers with the installation default. The orchestrator had already been
+    taught that `false` means "no browser"; this line dropped the `false` first. Found by following one click from the
+    dialog to the wire, not by testing either end, which is the lesson: a value can be correct at both ends of a
+    path and absent in the middle.
 15b. **A session's browser is visible in the rail.** `LiveSession.sidecarOrigin` renders as `browser :48005` on the
     row's metrics line: a sidecar is a process and a port per session, and its presence was otherwise observable only if
     an agent happened to call a tool. The port is shown because two sessions on different ports is the mechanism keeping

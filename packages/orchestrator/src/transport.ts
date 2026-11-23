@@ -41,6 +41,7 @@ import type { OsActionError } from "./os-actions.ts";
 import { acceptImages } from "./prompt-images.ts";
 import { discover, sessionAt } from "./registry.ts";
 import { abbreviate, listPlace, nameOf, placesFor } from "./places.ts";
+import { existsSync } from "node:fs";
 import { deleteSessionFile } from "./delete-session.ts";
 import type { Config } from "./config.ts";
 import type { KeychainCheck } from "./keychain.ts";
@@ -287,6 +288,11 @@ export class Transport {
       agentRoot: this.#config.agentRoot,
       agentRootManaged: this.#config.agentRootManaged,
       protocol: PROTOCOL_VERSION,
+      // Only when the capability is offered: a machine with no browser is told nothing, rather than shown a switch that
+      // would fail. `browserExists` is re-stated here because it is what the switch's own note explains.
+      ...(this.#config.sidecarOffered === true
+        ? { sidecar: { browser: this.#config.browser, browserExists: existsSync(this.#config.browser) } }
+        : {}),
     };
     return this.#install;
   }

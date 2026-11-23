@@ -579,6 +579,17 @@ export interface InstallFacts {
    * identity it was loaded from. `undefined` when no UI is served (`--no-ui`).
    */
   ui?: ServedUiIdentity | undefined;
+  /**
+   * The browser a session sidecar would drive (ADR-0018 §15c).
+   *
+   * Optional, and by the same convention as `ui` and `keychain`: an older orchestrator omits it and the settings
+   * surface renders nothing rather than inventing a state.
+   *
+   * Why it is here at all: the switch that turns this feature on has to say WHICH browser it will drive, and whether
+   * that browser is actually present — otherwise a reader turns it on, gets a session that cannot capture, and has no
+   * way to see that the path was the problem. It is also the only place the path is visible from inside the app.
+   */
+  sidecar?: { browser: string; browserExists: boolean } | undefined;
 }
 
 /**

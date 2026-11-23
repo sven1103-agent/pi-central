@@ -55,6 +55,7 @@ import {
   type ReadingPrefs,
 } from "../reading.ts";
 import { READING_PREFS_KEY } from "../reading.ts";
+import { effectiveSidecar, type SidecarPref } from "../sidecar-prefs.ts";
 import {
   RAIL_DEFAULT_WIDTH,
   RAIL_MAX_WIDTH,
@@ -169,6 +170,57 @@ const SECTIONS: { id: Section; label: string }[] = [
 
 type Section = "display" | "about";
 
+/**
+ * The session browser's switch (ADR-0018 §15c).
+ *
+ * Reads as a choice about NEW sessions, which is what it is: a running session was given its policy at spawn time and
+ * cannot be given a browser afterwards without a new fragment (C1 — the port is pinned in the profile).
+ *
+ * Two facts are shown, not one. The switch is the reader's answer; `installDefault` is why a session may already have a
+ * browser they never asked for. A single switch cannot explain that, and "it gave me a browser anyway" was a real
+ * report — the answer was `PI_CENTRAL_SIDECAR=1` in the environment, which the app had no way to see until now.
+ */
+function SessionBrowserPanel({
+  pref,
+  installDefault,
+  browser,
+  browserExists,
+  onChange,
+}: {
+  pref: SidecarPref;
+  installDefault: boolean;
+  browser: string;
+  browserExists: boolean;
+  onChange: (next: SidecarPref) => void;
+}) {
+  const on = effectiveSidecar(pref, true, installDefault);
+  return (
+    <section>
+      <h4>Session browser</h4>
+      <label className="reading-row">
+        <span>Preview its work in a browser</span>
+        <input
+          type="checkbox"
+          checked={on}
+          onChange={(event) => onChange(event.target.checked)}
+          aria-describedby="session-browser-note"
+        />
+      </label>
+      <p className="settings-note" id="session-browser-note">
+        {/* State the DEFAULT only when the reader has expressed no opinion, or the note would contradict the switch. */}
+        {pref === undefined && installDefault
+          ? `On by default for this installation. Set by PI_CENTRAL_SIDECAR=1 in the environment Pi Central was started from; this switch overrides it.`
+          : "A new session gets a browser of its own, beside its sandbox, and can open the dev server it runs. Unticked, sessions get none. A session already running cannot gain one."}
+      </p>
+      <p className={browserExists ? "settings-note settings-verify" : "settings-note settings-updates"}>
+        {browserExists
+          ? `Browser: ${browser}`
+          : `No browser at ${browser} — a session browser cannot start. Set PI_CENTRAL_BROWSER to a Chromium binary.`}
+      </p>
+    </section>
+  );
+}
+
 export function Settings({
   install,
   ready,
@@ -176,6 +228,7 @@ export function Settings({
   railPrefs,
   onRailPrefs,
   railMaxWidth,
+  sessionBrowser,
   initialSection = "display",
 }: {
   install: InstallFacts | undefined;
@@ -199,6 +252,21 @@ export function Settings({
   onRailPrefs?: ((change: (current: RailPrefs) => RailPrefs) => void) | undefined;
   /** The widest this window can give, so the slider's maximum is the number the drag would also stop at. */
   railMaxWidth?: number | undefined;
+  /**
+   * The session browser's switch (ADR-0018 §15c).
+   *
+   * Present only when the orchestrator reports a browser it can drive. Before this existed the feature could only be
+   * switched on with `PI_CENTRAL_SIDECAR=1` — which a dock PWA or a Finder-launched `.app` inherits no environment
+   * for, so the advertised way to run Pi Central was the one way it could not be turned on.
+   *
+   * `installDefault` is shown as well as the reader's own answer, because they are different facts and the switch alone
+   * cannot explain why a session got a browser the reader never asked for.
+   */
+  sessionBrowser?: {
+    pref: SidecarPref;
+    installDefault: boolean;
+    onChange: (next: SidecarPref) => void;
+  } | undefined;
   /**
    * Whether a snapshot has arrived yet.
    *
@@ -308,6 +376,19 @@ export function Settings({
             {section === "display" ? (
               <>
                 <ReadingPanel />
+                {/*
+                  Beside the display preferences because it is one: how a new session is started. Rendered only when a
+                  browser exists, so a machine without one is told nothing rather than offered a switch that would fail.
+                */}
+                {sessionBrowser !== undefined && install?.sidecar !== undefined && (
+                  <SessionBrowserPanel
+                    pref={sessionBrowser.pref}
+                    installDefault={sessionBrowser.installDefault}
+                    browser={install.sidecar.browser}
+                    browserExists={install.sidecar.browserExists}
+                    onChange={sessionBrowser.onChange}
+                  />
+                )}
                 {railPrefs !== undefined && onRailPrefs !== undefined && (
                   <RailPanel prefs={railPrefs} onChange={onRailPrefs} maxWidth={railMaxWidth ?? RAIL_MAX_WIDTH} />
                 )}

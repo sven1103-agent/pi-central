@@ -57,6 +57,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The app shows the orchestrator's startup lines in the terminal instead of discarding all but its URL ([#276]).
 - A checkout launch is recognised when the entry path is relative, so the package and adoption refusals fire ([#276]).
 - A session can screenshot a page it served itself, and the model receives the image ([#276]).
+- Settings has a **Session browser** switch, so the feature no longer needs `PI_CENTRAL_SIDECAR=1` to be reachable ([#276]).
 - Unticking the browser checkbox now opts a session out, instead of being ignored ([#276]).
 - A session's browser appears in the rail as `browser :48005`, so it is visible while it runs ([#276]).
 - Stopping a session removes its browser's config, policy and profile, not only the process ([#276]).

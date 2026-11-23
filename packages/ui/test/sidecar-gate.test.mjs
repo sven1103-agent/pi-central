@@ -22,7 +22,7 @@ globalThis.window = dom.window;
 globalThis.document = dom.window.document;
 
 let server;
-let OpenDirectorySheet, reduce, initialState, sidecarBadge, showsRowMetrics;
+let OpenDirectorySheet, reduce, initialState, sidecarBadge, showsRowMetrics, prefs;
 
 before(async () => {
   server = await createServer({
@@ -34,6 +34,7 @@ before(async () => {
   ({ OpenDirectorySheet } = await server.ssrLoadModule("/src/components/OpenDirectorySheet.tsx"));
   ({ reduce, initialState } = await server.ssrLoadModule("/src/store.ts"));
   ({ sidecarBadge, showsRowMetrics } = await server.ssrLoadModule("/src/rail-prefs.ts"));
+  prefs = await server.ssrLoadModule("/src/sidecar-prefs.ts");
 });
 
 after(async () => {
@@ -138,4 +139,48 @@ test("the checkbox starts in the installation's default state, and says when tha
   const on = render({ sidecarOffered: true, sidecarDefault: true });
   assert.match(on, /type="checkbox"[^>]*checked/, "on by default, so the box starts ticked");
   assert.ok(on.includes("on for new sessions"), "and the reader is told this is a default they are opting OUT of");
+});
+
+test("the reader's own answer outranks the installation's default, in both directions", () => {
+  // The whole point of the switch: a dock PWA or a Finder-launched .app inherits no shell environment, so before this the
+  // advertised way to run Pi Central was the one way the feature could not be turned on.
+  const { effectiveSidecar } = prefs;
+  // No opinion -> the default decides, which is how an existing PI_CENTRAL_SIDECAR=1 wrapper keeps working.
+  assert.equal(effectiveSidecar(undefined, true, true), true);
+  assert.equal(effectiveSidecar(undefined, true, false), false);
+  // An opinion wins over the default, BOTH ways: the "on" case is the new capability, the "off" case is the defect that
+  // made the checkbox decorative.
+  assert.equal(effectiveSidecar(true, true, false), true, "a reader can turn it on without an env var");
+  assert.equal(effectiveSidecar(false, true, true), false, "and off while the default is on");
+  // Not offered is not offered, whatever the preference says: a machine with no browser must not be told otherwise.
+  assert.equal(effectiveSidecar(true, false, true), false);
+});
+
+test("the preference round-trips, and absence is not false", () => {
+  const { parseSidecarPref, serializeSidecarPref } = prefs;
+  assert.equal(parseSidecarPref("on"), true);
+  assert.equal(parseSidecarPref("off"), false, "an explicit off must survive a restart");
+  // The distinction that matters: a corrupted or missing value is "no opinion", never "off". Otherwise a reader who never
+  // touched the switch would silently opt out of a default their installation set.
+  for (const junk of [null, "", "true", "false", "1", "0", "yes"]) {
+    assert.equal(parseSidecarPref(junk), undefined, "not a stored answer: " + JSON.stringify(junk));
+  }
+  assert.equal(serializeSidecarPref(true), "on");
+  assert.equal(serializeSidecarPref(false), "off");
+  assert.equal(serializeSidecarPref(undefined), null, "no opinion is stored as absence, not as a sentinel");
+});
+
+test("an unticked box survives the trip to the wire as false", () => {
+  // The second place the checkbox was decorative, found by following the click rather than testing either end: App's
+  // onOpenDirectory forwarded only `true`, so an unticked box sent NOTHING, which the orchestrator reads as "no opinion".
+  // Comments stripped FIRST (C20): the comment above the fix quotes the old expression, so a naive match finds the
+  // explanation of the bug and reports the bug. Same trap as the fragment assertions.
+  const source = readFileSync(new URL("../../ui/src/App.tsx", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  assert.ok(
+    !/sidecar === true \? \{ sidecar: true \} : \{\}/.test(source),
+    "the start request must forward false as well as true",
+  );
+  assert.match(source, /\.\.\.\(sidecar === undefined \? \{\} : \{ sidecar \}\)/, "and it must pass the answer through");
 });

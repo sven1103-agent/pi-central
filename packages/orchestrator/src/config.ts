@@ -16,6 +16,7 @@
  * `~/.local/share/pi-central/workspaces/` satisfies D-5: it is under `$HOME` as a path but
  * is not granted by any base profile, and it is not a tmp or agent dir.
  */
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolveInstallationRoot } from "./installation-root.ts";
 import { join, resolve, sep } from "node:path";
@@ -173,8 +174,19 @@ export function defaultConfig(): Config {
     // means the answer is the running installation and not whatever a config file claims.
     installationRoot: resolveInstallationRoot(),
     sidecarPort: parsePort(process.env["PI_CENTRAL_SIDECAR_PORT"]),
+    // The installation's DEFAULT for new sessions. Off unless the environment asks, because a per-session browser is a
+    // process and a port the reader did not ask for. This is only the default: the reader's per-session answer overrides
+    // it either way, and the in-app switch can turn it on from a dock launch that inherits no shell environment.
     sidecar: process.env["PI_CENTRAL_SIDECAR"] === "1",
-    sidecarOffered: process.env["PI_CENTRAL_SIDECAR"] === "1",
+    // CAPABILITY, not a second switch. It was `PI_CENTRAL_SIDECAR === "1"`, which made the env var the only way to offer
+    // the feature at all -- so a dock or .app launch, which inherits no shell environment, could never offer it. Measured
+    // consequence: the advertised way to run this product was the one way it could not be turned on.
+    //
+    // The gate is now what the doc comment always claimed: a browser exists to drive. The reader's DEFAULT for new
+    // sessions is `sidecar`, which they can set in the app.
+    sidecarOffered: existsSync(
+      process.env["PI_CENTRAL_BROWSER"] ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    ),
     browser:
       process.env["PI_CENTRAL_BROWSER"] ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   };
