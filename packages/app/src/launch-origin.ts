@@ -46,29 +46,40 @@ export interface LaunchOrigin {
  *   - an installed app serving the installed package — the designed path, and the reader chose it;
  *   - an override the reader set by hand — they already said where to look.
  */
-export function describeLaunch(origin: LaunchOrigin): { message: string; caveat: string | undefined } {
+export function describeLaunch(origin: LaunchOrigin): {
+  message: string;
+  caveat: string | undefined;
+  /** Present when the launch must not proceed. Takes precedence over \`caveat\`. */
+  refusal?: string | undefined;
+} {
   const message = `Pi Central: serving the package at ${origin.packageRoot}`;
 
   if (origin.overridden) return { message, caveat: undefined };
 
   /*
-   * The checkout case is the one worth a sentence. `shellSourceRoot` is the directory holding `packages/app`, i.e. the
-   * working tree the shell was started from (`npm run app`) — never an installed app, which has no sources beside it.
+   * The checkout case: the run started from a working tree but serves a DIFFERENT package.
    *
-   * Compared by PREFIX rather than equality: the package root of a checkout is that same tree, but a monorepo can put
-   * `package.json` above or below the app, and an equality test would then report a false mismatch — which is the
-   * failure mode that makes a warning untrustworthy and then ignored.
+   * And it is not only a warning, because the mistake was measured. `npm run app` from a checkout served the globally
+   * installed package instead -- `/opt/homebrew/lib/node_modules/pi-central` -- and the shell happily launched it,
+   * showing a reader an interface from a build that contained none of their changes. The launcher's own log said
+   * "serving the package at /opt/homebrew/…" and nothing else; the code being tested was never on screen.
+   *
+   * A warning would not have prevented that: every symptom (a missing control, no error, a plausible interface) points
+   * at the code, not at the launch path. So a launch from a checkout that would serve another package is REFUSED, naming
+   * the override. The reader can always choose the other package explicitly.
    */
   if (origin.shellSourceRoot !== undefined && !isWithin(origin.packageRoot, origin.shellSourceRoot)) {
     return {
       message,
-      caveat:
-        `this run started from the checkout at ${origin.shellSourceRoot}, but it is serving Pi Central from ` +
-        `${origin.packageRoot}. The UI you see is THAT package's, not your working tree's — set ` +
-        `PI_CENTRAL_PACKAGE to the checkout to look at uncommitted work.`,
+      caveat: undefined,
+      refusal:
+        `this run started from the checkout at ${origin.shellSourceRoot}, but it would serve Pi Central from ` +
+        `${origin.packageRoot}. That package's interface contains none of your working tree's changes.` +
+        `\n\nTo run the checkout, set PI_CENTRAL_PACKAGE=${origin.shellSourceRoot} (and run ` +
+        `npm run build:package there first). To run the installed package deliberately, unset PI_CENTRAL_DEV or ` +
+        `launch the installed app.`,
     };
   }
-
   return { message, caveat: undefined };
 }
 

@@ -22,20 +22,36 @@ import { describeLaunch, shellSourceRoot } from "../src/launch-origin.ts";
 const CHECKOUT = "/Users/someone/git/pi-central";
 const INSTALLED = "/opt/homebrew/lib/node_modules/pi-central";
 
-test("a run from a checkout that serves the INSTALLED package says so, and names the fix", () => {
-  // The reported case. This is not an error — it is how a reader tries a built app before publishing — so the message
-  // states the fact and the override, and does not tell anyone they did something wrong.
-  const { message, caveat } = describeLaunch({
+test("a run from a checkout that would serve the INSTALLED package is REFUSED, not merely warned", () => {
+  // This was a caveat until it happened. `npm run app` from this checkout served the globally installed package, the
+  // window showed an interface containing none of the working tree's changes, and the only trace was a log line naming
+  // /opt/homebrew. Every symptom of that state points at the CODE -- a control missing, no error, a plausible UI -- so
+  // several rounds went into looking for a bug in code that was never running. A warning would not have stopped that;
+  // a refusal does.
+  const { message, caveat, refusal } = describeLaunch({
     packageRoot: INSTALLED,
     shellSourceRoot: CHECKOUT,
     overridden: false,
   });
   assert.match(message, new RegExp(INSTALLED));
-  assert.ok(caveat !== undefined, "the mismatch must produce a caveat");
-  assert.match(caveat, new RegExp(CHECKOUT), "it names the checkout that was started from");
-  assert.match(caveat, new RegExp(INSTALLED), "…and the package actually being served");
-  assert.match(caveat, /not your working tree/, "it says which UI the reader is looking at");
-  assert.match(caveat, /PI_CENTRAL_PACKAGE/, "and how to look at uncommitted work instead");
+  assert.ok(refusal !== undefined, "the mismatch must refuse the launch");
+  assert.equal(caveat, undefined, "a refusal is not also a caveat; one statement per situation");
+  assert.match(refusal, new RegExp(CHECKOUT), "it names the checkout that was started from");
+  assert.match(refusal, new RegExp(INSTALLED), "and the package that would have been served");
+  assert.match(refusal, /PI_CENTRAL_PACKAGE/, "and the override that runs the checkout instead");
+  assert.match(refusal, /build:package/, "including the step the checkout needs before it can be served");
+});
+
+test("an explicit package choice is honoured even when it is not the checkout", () => {
+  // The escape hatch: a reader who SETS PI_CENTRAL_PACKAGE has said which package they mean, so there is nothing to
+  // refuse and nothing to warn about.
+  const { caveat, refusal } = describeLaunch({
+    packageRoot: INSTALLED,
+    shellSourceRoot: CHECKOUT,
+    overridden: true,
+  });
+  assert.equal(refusal, undefined, "an explicit choice must be obeyed");
+  assert.equal(caveat, undefined);
 });
 
 test("a run from a checkout that serves ITS OWN tree is quiet", () => {
@@ -91,14 +107,14 @@ test("a nested package root still counts as the same checkout", () => {
    * worse than no warning, because the next genuine one gets ignored.
    */
   for (const root of [CHECKOUT, `${CHECKOUT}/packages`, `${CHECKOUT}/packages/orchestrator`, `${CHECKOUT}/`]) {
-    const { caveat } = describeLaunch({ packageRoot: root, shellSourceRoot: CHECKOUT, overridden: false });
-    assert.equal(caveat, undefined, `${root} is inside the checkout`);
+    const result = describeLaunch({ packageRoot: root, shellSourceRoot: CHECKOUT, overridden: false });
+    assert.equal(result.refusal, undefined, `${root} is inside the checkout`);
   }
   // And a sibling that merely shares a prefix is NOT inside it.
-  const { caveat } = describeLaunch({
+  const { refusal } = describeLaunch({
     packageRoot: `${CHECKOUT}-old/packages`,
     shellSourceRoot: CHECKOUT,
     overridden: false,
   });
-  assert.ok(caveat !== undefined, "a prefix match must not span a directory boundary");
+  assert.ok(refusal !== undefined, "a prefix match must not span a directory boundary");
 });

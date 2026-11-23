@@ -761,6 +761,21 @@ function spawnOrchestrator(pkg: PackageRoot, environment: Environment): Promise<
   });
   console.log(origin.message);
   if (origin.caveat !== undefined) console.warn(`Pi Central: ${origin.caveat}`);
+  /*
+   * A REFUSAL, not a warning, when a run from a checkout would serve a different package.
+   *
+   * Measured: `npm run app` from this checkout served the globally installed pi-central 0.15.0, and the window showed
+   * an interface with none of the working tree's changes. The log said "serving the package at /opt/homebrew/…" and
+   * nothing else, so the reader -- and I -- spent several rounds looking for a bug in code that was never running.
+   * Every symptom of that state points at the code, which is why a warning is not enough.
+   */
+  if (origin.refusal !== undefined) {
+    console.error(`Pi Central: ${origin.refusal}`);
+    renderFailure("Wrong package", origin.refusal);
+    // `undefined`, the same answer as a child that never announced: the failure page is already on screen, and the
+    // caller's recovery is identical.
+    return Promise.resolve(undefined);
+  }
 
   const plan = planSpawn({
     node: environment.node,
