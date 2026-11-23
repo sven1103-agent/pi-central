@@ -23,7 +23,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { composeSidecarPolicy, type SidecarSpec } from "./sidecar-policy.ts";
 
@@ -162,6 +162,30 @@ export function reapDevPort(port: number, self: number = process.pid): number[] 
     }
   }
   return signalled;
+}
+
+/**
+ * Remove an assigned port's sidecar directory: the config, the rendered fragment, and the browser profile.
+ *
+ * A sidecar's PROCESS is stopped on every path that ends a session, but its state was never removed. Measured on a dev
+ * install: five session directories under `<state>/sidecars/`, and nothing ever read them again. Sessions are numbered
+ * from `s1` on every launch, so the ids are REUSED -- the directories are overwritten rather than accumulating forever,
+ * which is why the leak was invisible: a stale `s1` looks exactly like a current one, and its `mcp.json` names a port
+ * and a token that no longer exist.
+ *
+ * Removed only for a port Pi Central ASSIGNED. A pinned port belongs to a session the reader configured by hand, and
+ * this function cannot tell whether they still want the profile.
+ *
+ * Best effort, and silent on failure: a directory that cannot be removed is a startup-crash left behind, and failing a
+ * session stop over it would trade a small leak for a lost session.
+ */
+export function removeSidecarState(stateRoot: string, sessionId: string): boolean {
+  try {
+    rmSync(join(stateRoot, "sidecars", sessionId), { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

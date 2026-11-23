@@ -15,6 +15,7 @@ import {
   pickDevPort,
   portHasListener,
   reapDevPort,
+  removeSidecarState,
   sidecarInstruction,
   sidecarPromptArgs,
 } from "../src/sidecar-supervise.ts";
@@ -533,4 +534,35 @@ test("an explicit FALSE opts out, even when the installation gives browsers by d
   );
   assert.match(byDefault.session.sidecarOrigin ?? "", /^http:\/\/localhost:\d+$/, "while an absent answer takes the default");
   return app.stopAll().then(() => undefined);
+});
+
+test("stopping a session removes its sidecar's state, not only its process", () => {
+  if (skip) return console.log(skip);
+  // The PROCESS was already stopped on every path that ends a session. The DIRECTORY was not, and it holds a rendered
+  // fragment pinning a port plus an mcp.json naming a token from that launch. Measured on a dev install: five of them,
+  // unreadable and reused, because session ids restart at s1 -- so the leak looked like a current session.
+  const state = join(root as string, "teardown");
+  const app = new Supervisor(config({ sidecar: true, stateRoot: state }) as never, { rememberOpenSessions: false });
+  app.on("error", () => {});
+  app.on("log", () => {});
+  const started = app.start({ cwd: root as string, mode: "sandboxed" });
+  assert.ok(started.ok);
+  if (!started.ok) return;
+  const dir = join(state, "sidecars", started.session.id);
+  assert.ok(existsSync(dir), "the sidecar's state must exist while the session runs");
+  return app.stopAll().then(() => {
+    assert.ok(!existsSync(dir), "and must be gone once the session is stopped");
+  });
+});
+
+test("removing sidecar state is scoped to one session, and survives a directory that is already gone", () => {
+  const state = join(root as string, "remove-scope");
+  mkdirSync(join(state, "sidecars", "s1", "policy"), { recursive: true });
+  mkdirSync(join(state, "sidecars", "s2", "policy"), { recursive: true });
+  assert.equal(removeSidecarState(state, "s1"), true);
+  assert.ok(!existsSync(join(state, "sidecars", "s1")), "the named session's directory goes");
+  assert.ok(existsSync(join(state, "sidecars", "s2")), "another session's must not");
+  // Idempotent: a second stop, or a session that never had state, is not an error.
+  assert.equal(removeSidecarState(state, "s1"), true);
+  assert.equal(removeSidecarState(state, "never-existed"), true);
 });

@@ -59,6 +59,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - A session can screenshot a page it served itself, and the model receives the image ([#276]).
 - Unticking the browser checkbox now opts a session out, instead of being ignored ([#276]).
 - A session's browser appears in the rail as `browser :48005`, so it is visible while it runs ([#276]).
+- Stopping a session removes its browser's config, policy and profile, not only the process ([#276]).
 - `docs/UI-SIDECAR-DESIGN-OPTIONS.md` compares the four verbs with a containerised MCP browser, in diagrams ([#276]).
 - A browser renders a local page under the sidecar's own profile with egress confined to one port ([#276]).
 - A two-verb host-side service is measured against shipping `playwright` for UI capture ([#276]).

@@ -27,6 +27,7 @@ import {
   mcpConfigArgs,
   pickDevPort,
   reapDevPort,
+  removeSidecarState,
   sidecarPromptArgs,
   spawnSidecar,
   type SidecarHandle,
@@ -1529,6 +1530,10 @@ export class Supervisor extends EventEmitter {
       const reaped = reapDevPort(assigned);
       if (reaped.length > 0) this.emit("log", id, `stopped ${reaped.length} dev server(s) left on port ${assigned}`);
     }
+    // The STATE goes too, not only the process. Measured: a dev install had five session directories under
+    // <state>/sidecars/ that nothing would ever read again, each holding a fragment pinning a port and a config naming
+    // a token from a previous launch. Only for an assigned port: a hand-configured one is the reader's own.
+    if (assigned !== undefined) removeSidecarState(this.#config.stateRoot, id);
     const sidecar = this.#sidecars.get(id);
     if (sidecar === undefined) return;
     this.#sidecars.delete(id);
