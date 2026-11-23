@@ -10,6 +10,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+### Fixed
+
+- `act` clicks a page the sidecar keeps, so the next `capture` or `probe` shows the state after the click ([#288]).
+
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
 ## [0.16.0] — 2026-11-22
@@ -868,6 +872,7 @@ The spike that answered whether this was worth building.
 [#265]: https://github.com/sven1103-agent/pi-central/issues/265
 [#269]: https://github.com/sven1103-agent/pi-central/issues/269
 [#276]: https://github.com/sven1103-agent/pi-central/issues/276
+[#288]: https://github.com/sven1103-agent/pi-central/issues/288
 [#274]: https://github.com/sven1103-agent/pi-central/issues/274
 [#275]: https://github.com/sven1103-agent/pi-central/issues/275
 [#281]: https://github.com/sven1103-agent/pi-central/issues/281

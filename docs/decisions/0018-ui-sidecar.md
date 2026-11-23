@@ -69,6 +69,19 @@ through a fixed verb set over CDP, with no new shipped dependency.**
 3. **The tool surface is small by construction, not by filtering.** The agent may choose *which* checks to
    run and never author the assertion. That answers #276's open question 2, and it is the difference between a
    reviewer and a defendant.
+3a. **A verb's `url` means "be at this address", not "start over", because there is one page.** Every verb
+    used to navigate first, which discarded the page the previous verb had acted on: measured on a page counting
+    loads in `sessionStorage` and clicks in memory, `capture` → `act` → `capture` produced **3 loads and 0
+    surviving clicks**, and a dialog opened with `act` was absent from the next screenshot
+    ([#288](https://github.com/sven1103-agent/pi-central/issues/288)). The page is now navigated to only when its
+    address differs, compared host-side on parsed URLs so a trailing slash or a percent-encoding cannot force a
+    reload. One fix covers the whole interaction loop: `act` → `capture` shows the clicked state, `act` → `act`
+    accumulates, and `probe` → `act` → `probe` measures before and after. **This is the one piece of
+    deliberate implicit state in the sidecar**, and it is bounded: one page, one address, for the life of the
+    process, and a verb that names a different address still gets it — including a client-side route a click
+    changed, which is a different address and therefore a navigation. Rejected: an explicit `navigate: false` or
+    a fifth verb, both of which make the caller restate state the sidecar already holds — the fifth additionally
+    needing an amendment here for something the existing four can express.
 4. **Pi is pointed at the sidecar by `--mcp-config`, at a path outside `~/.pi`.** Measured (Phase 0D):
    `pi --mcp-config <file> mcp list` starts the configured server; the same command without the flag does
    not. That placement is load-bearing, not cosmetic — `~/.pi` is writable from inside every session (C6),
@@ -280,6 +293,7 @@ anything on a second machine.
 | The MCP config is `0600`, under the state root, outside `~/.pi` | verified/auto | `sidecar-supervise.test.ts` |
 | A wrong, absent, prefixed or other-session token is a 401; a positive control is a 200 | verified/auto | `sidecar-server.test.ts`, real processes |
 | The browser is visible in the rail while it runs | verified/auto | `sidecar-gate.test.mjs` |
+| A verb does not reload a page the sidecar is already showing, so a click survives into the next `capture` | verified/auto | `sidecar.test.ts`, "act does not reload a page…" (revert it and the sequence reads `navigate, capture, navigate, click, navigate, capture`); `sidecar-cdp-pipe.test.ts`, the parsed-URL comparison |
 
 CI has no `sandbox-exec` (C10), so everything touching a real policy runs in a plain terminal. The harnesses
 stay under `spikes/ui-sidecar/harness/`: a spike is not a test, and production assertions belong beside the

@@ -74,6 +74,55 @@ test("frames are split on NUL, not on newline", () => {
   });
 });
 
+test("isAt compares parsed URLs, so a spelling difference cannot force a reload (issue #288)", async () => {
+  // The reload the fix removes was invisible while every verb navigated. Its return would be silent, so the
+  // rule is asserted rather than described: what the page reports and what the caller wrote are normalised
+  // the same way, and a query or a fragment is a DIFFERENT address rather than decoration.
+  const browser = fakeBrowser();
+  const opened = CdpPage.open({ child: browser.child, timeoutMs: 500 });
+  setImmediate(() => browser.reply({ id: 1, result: { targetInfos: [{ type: "page", targetId: "T1" }] } }));
+  setTimeout(() => browser.reply({ id: 2, result: { sessionId: "S1" } }), 5);
+  setTimeout(() => browser.reply({ id: 3, result: {} }), 10);
+  setTimeout(() => browser.reply({ id: 4, result: {} }), 15);
+
+  const page = await opened;
+  let asked = 0;
+  /** Answer the n-th evaluation with a location, as a page at that address would. */
+  const isAt = (href: string, location: unknown): Promise<boolean> => {
+    const answer = page.isAt(href);
+    const ordinal = asked++;
+    setTimeout(() => {
+      const frame = browser.frames().filter((entry) => entry.method === "Runtime.evaluate")[ordinal];
+      assert.ok(frame !== undefined, "isAt must ask the page where it is");
+      browser.reply({ id: frame.id, result: { result: { value: location } } });
+    }, 5);
+    return answer;
+  };
+
+  assert.equal(await isAt("http://localhost:4173/", "http://localhost:4173/"), true);
+  assert.equal(
+    await isAt("http://localhost:4173/", "http://localhost:4173/settings"),
+    false,
+    "a different path is a different page",
+  );
+  assert.equal(
+    await isAt("http://localhost:4173/settings?tab=general", "http://localhost:4173/settings"),
+    false,
+    "a query names state the caller asked for, so it must be navigated to",
+  );
+  assert.equal(
+    await isAt("http://localhost:4173/a b", "http://localhost:4173/a%20b"),
+    true,
+    "the same address spelled two ways is the same address: a string test would reload here",
+  );
+  assert.equal(
+    await isAt("http://localhost:4173/", undefined),
+    false,
+    "a page that cannot report its address is not assumed to be the right one",
+  );
+  await page.close();
+});
+
 test("a command with no answer fails the call, within the timeout the CALLER asked for", async () => {
   // The failure shape this repository has produced twice: a process that never writes anything and never
   // exits. A timeout turns that into a stated error with the method named in it.
