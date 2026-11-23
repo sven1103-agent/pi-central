@@ -126,7 +126,7 @@ through a fixed verb set over CDP, with no new shipped dependency.**
     listening after the runs had exited. A port Pi Central *assigned* is therefore reaped when its session stops
     (never an explicit or pinned port, which may be someone's own dev server).
 15. **The capability is offered where it can work, and off unless asked for.** `PI_CENTRAL_SIDECAR=1` turns it on
-    for the installation; the directory picker then shows one checkbox, "Let it see my dev server", and the choice
+    for the installation; the directory picker then shows one checkbox, "Let the session see its dev server", and the choice
     travels with the start request as an opt-IN (`Control.start.sidecar`). The checkbox is rendered only when the
     orchestrator reports `sidecarOffered` on the snapshot — a machine with no configured browser is not offered a
     switch that would do nothing, because an inert control reads as a broken feature rather than an absent one.

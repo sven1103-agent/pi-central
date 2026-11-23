@@ -434,14 +434,20 @@ export function OpenDirectorySheet({
                * one option of this dialog rather than a setting, and it needs no label of its own beyond the sentence
                * that says what the session gets.
                */
-              <label className="sidecar-toggle" title="A browser in its own sandbox, so this session can see a dev server on its assigned port">
+              <label className="sidecar-toggle" title="Gives the session a browser in its own sandbox, on a port Pi Central assigns it (48000 and up). It can reach that one port and nothing else.">
                 <input
                   type="checkbox"
                   checked={sidecar}
                   onChange={(event) => setSidecar(event.target.checked)}
                   disabled={problem !== undefined}
                 />
-                <span>Let it see my dev server</span>
+                {/*
+                  "Let the session see it" rather than "Let it see my dev server", and the difference is the reader's
+                  pronoun. The sheet's own footnote says "The session is sandboxed to this directory", so the subject in
+                  this row should be the session too -- and "my dev server" claims there IS one, at a moment when the
+                  reader has not started it yet. The tooltip names the port range for anyone who wants the detail.
+                */}
+                <span>Let the session see its dev server</span>
               </label>
             )}
             <button type="submit" className="btn btn-primary-sheet" disabled={problem !== undefined}>
