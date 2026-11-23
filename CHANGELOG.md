@@ -56,6 +56,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - Startup states whether a session browser is offered, and names the browser path ([#276]).
 - The app shows the orchestrator's startup lines in the terminal instead of discarding all but its URL ([#276]).
 - A checkout launch is recognised when the entry path is relative, so the package and adoption refusals fire ([#276]).
+- A session can screenshot a page it served itself, and the model receives the image ([#276]).
 - `docs/UI-SIDECAR-DESIGN-OPTIONS.md` compares the four verbs with a containerised MCP browser, in diagrams ([#276]).
 - A browser renders a local page under the sidecar's own profile with egress confined to one port ([#276]).
 - A two-verb host-side service is measured against shipping `playwright` for UI capture ([#276]).

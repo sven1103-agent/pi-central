@@ -195,6 +195,30 @@ the agent can rewrite is not one. Phase 0C also removed the need for it: Pi is a
 issue every control command (ADR-0006). Loading an agent-authored page there would put untrusted content in
 the origin that controls every session.
 
+## What a real-machine run established
+
+The harness drives `Supervisor` directly. That is enough to prove the sidecar and not enough to prove the product, and
+the gap showed: **five defects sat between two processes and a human, and the harness could see none of them.**
+
+| Defect | What it looked like |
+|---|---|
+| `dist/ui` was a stale copy, and `ui:build` did not refresh it | a new control simply absent from a correct build |
+| `npm run app` served the globally installed package | a plausible app containing none of the working tree's changes |
+| the app adopted an orchestrator from a different package | the same, with no error at all |
+| the supervisor's stdout was parsed for a URL and otherwise discarded | the diagnostics that explain the sidecar never reached the terminal |
+| `shellSourceRoot` required an absolute path, and `npm run app` passes a relative one | both refusals added for the two rows above were dead code |
+
+None was in the sidecar. Every one was a correct value that never reached a place a person could see it, and the cure
+each time was the same: print the value. That is now a startup line (`Session browser: offered, browser <path>`), a
+Settings row (`Served UI`), and a refusal rather than a warning where a wrong package would otherwise be invisible.
+
+**Met on a real machine:** picker gate, per-session port, sidecar spawn, bearer token, CDP over a pipe, and a PNG
+delivered to the model as an image block, with `probe` measuring a deliberate 720 px overflow on a page the session
+served itself inside its own sandbox.
+
+**Not yet met:** the ADR's own Verification table (per-row), the merge onto the version this actually ships in, and
+anything on a second machine.
+
 ## Verification
 
 | Criterion | Class | How |
