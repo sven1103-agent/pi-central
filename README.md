@@ -53,6 +53,10 @@ Check these first — Pi Central will not run without them, and it is better to 
 | **[Safehouse](https://agent-safehouse.dev)** | Composes the per-session sandbox profile. | `safehouse --help` |
 | **Node ≥ 22** | The orchestrator runs TypeScript directly. | `node --version` |
 
+Optional: **Google Chrome** (or another Chromium), for
+[letting a session see what it built](#letting-a-session-see-what-it-built). Nothing else needs it, and
+`PI_CENTRAL_BROWSER` points at a different binary.
+
 ## Install
 
 ```bash
@@ -109,6 +113,49 @@ already inside `sandbox-exec` cannot apply a second profile, so an architecture 
 in-process would have no sandbox at all. The orchestrator must live outside and spawn one `safehouse`
 invocation per session. Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## Letting a session see what it built
+
+A session cannot look at its own work. It is inside Safehouse, and **Seatbelt does not nest**
+([C1](docs/CONSTRAINTS.md)) — so it can start a dev server, but it cannot start a browser to look at one. In
+practice an agent writes a page and then tells you to check it, or guesses.
+
+Pi Central can give it eyes. Switch the feature on in the environment Pi Central starts from:
+
+```bash
+PI_CENTRAL_SIDECAR=1 pi-central
+```
+
+Then tick **Preview its work in a browser** when you open a directory — or, with
+`PI_CENTRAL_SIDECAR=1` set, every new session gets one. The browser is a **second Safehouse sandbox beside the
+first**, not a wider one, because nesting is impossible: the orchestrator spawns it, just as it spawns `pi`.
+
+What that buys: the session runs its dev server on the port it is told to use (`PI_CENTRAL_DEV_PORT`, which is
+`48000` plus its session number), and opens `http://localhost:<port>` in its own browser. It gets **four verbs** —
+`capture` a screenshot, `probe` a fixed battery of layout checks (overflow, contrast, overlap, console errors),
+`act` to click one element it located and then capture, `info` for the server command — and no fifth. No verb
+takes a CDP method, a script, or a selector to assert with, because a general-purpose browser driver behind a
+permission prompt is not a boundary.
+
+A screenshot reaches the model as an **image**, not a description of one: it can look at a colour, a gap or an
+overflow that a text diff cannot show. The rail row says `browser :48005` while it runs, so you can see the
+process without asking the agent.
+
+**What it is not.** The renderer runs with `--no-sandbox` (Safehouse requires it), so the appended fragment is its
+only confinement, and that fragment is narrow on purpose: **outbound traffic to exactly one port**, this session's
+dev server, everything else on loopback included and mDNS denied so a confined renderer cannot emit DNS. It cannot
+reach the internet — verified inside a session, `curl https://update.googleapis.com` fails to resolve while the
+same request from the host answers 404. It holds no agent identity at all: no keychain, and no read of your
+`~/.ssh` tree, your git config, your gh credentials, or even `~/.npmrc` — nor of Pi's own transcripts, so a browser
+in one session cannot read another session's conversation. It costs one browser launch per session that uses it,
+and stopping the session stops the browser and removes its config, policy and profile.
+
+If you do not want it, leave `PI_CENTRAL_SIDECAR` unset: the control is then not shown at all, rather than shown
+and inert. The full reasoning, including the renderer's `--no-sandbox` concession, is
+[ADR-0018](docs/decisions/0018-ui-sidecar.md).
+
+Why this shape and not a containerised MCP browser — the alternatives, with diagrams and the measurements that
+separate them — is in [docs/UI-SIDECAR-DESIGN-OPTIONS.md](docs/UI-SIDECAR-DESIGN-OPTIONS.md).
+
 ## In your dock
 
 Pi Central is a web app. Start it once (see [Install](#install)), open <http://127.0.0.1:8787>, then add
@@ -146,7 +193,8 @@ Stated plainly, because a dashboard that overstates itself is worse than one tha
 reconstructed from Pi's delta-only stream; the approval dock answerable for any session; a bounded tool
 trace with full traversal; a read-only file tree and image viewer confined to the session's directory;
 images shown where they belong in the conversation, including the ones a tool read, and screenshots pasted or
-dropped straight into the composer;
+dropped straight into the composer; a session that can screenshot the page it just served, in a sandbox of its
+own, with the image arriving as an image;
 history searchable by content, with a clear refusal when a session's directory is gone; a session roster
 that survives a restart; agent-scoped credentials with the host's own credentials denied, and commits
 signed as the agent when the store is configured to sign.
@@ -202,6 +250,7 @@ workspaces and the agent root, and how to verify the install.
 | [docs/SECURITY.md](docs/SECURITY.md) | What the vulnerability scan covers, where results appear, and the gate |
 | [docs/INCREMENTS.md](docs/INCREMENTS.md) · [docs/ROADMAP.md](docs/ROADMAP.md) | How work is sequenced, and the long view |
 | [docs/UI-SIDECAR-DESIGN-OPTIONS.md](docs/UI-SIDECAR-DESIGN-OPTIONS.md) | The session browser: four verbs vs a containerised MCP server, with diagrams |
+| [ADR-0018](docs/decisions/0018-ui-sidecar.md) | The session browser: why a sibling sandbox, four verbs, and one port |
 | [docs/decisions/](docs/decisions/) | Architecture decision records |
 | [packages/ui/DESIGN.md](packages/ui/DESIGN.md) | The UI design system, as implemented |
 
