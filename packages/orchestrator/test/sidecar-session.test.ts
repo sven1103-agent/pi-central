@@ -567,20 +567,28 @@ test("removing sidecar state is scoped to one session, and survives a directory 
   assert.equal(removeSidecarState(state, "never-existed"), true);
 });
 
-test("a scratch session gets no browser, even with the feature on", () => {
+test("a SCRATCH session is sandboxed, so the mode gate does not exclude it", () => {
   if (skip) return console.log(skip);
-  // ADR-0018's verification table states this and nothing asserted it. A scratch session runs in the state root, not in a
-  // directory the reader opened, so there is no dev server to serve and no port to confine it to. The gate is `mode`,
-  // which is right, but "right and untested" is the shape this repository's norms are meant to catch.
-  const state = join(root as string, "scratch-mode");
-  const app = new Supervisor(config({ sidecar: true, stateRoot: state }) as never, { rememberOpenSessions: false });
+  /*
+   * ADR-0018's verification table claimed "a scratch session spawns nothing" as verified/auto. It was not, and the claim
+   * was misinformed rather than merely untested: "scratch" is NOT a launch mode (`LaunchMode` is "sandboxed" | "direct"),
+   * it is a property of the cwd -- `isScratch` asks whether the cwd is inside `workspaceRoot`. A scratch session is
+   * therefore SANDBOXED, passes the mode gate, and gets a browser like any other.
+   *
+   * Which is the right outcome, not a leak: it has a private workdir of its own and can serve a page from it. So the row
+   * was deleted instead of tested, and this test records the real behaviour so the next reader is not misled the same way.
+   */
+  const state = join(root as string, "scratch-cwd");
+  const workspaceRoot = join(root as string, "workspace");
+  mkdirSync(join(workspaceRoot, "s1"), { recursive: true });
+  const app = new Supervisor(config({ sidecar: true, stateRoot: state, workspaceRoot }) as never, {
+    rememberOpenSessions: false,
+  });
   app.on("error", () => {});
   app.on("log", () => {});
-  const scratch = app.start({ mode: "scratch" });
+  const scratch = app.start({ cwd: join(workspaceRoot, "s1"), mode: "sandboxed" });
   assert.ok(scratch.ok);
   if (!scratch.ok) return;
-  assert.equal(scratch.session.sidecarOrigin, undefined, "no browser on a scratch session");
-  assert.ok(!scratch.session.command.includes("--mcp-config"), "and no MCP config offered to it");
-  assert.ok(!existsSync(join(state, "sidecars", scratch.session.id)), "and no state written for it");
+  assert.match(scratch.session.sidecarOrigin ?? "", /^http:\/\/localhost:\d+$/, "a scratch session has a page to render");
   return app.stopAll().then(() => undefined);
 });

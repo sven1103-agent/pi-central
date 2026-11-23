@@ -247,6 +247,7 @@ anything on a second machine.
 | The sidecar dies with its session's process | verified/auto | `sidecar-session.test.ts`, on every path that ends a session |
 | The sidecar's config, policy and profile are REMOVED when the session stops | verified/auto | `sidecar-session.test.ts`, "removes its sidecar's state" |
 | A session that did not ask for a browser gets none, and an unticked box outranks the default | verified/auto | `sidecar-session.test.ts`, the opt-out test |
+| A **scratch** session has a browser too — it is a cwd property, not a mode, so the gate does not exclude it | verified/auto | `sidecar-session.test.ts`, the scratch test |
 | Closing the sidecar's stdin takes it down; stopping twice is harmless | verified/auto | `sidecar-supervise.test.ts` |
 | `--mcp-config` precedes any subcommand | verified/auto | `sidecar-supervise.test.ts`, pinned positionally after the third occurrence |
 | The MCP config is `0600`, under the state root, outside `~/.pi` | verified/auto | `sidecar-supervise.test.ts` |
