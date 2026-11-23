@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createServer } from "node:net";
 import { spawn } from "node:child_process";
@@ -9,6 +9,7 @@ import { Supervisor, resolveSidecarEntry } from "../src/supervisor.ts";
 import {
   DEV_PORT_BASE,
   devPortFor,
+  isPiCentralCheckout,
   mcpConfigArgs,
   pickDevPort,
   portHasListener,
@@ -430,4 +431,57 @@ test("a per-session opt-in cannot grant a browser that the installation does not
   // the existing rule, and an opt-in must not bypass it.
   assert.equal(started.session.sidecarOrigin, undefined, "an opt-in must not arm an unsandboxed session");
   return app.stopAll().then(() => undefined);
+});
+
+test("a Pi Central checkout is told it cannot serve its own orchestrator, and what to do instead", () => {
+  // Measured: an agent asked to start the dev server and look at the login page in a Pi Central checkout spent its
+  // whole turn discovering C1, offering three workarounds, and showed no screenshot. The instruction said nothing about
+  // a project whose own start script spawns a sandboxed child, which is the one case a session cannot work around.
+  const dir = join(root as string, "self-hosted");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "pi-central" }));
+  assert.equal(isPiCentralCheckout(dir), true, "the checkout must be recognised by its manifest");
+
+  const text = sidecarInstruction(48001, true);
+  assert.match(text, /is inside a sandbox/, "the instruction must name the failure the agent will see");
+  assert.match(text, /C1/, "and the constraint, so it stops looking for a flag");
+  assert.match(text, /ui:dev/, "and the one way to see the interface from inside a session");
+  assert.match(text, /48001/, "naming the port it was actually assigned");
+  assert.match(text, /do not spend turns/, "and telling it not to hunt for a way around the sandbox");
+
+  // The appendix is for THIS project only: every other session must not be given an irrelevant warning.
+  assert.ok(!sidecarInstruction(48001, false).includes("This project IS Pi Central"));
+});
+
+test("a project merely NAMED pi-central is not the checkout", () => {
+  // The detector reads the manifest name, so this case is the one it would get wrong if it matched a path or a word.
+  const theirs = join(root as string, "not-ours");
+  mkdirSync(theirs, { recursive: true });
+  writeFileSync(join(theirs, "package.json"), JSON.stringify({ name: "pi-central-dashboard" }));
+  assert.equal(isPiCentralCheckout(theirs), false);
+  assert.equal(isPiCentralCheckout(join(root as string, "nowhere")), false, "a missing manifest is not a match");
+});
+
+test("the session's own directory decides the appendix, through the prompt arguments", () => {
+  if (skip) return console.log(skip);
+  // The wiring, not just the text: `sidecarPromptArgs` takes the cwd, and `#buildLaunch` passes it. Removing either
+  // leaves `sidecarInstruction` correct and the agent uninformed -- which is exactly the state that was measured.
+  const dir = join(root as string, "wiring");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "pi-central" }));
+  const handle = {
+    configFile: join(dir, "mcp.json"),
+    origin: "http://localhost:48001",
+    devPort: 48001,
+    token: "t",
+    port: () => 47801,
+    ready: Promise.resolve(47801),
+    stop: async () => {},
+    gone: false,
+  };
+  const own = sidecarPromptArgs(handle, dir).join(" ");
+  const other = sidecarPromptArgs(handle, join(root as string, "elsewhere")).join(" ");
+  assert.match(own, /This project IS Pi Central/, "a Pi Central checkout must be told");
+  assert.doesNotMatch(other, /This project IS Pi Central/, "and another project must not be");
+  assert.deepEqual(sidecarPromptArgs(undefined, dir), [], "no sidecar, no instruction");
 });

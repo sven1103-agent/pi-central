@@ -719,7 +719,7 @@ export class Supervisor extends EventEmitter {
     };
     this.#sessions.set(session.id, session);
 
-    const launch = this.#buildLaunch(policy.launch, input.sessionPath, this.#sidecars.get(session.id));
+    const launch = this.#buildLaunch(policy.launch, input.sessionPath, this.#sidecars.get(session.id), input.cwd);
     // The Inspector shows this string, so it has to be the argv that actually runs. It was computed from
     // `policy` before the sidecar existed, which showed a session without `--mcp-config` while the process
     // had one — a display that disagrees with reality in the one place that exists to be truthful (the house
@@ -780,12 +780,16 @@ export class Supervisor extends EventEmitter {
    * safehouse one. The only value interpolated is a path validated to exist by
    * `checkResumable`; the argument shape is fixed.
    */
-  #buildLaunch(launch: LaunchSpec, sessionPath?: string, sidecar?: SidecarHandle): LaunchSpec {
+  /**
+   * `cwd` is passed so the instruction can say when a project cannot be served at all (Pi Central's own checkout,
+   * where C1 stops its orchestrator). Advisory only: it changes what the agent is told.
+   */
+  #buildLaunch(launch: LaunchSpec, sessionPath: string | undefined, sidecar: SidecarHandle | undefined, cwd: string): LaunchSpec {
     const extra: string[] = [];
     // BEFORE any subcommand: `pi mcp list --mcp-config X` reports "Unknown option" (Phase 0D measured it,
     // and a probe nearly concluded the flag did not exist because of the ordering).
     extra.push(...mcpConfigArgs(sidecar));
-    extra.push(...sidecarPromptArgs(sidecar));
+    extra.push(...sidecarPromptArgs(sidecar, cwd));
     if (sessionPath) extra.push("--session", sessionPath);
     if (extra.length === 0) return launch;
     return { ...launch, args: [...launch.args, ...extra] };

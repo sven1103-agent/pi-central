@@ -23,7 +23,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { composeSidecarPolicy, type SidecarSpec } from "./sidecar-policy.ts";
 
@@ -198,7 +198,27 @@ export function pickDevPort(
  * matters: a server that moves to another port is simply unreachable for the sidecar, which is the whole point
  * of the pin.
  */
-export function sidecarInstruction(devPort: number): string {
+/**
+ * Is this Pi Central's own checkout?
+ *
+ * Pi Central refuses to start inside a session (C1), so a session working on its own UI has one way to see anything:
+ * serve only the UI, with no orchestrator. Measured: an agent asked to start the dev server and look at the login page
+ * in a Pi Central checkout spent its whole turn discovering C1, offering three workarounds, and never showed a
+ * screenshot -- correct reasoning to the wrong prompt.
+ *
+ * Detected by the manifest's name rather than a path: the checkout can live anywhere, and a project merely NAMED
+ * pi-central is not the same thing. Advisory only -- it changes what the agent is TOLD, never what the sidecar does.
+ */
+export function isPiCentralCheckout(cwd: string): boolean {
+  try {
+    const manifest = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")) as { name?: unknown };
+    return manifest.name === "pi-central";
+  } catch {
+    return false;
+  }
+}
+
+export function sidecarInstruction(devPort: number, selfHosted = false): string {
   return [
     "## Your browser",
     "",
@@ -208,11 +228,31 @@ export function sidecarInstruction(devPort: number): string {
     "- Start any dev server or preview you want to look at on port " + devPort + ", and do not let it fall back to",
     "  another port. For example `vite --port " + devPort + " --strictPort`, `next dev -p " + devPort + "`, or",
     "  `python3 -m http.server " + devPort + " --bind 127.0.0.1`. `$PI_CENTRAL_DEV_PORT` holds the same number.",
+    "- **Not every project can be served from here, and the reason is C1.** A process inside a sandbox cannot apply",
+    "  another Seatbelt profile, so an app whose own start script spawns a sandboxed child -- Pi Central itself is the",
+    "  clear case -- fails with 'Pi Central cannot start: this process is inside a sandbox'. That is the guard working,",
+    "  not a misconfiguration, and no flag makes it work. For such a project serve only the part you need to LOOK at:",
+    "  a static build, a component harness, or a dev-server-only run. If the only way to see it is an orchestrator, say",
+    "  so and stop -- do not spend turns looking for a way around a sandbox you are inside.",
     "- Prefer `probe` (a compact verdict on overflow, contrast, overlap and console errors) and use `capture` only",
     "  when that is not enough: a screenshot costs thousands of tokens.",
     "- To SEE a screenshot, call the typed function from a codemode script and show the image:",
     `  \`const r = await tools.mcp__pi_central_sidecar__capture({ url: "http://localhost:${devPort}/" }); image(r.content[0]);\``,
     "  The `mcp({ tool })` proxy forms return only the caption.",
+    ...(selfHosted
+      ? [
+          "",
+          "### This project IS Pi Central",
+          "",
+          "Its own orchestrator cannot start from here (C1 -- a sandbox cannot nest), so `npm run server` will refuse.",
+          "Serve only the UI on the port above, with no orchestrator:",
+          "",
+          "  PI_CENTRAL_WS=ws://127.0.0.1:8787 npm run ui:dev -- --port " + String(devPort) + " --strictPort",
+          "",
+          "The socket is then dead, so the page renders its disconnected state. That is enough to review layout, styling",
+          "and rendering, and it is all that is reviewable from inside a sandbox. Say plainly what you could not see.",
+        ]
+      : []),
   ].join("\n");
 }
 
@@ -388,6 +428,10 @@ export function mcpConfigArgs(handle: SidecarHandle | undefined): string[] {
 }
 
 /** The system-prompt text for a session that has a sidecar, as Pi arguments. Nothing when it has none. */
-export function sidecarPromptArgs(handle: SidecarHandle | undefined): string[] {
-  return handle === undefined ? [] : ["--append-system-prompt", sidecarInstruction(handle.devPort)];
+export function sidecarPromptArgs(handle: SidecarHandle | undefined, cwd?: string): string[] {
+  if (handle === undefined) return [];
+  return [
+    "--append-system-prompt",
+    sidecarInstruction(handle.devPort, cwd === undefined ? false : isPiCentralCheckout(cwd)),
+  ];
 }
