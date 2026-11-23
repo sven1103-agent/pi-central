@@ -864,6 +864,18 @@ function spawnOrchestrator(pkg: PackageRoot, environment: Environment): Promise<
         lastStderr = keepTail(lastStderr, `${parsed.reason}\n`);
         continue;
       }
+      /*
+       * Everything the orchestrator writes to stdout is echoed when there is a terminal, not only the URL.
+       *
+       * The rest used to be discarded, which threw away the lines that answer "why does my session have no browser":
+       * the served UI build, the stale-build warning, and whether a session browser is offered at all. Measured: a
+       * launch printed four lines about the package and the port and nothing about the sidecar, so the one fact needed
+       * to attribute "0 servers configured" never reached the reader -- although `server.ts` logs it precisely so it can.
+       *
+       * The URL line is NOT echoed: it is the app's own handshake, and printing it here as well as in the app's
+       * "orchestrator at" line would read as two orchestrators starting.
+       */
+      if (parsed.kind !== "url" && process.stdout.isTTY) process.stdout.write(line + "\n");
       if (parsed.kind !== "url" || announced) continue;
       announced = true;
       clearTimeout(timeout);
