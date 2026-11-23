@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { staleBuiltUi } from "../src/static-ui.ts";
 
@@ -56,4 +56,25 @@ test("nothing is said when the copies agree, when the sibling is older, or when 
   assert.equal(staleBuiltUi(copyA, copyB), undefined, "the same entry bundle is the same build");
 
   assert.equal(staleBuiltUi(fresh, join(root, "does-not-exist")), undefined, "an absent sibling says nothing");
+});
+
+test("the shipped UI carries the sidecar control, not just the source", () => {
+  /*
+   * The defect this holds, measured twice: `packages/ui/src` had the session-browser control while the served bundle did
+   * not, because `bin/pi-central.js` serves `dist/ui` — a COPY made by `build:package`. The first time it was a stale copy
+   * (`scripts/sync-served-ui.mjs` exists for that). The second time it was the same class one layer out: the package under
+   * test was the GLOBAL install, which predates the feature entirely.
+   *
+   * Both looked identical from inside the app — a switch that is simply not there — so the check has to compare artifacts
+   * rather than trust either. Skipped unless a built tree exists, because `verify` runs before any build in CI.
+   */
+  const built = join(import.meta.dirname, "..", "..", "..", "dist", "ui", "assets");
+  if (!existsSync(built)) return console.log("# skip: no dist/ui, so there is nothing served to check");
+  const bundles = readdirSync(built).filter((f) => /^index-.*\.js$/.test(f));
+  assert.ok(bundles.length > 0, "a built UI has an entry bundle");
+  const text = bundles.map((f) => readFileSync(join(built, f), "utf8")).join("\n");
+  // The string literals the control is built from, which survive minification even though the identifiers do not.
+  for (const marker of ["Preview its work in a browser", "pi-central:session-browser"]) {
+    assert.ok(text.includes(marker), `the served bundle must contain ${JSON.stringify(marker)}`);
+  }
 });

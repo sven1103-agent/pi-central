@@ -70,6 +70,38 @@ export function explainStartupError(error: unknown, host: string, port: number):
  * `(unreadable)` rather than a throw: a missing or malformed `index.html` is `hasBuiltUi`'s business
  * (it reports "no built UI"), and a log line must not be able to fail a start.
  */
+/**
+ * Whether the served UI was built a long way from the code that is running.
+ *
+ * The two artifacts are built by separate commands — `bin/` by `build:package`, `dist/ui` by `ui:build` — so a stale
+ * bundle beside a fresh server is the ordinary result of rebuilding only one, and the UI that comes up is missing every
+ * control the server has learned since. Measured: Settings rendered a protocol number and no Browser row, from source
+ * that had both.
+ *
+ * **A wide window on purpose.** The two builds run seconds apart in a package build and an hour apart in a dev loop, so a
+ * tight threshold would cry wolf constantly and teach the reader to ignore it. This is not a freshness check — that is
+ * `staleBuiltUi` and it compares against a sibling tree. It only catches the case where the gap is large enough that the
+ * reader is probably looking at something else.
+ *
+ * Left UNDONE: the marker fires when *either* artifact is much newer, which catches "stale bundle, fresh server" but not
+ * its mirror — a page from tomorrow against a server from last week would need the bundle's own mtime, and `ServedUiIdentity`
+ * does not carry one. Worth a field when someone is bitten by that direction.
+ */
+function uiLooksForeign(uiDir: string, builtAt: string): boolean {
+  const built = Date.parse(builtAt);
+  if (!Number.isFinite(built)) return false;
+  try {
+    // The orchestrator's own module file: its mtime is when THIS code was last built or edited.
+    const own = statSync(new URL(import.meta.url)).mtimeMs;
+    return own - built > UI_FOREIGN_MS;
+  } catch {
+    return false;
+  }
+}
+
+/** A day. Any shorter and a dev loop that rebuilds the UI in the morning would warn every afternoon. */
+const UI_FOREIGN_MS = 24 * 60 * 60 * 1000;
+
 export function describeBuiltUi(uiDir: string): string {
   // `statSync` decides which failure this is: an `index.html` that cannot be read is "(unreadable)",
   // one that reads but names no bundle is a different defect and says so.
@@ -81,9 +113,22 @@ export function describeBuiltUi(uiDir: string): string {
   }
   const identity = servedUiIdentity(uiDir);
   if (identity === undefined) return readable ? "(no entry bundle named in index.html)" : "(unreadable)";
+  /*
+   * SAY IT WHEN THE PAGE AND THE ORCHESTRATOR ARE FROM DIFFERENT BUILDS.
+   *
+   * Measured, and it cost a full afternoon: the orchestrator and the UI bundle are built separately, and a stale
+   * `dist/ui` beside a fresh `bin/` produces a UI that lacks the feature the orchestrator has. Desktop Settings showed a
+   * protocol number with no Browser row, while a fresh build showed both — same source, different artifacts. Nothing on
+   * screen said so, and the bundle name is the one fact that distinguishes them.
+   *
+   * Not an ERROR: a dev loop that rebuilds the UI and not the server is legitimate, and an orchestrator that refused to
+   * start would be wrong. A marker, because the question "is the page I am looking at built from this code?" is the
+   * question nobody thinks to ask while staring at a missing control.
+   */
+  const marker = uiLooksForeign(uiDir, identity.builtAt) ? "  <-- UI looks older than this build" : "";
   // The asset name and the file's mtime together: the name distinguishes builds, the time tells you
   // whether it predates your last edit.
-  return `${identity.entry} (built ${identity.builtAt.slice(0, 16).replace("T", " ")})`;
+  return `${identity.entry} (built ${identity.builtAt.slice(0, 16).replace("T", " ")})${marker}`;
 }
 
 /**
@@ -101,7 +146,14 @@ export function describeSidecar(options: {
   browser: string;
   browserExists: boolean;
 }): string {
-  if (!options.offered) return "not offered (set PI_CENTRAL_SIDECAR=1 to offer it per session)";
+  // The advice names the IN-APP switch first, because that is the one a reader can reach: a dock PWA or a Finder-launched
+  // .app inherits no shell environment, so telling them to set a variable is telling them to do something they cannot.
+  // The variable is still the answer for a scripted launch, so it is named second rather than dropped.
+  // Measured: this advice said "set PI_CENTRAL_SIDECAR=1" and nothing else, which stayed in place for several commits
+  // after the switch existed and told the reader to work around the fix.
+  if (!options.offered) {
+    return `not offered — no browser at ${options.browser}. Set PI_CENTRAL_BROWSER, or turn on "Preview its work in a browser" in Settings once one is found`;
+  }
   if (!options.browserExists) return `OFFERED BUT UNSABLE: no browser at ${options.browser}`;
   return `offered, browser ${options.browser}`;
 }

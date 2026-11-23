@@ -84,3 +84,20 @@ test("the startup line states whether a session browser is offered, and refuses 
   assert.match(unusable, /\/nowhere\/chrome/, "and names the path it checked");
   assert.match(describeSidecar({ offered: true, browser: "/b", browserExists: true }), /offered, browser \/b/);
 });
+
+test("the describeSidecar advice names a route the reader can actually reach", () => {
+  /*
+   * Measured: this line said `not offered (set PI_CENTRAL_SIDECAR=1 to offer it per session)` and ONLY that, for several
+   * commits after the in-app switch existed. A dock PWA or a Finder-launched .app inherits no shell environment, so the
+   * advice told the reader to do the one thing the fix existed to stop requiring.
+   *
+   * Asserted on the message rather than on a run, because the defect is a stale sentence: right about the mechanism, wrong
+   * about the reader.
+   */
+  const line = describeSidecar({ offered: false, browser: "/Applications/Google Chrome.app/x", browserExists: false });
+  assert.match(line, /not offered/, "the state is still named plainly");
+  assert.match(line, /PI_CENTRAL_BROWSER/, "the cause is nameable: no browser was found");
+  assert.match(line, /Settings/, "and the fix a reader can reach without a terminal");
+  // Not a ban on the variable -- a scripted launch still uses it -- but it must not be the ONLY advice.
+  assert.ok(!line.includes("(set PI_CENTRAL_SIDECAR=1"), "the env var is not the sole instruction");
+});
