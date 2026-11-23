@@ -744,3 +744,38 @@ test("a sidecar that dies before it listens is not reported as healthy", () => {
     }, 200);
   }).then(() => app.stopAll().then(() => undefined));
 });
+
+test("resuming a session honours the browser answer, like starting one", () => {
+  if (skip) return console.log(skip);
+  /*
+   * Measured gap: four call sites resume a session and none passed a sidecar, so a reopened session had no browser however
+   * the switch was set — and resumed sessions are the COMMON case after a restart. The reader turns the feature on, reopens
+   * yesterday`s frontend work, and gets a session that cannot see its own dev server; because a session with no browser is
+   * also told nothing, it goes looking for why.
+   *
+   * Asserted through `resume` rather than through the UI, because the defect was in the middle of the path: the picker sent
+   * the answer, the orchestrator understood it, and `resume` dropped it.
+   */
+  const state = join(root as string, "resume-sidecar");
+  // The default is OFF and the resume asks for one: with the default on, a broken propagation would still produce a
+  // sidecar and the test would pass while testing nothing. Falsified by removing the propagation, which is how that was
+  // found -- the first version of this test used `sidecar: true` as the default and could not fail.
+  const app = new Supervisor(config({ stateRoot: state, sidecar: false, sidecarOffered: true }) as never, {
+    rememberOpenSessions: false,
+  });
+  app.on("error", () => {});
+  app.on("log", () => {});
+  const dir = join(root as string, "resumed-project");
+  mkdirSync(dir, { recursive: true });
+  const transcript = join(dir, "session.jsonl");
+  writeFileSync(transcript, "");
+  const historical = { path: transcript, cwd: dir, name: "resumed", updatedAt: Date.now(), bytes: 0, messageCount: 0, firstMessage: "" };
+  const resumed = app.resume(historical as never, { mode: "sandboxed", sidecar: true });
+  assert.ok(resumed.ok);
+  if (!resumed.ok) return;
+  assert.ok(
+    existsSync(join(state, "sidecars", resumed.session.id, "mcp.json")),
+    "a resumed session that asked for a browser must be given one",
+  );
+  return app.stopAll().then(() => undefined);
+});

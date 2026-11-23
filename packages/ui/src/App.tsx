@@ -1737,6 +1737,24 @@ export function App() {
     [send],
   );
 
+  /**
+   * Reopen a session, carrying the reader's browser answer.
+   *
+   * Four call sites resume a session — a stopped row, the History tab, an idempotent reopen, and a failed session's
+   * Retry — and none of them passed a sidecar, so a resumed session never had a browser however the switch was set.
+   * Resumed sessions are the common case after a restart, which is when a reader is most likely to be looking at
+   * yesterday's frontend work.
+   *
+   * One helper rather than four spreads, because four is exactly how many places were missed the first time.
+   */
+  const resumeWith = useCallback(
+    (target: { path: string }) => {
+      const sidecar = effectiveSidecar(sidecarPref, state.sidecarOffered, state.sidecarDefault);
+      send({ kind: "resume", path: target.path, sidecar });
+    },
+    [send, sidecarPref, state.sidecarOffered, state.sidecarDefault],
+  );
+
   const onStartSession = useCallback(() => {
     // Ask for focus BEFORE the control goes out: the orchestrator answers `start` with the new `session`
     // event synchronously, so the intent has to be in the store when that event lands (issue #144).
@@ -2490,7 +2508,7 @@ export function App() {
                  */
                 dispatch({ kind: "focusRow", key: session.path });
                 dispatch({ kind: "expectNewSession", file: session.path });
-                send({ kind: "resume", path: session.path });
+                resumeWith({ path: session.path });
                 setTab("sessions");
               }}
             />
@@ -2512,7 +2530,7 @@ export function App() {
                 onResume={() => {
                   dispatch({ kind: "expectNewSession" });
                   // By PATH: a stopped session has no handle, and the path is its durable identity (ADR-0004).
-                  send({ kind: "resume", path: stoppedRow.entry.path });
+                  resumeWith({ path: stoppedRow.entry.path });
                 }}
                 onForget={() => dispatch({ kind: "forget", path: stoppedRow.entry.path })}
                 {...(supportsDelete(state.install?.protocol)
@@ -2629,7 +2647,7 @@ export function App() {
                   if (target?.sessionFile === undefined) return;
                   dispatch({ kind: "focusRow", key: target.sessionFile });
                   dispatch({ kind: "expectNewSession", file: target.sessionFile });
-                  send({ kind: "resume", path: target.sessionFile });
+                  resumeWith({ path: target.sessionFile });
                 },
                 onRetry: () => {
                   const target = focusedSession(state);
@@ -2800,7 +2818,7 @@ export function App() {
                 if (!focused?.sessionFile) return;
                 dispatch({ kind: "focusRow", key: focused.sessionFile });
                 dispatch({ kind: "expectNewSession", file: focused.sessionFile });
-                send({ kind: "resume", path: focused.sessionFile });
+                resumeWith({ path: focused.sessionFile });
               }}
               onRetry={() => focused && send({ kind: "retry", sessionId: focused.id })}
               retryAvailable={supportsRetry(state.install?.protocol)}

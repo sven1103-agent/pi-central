@@ -531,7 +531,10 @@ export class Transport {
               cwdExists: true,
               scratch: owner.scratch,
             },
-            control.mode ? { mode: control.mode } : {},
+            {
+              ...(control.mode ? { mode: control.mode } : {}),
+              ...(control.sidecar === undefined ? {} : { sidecar: control.sidecar }),
+            },
           );
           if (!resumed.ok) {
             this.#broadcast({ kind: "error", message: resumed.message });
@@ -540,7 +543,10 @@ export class Transport {
           this.#broadcast({ kind: "session", session: resumed.session });
           return;
         }
-        const result = this.#supervisor.resume(target, control.mode ? { mode: control.mode } : {});
+        const result = this.#supervisor.resume(target, {
+          ...(control.mode ? { mode: control.mode } : {}),
+          ...(control.sidecar === undefined ? {} : { sidecar: control.sidecar }),
+        });
         if (!result.ok) {
           this.#broadcast({ kind: "error", message: result.message });
           return;

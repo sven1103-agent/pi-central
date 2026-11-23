@@ -466,7 +466,15 @@ export type Control =
    * a question it was not asked.
    */
   | { kind: "install" }
-  | { kind: "resume"; path: string; mode?: "sandboxed" | "direct" };
+  /**
+   * Reopen a recorded session in its own directory.
+   *
+   * `sidecar` is the same three-valued answer `start` takes, and it was missing here first: resuming a session produced
+   * one with no browser regardless of the reader's switch, so a reader who turned the feature on and reopened yesterday's
+   * work got a session that could not see its own dev server -- and, because it was also told nothing, one that went
+   * looking for why. Resumed sessions are the common case after a restart, which is when it hurt most.
+   */
+  | { kind: "resume"; path: string; mode?: "sandboxed" | "direct"; sidecar?: boolean };
 
 /**
  * One image travelling on a prompt, from the UI to Pi.

@@ -351,6 +351,16 @@ export class Supervisor extends EventEmitter {
       unavailable: [],
     };
 
+    /*
+     * KNOWN GAP, stated here because this is where someone will look: the restore passes no `sidecar` answer, so reopened
+     * sessions get a browser only when the installation DEFAULT is on (`PI_CENTRAL_SIDECAR=1`). The in-app switch lives in
+     * the UI's `localStorage` and the orchestrator has no way to read it at startup, so a reader who turned the feature on
+     * in Settings and restarts will find the restored fleet without browsers until they resume or start one.
+     *
+     * Not fixed by making the orchestrator remember a preference: that is a second answer which can disagree with the
+     * switch on screen, which is the class of bug the three-valued field exists to close. The honest fix is for the UI to
+     * send its answer once on connect, which is a protocol addition and its own change.
+     */
     for (const entry of loaded.sessions) {
       // A file that no longer parses as a session is indistinguishable from one that was deleted:
       // `sessionAt` refuses both, and neither can be reopened.
@@ -453,7 +463,7 @@ export class Supervisor extends EventEmitter {
    */
   resume(
     session: HistoricalSession,
-    options: { mode?: LaunchMode; env?: Record<string, string> } = {},
+    options: { mode?: LaunchMode; env?: Record<string, string>; sidecar?: boolean } = {},
   ): StartResult | StartFailure {
     const readiness = checkResumable(session);
     if (!readiness.ok) return { ok: false, message: readiness.message };
@@ -485,6 +495,7 @@ export class Supervisor extends EventEmitter {
       // No name: the session already carries its own, and re-applying one would append a
       // redundant session_info entry to a file we did not create.
       ...(options.env ? { env: options.env } : {}),
+      ...(options.sidecar === undefined ? {} : { sidecar: options.sidecar }),
       ...(hasTranscript ? { sessionPath: session.path } : {}),
     });
     // Recorded HERE as well as from `#refreshState`, because reopening a session on the next launch
