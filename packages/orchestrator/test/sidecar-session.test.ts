@@ -41,6 +41,39 @@ function fixtureRoot(): string | undefined {
 }
 
 const root = fixtureRoot();
+
+/**
+ * Write the executable stub a sidecar spawn needs, once per run.
+ *
+ * Deliberately NOT a recorded argv: `--` separates safehouse flags from the wrapped command, and the stub only has to
+ * skip its own arguments up to that separator, then execute the rest. That is what makes the spawned sidecar real.
+ */
+function writeSafehouseStub(base: string): void {
+  const fixtures = join(base, "fixtures");
+  mkdirSync(fixtures, { recursive: true });
+  const stub = join(fixtures, "safehouse-stub");
+  writeFileSync(stub, '#!/bin/sh\nwhile [ $# -gt 0 ] && [ "$1" != "--" ]; do shift; done\n[ $# -gt 0 ] && shift\nexec "$@"\n', {
+    mode: 0o755,
+  });
+}
+if (root !== undefined) writeSafehouseStub(root);
+
+/**
+ * Wait until a session reports a browser, or give up.
+ *
+ * `sidecarOrigin` is set when the sidecar ANNOUNCES its port, not when the spawn is attempted — so a test that reads it
+ * straight after `start()` is asking before the answer exists. This is the same tick that used to be papered over by a
+ * `ready` promise which resolved unconditionally.
+ */
+async function originOf(app: Supervisor, id: string, timeoutMs = 5000): Promise<string | undefined> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const origin = app.get(id)?.sidecarOrigin;
+    if (origin !== undefined) return origin;
+    await new Promise((done) => setTimeout(done, 25));
+  }
+  return app.get(id)?.sidecarOrigin;
+}
 if (root !== undefined) process.on("exit", () => rmSync(root, { recursive: true, force: true }));
 const skip = root === undefined ? "# skip: set PI_CENTRAL_TEST_PRIVATE_ROOT to exercise the supervisor" : undefined;
 
@@ -50,6 +83,18 @@ function config(over: Record<string, unknown> = {}) {
     workspaceRoot: join(base, "workspaces"),
     stateRoot: join(base, "state"),
     sessionsRoot: join(base, "sessions"),
+    /*
+     * A stub safehouse that RUNS, so the sidecar spawn is real rather than a failure every assertion then papered over.
+     *
+     * The measured problem with the previous value: it pointed at a path that did not exist, so every sidecar spawn failed
+     * with ENOENT -- and because `ready` resolved unconditionally at the time, six tests still asserted
+     * `sidecarOrigin` and passed. They were testing a spawn that never happened. Now that `ready` can refuse, those
+     * tests were the ones that failed, which is the point: the false positive was in the test fixture as much as the code.
+     *
+     * The stub is `sh -c 'exec "$@"'`: it drops its own argv[0] and executes the rest, so the sidecar runs UNCONFINED in
+     * tests while the argv shape the supervisor composes is exactly the production one. Policy content is asserted
+     * separately, in `sidecar-policy.test.ts`, against the rendered fragment rather than against a run.
+     */
     safehouse: join(base, "fixtures", "safehouse-stub"),
     pi: join(base, "fixtures", "pi-stub"),
     agentRoot: join(base, "agent"),
@@ -232,9 +277,14 @@ test("an explicit port still wins over the assigned one, and null still opts out
   return app.stopAll().then(() => undefined);
 });
 
-test("without the switch and without a port, a session gets no sidecar and no instruction", () => {
+test("on a machine with no browser, a session gets no sidecar and no instruction", () => {
   if (skip) return console.log(skip);
-  const app = new Supervisor(config({ stateRoot: join(root as string, "off") }) as never, { rememberOpenSessions: false });
+  // `sidecarOffered: false` is the config of a machine where no Chromium was found: the capability is absent, so the
+  // instruction would be a paragraph about a feature this installation cannot offer. The other half -- offered but not
+  // requested -- is the test below, and it says the opposite on purpose.
+  const app = new Supervisor(config({ sidecarOffered: false, stateRoot: join(root as string, "off") }) as never, {
+    rememberOpenSessions: false,
+  });
   app.on("error", () => {});
   const started = app.start({ cwd: root as string, mode: "sandboxed" });
   assert.ok(started.ok);
@@ -393,7 +443,7 @@ test("the sidecar entry is resolved for the installation that exists, not for on
   }
 });
 
-test("a session can opt IN per session, without the app default being on", () => {
+test("a session can opt IN per session, without the app default being on", async () => {
   if (skip) return console.log(skip);
   // The UI gate's request shape: the picker sends `sidecar: true` for one session. Without this the only way to get a
   // browser would be a global switch, so a reader who wanted one for a single frontend task could not have it.
@@ -413,9 +463,11 @@ test("a session can opt IN per session, without the app default being on", () =>
     !existsSync(join(state, "sidecars", plain.session.id, "mcp.json")),
     "and a session that did not ask must stay without one",
   );
-  // The event the UI reads to show which address the browser can see.
-  assert.match(asked.session.sidecarOrigin ?? "", /^http:\/\/localhost:\d+$/, "the session must report its browser's origin");
-  assert.equal(plain.session.sidecarOrigin, undefined, "a session with no browser must report no origin");
+  // The event the UI reads to show which address the browser can see. Awaited, because a browser is reported when it
+  // LISTENS rather than when its spawn is attempted -- the difference that made the old assertion pass on a failed spawn.
+  const origin = await originOf(app, asked.session.id);
+  assert.match(origin ?? "", /^http:\/\/localhost:\d+$/, "the session must report its browser's origin");
+  assert.equal(app.get(plain.session.id)?.sidecarOrigin, undefined, "a session with no browser must report no origin");
   return app.stopAll().then(() => undefined);
 });
 
@@ -517,7 +569,7 @@ test("the config-directory grant is passed only for a session that has a sidecar
   assert.match(source, /stateRoot, "sidecars", input\.id/, "and the directory must be the one spawnSidecar writes to");
 });
 
-test("an explicit FALSE opts out, even when the installation gives browsers by default", () => {
+test("an explicit FALSE opts out, even when the installation gives browsers by default", async () => {
   if (skip) return console.log(skip);
   // The defect this holds, measured in the first real run: the picker always sends the reader's answer, so an unticked
   // box sends false. The old code read false as "not an opt-in" and let the default supply a browser anyway, which made
@@ -535,7 +587,11 @@ test("an explicit FALSE opts out, even when the installation gives browsers by d
     !existsSync(join(state, "sidecars", refused.session.id, "mcp.json")),
     "and no sidecar process or config for it",
   );
-  assert.match(byDefault.session.sidecarOrigin ?? "", /^http:\/\/localhost:\d+$/, "while an absent answer takes the default");
+  assert.match(
+    (await originOf(app, byDefault.session.id)) ?? "",
+    /^http:\/\/localhost:\d+$/,
+    "while an absent answer takes the default",
+  );
   return app.stopAll().then(() => undefined);
 });
 
@@ -571,7 +627,7 @@ test("removing sidecar state is scoped to one session, and survives a directory 
   assert.equal(removeSidecarState(state, "never-existed"), true);
 });
 
-test("a SCRATCH session is sandboxed, so the mode gate does not exclude it", () => {
+test("a SCRATCH session is sandboxed, so the mode gate does not exclude it", async () => {
   if (skip) return console.log(skip);
   /*
    * ADR-0018's verification table claimed "a scratch session spawns nothing" as verified/auto. It was not, and the claim
@@ -593,7 +649,11 @@ test("a SCRATCH session is sandboxed, so the mode gate does not exclude it", () 
   const scratch = app.start({ cwd: join(workspaceRoot, "s1"), mode: "sandboxed" });
   assert.ok(scratch.ok);
   if (!scratch.ok) return;
-  assert.match(scratch.session.sidecarOrigin ?? "", /^http:\/\/localhost:\d+$/, "a scratch session has a page to render");
+  assert.match(
+    (await originOf(app, scratch.session.id)) ?? "",
+    /^http:\/\/localhost:\d+$/,
+    "a scratch session has a page to render",
+  );
   return app.stopAll().then(() => undefined);
 });
 
@@ -618,4 +678,69 @@ test("every test in this file that needs the private root SKIPS without it", () 
     if (/root as string/.test(chunk) && !/if \(skip\)/.test(chunk)) unguarded.push(name);
   }
   assert.deepEqual(unguarded, [], "these tests use root without guarding on skip, so CI cannot run them");
+});
+
+test("a session with no browser is told so, instead of being left to investigate", () => {
+  if (skip) return console.log(skip);
+  /*
+   * Measured: the reader ticked the Settings switch, started a session, and asked it to screenshot its dev server. The
+   * session had no sidecar, found no token, found a STALE `pi_central_sidecar` entry in `mcp-cache.json` from an earlier
+   * session, and spent the turn concluding "the sidecar isn't registered" -- a registration gap was a plausible and
+   * completely wrong reading of "this session was started without a browser".
+   *
+   * Silence was the defect: with nothing said, every explanation was equally available.
+   */
+  const quiet = sidecarPromptArgs(undefined, undefined, false);
+  assert.deepEqual(quiet, [], "a machine that does not offer it says nothing: no noise about a feature it lacks");
+
+  const told = sidecarPromptArgs(undefined, undefined, true);
+  assert.equal(told[0], "--append-system-prompt");
+  const text = told[1] ?? "";
+  assert.match(text, /NO UI sidecar/, "the state is named, not implied");
+  assert.match(text, /normal state, not a fault/, "and it is not dressed up as a failure");
+  assert.match(text, /mcp-cache\.json/, "the stale cache is named, because it is the trap that misled a real session");
+  assert.match(text, /not evidence/, "and explicitly discounted");
+  assert.match(text, /Do NOT investigate/, "the instruction is to stop, not to diagnose");
+  assert.match(text, /starts a NEW session/, "with the one action that changes it");
+});
+test("a sidecar that dies before it listens is not reported as healthy", () => {
+  if (skip) return console.log(skip);
+  /*
+   * THE false positive this file existed to hide, found while investigating a real report.
+   *
+   * `ready` used to be a race between the port and `exited`, with `Promise.resolve(port)` as one arm -- so it resolved on
+   * a microtask and could never say no. Measured: with a safehouse path that does not exist, `ready` still resolved, so
+   * "the sidecar started" was unfalsifiable. Six tests asserted `sidecarOrigin` off that lie, against a fixture whose
+   * safehouse did not exist either.
+   *
+   * Now `ready` rejects, the handle is dropped, and the session says so. This is the test that would have caught it.
+   */
+  const state = join(root as string, "sidecar-dead");
+  const app = new Supervisor(
+    config({ sidecar: true, sidecarOffered: true, stateRoot: state, safehouse: "/nonexistent/safehouse" }) as never,
+    { rememberOpenSessions: false },
+  );
+  app.on("error", () => {});
+  app.on("log", () => {});
+  const started = app.start({ cwd: root as string, mode: "sandboxed", sidecar: true });
+  assert.ok(started.ok, "the session still starts: a missing browser is not fatal");
+  if (!started.ok) return;
+  return new Promise<void>((done) => {
+    setTimeout(() => {
+      try {
+        assert.equal(app.get(started.session.id)?.sidecarOrigin, undefined, "no origin: nothing is listening");
+        assert.equal(app.sidecarFor(started.session.id), undefined, "and the dead handle is not kept");
+        // The argv is composed SYNCHRONOUSLY, so a sidecar that dies a tick later is already in it -- a stated limit, not
+        // an oversight: making it exact means making start() async. What must never be wrong is the claim the reader and
+        // the agent read, which is `sidecarOrigin` above.
+        const warned = (app.get(started.session.id)?.warnings ?? []).filter((w) => /session browser/i.test(w));
+        assert.equal(warned.length, 1, "the absence is explained once, on the session");
+        assert.match(warned[0] ?? "", /fault rather than a setting/, "naming it as a fault rather than a setting");
+        done();
+      } catch (error) {
+        done();
+        throw error;
+      }
+    }, 200);
+  }).then(() => app.stopAll().then(() => undefined));
 });

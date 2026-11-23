@@ -44,6 +44,13 @@ export interface SidecarHandle {
   stop: () => Promise<void>;
   /** True once the process has exited, so a caller can reap without guessing. */
   readonly gone: boolean;
+  /**
+   * Why it could not start, once that is known.
+   *
+   * Set by the supervisor, which owns the promise: `spawnSidecar` is synchronous and the death is not. Read again when
+   * the session's argv is built, so a sidecar that died immediately is not handed to Pi as healthy.
+   */
+  failure?: string | undefined;
 }
 
 export interface SidecarSpawn {
@@ -113,6 +120,26 @@ export const DEV_PORT_BASE = 48000;
 export function devPortFor(sessionId: string): number {
   return DEV_PORT_BASE + sessionOrdinal(sessionId);
 }
+
+/**
+ * Attach a no-op handler so a rejection nobody awaited is a recorded fact rather than a process-ending event.
+ *
+ * Node treats an unhandled rejection as fatal, and this promise rejects in a state the caller might not be watching — a
+ * sidecar told to stop, or one whose spawn failed after the caller moved on. The returned promise still rejects for
+ * anyone who awaits it; this only stops the timer running out from crashing a process that was not asking.
+ */
+function markHandled<T>(promise: Promise<T>): Promise<T> {
+  promise.catch(() => {});
+  return promise;
+}
+
+/**
+ * How long a sidecar has to announce its port before it is pronounced dead.
+ *
+ * Generous on purpose: a real sidecar under Safehouse announces in well under a second, and the cost of being wrong in
+ * this direction is refusing a working browser rather than accepting a broken one.
+ */
+const READY_TIMEOUT_MS = 15_000;
 
 /** The pids listening on a TCP port, via a fixed binary and a fixed argv. Empty when none, or when lsof cannot say. */
 function listenerPids(port: number): number[] {
@@ -432,7 +459,45 @@ export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
     devPort: options.port,
     token,
     port: () => (gone ? undefined : port),
-    ready: Promise.resolve(port),
+    /*
+     * The spawn is already in flight, so "ready" must not be a resolved promise: a sidecar that died at launch was
+     * handed to the supervisor as healthy, the session was launched with --mcp-config and a token for a server that
+     * would never answer, and the failure surfaced only later as "Connection closed" -- or, worse, not at all, with a
+     * session that reported a browser it could not reach.
+     *
+     * `race` rather than `exited`: the normal case is a process that outlives this promise, and that case must resolve.
+     */
+    ready: /* a promise whose rejection is the answer, not an accident: every caller that ignores it must still not
+              turn a dead sidecar into a crashed orchestrator. Marked handled, and each caller attaches its own. */
+    markHandled(new Promise<number>((resolve, reject) => {
+      /*
+       * THREE outcomes, and the middle one is the one that was missing: the sidecar announces its listening port, it
+       * exits first, or it is still starting when a deadline passes. The first version raced the port against `exited`
+       * and resolved on a microtask, which is not a success condition at all -- measured: with a safehouse path that does
+       * not exist, `ready` still resolved. That made "it started" unfalsifiable, and every caller treating it as a
+       * health check was reading a promise that could not say no.
+       *
+       * The deadline is deliberately generous: a real sidecar under Safehouse announces within a second, and the cost of
+       * being wrong here is refusal of a working browser rather than acceptance of a broken one.
+       */
+      const timer = setTimeout(() => {
+        reject(new Error(`the sidecar did not announce a port within ${READY_TIMEOUT_MS} ms`));
+      }, READY_TIMEOUT_MS);
+      timer.unref?.();
+      void exited.then(() => {
+        clearTimeout(timer);
+        reject(spawnError ?? new Error(`the sidecar exited before it could listen (port ${port})`));
+      });
+      // The announcement arrives on stderr as `sidecar listening on 127.0.0.1:<port> origin=...`. Matched on that shape
+      // rather than on the number appearing anywhere in a line: a port number is not distinctive, and a log line that
+      // mentions it must not be mistaken for a bind.
+      pendingPortListeners.push((line: string) => {
+        if (line.includes(`listening on 127.0.0.1:${port}`)) {
+          clearTimeout(timer);
+          resolve(port);
+        }
+      });
+    })),
     stop,
     get gone() {
       return gone;
@@ -452,8 +517,55 @@ export function mcpConfigArgs(handle: SidecarHandle | undefined): string[] {
 }
 
 /** The system-prompt text for a session that has a sidecar, as Pi arguments. Nothing when it has none. */
-export function sidecarPromptArgs(handle: SidecarHandle | undefined, cwd?: string): string[] {
-  if (handle === undefined) return [];
+/**
+ * What a session with NO browser is told.
+ *
+ * Nothing, until a measured turn: a session asked to screenshot its dev server found no `pi_central_sidecar` server,
+ * no `PI_CENTRAL_SIDECAR_TOKEN`, and a STALE entry for it in `mcp-cache.json` left by an earlier session. It then spent
+ * the turn reading MCP configuration files and reporting "the sidecar isn't registered", which was accurate and useless:
+ * the reader had simply started this session without the browser, and the session had no way to know that.
+ *
+ * Silence is what made a hundred plausible explanations equally available. So it says the one thing that is true and
+ * actionable, and it says the FORBIDDEN diagnosis too, because a stale cache entry is a trap that looks like evidence.
+ */
+export const NO_SIDECAR_INSTRUCTION = [
+  "## Your browser",
+  "",
+  "You have NO UI sidecar in this session, so `mcp__pi_central_sidecar__*` does not exist and you cannot capture or",
+  "probe a page. This is a normal state, not a fault: the browser is per session and this one was started without it.",
+  "",
+  "- To get one, the reader ticks **Preview its work in a browser** in Settings, or the checkbox in the directory",
+  "  picker, and starts a NEW session. A running session cannot gain one.",
+  "- Do NOT investigate this. `mcp({})`, `mcp-adapter.json`, `mcp-cache.json` and your own environment will",
+  "  suggest several explanations -- including a STALE \`pi_central_sidecar\` tool cache from an earlier session, which",
+  "  is not evidence that the server is configured in this one. The answer is above, so report it and continue.",
+  "- Without a browser, verify rendering by other means: read the code, ask the reader, or run whatever the project",
+  "  already has for tests.",
+].join("\n");
+
+/**
+ * The one sentence a reader sees when a session asked for a browser and did not get one.
+ *
+ * A FAULT, not a setting, and it says so: the other reason to have no browser is not asking, and conflating them sends the
+ * reader looking for a switch they already turned on. The cause is named when it is known, because "it failed" without one
+ * is what sent a measured session to `mcp-adapter.json` and `mcp-cache.json` for an explanation.
+ */
+export function sidecarFailureWarning(cause: string): string {
+  return (
+    `No session browser: ${cause}. This is a fault rather than a setting — sessions here get one normally, so the ` +
+    "orchestrator's log has the detail. This session cannot capture a page."
+  );
+}
+
+export function sidecarPromptArgs(
+  handle: SidecarHandle | undefined,
+  cwd?: string,
+  offered = false,
+): string[] {
+  // A session without a browser is TOLD it has none, because silence produced a whole turn of investigation. Only when
+  // the installation OFFERS the capability: on a machine with no browser configured, a paragraph about a feature the
+  // reader never had is noise in every session's prompt, and the orchestrator says so once at startup instead.
+  if (handle === undefined) return offered ? ["--append-system-prompt", NO_SIDECAR_INSTRUCTION] : [];
   return [
     "--append-system-prompt",
     sidecarInstruction(handle.devPort, cwd === undefined ? false : isPiCentralCheckout(cwd)),

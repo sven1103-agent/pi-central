@@ -156,6 +156,17 @@ through a fixed verb set over CDP, with no new shipped dependency.**
     taught that `false` means "no browser"; this line dropped the `false` first. Found by following one click from the
     dialog to the wire, not by testing either end, which is the lesson: a value can be correct at both ends of a
     path and absent in the middle.
+15e. **"The sidecar started" must be falsifiable, and a session with no browser is told so.** Two defects behind one
+    report. First, `ready` was a race between the port and `exited` with `Promise.resolve(port)` as one arm, so it resolved
+    on a microtask and could never say no: measured, a sidecar with a safehouse path that does not exist still resolved.
+    Six tests asserted `sidecarOrigin` off that lie, against a fixture whose safehouse did not exist either, so the whole
+    integration surface was passing on a spawn that always failed. `ready` now resolves only on the sidecar's own
+    `listening on 127.0.0.1:<port>` line and rejects otherwise; `sidecarOrigin` is set when that announcement arrives, so
+    a session never claims a browser it does not have. Second, silence: a session started without a browser was told
+    nothing, so it read `mcp-adapter.json` and a stale `mcp-cache.json` entry and reported "the sidecar isn't registered"
+    — true and useless. `sidecarPromptArgs` now appends `NO_SIDECAR_INSTRUCTION` when the installation OFFERS the
+    capability and the session did not get one, naming the stale cache as the trap it is. A genuine spawn failure becomes
+    a session warning, where the other "this will not work" facts live, rather than a log line nobody reads.
 15b. **A session's browser is visible in the rail.** `LiveSession.sidecarOrigin` renders as `browser :48005` on the
     row's metrics line: a sidecar is a process and a port per session, and its presence was otherwise observable only if
     an agent happened to call a tool. The port is shown because two sessions on different ports is the mechanism keeping

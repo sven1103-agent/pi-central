@@ -28,6 +28,7 @@ import {
   pickDevPort,
   reapDevPort,
   removeSidecarState,
+  sidecarFailureWarning,
   sidecarPromptArgs,
   spawnSidecar,
   type SidecarHandle,
@@ -376,6 +377,17 @@ export class Supervisor extends EventEmitter {
     return this.#open.list();
   }
 
+  /**
+   * The sidecar handle a session currently holds, if any.
+   *
+   * Exported for the one question a test must ask and the UI cannot: "is this session's browser still considered live?"
+   * A session can report `sidecarOrigin` from the moment it started, so that field alone cannot tell a browser that is
+   * running from one that died before it listened.
+   */
+  sidecarFor(id: string): SidecarHandle | undefined {
+    return this.#sidecars.get(id);
+  }
+
   list(): LiveSession[] {
     return [...this.#sessions.values()];
   }
@@ -637,9 +649,18 @@ export class Supervisor extends EventEmitter {
         : (input.sidecarPort ??
           this.#config.sidecarPort ??
           (this.#config.sidecar === true || input.sidecar === true ? this.#assignDevPort(input.id) : undefined));
-    const sidecarHandle =
-      sidecarPort !== undefined && input.mode === "sandboxed"
-        ? this.#startSidecar(input.id, sidecarPort)
+    // WHY there is no sidecar, when the reader asked for one. A spawn failure emitted only a log line, so the session
+    // started with no browser and no reason anywhere a reader or an agent would look -- and a measured session spent a
+    // whole turn diffing mcp-adapter.json, mcp-cache.json and its own environment to conclude "the sidecar isn't
+    // registered", which was true and useless. The message goes on the session's warnings, where the other
+    // "this will not work and here is why" facts already live (issues #25, #28).
+    const wantsSidecar = sidecarPort !== undefined && input.mode === "sandboxed";
+    const sidecarHandle = wantsSidecar ? this.#startSidecar(input.id, sidecarPort) : undefined;
+    // Two ways to have no browser after asking for one: the spawn threw, or it started and died before we looked. Both
+    // are a FAULT, and both used to be silent to the reader and to the agent.
+    const sidecarFailure =
+      wantsSidecar && sidecarHandle === undefined
+        ? sidecarFailureWarning("the process could not be spawned")
         : undefined;
 
     const env = {
@@ -743,6 +764,21 @@ export class Supervisor extends EventEmitter {
     });
 
     /*
+     * A sidecar that died between the spawn and here is NOT a sidecar.
+     *
+     * The spawn is synchronous and the death is not, so the handle exists either way. Handing it on was the defect: Pi
+     * got `--mcp-config` naming a server that would never answer, and the session was told it had a browser. The window
+     * is narrow, but a missing browser or bundle dies immediately, which is exactly the case that matters.
+     *
+     * Read BEFORE the session object, because that object carries `sidecarOrigin` and the warnings.
+     */
+    const maybeSidecar = this.#sidecars.get(input.id);
+    const liveSidecar = maybeSidecar !== undefined && maybeSidecar.failure === undefined ? maybeSidecar : undefined;
+    if (maybeSidecar !== undefined && liveSidecar === undefined) {
+      this.#sidecars.delete(input.id);
+    }
+
+    /*
      * A session that has just spawned is, by construction, current: Pi discovered its resources a moment ago.
      * Recorded HERE because this is the only place that knows the moment — and the toolset check is unusable
      * without it, since "newer than what?" has no answer otherwise (issue #274).
@@ -756,7 +792,13 @@ export class Supervisor extends EventEmitter {
       state: "starting",
       mode: input.mode,
       isolation: policy.isolation,
-      ...(sidecarHandle === undefined ? {} : { sidecarOrigin: sidecarHandle.origin }),
+      /*
+       * NOT set from the handle, which exists before the process has proven anything. It is patched in when the sidecar
+       * announces its port and removed if it dies first, so "this session has a browser" is a fact about a LISTENING
+       * SERVER rather than about a spawn that was attempted.
+       *
+       * The consequence for the rail: the badge appears a second after the row does, which is the correct order.
+       */
       command: describe(policy),
       scratch: isScratch(this.#config, input.cwd),
       messageCount: 0,
@@ -773,6 +815,7 @@ export class Supervisor extends EventEmitter {
       warnings: [
         ...policy.warnings,
         ...capabilities.warnings,
+        ...(sidecarFailure === undefined ? [] : [sidecarFailure]),
         ...(ownInstallationWarning(input.cwd, this.#installationRoot) !== undefined
           ? [ownInstallationWarning(input.cwd, this.#installationRoot)!]
           : []),
@@ -783,7 +826,17 @@ export class Supervisor extends EventEmitter {
     };
     this.#sessions.set(session.id, session);
 
-    const launch = this.#buildLaunch(policy.launch, input.sessionPath, this.#sidecars.get(session.id), input.cwd);
+    /*
+     * Handed to Pi when the spawn has not already failed.
+     *
+     * LIMIT, stated rather than papered over: this decides synchronously and a sidecar that dies one tick later is still
+     * passed here. The session then launches with `--mcp-config` naming a server that never answers, and Pi reports a
+     * dead MCP server rather than a session with no browser. Making it exact means awaiting the announcement before the
+     * spawn, which makes `start` async and ripples through the transport and every caller — a large change for a failure
+     * mode that is already reported (the warning and the log). What is NOT fudged: `sidecarOrigin` is only set when the
+     * sidecar announces, so the session never claims a browser it does not have.
+     */
+    const launch = this.#buildLaunch(policy.launch, input.sessionPath, liveSidecar, input.cwd);
     // The Inspector shows this string, so it has to be the argv that actually runs. It was computed from
     // `policy` before the sidecar existed, which showed a session without `--mcp-config` while the process
     // had one — a display that disagrees with reality in the one place that exists to be truthful (the house
@@ -855,7 +908,9 @@ export class Supervisor extends EventEmitter {
     // BEFORE any subcommand: `pi mcp list --mcp-config X` reports "Unknown option" (Phase 0D measured it,
     // and a probe nearly concluded the flag did not exist because of the ordering).
     extra.push(...mcpConfigArgs(sidecar));
-    extra.push(...sidecarPromptArgs(sidecar, cwd));
+    // `offered` so a session WITHOUT a browser is told it has none only where the installation could have given it
+    // one: on a machine with none configured, a paragraph about a feature the reader never had is noise.
+    extra.push(...sidecarPromptArgs(sidecar, cwd, this.#config.sidecarOffered === true));
     if (sessionPath) extra.push("--session", sessionPath);
     if (extra.length === 0) return launch;
     return { ...launch, args: [...launch.args, ...extra] };
@@ -1513,7 +1568,50 @@ export class Supervisor extends EventEmitter {
         browser: this.#config.browser,
         onLog: (line: string) => this.emit("log", sessionId, line),
       });
+      /*
+       * The handle is only registered once the sidecar has PROVED it can listen.
+       *
+       * `spawnSidecar` returns synchronously and the process may already be dying -- a bad browser path, a bind failure,
+       * a missing bundle. Registering it regardless meant a session was launched with `--mcp-config` and a bearer token
+       * for a server that would never answer, and the failure surfaced much later as a tool error inside the agent, or as
+       * silence. Measured: the reader asked a session to screenshot its dev server and the session spent the turn
+       * discovering that "the sidecar isn't registered".
+       *
+       * Async would be cleaner and it would make `#spawn` async, which ripples into the transport and every test. The
+       * refusal is instead recorded on the handle and read synchronously below, which is the same answer one tick earlier
+       * than an await would give it.
+       */
       this.#sidecars.set(sessionId, handle);
+      // A `.then` on a promise that can reject is an unhandled rejection when it does: the catch below is the handler,
+      // and this must not become a second one that nobody attached to.
+      void handle.ready.then(
+        () => {
+          const session = this.#sessions.get(sessionId);
+          if (session === undefined) return;
+          session.sidecarOrigin = handle.origin;
+          this.#patch(sessionId);
+        },
+        () => {
+          /* handled below */
+        },
+      );
+      void handle.ready.catch((error: unknown) => {
+        handle.failure = (error as Error).message;
+        // Drop it, so the map does not keep claiming a browser that is not there. Identity-checked because a stop racing
+        // this would already have removed it, and re-adding is not possible but deleting someone else's handle is.
+        if (this.#sidecars.get(sessionId) === handle) this.#sidecars.delete(sessionId);
+        // The state goes too: a directory with a fragment, a token and a profile for a process that never ran is noise
+        // left on disk, and `removeSidecarState` is already the one place that knows how to clear it.
+        removeSidecarState(this.#config.stateRoot, sessionId);
+        this.emit("log", sessionId, `no UI sidecar for this session: ${(error as Error).message}`);
+        // And the READER is told, if the session is already up and nothing has said it yet: the warning written at spawn
+        // time could not know this, and two warnings for one absence would read as two faults.
+        const session = this.#sessions.get(sessionId);
+        if (session !== undefined && !session.warnings.some((w) => w.startsWith("No session browser"))) {
+          session.warnings = [...session.warnings, sidecarFailureWarning((error as Error).message)];
+          this.#patch(sessionId);
+        }
+      });
       return handle;
     } catch (error) {
       this.emit("log", sessionId, `no UI sidecar for this session: ${(error as Error).message}`);
@@ -1522,10 +1620,25 @@ export class Supervisor extends EventEmitter {
   }
 
   async #stopSidecar(id: string): Promise<void> {
-    // Only a port Pi Central ASSIGNED is ever in this map, so an explicit or pinned port (someone's real dev server)
-    // cannot be reaped by mistake. See `reapDevPort` for why the port is the handle.
     const assigned = this.#devPorts.get(id);
     this.#devPorts.delete(id);
+    /*
+     * The BROWSER first, then the port.
+     *
+     * `reapDevPort` signals whoever holds the port, and until the sidecar is gone that includes the sidecar's own
+     * control socket and its renderer's egress target. Reaping first therefore reaped nothing of the reader's and left
+     * the stray server -- measured as a test that passed alone and failed inside the file, because whether the sidecar
+     * still held the port depended on how fast it had started.
+     */
+    const sidecar = this.#sidecars.get(id);
+    if (sidecar !== undefined) {
+      this.#sidecars.delete(id);
+      try {
+        await sidecar.stop();
+      } catch (error) {
+        this.emit("log", id, `sidecar teardown: ${(error as Error).message}`);
+      }
+    }
     if (assigned !== undefined) {
       const reaped = reapDevPort(assigned);
       if (reaped.length > 0) this.emit("log", id, `stopped ${reaped.length} dev server(s) left on port ${assigned}`);
@@ -1534,14 +1647,6 @@ export class Supervisor extends EventEmitter {
     // <state>/sidecars/ that nothing would ever read again, each holding a fragment pinning a port and a config naming
     // a token from a previous launch. Only for an assigned port: a hand-configured one is the reader's own.
     if (assigned !== undefined) removeSidecarState(this.#config.stateRoot, id);
-    const sidecar = this.#sidecars.get(id);
-    if (sidecar === undefined) return;
-    this.#sidecars.delete(id);
-    try {
-      await sidecar.stop();
-    } catch (error) {
-      this.emit("log", id, `sidecar teardown: ${(error as Error).message}`);
-    }
   }
 
   /**
