@@ -566,3 +566,21 @@ test("removing sidecar state is scoped to one session, and survives a directory 
   assert.equal(removeSidecarState(state, "s1"), true);
   assert.equal(removeSidecarState(state, "never-existed"), true);
 });
+
+test("a scratch session gets no browser, even with the feature on", () => {
+  if (skip) return console.log(skip);
+  // ADR-0018's verification table states this and nothing asserted it. A scratch session runs in the state root, not in a
+  // directory the reader opened, so there is no dev server to serve and no port to confine it to. The gate is `mode`,
+  // which is right, but "right and untested" is the shape this repository's norms are meant to catch.
+  const state = join(root as string, "scratch-mode");
+  const app = new Supervisor(config({ sidecar: true, stateRoot: state }) as never, { rememberOpenSessions: false });
+  app.on("error", () => {});
+  app.on("log", () => {});
+  const scratch = app.start({ mode: "scratch" });
+  assert.ok(scratch.ok);
+  if (!scratch.ok) return;
+  assert.equal(scratch.session.sidecarOrigin, undefined, "no browser on a scratch session");
+  assert.ok(!scratch.session.command.includes("--mcp-config"), "and no MCP config offered to it");
+  assert.ok(!existsSync(join(state, "sidecars", scratch.session.id)), "and no state written for it");
+  return app.stopAll().then(() => undefined);
+});

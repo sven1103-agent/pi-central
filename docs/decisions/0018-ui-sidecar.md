@@ -233,15 +233,25 @@ anything on a second machine.
 
 ## Verification
 
-| Criterion | Class | How |
+| Criterion | Class | Where it is proven |
 |---|---|---|
-| A session renders its dev server with no human action | `verified/manual` | one run, the PNG inline |
-| `file://`, `chrome://`, an unregistered origin refused | `verified/auto` | the request path, asserting the refusal |
-| A hostile client cannot widen what is reachable | `verified/auto` | attempt the widened call, read the refusal |
-| The sidecar dies with its session | `verified/auto` | `kill -9` the orchestrator; no browser, no port |
-| A scratch session spawns nothing | `verified/auto` | the verb's answer, and the process count |
-| `probe` names the offending selector from JSON alone | `verified/manual` | one overflowed render |
-| Egress is confined to one port | `verified/manual` | a second loopback port returns `EPERM` |
+| A session renders its dev server with no human action | **verified/manual** | one real run, the PNG inline — Checkpoint B, 5/5 |
+| `file://`, `chrome://`, `data:`, `javascript:` refused before the origin is consulted | verified/auto | `sidecar-control.test.ts`, "refused before the origin is even consulted" |
+| A registered origin cannot vouch for a longer loopback URL, nor a host whose *text* starts with it | verified/auto | `sidecar-control.test.ts`, both prefix tests |
+| A non-loopback host is refused by the loopback check, an unregistered port by the origin check | verified/auto | `sidecar-control.test.ts`, two tests, each naming WHICH check |
+| No verb accepts a field that could smuggle a CDP method or a script | verified/auto | `sidecar-control.test.ts`, "the verb set is closed" + the smuggling test |
+| `probe` takes a choice of checks, never an assertion to run | verified/auto | `sidecar-control.test.ts`, and the verb's own doc comment |
+| `probe` names the offending selector from JSON alone | **verified/manual** | one overflowed render: the 720px overflow was measured independently |
+| Egress is confined to one port | **verified/manual** | a second loopback port returns `EPERM` — `escape-probe.mjs`, in a plain terminal |
+| The internet is unreachable from a session | **verified/manual** | inside: `Could not resolve host: update.googleapis.com`; outside: HTTP 404 for the same request |
+| The sidecar dies with its session's process | verified/auto | `sidecar-session.test.ts`, on every path that ends a session |
+| The sidecar's config, policy and profile are REMOVED when the session stops | verified/auto | `sidecar-session.test.ts`, "removes its sidecar's state" |
+| A session that did not ask for a browser gets none, and an unticked box outranks the default | verified/auto | `sidecar-session.test.ts`, the opt-out test |
+| Closing the sidecar's stdin takes it down; stopping twice is harmless | verified/auto | `sidecar-supervise.test.ts` |
+| `--mcp-config` precedes any subcommand | verified/auto | `sidecar-supervise.test.ts`, pinned positionally after the third occurrence |
+| The MCP config is `0600`, under the state root, outside `~/.pi` | verified/auto | `sidecar-supervise.test.ts` |
+| A wrong, absent, prefixed or other-session token is a 401; a positive control is a 200 | verified/auto | `sidecar-server.test.ts`, real processes |
+| The browser is visible in the rail while it runs | verified/auto | `sidecar-gate.test.mjs` |
 
 CI has no `sandbox-exec` (C10), so everything touching a real policy runs in a plain terminal. The harnesses
 stay under `spikes/ui-sidecar/harness/`: a spike is not a test, and production assertions belong beside the
