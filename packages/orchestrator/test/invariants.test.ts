@@ -42,25 +42,76 @@ test("the orchestrator imports no Pi runtime value -- only `import type` (ADR-00
   assert.deepEqual(offenders, [], `value imports of Pi found:\n${offenders.join("\n")}`);
 });
 
-test("Safehouse argv is assembled in exactly one module (ADR-0002)", () => {
-  // If a second call site appears, "every session's grant set is derived from one function"
-  // stops being true.
+test("Safehouse argv is assembled in exactly two modules, one per sandbox kind (ADR-0002, ADR-0015)", () => {
+  // If a third call site appears, "every session's grant set is derived from one function" stops being true.
+  //
+  // The second entry is deliberate and narrow: ADR-0018 adds a sidecar that is a SIBLING sandbox, not a
+  // session (C1 makes nesting impossible). It is a separate assembler precisely so it cannot inherit a
+  // session's grants — it takes no `cwd`, has a constant feature set, and renders its fragment from the
+  // shared denies. The pairing is asserted below rather than left to a comment.
   const builders = files.filter((file) => {
     const text = readFileSync(file, "utf8");
     return text.includes('"--workdir"');
   });
   assert.deepEqual(
-    builders.map((f) => relative(SRC, f)),
-    ["policy.ts"],
-    "Safehouse argv must only be assembled in policy.ts",
+    builders.map((f) => relative(SRC, f)).sort(),
+    ["policy.ts", "sidecar-policy.ts"],
+    "Safehouse argv must be assembled only by the session assembler and the sidecar assembler",
   );
 });
 
-test("the orchestrator never passes --add-dirs (ADR-0002)", () => {
+test("the two assemblers cannot produce each other's argv (ADR-0015)", () => {
+  // The risk a second assembler introduces is not duplication, it is INHERITANCE: a helper shared by both
+  // would let a sidecar grant reach a session or a session's workdir reach the renderer. So each module
+  // must name only its own concerns.
+  // Comments stripped first. C20 records this defect: a guard string that also appears in the comment
+  // explaining the guard makes the assertion fire on correct code (and, worse, can make it pass on broken
+  // code). "the sidecar must not borrow the session assembler" matched the prose saying so.
+  const code = (file: string): string =>
+    readFileSync(join(SRC, file), "utf8")
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("*") && !line.trimStart().startsWith("//"))
+      .join("\n");
+  const session = code("policy.ts");
+  const sidecar = code("sidecar-policy.ts");
+
+  // A session can never be given a Chromium feature (see FORBIDDEN_ENABLE, which now closes them).
+  assert.match(session, /playwright-chrome/, "policy.ts must name the browser features it refuses");
+  // The sidecar never reads a workdir from its caller: no `cwd` in its spec, no `--workdir` argument value
+  // derived from one. Asserted structurally — the spec has no such field.
+  assert.ok(!/cwd\??:\s*string/.test(sidecar), "the sidecar spec must have no cwd parameter");
+  assert.ok(!sidecar.includes("composePolicy"), "the sidecar must not borrow the session assembler");
+  assert.ok(!session.includes("composeSidecarPolicy"), "a session must not borrow the sidecar assembler");
+});
+
+test("a SESSION is never given --add-dirs or --add-dirs-ro (ADR-0002)", () => {
+  // The original assertion was a bare substring check over every source file, so it could not tell
+  // `--add-dirs` (read-WRITE) from `--add-dirs-ro` (read-only) and it fired the moment the sidecar needed a
+  // read-only grant for its own code. Fixing it by loosening the pattern would have lost the protection; this
+  // fixes it by asking the right question.
+  //
+  // The rule ADR-0002 states is about SESSIONS: a session's grant set derives from its workdir, and a
+  // hand-added directory is exactly the union that ADR exists to prevent. A sidecar is a sibling with a fixed,
+  // narrow purpose and no model in it, and it is the only assembler allowed the read-only form.
+  const session = readFileSync(join(SRC, "policy.ts"), "utf8");
+  for (const flag of ["--add-dirs", "--add-dirs-ro"]) {
+    assert.ok(!session.includes(flag), `policy.ts must not reference ${flag}`);
+  }
+
+  // Everywhere else, the read-WRITE form stays forbidden outright.
   for (const file of files) {
     const text = readFileSync(file, "utf8");
-    assert.ok(!text.includes("--add-dirs"), `${relative(SRC, file)} references --add-dirs`);
+    const name = relative(SRC, file);
+    assert.ok(!/--add-dirs(?!-ro)/.test(text), `${name} references --add-dirs (read-write)`);
   }
+
+  // And the read-only form may appear ONLY in the sidecar assembler, which grants its own code.
+  const roUsers = files.filter((file) => readFileSync(file, "utf8").includes("--add-dirs-ro"));
+  assert.deepEqual(
+    roUsers.map((file) => relative(SRC, file)).sort(),
+    ["sidecar-policy.ts"],
+    "only the sidecar may take a read-only extra directory",
+  );
 });
 
 test("wide-read is refused, never enabled", () => {
@@ -75,12 +126,18 @@ test("no source file uses shell interpolation for a spawn (fixed binaries only)"
     const name = relative(SRC, file);
     assert.ok(!text.includes("shell: true"), `${name} uses shell: true`);
 
-    // Match the *child_process* calls, not `RegExp.prototype.exec`. A bare substring check
-    // for "exec(" also fires on `/pattern/.exec(line)`, which is a regex match with no shell
-    // and no subprocess, so it would be a false positive that trains people to ignore this
-    // test. Scan the import binding plus call sites instead.
+    // Match the *child_process* calls, not `RegExp.prototype.exec`. A bare substring check for "exec("
+    // also fires on `/pattern/.exec(line)`, which is a regex match with no shell and no subprocess, so it
+    // would be a false positive that trains people to ignore this test.
+    //
+    // That paragraph was here and the check still had the bug it described: `\bexec(...)` matches
+    // `/rgba?(...)/.exec(c)`, and it fired on the contrast measurement the moment one was written in a file
+    // that also imports child_process. The call must be a STATEMENT-level import binding — i.e. preceded by
+    // nothing that makes it a method call — so a leading `.` excludes `.exec(` and `x.exec(`.
+    const importsChildProcess = /from "node:child_process"/.test(text);
+    const shellCall = /(?<![.\w])exec(File|FileSync|Sync)?\s*\(/.test(text);
     assert.ok(
-      !/from "node:child_process"/.test(text) || !/\bexec(File|Sync)?\s*\(/.test(text),
+      !(importsChildProcess && shellCall),
       `${name} uses a child_process exec call; spawn a fixed binary with spawn() instead`,
     );
   }

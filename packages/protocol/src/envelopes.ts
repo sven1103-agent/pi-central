@@ -72,6 +72,14 @@ export interface LiveSession {
   mode: "sandboxed" | "direct";
   /** Human-readable description of the isolation actually in force. */
   isolation: string;
+  /**
+   * The dev-server address this session's UI sidecar can see, when it has one (ADR-0018).
+   *
+   * The ORIGIN rather than the port, because the sidecar serves exactly one and the session was told which: a
+   * reader looking at a session that cannot see their preview needs the address that would work, not a number
+   * they have to reassemble. Absent for a session with no browser.
+   */
+  sidecarOrigin?: string | undefined;
   /** The exact command line, for display. Never executed verbatim from here. */
   command: string;
   scratch: boolean;
@@ -233,7 +241,27 @@ export interface ModelOption {
 /** Commands the UI may send. A closed union — the UI cannot name an arbitrary operation. */
 export type Control =
   | { kind: "list" }
-  | { kind: "start"; cwd?: string; name?: string; mode?: "sandboxed" | "direct" }
+  | {
+      kind: "start";
+      cwd?: string;
+      name?: string;
+      mode?: "sandboxed" | "direct";
+      /**
+       * The dev-server port this session's UI sidecar may reach, if any (ADR-0018).
+       *
+       * Per SESSION rather than per orchestrator, because the fragment pins egress to exactly one port and a
+       * fleet has more than one dev server. It was an environment variable first, and that made testing a
+       * single session require arming a whole app — which is a design smell, not a convenience problem.
+       */
+      sidecarPort?: number;
+      /**
+       * Give this session a UI sidecar on a port Pi Central assigns (ADR-0018 §14).
+       *
+       * An explicit `sidecarPort` still wins, and this cannot grant the capability where it is not offered — the
+       * orchestrator decides that, so a client cannot turn a browser on for a machine that has none.
+       */
+      sidecar?: boolean;
+    }
   /**
    * Re-spawn a session that FAILED, in the directory it already had (issue #11).
    *
@@ -438,7 +466,15 @@ export type Control =
    * a question it was not asked.
    */
   | { kind: "install" }
-  | { kind: "resume"; path: string; mode?: "sandboxed" | "direct" };
+  /**
+   * Reopen a recorded session in its own directory.
+   *
+   * `sidecar` is the same three-valued answer `start` takes, and it was missing here first: resuming a session produced
+   * one with no browser regardless of the reader's switch, so a reader who turned the feature on and reopened yesterday's
+   * work got a session that could not see its own dev server -- and, because it was also told nothing, one that went
+   * looking for why. Resumed sessions are the common case after a restart, which is when it hurt most.
+   */
+  | { kind: "resume"; path: string; mode?: "sandboxed" | "direct"; sidecar?: boolean };
 
 /**
  * One image travelling on a prompt, from the UI to Pi.
@@ -551,6 +587,17 @@ export interface InstallFacts {
    * identity it was loaded from. `undefined` when no UI is served (`--no-ui`).
    */
   ui?: ServedUiIdentity | undefined;
+  /**
+   * The browser a session sidecar would drive (ADR-0018 §15c).
+   *
+   * Optional, and by the same convention as `ui` and `keychain`: an older orchestrator omits it and the settings
+   * surface renders nothing rather than inventing a state.
+   *
+   * Why it is here at all: the switch that turns this feature on has to say WHICH browser it will drive, and whether
+   * that browser is actually present — otherwise a reader turns it on, gets a session that cannot capture, and has no
+   * way to see that the path was the problem. It is also the only place the path is visible from inside the app.
+   */
+  sidecar?: { browser: string; browserExists: boolean } | undefined;
 }
 
 /**
@@ -598,6 +645,26 @@ export type Event =
        * breaking change to fix a cosmetic one.
        */
       install?: InstallFacts | undefined;
+      /**
+       * Whether the session picker should offer a UI sidecar (ADR-0018 §15).
+       *
+       * A property of the INSTALLATION, not of a session, so it belongs with the other installation facts: a machine
+       * with no browser configured must not be offered one, and offering it there would turn "capability missing"
+       * into "capability present and broken". Absent means no, which is also what an older orchestrator means.
+       *
+       * NO version bump, by the same rule the `install` field above follows: an absent optional field is ignored by
+       * both sides, and the absent case is a tested state (the store defaults to "not offered"). Bumping would fail
+       * `wire-surface.test.ts`, whose whole point is that a version moves only with the set of KINDS.
+       */
+      sidecarOffered?: boolean | undefined;
+      /**
+       * Whether a new session gets a browser when the reader expresses no preference.
+       *
+       * Separate from `sidecarOffered` and it is not redundancy: "may I offer this" and "is it on unless you say no"
+       * are different questions, and the checkbox needs the second to start in the right state. Measured: the box
+       * started unticked while the default gave a browser anyway, so the control contradicted the outcome.
+       */
+      sidecarDefault?: boolean | undefined;
       /** True history total, as distinct from the length of `history`. */
       historyTotal: number;
       /**

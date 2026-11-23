@@ -14,7 +14,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { describeBuiltUi, explainStartupError } from "../src/startup-error.ts";
+import { describeBuiltUi, describeSidecar, explainStartupError } from "../src/startup-error.ts";
 
 test("a port collision explains the second-server case, which is the one that matters here", () => {
   // `EADDRINUSE` on a local tool has exactly one common cause, and it is the cause that also explains
@@ -70,4 +70,34 @@ test("the startup log names the served bundle, so 'am I current?' needs no curl"
 test("an unreadable UI directory is reported as such rather than throwing", () => {
   // A log line must never be able to fail a start.
   assert.equal(describeBuiltUi("/definitely/not/here"), "(unreadable)");
+});
+
+test("the startup line states whether a session browser is offered, and refuses to overclaim", () => {
+  // Measured cost of not having this line: "Pi reports 0 servers configured" could mean the config was never written, the
+  // token was wrong, the port was elsewhere, or the file was unreadable -- and telling those apart needed a filesystem
+  // inspection on the machine. Every other confusion in this stretch was resolved by making a value visible.
+  assert.match(describeSidecar({ offered: false, browser: "/b", browserExists: true }), /not offered/);
+  // Offered with no browser is a BROKEN configuration. Saying merely "offered" there would make the one line meant to
+  // explain the sidecar the one line that lies about it.
+  const unusable = describeSidecar({ offered: true, browser: "/nowhere/chrome", browserExists: false });
+  assert.match(unusable, /UNSABLE/);
+  assert.match(unusable, /\/nowhere\/chrome/, "and names the path it checked");
+  assert.match(describeSidecar({ offered: true, browser: "/b", browserExists: true }), /offered, browser \/b/);
+});
+
+test("the describeSidecar advice names a route the reader can actually reach", () => {
+  /*
+   * Measured: this line said `not offered (set PI_CENTRAL_SIDECAR=1 to offer it per session)` and ONLY that, for several
+   * commits after the in-app switch existed. A dock PWA or a Finder-launched .app inherits no shell environment, so the
+   * advice told the reader to do the one thing the fix existed to stop requiring.
+   *
+   * Asserted on the message rather than on a run, because the defect is a stale sentence: right about the mechanism, wrong
+   * about the reader.
+   */
+  const line = describeSidecar({ offered: false, browser: "/Applications/Google Chrome.app/x", browserExists: false });
+  assert.match(line, /not offered/, "the state is still named plainly");
+  assert.match(line, /PI_CENTRAL_BROWSER/, "the cause is nameable: no browser was found");
+  assert.match(line, /Settings/, "and the fix a reader can reach without a terminal");
+  // Not a ban on the variable -- a scripted launch still uses it -- but it must not be the ONLY advice.
+  assert.ok(!line.includes("(set PI_CENTRAL_SIDECAR=1"), "the env var is not the sole instruction");
 });

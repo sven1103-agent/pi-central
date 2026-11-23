@@ -1,0 +1,16 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>sidecar phase 0</title>
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { width: 800px; height: 400px; background: #0b3d91; color: #fff;
+         font: 600 40px/1.2 -apple-system, system-ui, sans-serif; }
+  #ok { position: absolute; top: 24px; left: 24px; }
+  #swatch { position: absolute; top: 140px; left: 24px; width: 240px; height: 120px; background: #ff8a00; }
+  /* Deliberate horizontal overflow: the probe must be able to find this by measurement,
+     not by knowing the selector. */
+  #wide { position: absolute; top: 300px; left: 24px; width: 2000px; height: 40px; background: #30d158; }
+</style>
+<div id="ok">sidecar phase 0</div>
+<div id="swatch"></div>
+<div id="wide"></div>

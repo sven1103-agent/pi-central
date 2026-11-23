@@ -65,6 +65,23 @@ export interface FragmentOptions {
   keychain?: boolean;
   /** The agent keychain to grant, when `keychain` is on. */
   keychainPath?: string;
+  /**
+   * The directory holding this session's UI sidecar config (ADR-0018).
+   *
+   * Pi is launched with `--mcp-config <stateRoot>/sidecars/<id>/mcp.json`, and that path is OUTSIDE the session's
+   * workdir. Measured on a real machine: the file existed and named the right URL, the sidecar was listening and
+   * answering 401 to unauthenticated requests, and Pi reported **0 servers configured** -- because opening the file it
+   * had been told about was a denied read. A denied read looks exactly like a missing file from Pi's side, which is the
+   * same deceptive shape as the sidecar's own `Path does not exist` launch failure.
+   *
+   * Read-only, and `subpath` on the directory rather than the file: Pi re-reads the config when a tool is called, and a
+   * literal grant on one filename would break the moment the layout gained a second file.
+   *
+   * Bounded: the directory holds one JSON file naming a loopback URL and a token VARIABLE. The token itself is not in
+   * the file (it is interpolated from the environment), so a session that reads this learns nothing it can use against
+   * another sidecar -- and the origin it names is already an address the session can reach anyway.
+   */
+  sidecarConfigDir?: string;
 }
 
 /**
@@ -195,7 +212,7 @@ const HOST_DENIES: { comment: string[]; rules: string[] }[] = [
  * diffed to detect drift (ADR-0010 §5, the drift badge).
  */
 export function renderPolicyFragment(options: FragmentOptions = {}): string {
-  const { agentRoot, keychain = false, keychainPath } = options;
+  const { agentRoot, keychain = false, keychainPath, sidecarConfigDir } = options;
   if (agentRoot !== undefined && !agentRoot.startsWith("/")) {
     throw new Error(`agent root must be an absolute path: ${JSON.stringify(agentRoot)}`);
   }
@@ -221,10 +238,7 @@ export function renderPolicyFragment(options: FragmentOptions = {}): string {
     "",
   ];
 
-  for (const block of HOST_DENIES) {
-    out.push(...block.comment.map((line) => (line === "" ? ";;" : `;; ${line}`)));
-    out.push(...block.rules, "");
-  }
+  out.push(...renderHostDenies());
 
   // --- The agent's own credentials -------------------------------------------------------
   // Placed after the host denies: the same `gitconfig`/`gh` names exist under both roots, and
@@ -246,6 +260,25 @@ export function renderPolicyFragment(options: FragmentOptions = {}): string {
       "(allow file-read* file-write*",
       `    (subpath ${JSON.stringify(agentRoot)})`,
       ")",
+      "",
+    );
+  }
+
+  // --- The UI sidecar's config (ADR-0018) ------------------------------------------------
+  //
+  // Pi opens this file at launch and re-reads it per tool call. It lives outside the workdir, so without this grant the
+  // open is DENIED and Pi reports "0 servers configured" -- the sidecar is running, the token is right, and the only
+  // symptom is an absence.
+  if (sidecarConfigDir !== undefined) {
+    out.push(
+      ";; --- The UI sidecar's config -----------------------------------------------",
+      ";; Read-only. Pi is told --mcp-config <this dir>/mcp.json, which is outside the workdir.",
+      ";; Ancestor literals for the same reason the agent root needs them: SBPL requires read",
+      ";; access to every path component, and Safehouse emits no ancestors for a non-workdir path.",
+      "(allow file-read*",
+      ...ancestorLiterals(sidecarConfigDir),
+      ")",
+      `(allow file-read* (subpath ${JSON.stringify(sidecarConfigDir)}))`,
       "",
     );
   }
@@ -284,6 +317,31 @@ export function renderPolicyFragment(options: FragmentOptions = {}): string {
   }
 
   return out.join("\n");
+}
+
+/**
+ * The host-credential denies alone — the part every sandboxed process needs.
+ *
+ * Exported separately because the UI sidecar needs exactly this block and nothing else
+ * (ADR-0018). It is a **separate entry point, not a copy**: the sidecar renders its fragment with
+ * this function, so a name added to `HOST_DENIES` reaches the renderer in the same commit that
+ * reaches a session.
+ *
+ * That is not tidiness, it is the defect the Phase 0C spike found by hand. A four-name deny list
+ * left `~/.gitconfig` readable while reporting the other three refused — C15c's rule that the unit
+ * of a path boundary is the directory and not a list of names under it. A second hand-written list
+ * would reproduce it whenever the first one changed.
+ *
+ * Deliberately **no** `agentRoot` grant and **no** keychain grant: the renderer is not an agent and
+ * resolves no provider key (ADR-0010, ADR-0015 §9).
+ */
+export function renderHostDenies(): string[] {
+  const out: string[] = [];
+  for (const block of HOST_DENIES) {
+    out.push(...block.comment.map((line) => (line === "" ? ";;" : `;; ${line}`)));
+    out.push(...block.rules, "");
+  }
+  return out;
 }
 
 /** Write the fragment into the state root, returning its path. Deterministic content. */

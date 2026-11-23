@@ -16,6 +16,7 @@
  * `~/.local/share/pi-central/workspaces/` satisfies D-5: it is under `$HOME` as a path but
  * is not granted by any base profile, and it is not a tmp or agent dir.
  */
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolveInstallationRoot } from "./installation-root.ts";
 import { join, resolve, sep } from "node:path";
@@ -80,6 +81,44 @@ export interface Config {
    * configuration **actually** is, rather than from an assumption (C13).
    */
   providerAgentDir: string;
+  /**
+   * The dev-server port a session's UI sidecar is allowed to reach, or `undefined` for no sidecar
+   * (ADR-0015).
+   *
+   * A **port, not an address**: SBPL cannot express `127.0.0.1:*` at all (measured — "host must be `*` or
+   * `localhost`"), so `localhost:<port>` is the only narrow egress rule and one port is all a fragment can
+   * pin.
+   *
+   * There is deliberately **no auto-grant**. An earlier draft granted on "the workdir sniffs as a frontend
+   * project", which is C15c's shape: a decision keyed on an input that appears nowhere in the policy. Instead
+   * the port is configuration, and absent configuration means the session gets no browser. The product answer
+   * is a gate at session creation (offered when the project looks like a dev server), which is a UI slice and
+   * not a policy one.
+   */
+  sidecarPort: number | undefined;
+  /**
+   * Give every sandboxed session a sidecar, on a dev port Pi Central assigns it (ADR-0018 §14).
+   *
+   * Optional so existing configurations keep meaning "no sidecar". An explicit `sidecarPort` still wins, which is
+   * what a harness or a manual run wants; a single global port is only right for a single session.
+   */
+  sidecar?: boolean;
+  /**
+   * Offer the UI sidecar in the session picker, whatever the default is.
+   *
+   * Separate from `sidecar` because they answer different questions. `sidecar` is the app's default for sessions
+   * started from the header; this decides whether a reader CHOOSING a directory is shown the choice at all. A
+   * capability nobody can find is not a product, and a capability offered with no way to supply the browser is not
+   * either — so the gate is this flag AND a resolved browser.
+   */
+  sidecarOffered?: boolean;
+  /**
+   * The browser the sidecar drives, resolved by configuration like `safehouse` and `pi`.
+   *
+   * Not distributed: a renderer is a host tool, and shipping one would add ~344 MB to a package whose only
+   * runtime dependency is `ws`.
+   */
+  browser: string;
 }
 
 /**
@@ -134,7 +173,36 @@ export function defaultConfig(): Config {
     // `installation-root.ts`. `defaultConfig` is the orchestrator's entry point, so resolving here
     // means the answer is the running installation and not whatever a config file claims.
     installationRoot: resolveInstallationRoot(),
+    sidecarPort: parsePort(process.env["PI_CENTRAL_SIDECAR_PORT"]),
+    // The installation's DEFAULT for new sessions. Off unless the environment asks, because a per-session browser is a
+    // process and a port the reader did not ask for. This is only the default: the reader's per-session answer overrides
+    // it either way, and the in-app switch can turn it on from a dock launch that inherits no shell environment.
+    sidecar: process.env["PI_CENTRAL_SIDECAR"] === "1",
+    // CAPABILITY, not a second switch. It was `PI_CENTRAL_SIDECAR === "1"`, which made the env var the only way to offer
+    // the feature at all -- so a dock or .app launch, which inherits no shell environment, could never offer it. Measured
+    // consequence: the advertised way to run this product was the one way it could not be turned on.
+    //
+    // The gate is now what the doc comment always claimed: a browser exists to drive. The reader's DEFAULT for new
+    // sessions is `sidecar`, which they can set in the app.
+    sidecarOffered: existsSync(
+      process.env["PI_CENTRAL_BROWSER"] ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    ),
+    browser:
+      process.env["PI_CENTRAL_BROWSER"] ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   };
+}
+
+/**
+ * Read a port from configuration, or `undefined` for no sidecar.
+ *
+ * A malformed value is `undefined` rather than a throw: the orchestrator must start for a user who typo'd a
+ * variable, and "no browser" is a stated state the Inspector can show. A throw here would make a typo a
+ * launch failure.
+ */
+function parsePort(value: string | undefined): number | undefined {
+  if (value === undefined || value.trim() === "") return undefined;
+  const port = Number(value);
+  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : undefined;
 }
 
 /**

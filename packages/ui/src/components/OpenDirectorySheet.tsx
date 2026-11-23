@@ -53,6 +53,8 @@ export function OpenDirectorySheet({
   onChooserChange,
   onClose,
   onOpen,
+  sidecarOffered,
+  sidecarDefault,
 }: {
   /** Where Pi Central is running from, or `undefined` if it could not be identified (issue #25). */
   installationRoot: string | undefined;
@@ -87,9 +89,35 @@ export function OpenDirectorySheet({
   chooser?: ChooserPrefs | undefined;
   onChooserChange?: ((next: ChooserPrefs) => void) | undefined;
   onClose: () => void;
-  onOpen: (cwd: string) => void;
+  /**
+   * Commit the selection. `sidecar` is the reader's answer to the browser toggle, and it travels with the commit
+   * rather than being a separate request: one dialog, one outcome.
+   */
+  onOpen: (cwd: string, sidecar?: boolean) => void;
+  /**
+   * Whether to offer the browser toggle at all (ADR-0018 §15).
+   *
+   * Off when the installation has no browser configured. Offering a switch that silently does nothing would be worse
+   * than not offering it: the reader would conclude the feature is broken rather than absent.
+   */
+  sidecarOffered?: boolean | undefined;
+  /**
+   * Whether a session gets a browser when the reader expresses no preference.
+   *
+   * The checkbox starts at this value. Measured defect it fixes: the box started UNTICKED while the default supplied a
+   * browser anyway, so the control contradicted the outcome -- unticking it changed nothing, because `false` from an
+   * untouched box was indistinguishable from "no preference".
+   */
+  sidecarDefault?: boolean | undefined;
 }) {
   const [path, setPath] = useState(initialPath);
+  /**
+   * Off by default.
+   *
+   * A browser is a process and a port per session, so it is something the reader asks for rather than something they
+   * discover afterwards. The toggle is only rendered when the installation offers one at all.
+   */
+  const [sidecar, setSidecar] = useState(sidecarDefault === true);
   const inputRef = useRef<HTMLInputElement>(null);
 
   /**
@@ -225,7 +253,7 @@ export function OpenDirectorySheet({
 
   /** Commit the ONE selection. The only place a session is started from this dialog. */
   const commit = () => {
-    if (problem === undefined) onOpen(effectivePath);
+    if (problem === undefined) onOpen(effectivePath, sidecar);
   };
 
   return (
@@ -256,7 +284,8 @@ export function OpenDirectorySheet({
           <DirectoryChooser
             state={places}
             recent={recent}
-            onChooseRecent={(cwd) => onOpen(cwd)}
+            // A recent row commits, so it carries the toggle's current answer too: the reader set it before choosing.
+            onChooseRecent={(cwd) => onOpen(cwd, sidecar)}
             sort={chooser?.sort ?? defaultSort()}
             showHidden={chooser?.showHidden === true}
             onSort={(next) => onChooserChange?.({ ...(chooser ?? defaultChooserPrefs()), sort: next })}
@@ -408,6 +437,38 @@ export function OpenDirectorySheet({
             <button type="button" className="btn btn-ghost" onClick={onClose}>
               Cancel
             </button>
+            {sidecarOffered === true && (
+              /*
+               * Beside Open, because it is part of what will be opened. A checkbox rather than a switch: it reads as
+               * one option of this dialog rather than a setting, and it needs no label of its own beyond the sentence
+               * that says what the session gets.
+               */
+              <label className="sidecar-toggle" title="The session gets a sandboxed browser, so it can open your dev server and check its own work. It reaches that one port and nothing else.">
+                <input
+                  type="checkbox"
+                  checked={sidecar}
+                  onChange={(event) => setSidecar(event.target.checked)}
+                  disabled={problem !== undefined}
+                />
+                {/*
+                  Named for the OUTCOME, not the plumbing.
+
+                  Two earlier versions described infrastructure -- "my dev server", then "its dev server" -- which is a
+                  thing the reader has not started yet and does not say what they get for it. The feature's own point is
+                  that the agent can check its UI work without a human taking screenshots, so the label says that.
+
+                  "Preview" rather than "capture" or "test": it is the verb a frontend toolchain already uses, and it
+                  implies looking rather than asserting, which is what the four verbs do.
+                 */}
+                <span>
+                  Preview its work in a browser
+                  {/* Stated, not implied: when the installation turns this on by default, an already-ticked box is not
+                      an explanation, and a reader who does not want a browser per session needs to know they are opting
+                      OUT of something rather than opting into it. */}
+                  {sidecarDefault === true && <span className="sidecar-default"> (on for new sessions)</span>}
+                </span>
+              </label>
+            )}
             <button type="submit" className="btn btn-primary-sheet" disabled={problem !== undefined}>
               Open
             </button>

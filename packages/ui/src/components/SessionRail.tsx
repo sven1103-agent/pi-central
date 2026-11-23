@@ -13,7 +13,7 @@ import type { LiveSession } from "@pi-central/protocol";
 import { displayName, formatContext, isNearFull, nameLabel, shortenPath, whereLine } from "../format.ts";
 import { stateLabel } from "../store.ts";
 import { groupRows, isRunning, rosterLabel, rowActivity, type RosterRow } from "../roster.ts";
-import { defaultRailPrefs, isFolded, showsRowMetrics, type RailPrefs } from "../rail-prefs.ts";
+import { defaultRailPrefs, isFolded, showsRowMetrics, sidecarBadge, type RailPrefs } from "../rail-prefs.ts";
 import { ContextBar } from "./ContextMeter.tsx";
 
 /**
@@ -628,6 +628,19 @@ function RailRow({
               {formatContext(session.contextPercent)}
             </span>
             {session.pending > 0 && <span>+{session.pending} queued</span>}
+            {/*
+              The browser, when there is one, on the metrics line beside queued work: both answer "is something of mine
+              running". A sidecar is a process and a port that is otherwise invisible until an agent happens to use it.
+              The port is shown because two sessions on different ports is the mechanism keeping them apart.
+            */}
+            {sidecarBadge(session) !== undefined && (
+              <span
+                className="rail-sidecar"
+                title={`This session has a sandboxed browser at ${session.sidecarOrigin ?? ""}`}
+              >
+                {sidecarBadge(session)}
+              </span>
+            )}
             {session.state === "failed" && session.error !== undefined && <span>failed</span>}
           </span>
           {session.warnings.length > 0 && (

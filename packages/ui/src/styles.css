@@ -2931,6 +2931,24 @@ select.btn { font-family: var(--sans); }
 }
 .dialog-body .title { font-size: var(--fs-base); font-weight: 600; margin: 0 0 var(--sp-1); }
 .dialog-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-3); flex-wrap: wrap; }
+/* The browser toggle sits in the action row, pushed away from the buttons so it reads as an OPTION of the dialog
+   rather than as a third action. `margin-left: auto` (not an extra spacer element) is what puts it left of Open
+   while still leaving Open at the right edge, which is where every file dialog puts its outcome. */
+.dialog-actions .sidecar-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+  margin-right: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--dim);
+  cursor: pointer;
+  user-select: none;
+}
+.dialog-actions .sidecar-toggle input { accent-color: var(--accent); cursor: pointer; }
+/* The "on for new sessions" note, quieter than the label it follows: it explains a default rather than naming an action. */
+.dialog-actions .sidecar-default { opacity: 0.75; }
+.dialog-actions .sidecar-toggle:has(input:disabled) { opacity: 0.5; cursor: default; }
 .dialog-body input[type="text"], .dialog-body textarea {
   width: 100%;
   background: var(--bg);
@@ -7131,3 +7149,38 @@ select.btn { font-family: var(--sans); }
  * underlined on hover, so the affordance is truthfully "this is where you are", not "this goes somewhere".
  */
 .chooser-crumb-root { color: var(--dim); }
+
+/* The browser badge on a rail row. Deliberately NOT a chip: a chip reads as isolation state ("Safehouse",
+   "NO ISOLATION"), and this is a fact about what is running. Mono, because it ends in a port number. */
+.rail-sidecar {
+  font-family: var(--mono);
+  font-size: 10px;
+  opacity: 0.85;
+}
+
+/*
+ * A checkbox row with a sentence for a label (ADR-0018 15c).
+ *
+ * Not `.reading-row`: that is a three-column grid built for the two sliders above it (76px label, 1fr control, 44px
+ * value), so a full-sentence label wrapped to four lines in the first column and the control sat in the value column --
+ * which read as a NUMBER FOR the label rather than a switch you can flip. Measured in a real screenshot of Settings.
+ *
+ * Full width instead: control first, label beside it, the way "Show the session list" reads in the section below.
+ */
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+.settings-toggle input { accent-color: var(--accent); cursor: pointer; flex: none; }
+/* The browser path is a FACT, not prose, so it is mono and allowed to wrap mid-token: a path broken at a slash is
+   still readable, a path truncated with an ellipsis is not -- and the path is the whole point of the line. */
+.settings-browser-path, .settings .settings-browser-path {
+  font-family: var(--mono);
+  font-style: normal;
+  word-break: break-all;
+}

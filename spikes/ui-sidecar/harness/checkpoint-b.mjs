@@ -1,0 +1,304 @@
+#!/usr/bin/env node
+/**
+ * Checkpoint B — one command: a real session, a real dev server, a real sidecar.
+ *
+ * Four things had to happen at once for this feature to be testable by hand, and that was the design defect:
+ * the orchestrator had to be armed with a port, a dev server had to be listening on exactly that port, a NEW
+ * session had to be created (existing ones were spawned unarmed), and only then could a prompt do anything.
+ * Four steps, two of them invisible, and the failure mode of every one of them was silence.
+ *
+ * So this drives the Supervisor directly — no Electron, no UI, no clicking, no environment to remember:
+ *
+ *   node checkpoint-b.mjs                 # uses a fixture dev server on 4173
+ *   node checkpoint-b.mjs --port 5173     # or a real project already listening there
+ *   node checkpoint-b.mjs --url http://localhost:5173/   # and a different page
+ *
+ * It prints, in order: whether the sidecar was armed, whether the session saw the tool, and what the tool
+ * answered. Any of those failing is stated where it fails rather than at the end.
+ *
+ * Requires a plain terminal (C1): the session is a sandboxed `safehouse` child, and a nested sandbox cannot
+ * apply a policy.
+ */
+import { spawn } from "node:child_process";
+import { createServer } from "node:http";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO = resolve(HERE, "../../..");
+
+const argv = process.argv.slice(2);
+const opt = (name, fallback) => {
+  const index = argv.indexOf("--" + name);
+  return index === -1 ? fallback : argv[index + 1];
+};
+const PORT = Number(opt("port", "4173"));
+const URL_TO_CAPTURE = opt("url", "http://localhost:" + PORT + "/");
+
+// --session-serves: the harness starts NO server. Pi Central assigns the port, the agent is told it, and the agent
+// has to write a page, serve it from inside its own sandbox and look at it -- the real workflow. Every earlier run
+// used a fixture started outside any sandbox, which proved the sidecar but not that a session can feed it.
+// --ipv6 additionally asks for the server to bind ::1 only, to find out whether "localhost:<port>" covers it.
+const SERVES = argv.includes("--session-serves");
+const IPV6 = argv.includes("--ipv6");
+
+const { defaultConfig } = await import(join(REPO, "packages/orchestrator/src/config.ts"));
+const { Supervisor } = await import(join(REPO, "packages/orchestrator/src/supervisor.ts"));
+
+const results = [];
+const record = (name, pass, detail) => {
+  results.push(pass);
+  console.log((pass ? "PASS" : "FAIL") + "  " + name + (detail ? "  -- " + detail : ""));
+};
+
+// --- 1. A dev server on the pinned port, unless one is already there. ----------------------------
+let fixture;
+const listening = await new Promise((done) => {
+  const probe = createServer();
+  probe.once("error", () => done(true));
+  probe.listen(PORT, () => probe.close(() => done(false)));
+});
+if (SERVES) {
+  console.log("dev server: none started by the harness -- the SESSION must serve its own page");
+} else if (listening) {
+  console.log(`dev server: already listening on :${PORT}`);
+} else {
+  // The Phase 0 fixture: a page with deliberate horizontal overflow, so the verdict has something to say.
+  const page = readFileSync(join(HERE, "page.html"));
+  fixture = createServer((request, response) => {
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    response.end(page);
+  });
+  await new Promise((done) => fixture.listen(PORT, done));
+  console.log(`dev server: started the fixture on :${PORT}`);
+}
+
+// --- 2. A supervisor, with a workspace that is private and a state root that is not /tmp. ---------
+const root = mkdtempSync(join(homedir(), ".pi-central-checkpoint-b-"));
+process.on("exit", () => {
+  try {
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch {
+    // A throwaway under $HOME; a cleanup race must not turn a result into a stack trace.
+  }
+});
+
+const config = {
+  ...defaultConfig(),
+  stateRoot: join(root, "state"),
+  workspaceRoot: join(root, "workspaces"),
+  fragmentDir: join(root, "state", "policy"),
+  // Assigned ports, not a pinned one: a pin from the environment would defeat what this mode tests.
+  ...(SERVES ? { sidecar: true, sidecarPort: undefined } : {}),
+};
+const supervisor = new Supervisor(config, { rememberOpenSessions: false });
+supervisor.on("error", () => {});
+/**
+ * EVERY line the sidecar writes, printed as it arrives.
+ *
+ * The filtered version printed only lines matching /sidecar/, which excluded the sidecar's OWN stderr — so the
+ * one message that named the failure ("Path does not exist: …") was visible only second-hand, inside Pi's
+ * paraphrased "Connection closed (…)" summary. A harness that filters the evidence it exists to collect is
+ * asking the reader to guess.
+ */
+/**
+ * The sidecar's log, with the EXPECTED browser noise collapsed.
+ *
+ * Chrome under `--no-sandbox` fails every macOS integration it probes — crashpad, keychain, dock, the
+ * notification centre, CoreVideo continuations — and says so on stderr, repeatedly. Those lines are not errors
+ * here: they are the profile doing its job. Printed in full they buried the one line that mattered, so the
+ * noise is counted and summarised while everything else is still printed verbatim.
+ *
+ * Deliberately an allow-list of KNOWN noise, not a filter for lines containing "error": a real failure names a
+ * path, a grant or a token, so it does not match these patterns.
+ */
+const NOISE = [
+  /crashpad/i, /SecItemCopyMatching/i, /Keychain lookup failed/i, /bootstrap_check_in/i,
+  /NSNotificationCenter|notification center/i, /dock_plist/i, /Encryption is not available/i,
+  /CVDisplayLinkCreateWithCGDisplay/i, /IOPMAssertionCreate/i, /process_requirement/i,
+  /allocator multiple times/i, /Dropped sandbox-denied path from PATH/i,
+];
+const sidecarLog = [];
+let suppressed = 0;
+supervisor.on("log", (_id, line) => {
+  sidecarLog.push(line);
+  if (NOISE.some((pattern) => pattern.test(line))) {
+    suppressed += 1;
+    return;
+  }
+  console.log("  [sidecar] " + line);
+});
+
+// --- 3. Start a session WITH the port. This is the per-session option: one command, no env arming. ----
+const started = supervisor.start({ cwd: root, mode: "sandboxed", ...(SERVES ? {} : { sidecarPort: PORT }) });
+if (!started.ok) {
+  console.error("could not start a session: " + started.message);
+  process.exit(1);
+}
+const id = started.session.id;
+console.log("session: " + id + " in " + root);
+// The port the supervisor actually PINNED, read from the rendered policy. It is the session's preferred port unless
+// something was already listening there (a dev server a previous run left behind), so computing it here would
+// report the wrong one exactly when it matters.
+const pinnedFragment = join(config.stateRoot, "sidecars", id, "policy", id + ".sb");
+const targetPort = SERVES ? Number(/localhost:(\d+)/.exec(readFileSync(pinnedFragment, "utf8"))?.[1]) : PORT;
+if (SERVES) console.log("assigned dev port: " + targetPort + (IPV6 ? " (the session is asked to bind ::1 only)" : ""));
+
+const configFile = join(config.stateRoot, "sidecars", id, "mcp.json");
+record("the session was armed with a sidecar", existsSync(configFile), configFile);
+record(
+  "the session argv carries --mcp-config",
+  started.session.command.includes("--mcp-config"),
+  "without it Pi never learns the server exists",
+);
+
+// --- 4. Ask the session to use it. ---------------------------------------------------------------
+// The prompt is the product question, not a protocol probe: can the agent see its own UI work?
+const prompt = SERVES
+  ? "In the current directory create index.html: a navy (#0b3d91) page with a white heading 'served by the session' " +
+    "and a green <div> exactly 2000px wide and 40px tall, so the page overflows horizontally. Serve the directory so " +
+    "you can look at it" +
+    (IPV6 ? ", bound to the IPv6 loopback ::1 ONLY (not 127.0.0.1)" : "") +
+    ", then check it with your browser: report what probe finds, and show me a screenshot."
+  : `Call the tool mcp__pi_central_sidecar__capture with url ${URL_TO_CAPTURE}, then tell me what you see. ` +
+    `Do it in a codemode script: \`const r = await tools.mcp__pi_central_sidecar__capture({ url: "${URL_TO_CAPTURE}" }); image(r.content[0]);\`. ` +
+    `If that tool does not exist, say exactly "NO SIDECAR TOOL" and list the mcp__ tools you do have.`;
+// This prompt names the display call on purpose: the checkpoint asks whether the picture CAN reach the model. Whether an
+// agent finds that path unaided is the tool description's job, and the first two runs showed it taking the lossy proxy.
+console.log("\nprompting the session (this makes one model call, and may use your provider key)…\n");
+
+let said = "";
+try {
+  await supervisor.prompt(id, prompt);
+  // Wait for the turn to settle rather than for a fixed time: `agent_settled` is the only event that means
+  // Pi will not continue on its own (C8). The timeout is a backstop, not the mechanism.
+  // Wait for the turn to SETTLE by reading the session state, not by guessing a duration.
+  //
+  // `agent_settled` is the only event that means Pi will not continue on its own (C8), and the supervisor
+  // reflects it in the session state it patches. Reading the authoritative state beats listening for one event
+  // name out of many — the first version of this waited on an "event" channel that does not exist.
+  said = await new Promise((done) => {
+    // 90 s: long enough for a real capture on a slow page, short enough that a hang is reported while the
+    // operator is still watching. The previous bound was three minutes, which is a long time to wait for a
+    // result that is not coming.
+    // The agent writes a page and starts a server in this mode, which takes a few turns.
+    const deadline = Date.now() + (SERVES ? 300_000 : 120_000);
+    // "Idle with a message" is ALSO true the instant the prompt is accepted, before the agent has started its
+    // turn -- the first version of this declared the session settled at once and stopped it mid-turn, so the
+    // capture never ran. A settle is: the session was seen BUSY, and is now idle on two consecutive ticks.
+    let sawBusy = false;
+    let idleTicks = 0;
+    const startedAt = Date.now();
+    const tick = () => {
+      // `get`, not `session`: the accessor is `Supervisor#get`. An earlier draft of this file used a name that
+      // does not exist, and the resulting TypeError was reported as "the prompt was accepted: FAIL" — so the one
+      // line that would have named the mistake was the failing assertion, not a hint.
+      const session = supervisor.get(id);
+      if (session !== undefined && session.state !== "idle") {
+        sawBusy = true;
+        idleTicks = 0;
+      } else if (session !== undefined && sawBusy) {
+        idleTicks += 1;
+      }
+      // Never seen busy after 20 s means the prompt did not start a turn; do not wait the full deadline.
+      if (idleTicks >= 2 || (!sawBusy && Date.now() - startedAt > 20_000)) {
+        done(sawBusy ? "(the session ran a turn and settled)" : "(the session never started a turn)");
+        return;
+      }
+      if (Date.now() > deadline) {
+        // The distinction that matters when this fires: did the sidecar SAY anything? A silent sidecar means the
+        // verb never returned, which is a browser-operation hang rather than a slow page.
+        done("(timed out waiting for the session to settle)");
+        return;
+      }
+      setTimeout(tick, 1000);
+    };
+    tick();
+  });
+} catch (error) {
+  record("the prompt was accepted", false, String(error));
+}
+
+// The transcript is the evidence, so fetch it rather than paraphrasing. `fetchTranscript` is the same call the
+// UI's file viewer makes, so what is printed here is what a reader would see.
+const transcript = await supervisor.fetchTranscript(id).catch(() => undefined);
+// ASSISTANT messages only. The user's prompt contains the literal phrase "NO SIDECAR TOOL", and a reply built from
+// every message matched the instruction I wrote rather than anything the agent said.
+const reply = (transcript?.messages ?? [])
+  .filter((message) => message.role === "assistant")
+  .flatMap((message) => (Array.isArray(message.content) ? message.content : []))
+  .filter((block) => block?.type === "text")
+  .map((block) => String(block.text ?? ""))
+  .join("\n")
+  .trim();
+
+record("the session produced a reply", reply !== "", said);
+if (suppressed > 0) {
+  console.log(`  [sidecar] (${suppressed} expected browser-integration lines suppressed: crashpad, keychain, dock, CoreVideo)`);
+}
+if (reply !== "") {
+  console.log("\n--- the session's reply ---");
+  console.log(reply.slice(0, 1500));
+  // Not a search of the reply for "NO SIDECAR TOOL": the agent quotes the phrase while saying it did NOT use it, and
+  // an earlier assertion failed on exactly that. The fact is whether the agent CALLED the tool.
+  const called = (transcript?.messages ?? [])
+    .filter((message) => message.role === "assistant")
+    .some((message) => (Array.isArray(message.content) ? message.content : []).some(
+      // The call is a CODEMODE script that names the sidecar, not a call to a tool called pi_central_sidecar.
+      (block) => block?.type === "toolCall" && JSON.stringify(block.arguments ?? {}).includes("pi_central_sidecar"),
+    ));
+  record("the agent called the capture tool", called);
+  // The outcome itself, not the model's prose about it: did the capture tool return an IMAGE block? That is the
+  // product question -- an agent seeing its own UI -- and it cannot be satisfied by a reply that merely
+  // mentions the word "screenshot".
+  const images = (transcript?.messages ?? [])
+    .flatMap((message) => (Array.isArray(message.content) ? message.content : []))
+    .filter((block) => block?.type === "image");
+  record(
+    "the capture tool returned an image the agent could see",
+    images.length > 0,
+    images.length > 0 ? images.length + " image block(s), first " + String(images[0].data ?? "").length + " base64 chars" : "no image block anywhere in the transcript",
+  );
+  if (SERVES) {
+    const everything = JSON.stringify(transcript?.messages ?? []);
+    // The agent must have used the port it was ASSIGNED. Anything else would have been refused, but a refusal that
+    // was then worked around would hide that the instruction was ignored.
+    record(
+      "the agent served and looked at the page on its assigned port",
+      everything.includes("localhost:" + targetPort) || everything.includes("127.0.0.1:" + targetPort),
+      "assigned " + targetPort,
+    );
+    // The page is the session's own: only it contains the 2000px bar, so a verdict naming the overflow cannot have
+    // come from any other server on this machine.
+    record(
+      "the probe measured the overflow of the page the session wrote",
+      /horizontal-overflow/.test(everything),
+      "the sidecar reached a server that lives inside the session's sandbox",
+    );
+  }
+if (!called && sidecarLog.length === 0) {
+  // The most useful distinction available at this point: did the sidecar say ANYTHING?
+  console.log("");
+  console.log("  The sidecar wrote nothing at all. That means it never got as far as its own stderr, so the");
+  console.log("  failure is in the LAUNCH — safehouse refusing the policy, or the interpreter not starting.");
+} else if (!called) {
+  console.log("");
+  console.log("  The sidecar DID write the lines above. Those are its own words, not Pi's paraphrase of them.");
+}
+}
+
+await supervisor.stopAll();
+fixture?.close();
+
+const failed = results.filter((pass) => !pass).length;
+console.log("\n" + (results.length - failed) + "/" + results.length + " expectations held");
+if (failed !== 0) {
+  console.log("\nA failure above is one of four things, in this order of likelihood:");
+  console.log("  1. the sidecar spawn failed -- look for a [session log] line naming the reason");
+  console.log("  2. Pi did not read the config -- check --mcp-config in the printed argv");
+  console.log("  3. the browser could not start under the policy -- the session log carries its stderr");
+  console.log("  4. the model ignored the instruction -- the transcript above shows what it did instead");
+}
+process.exit(failed === 0 ? 0 : 1);

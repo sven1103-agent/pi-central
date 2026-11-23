@@ -2,10 +2,19 @@
 /**
  * Build the distributable artifact (issue #52).
  *
- * Produces exactly two things, and nothing else is shipped:
+ * Produces exactly three things, and nothing else is shipped:
  *
- *   bin/pi-central.js   one bundled ESM file: orchestrator + protocol + `ws`
- *   dist/ui/            the built UI, as `vite build` wrote it
+ *   bin/pi-central.js     one bundled ESM file: orchestrator + protocol + `ws`
+ *   bin/pi-central-sidecar.js  the sidecar as its OWN bundle, started as a separate process
+ *   dist/ui/              the built UI, as `vite build` wrote it
+ *
+ * ## Why the sidecar is a second entry and not a `.ts` file
+ *
+ * It runs as a separate process, launched by the orchestrator rather than imported, so bundling it into the
+ * orchestrator would not help: the file it launches has to EXIST in the package. The build used to copy the
+ * TypeScript sources instead, which leaves a published install unable to start a sidecar at all — Node refuses
+ * to strip types under `node_modules` (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`), the same measurement
+ * that made the orchestrator a bundle. Its own bundle is the smallest thing that works.
  *
  * ## Why the orchestrator is BUNDLED rather than compiled file-by-file
  *
@@ -54,7 +63,9 @@ function fail(message) {
 // starts.
 console.log("build-package: building the UI (vite)");
 const { spawnSync } = await import("node:child_process");
-const vite = spawnSync("npm", ["run", "ui:build", "--silent"], {
+// `ui:build:only`, not `ui:build`: the syncing variant would copy `packages/ui/dist` into `dist/ui` and this script
+// then copies it again, which is the same tree onto itself. The sync exists for the DEV loop (`npm run app`).
+const vite = spawnSync("npm", ["run", "ui:build:only", "--silent"], {
   cwd: root,
   stdio: "inherit",
   // `npm` is a shell script on some platforms, so it needs a shell to be found at all.
@@ -117,6 +128,29 @@ await build({
 // running the file straight out of the tarball.
 chmodSync(BIN, 0o755);
 
+// --- 3b. The sidecar, as its own bundle ----------------------------------------------------------
+//
+// A second entry, not an import: the orchestrator SPAWNS it, so the artifact the launch names must exist as a
+// file. Written next to the orchestrator bundle, which is where the supervisor looks (see `sidecarEntry`).
+console.log("build-package: bundling the sidecar");
+const SIDECAR_BIN = join(BIN_DIR, "pi-central-sidecar.js");
+await build({
+  entryPoints: [join(root, "packages", "orchestrator", "src", "sidecar.ts")],
+  outfile: SIDECAR_BIN,
+  bundle: true,
+  platform: "node",
+  target: "node22",
+  format: "esm",
+  // The CDP client and the control surface use no dependency beyond Node itself; `ws` is not used here at all
+  // (the pipe replaced it), so nothing is external.
+  external: [],
+  sourcemap: true,
+  sourcesContent: true,
+  legalComments: "none",
+  logLevel: "warning",
+});
+chmodSync(SIDECAR_BIN, 0o755);
+
 // --- 4. Say what was produced, with numbers ------------------------------------------------------
 //
 // Printed every time rather than only during a release: a size that jumps by a factor is a signal,
@@ -139,6 +173,7 @@ const uiBytes = directoryBytes(UI_DEST);
 
 console.log("");
 console.log(`  bin/pi-central.js   ${kib(binSize)}  (includes an inline sourcemap)`);
+console.log(`  bin/pi-central-sidecar.js  ${kib(statSync(SIDECAR_BIN).size)}  (the sidecar, its own bundle)`);
 console.log(`  dist/ui             ${kib(uiBytes)}`);
 console.log(`  version             ${pkg.name} ${pkg.version}`);
 console.log(`  runtime deps        ${Object.keys(pkg.dependencies ?? {}).join(", ") || "none"}`);

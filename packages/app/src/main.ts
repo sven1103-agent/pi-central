@@ -609,6 +609,30 @@ async function launch(): Promise<void> {
   console.log(`Pi Central: ${decision.reason}`);
 
   if (decision.verdict === "attach" && record !== undefined) {
+    /*
+     * Adoption is where a launch from a checkout goes wrong MOST often, because it wins over every other decision.
+     *
+     * Measured: a dev run was adopted by an orchestrator started earlier from a DIFFERENT package, so the window loaded
+     * that process's UI -- an interface containing none of the working tree's changes -- and the log's only trace was a
+     * pid and a port. The reader sees a plausible app, no error, and a missing control: every symptom points at the
+     * code rather than at which process is on screen.
+     *
+     * So a run from a checkout refuses to adopt a process it cannot attribute. There is no honest way to ask a running
+     * orchestrator which package it was started from, so the answer is "unknown", and unknown is enough to refuse. The
+     * remedy is to stop it, which is stated rather than assumed.
+     */
+    const shell = shellSourceRoot(process.argv[1]);
+    if (shell !== undefined) {
+      const message =
+        `an orchestrator from an earlier launch is running (pid ${record.pid}, port ${record.port}), and this run was ` +
+        `started from the checkout at ${shell}. Loading that process would show ITS interface, which may be a different ` +
+        `package's — not your working tree's.` +
+        `\n\nStop it and launch again:  kill ${record.pid}` +
+        `\n\nOr quit that app with "Keep sessions running" off, then reopen this one.`;
+      console.error(`Pi Central: ${message}`);
+      renderFailure("Another orchestrator is running", message);
+      return;
+    }
     adopt(record, decision.reason);
     return;
   }
@@ -761,6 +785,21 @@ function spawnOrchestrator(pkg: PackageRoot, environment: Environment): Promise<
   });
   console.log(origin.message);
   if (origin.caveat !== undefined) console.warn(`Pi Central: ${origin.caveat}`);
+  /*
+   * A REFUSAL, not a warning, when a run from a checkout would serve a different package.
+   *
+   * Measured: `npm run app` from this checkout served the globally installed pi-central 0.15.0, and the window showed
+   * an interface with none of the working tree's changes. The log said "serving the package at /opt/homebrew/…" and
+   * nothing else, so the reader -- and I -- spent several rounds looking for a bug in code that was never running.
+   * Every symptom of that state points at the code, which is why a warning is not enough.
+   */
+  if (origin.refusal !== undefined) {
+    console.error(`Pi Central: ${origin.refusal}`);
+    renderFailure("Wrong package", origin.refusal);
+    // `undefined`, the same answer as a child that never announced: the failure page is already on screen, and the
+    // caller's recovery is identical.
+    return Promise.resolve(undefined);
+  }
 
   const plan = planSpawn({
     node: environment.node,
@@ -825,6 +864,18 @@ function spawnOrchestrator(pkg: PackageRoot, environment: Environment): Promise<
         lastStderr = keepTail(lastStderr, `${parsed.reason}\n`);
         continue;
       }
+      /*
+       * Everything the orchestrator writes to stdout is echoed when there is a terminal, not only the URL.
+       *
+       * The rest used to be discarded, which threw away the lines that answer "why does my session have no browser":
+       * the served UI build, the stale-build warning, and whether a session browser is offered at all. Measured: a
+       * launch printed four lines about the package and the port and nothing about the sidecar, so the one fact needed
+       * to attribute "0 servers configured" never reached the reader -- although `server.ts` logs it precisely so it can.
+       *
+       * The URL line is NOT echoed: it is the app's own handshake, and printing it here as well as in the app's
+       * "orchestrator at" line would read as two orchestrators starting.
+       */
+      if (parsed.kind !== "url" && process.stdout.isTTY) process.stdout.write(line + "\n");
       if (parsed.kind !== "url" || announced) continue;
       announced = true;
       clearTimeout(timeout);

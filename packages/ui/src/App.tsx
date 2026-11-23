@@ -71,6 +71,7 @@ import {
   toggleFolded,
   type RailPrefs,
 } from "./rail-prefs.ts";
+import { effectiveSidecar, readSidecarPref, writeSidecarPref, type SidecarPref } from "./sidecar-prefs.ts";
 import { RailResizer } from "./components/RailResizer.tsx";
 import { ShortcutSheet } from "./components/ShortcutSheet.tsx";
 import {
@@ -372,6 +373,15 @@ export function App() {
    * with a stored value — gets exactly what they stored, and a reader with nothing stored gets the open default. The
    * roster-size default is applied by the effect below, once, when the roster says how big it is.
    */
+  /*
+    The reader's own answer about a session browser (ADR-0018 §15c), read once from `localStorage`.
+
+    `undefined` means no opinion, which is NOT `false`: an installation whose default comes from `PI_CENTRAL_SIDECAR=1`
+    must still give new sessions a browser to a reader who has never touched this, and a reader who has turned it off
+    must not get one back on the next launch.
+  */
+  const [sidecarPref, setSidecarPref] = useState<SidecarPref>(readSidecarPref);
+
   const [railPrefs, setRailPrefs] = useState<RailPrefs>(() => {
     try {
       return parseRailPrefs(localStorage.getItem(RAIL_PREFS_KEY), 0);
@@ -1727,12 +1737,41 @@ export function App() {
     [send],
   );
 
+  /**
+   * Reopen a session, carrying the reader's browser answer.
+   *
+   * Four call sites resume a session — a stopped row, the History tab, an idempotent reopen, and a failed session's
+   * Retry — and none of them passed a sidecar, so a resumed session never had a browser however the switch was set.
+   * Resumed sessions are the common case after a restart, which is when a reader is most likely to be looking at
+   * yesterday's frontend work.
+   *
+   * One helper rather than four spreads, because four is exactly how many places were missed the first time.
+   */
+  const resumeWith = useCallback(
+    (target: { path: string }) => {
+      const sidecar = effectiveSidecar(sidecarPref, state.sidecarOffered, state.sidecarDefault);
+      send({ kind: "resume", path: target.path, sidecar });
+    },
+    [send, sidecarPref, state.sidecarOffered, state.sidecarDefault],
+  );
+
   const onStartSession = useCallback(() => {
     // Ask for focus BEFORE the control goes out: the orchestrator answers `start` with the new `session`
     // event synchronously, so the intent has to be in the store when that event lands (issue #144).
     dispatch({ kind: "expectNewSession" });
-    send({ kind: "start" });
-  }, [send]);
+    /*
+     * A scratch session gets the DEFAULT, said out loud rather than left to the orchestrator.
+     *
+     * Measured inconsistency this closes: opening a directory offered a browser checkbox, while "New session" offered
+     * nothing and got whatever the default was -- so the same feature behaved differently depending on which button
+     * started the session, and nothing on screen said which.
+     *
+     * It is not a choice here, because a scratch session has no directory to serve yet. Sending the default explicitly
+     * means the two paths agree by construction, and the Inspector states the outcome either way.
+     */
+    const sidecar = effectiveSidecar(sidecarPref, state.sidecarOffered, state.sidecarDefault);
+    send({ kind: "start", ...(sidecar ? { sidecar: true } : {}) });
+  }, [send, sidecarPref, state.sidecarOffered, state.sidecarDefault]);
 
   /**
    * Ask for the chooser's places, or for one directory inside them (issue #76, ADR-0012).
@@ -1762,9 +1801,18 @@ export function App() {
   );
 
   const onOpenDirectory = useCallback(
-    (cwd: string) => {
+    (cwd: string, sidecar?: boolean) => {
       dispatch({ kind: "expectNewSession" });
-      send({ kind: "start", cwd });
+      /*
+        The reader's answer travels with the request, including when it is `false`.
+        
+        It used to forward only `true` — `...(sidecar === true ? { sidecar: true } : {})` — so an unticked box sent
+        NOTHING, which the orchestrator reads as "no opinion" and answers with the installation's default. The checkbox
+        was therefore decorative in a second place: the orchestrator had already been taught that `false` means "no
+        browser", and this line dropped the `false` before it ever got there. Found by following one click from the
+        dialog to the wire rather than by testing either end.
+      */
+      send({ kind: "start", cwd, ...(sidecar === undefined ? {} : { sidecar }) });
       // The ONE place the picker remembers a place to begin: a session was actually started here.
       rememberOpenedDirectory(cwd);
       setSheetOpen(false);
@@ -2460,7 +2508,7 @@ export function App() {
                  */
                 dispatch({ kind: "focusRow", key: session.path });
                 dispatch({ kind: "expectNewSession", file: session.path });
-                send({ kind: "resume", path: session.path });
+                resumeWith({ path: session.path });
                 setTab("sessions");
               }}
             />
@@ -2482,7 +2530,7 @@ export function App() {
                 onResume={() => {
                   dispatch({ kind: "expectNewSession" });
                   // By PATH: a stopped session has no handle, and the path is its durable identity (ADR-0004).
-                  send({ kind: "resume", path: stoppedRow.entry.path });
+                  resumeWith({ path: stoppedRow.entry.path });
                 }}
                 onForget={() => dispatch({ kind: "forget", path: stoppedRow.entry.path })}
                 {...(supportsDelete(state.install?.protocol)
@@ -2599,7 +2647,7 @@ export function App() {
                   if (target?.sessionFile === undefined) return;
                   dispatch({ kind: "focusRow", key: target.sessionFile });
                   dispatch({ kind: "expectNewSession", file: target.sessionFile });
-                  send({ kind: "resume", path: target.sessionFile });
+                  resumeWith({ path: target.sessionFile });
                 },
                 onRetry: () => {
                   const target = focusedSession(state);
@@ -2770,7 +2818,7 @@ export function App() {
                 if (!focused?.sessionFile) return;
                 dispatch({ kind: "focusRow", key: focused.sessionFile });
                 dispatch({ kind: "expectNewSession", file: focused.sessionFile });
-                send({ kind: "resume", path: focused.sessionFile });
+                resumeWith({ path: focused.sessionFile });
               }}
               onRetry={() => focused && send({ kind: "retry", sessionId: focused.id })}
               retryAvailable={supportsRetry(state.install?.protocol)}
@@ -2893,6 +2941,20 @@ export function App() {
             })
           }
           railMaxWidth={railMaxWidth(viewportWidth)}
+          sessionBrowser={
+            state.sidecarOffered
+              ? {
+                  pref: sidecarPref,
+                  // Only meaningful when the reader has no opinion of their own, so it is passed rather than folded in:
+                  // the panel states it only in that case.
+                  installDefault: state.sidecarDefault,
+                  onChange: (next) => {
+                    setSidecarPref(next);
+                    writeSidecarPref(next);
+                  },
+                }
+              : undefined
+          }
           onClose={() => {
             setSettingsOpen(false);
             settingsTriggerRef.current?.focus();
@@ -2918,6 +2980,13 @@ export function App() {
       {sheetOpen && (
         <OpenDirectorySheet
           installationRoot={state.installationRoot}
+          sidecarOffered={state.sidecarOffered}
+          /*
+            The reader's own answer, so the picker's box starts where the switch in Settings left it. Passing
+            `state.sidecarDefault` here was the bug: the box then showed the INSTALLATION's default and ignored a reader
+            who had turned the feature off, so the control contradicted the outcome in the opposite direction.
+          */
+          sidecarDefault={effectiveSidecar(sidecarPref, state.sidecarOffered, state.sidecarDefault)}
           home={state.home}
           /* Derived from history, not stored (issue #149). `state.history` is the newest page, which is
              exactly the right input: "recent" cannot be older than the page it is drawn from. */

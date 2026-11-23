@@ -42,6 +42,8 @@ function supervisorFor(root: string) {
     providerAgentDir: join(root, "provider"),
     home: root,
     installationRoot: join(root, "installation"),
+    sidecarPort: undefined,
+    browser: "/nonexistent/chrome",
   });
   // The launch failure this provokes is expected; without a listener it fails the run for an unrelated reason.
   supervisor.on("error", () => {});

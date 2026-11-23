@@ -19,6 +19,8 @@ const config = (over: Partial<Config> = {}): Config => ({
   fragmentDir: join(root, "state", "policy"),
   agentRootManaged: true,
   installationRoot: undefined,
+  sidecarPort: undefined,
+  browser: "/nonexistent/chrome",
   providerAgentDir: join(root, "provider-agent"),
   home: "/Users/tester",
   ...over,

@@ -1,0 +1,212 @@
+/**
+ * The browser gate: offered where it can work, absent where it cannot, off unless asked for.
+ *
+ * ADR-0015 §15. Three properties, and the third is the one a reader would notice:
+ *
+ *   1. With no browser configured, the toggle is NOT RENDERED. A switch that does nothing reads as a broken feature;
+ *      an absent switch reads as an absent one, which is the truth.
+ *   2. Where it is offered, it starts UNCHECKED. A browser is a process and a port per session, so it is asked for.
+ *   3. The choice travels with the commit as an opt-IN, so a session started from a recent row carries the same
+ *      answer as one started from the Open button.
+ */
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { JSDOM } from "jsdom";
+import { createServer } from "vite";
+import { createElement } from "react";
+import { renderToString } from "react-dom/server";
+import { readFileSync } from "node:fs";
+
+const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://local.invalid/" });
+globalThis.window = dom.window;
+globalThis.document = dom.window.document;
+
+let server;
+let OpenDirectorySheet, reduce, initialState, sidecarBadge, showsRowMetrics, prefs;
+
+before(async () => {
+  server = await createServer({
+    root: new URL("..", import.meta.url).pathname,
+    server: { middlewareMode: true },
+    appType: "custom",
+    logLevel: "error",
+  });
+  ({ OpenDirectorySheet } = await server.ssrLoadModule("/src/components/OpenDirectorySheet.tsx"));
+  ({ reduce, initialState } = await server.ssrLoadModule("/src/store.ts"));
+  ({ sidecarBadge, showsRowMetrics } = await server.ssrLoadModule("/src/rail-prefs.ts"));
+  prefs = await server.ssrLoadModule("/src/sidecar-prefs.ts");
+});
+
+after(async () => {
+  await server?.close();
+});
+
+function render(props = {}) {
+  return renderToString(
+    createElement(OpenDirectorySheet, {
+      installationRoot: "/somewhere/else",
+      home: "/Users/x",
+      onClose: () => {},
+      onOpen: () => {},
+      ...props,
+    }),
+  );
+}
+
+const TOGGLE = "Preview its work in a browser";
+
+test("with no browser configured, the toggle is not rendered at all", () => {
+  // The failure this prevents is the specific one that reads worst: a control that is present and inert. A reader
+  // who ticks it, opens a session and sees no browser concludes the feature is broken, not that the machine lacks
+  // one -- and there is nothing on screen to correct them.
+  for (const value of [undefined, false]) {
+    assert.ok(!render({ sidecarOffered: value }).includes(TOGGLE), "the toggle must be absent when offering " + String(value));
+  }
+});
+
+test("where it is offered, the toggle is present and unchecked", () => {
+  const html = render({ sidecarOffered: true });
+  assert.ok(html.includes(TOGGLE), "an offered browser must have a control");
+  // `checked=""` is what a checked checkbox renders as. Asserting the absence of the attribute is asserting the
+  // default, which is the property: the reader opts IN.
+  assert.ok(!/type="checkbox"[^>]*checked/.test(html), "it must start unchecked");
+});
+
+test("the commit carries the answer, so Open and a recent row cannot disagree", () => {
+  // Behavioural rather than visual: the sheet calls onOpen with the toggle value, and there is exactly ONE commit
+  // path (the design decision the sheet documents). Rendering cannot show this, so it is asserted against the
+  // source of the component -- the same approach the repo uses where a click needs a browser.
+  const source = readComponent();
+  assert.match(source, /onOpen\(effectivePath, sidecar\)/, "the Open button must pass the toggle");
+  assert.match(source, /onChooseRecent=\{\(cwd\) => onOpen\(cwd, sidecar\)\}/, "a recent row must pass the toggle");
+  // And it must never send the choice as a separate request.
+  assert.ok(!/kind: "sidecar"/.test(source), "the choice belongs to the start request, not a control of its own");
+});
+
+function readComponent() {
+  return readFileSync(new URL("../src/components/OpenDirectorySheet.tsx", import.meta.url), "utf8");
+}
+
+test("the store treats an orchestrator that does not report the capability as offering none", () => {
+  // The absent case is a real state, not a gap: an orchestrator older than this field sends nothing, and a machine
+  // with no browser sends nothing either. Both must read as "do not offer", because the alternative -- defaulting to
+  // offering -- puts an inert control in front of a reader and blames the feature for the machine.
+  const base = { live: [], history: [], historyTotal: 0, home: "/Users/x" };
+  const absent = reduce(initialState(), { kind: "snapshot", ...base });
+  assert.equal(absent.sidecarOffered, false, "an unreported capability must not be offered");
+  const off = reduce(initialState(), { kind: "snapshot", ...base, sidecarOffered: false });
+  assert.equal(off.sidecarOffered, false);
+  const on = reduce(initialState(), { kind: "snapshot", ...base, sidecarOffered: true });
+  assert.equal(on.sidecarOffered, true, "and a reported one must be");
+});
+
+test("the orchestrator reports the capability on the snapshot, so the UI has something to read", () => {
+  // Source-level on purpose. The alternative is standing up a WebSocket server with a real Supervisor in a UI test,
+  // which would test the transport rather than this fact. What must hold is that the snapshot CARRIES the field from
+  // configuration: without it, a machine that offers a browser looks exactly like one that does not, and the toggle
+  // never appears -- the failure mode is invisible rather than wrong.
+  const source = readFileSync(new URL("../../orchestrator/src/transport.ts", import.meta.url), "utf8");
+  assert.match(
+    source,
+    /kind: "snapshot",[\s\S]{0,600}?sidecarOffered/,
+    "the snapshot must carry sidecarOffered, from configuration",
+  );
+});
+
+test("a session's browser is visible in the rail, and a session without one says nothing", () => {
+  // Invisible feature, reported from use: "we don't see it in the UI". A sidecar is a process and a port per session, and
+  // its presence was only observable if an agent happened to call a tool.
+  assert.equal(sidecarBadge({ sidecarOrigin: "http://localhost:48005" }), "browser :48005");
+  assert.equal(sidecarBadge({}), undefined, "no origin, no badge -- never a fabricated one");
+  assert.equal(sidecarBadge({ sidecarOrigin: "http://localhost" }), "browser", "no port to show, but still a browser");
+
+  // The PORT is what a reader comparing two rows needs: different ports is the mechanism keeping two sessions apart.
+  const calm = "calm";
+  const base = { contextPercent: 10, pending: 0, state: "idle" };
+  assert.equal(showsRowMetrics(calm, base), false, "nothing to say about a quiet session");
+  assert.equal(showsRowMetrics(calm, { ...base, sidecarOrigin: "http://localhost:48001" }), true, "a browser earns a row");
+  // A session with no process cannot have one, and must not gain a row from this.
+  assert.equal(showsRowMetrics(calm, undefined), false);
+});
+
+test("the checkbox starts in the installation's default state, and says when that is on", () => {
+  // Measured contradiction this fixes: the box started UNTICKED while the default supplied a browser anyway, so ticking
+  // and unticking produced the same session -- the control was decorative.
+  const off = render({ sidecarOffered: true, sidecarDefault: false });
+  assert.ok(!/type="checkbox"[^>]*checked/.test(off), "off by default, so the box starts clear");
+  assert.ok(!off.includes("on for new sessions"), "and no note about a default that does not exist");
+
+  const on = render({ sidecarOffered: true, sidecarDefault: true });
+  assert.match(on, /type="checkbox"[^>]*checked/, "on by default, so the box starts ticked");
+  assert.ok(on.includes("on for new sessions"), "and the reader is told this is a default they are opting OUT of");
+});
+
+test("the reader's own answer outranks the installation's default, in both directions", () => {
+  // The whole point of the switch: a dock PWA or a Finder-launched .app inherits no shell environment, so before this the
+  // advertised way to run Pi Central was the one way the feature could not be turned on.
+  const { effectiveSidecar } = prefs;
+  // No opinion -> the default decides, which is how an existing PI_CENTRAL_SIDECAR=1 wrapper keeps working.
+  assert.equal(effectiveSidecar(undefined, true, true), true);
+  assert.equal(effectiveSidecar(undefined, true, false), false);
+  // An opinion wins over the default, BOTH ways: the "on" case is the new capability, the "off" case is the defect that
+  // made the checkbox decorative.
+  assert.equal(effectiveSidecar(true, true, false), true, "a reader can turn it on without an env var");
+  assert.equal(effectiveSidecar(false, true, true), false, "and off while the default is on");
+  // Not offered is not offered, whatever the preference says: a machine with no browser must not be told otherwise.
+  assert.equal(effectiveSidecar(true, false, true), false);
+});
+
+test("the preference round-trips, and absence is not false", () => {
+  const { parseSidecarPref, serializeSidecarPref } = prefs;
+  assert.equal(parseSidecarPref("on"), true);
+  assert.equal(parseSidecarPref("off"), false, "an explicit off must survive a restart");
+  // The distinction that matters: a corrupted or missing value is "no opinion", never "off". Otherwise a reader who never
+  // touched the switch would silently opt out of a default their installation set.
+  for (const junk of [null, "", "true", "false", "1", "0", "yes"]) {
+    assert.equal(parseSidecarPref(junk), undefined, "not a stored answer: " + JSON.stringify(junk));
+  }
+  assert.equal(serializeSidecarPref(true), "on");
+  assert.equal(serializeSidecarPref(false), "off");
+  assert.equal(serializeSidecarPref(undefined), null, "no opinion is stored as absence, not as a sentinel");
+});
+
+test("an unticked box survives the trip to the wire as false", () => {
+  // The second place the checkbox was decorative, found by following the click rather than testing either end: App's
+  // onOpenDirectory forwarded only `true`, so an unticked box sent NOTHING, which the orchestrator reads as "no opinion".
+  // Comments stripped FIRST (C20): the comment above the fix quotes the old expression, so a naive match finds the
+  // explanation of the bug and reports the bug. Same trap as the fragment assertions.
+  const source = readFileSync(new URL("../../ui/src/App.tsx", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  assert.ok(
+    !/sidecar === true \? \{ sidecar: true \} : \{\}/.test(source),
+    "the start request must forward false as well as true",
+  );
+  assert.match(source, /\.\.\.\(sidecar === undefined \? \{\} : \{ sidecar \}\)/, "and it must pass the answer through");
+});
+
+test("the session-browser row is a checkbox row, not a slider row", () => {
+  /*
+   * Reported from a real screenshot: the section read as broken. The cause was reusing `.reading-row`, a three-column grid
+   * built for the two sliders above it — 76px label, 1fr control, 44px value. A sentence-length label wrapped to FOUR
+   * lines in the 76px column while the checkbox sat in the value column, which reads as a number for the label rather
+   * than a switch to flip. "Preview it / work in a / browser" is what the screenshot shows.
+   *
+   * Asserted on the SOURCE rather than the rendered markup because the defect is a class choice: the markup was valid and
+   * the checkbox was present and functional, so nothing about the DOM is wrong. What was wrong is which grid it joined.
+   */
+  const settings = readFileSync(new URL("../../ui/src/components/Settings.tsx", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  const panel = settings.slice(settings.indexOf("function SessionBrowserPanel"));
+  const section = panel.slice(0, panel.indexOf("</section>"));
+  assert.ok(!/reading-row/.test(section), "the browser switch must not reuse the sliders' three-column grid");
+  assert.match(section, /className="settings-toggle"/, "it is a full-width checkbox row with its label beside it");
+  // And the CSS has to exist, or the class is a promise with nothing behind it.
+  const css = readFileSync(new URL("../../ui/src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.settings-toggle \{[^}]*display: flex/, "the flex row the label needs");
+  // The rule body, not merely the selector: an assertion on the selector alone passes while the property is gone, which is
+  // what the first version did -- it named `word-break` in the regex without anchoring to the block that must hold it.
+  const pathRule = /\.settings-browser-path[^{]*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(pathRule, /word-break:\s*break-all/, "a path that wraps instead of truncating");
+});

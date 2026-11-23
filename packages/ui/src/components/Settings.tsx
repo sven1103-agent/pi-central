@@ -55,6 +55,7 @@ import {
   type ReadingPrefs,
 } from "../reading.ts";
 import { READING_PREFS_KEY } from "../reading.ts";
+import { effectiveSidecar, type SidecarPref } from "../sidecar-prefs.ts";
 import {
   RAIL_DEFAULT_WIDTH,
   RAIL_MAX_WIDTH,
@@ -169,6 +170,70 @@ const SECTIONS: { id: Section; label: string }[] = [
 
 type Section = "display" | "about";
 
+/**
+ * The session browser's switch (ADR-0018 §15c).
+ *
+ * Reads as a choice about NEW sessions, which is what it is: a running session was given its policy at spawn time and
+ * cannot be given a browser afterwards without a new fragment (C1 — the port is pinned in the profile).
+ *
+ * Two facts are shown, not one. The switch is the reader's answer; `installDefault` is why a session may already have a
+ * browser they never asked for. A single switch cannot explain that, and "it gave me a browser anyway" was a real
+ * report — the answer was `PI_CENTRAL_SIDECAR=1` in the environment, which the app had no way to see until now.
+ */
+function SessionBrowserPanel({
+  pref,
+  installDefault,
+  browser,
+  browserExists,
+  onChange,
+}: {
+  pref: SidecarPref;
+  installDefault: boolean;
+  browser: string;
+  browserExists: boolean;
+  onChange: (next: SidecarPref) => void;
+}) {
+  const on = effectiveSidecar(pref, true, installDefault);
+  return (
+    <section>
+      <h4>Session browser</h4>
+      {/*
+        NOT a `.reading-row`, which is what this first used and what made it look broken. That class is a three-column grid
+        sized for two sliders — a 76px label column and a 44px value column — so a sentence-length label wrapped to four
+        lines in the first column while the checkbox sat in the value column, reading as a value for "Preview it" rather
+        than a control. A checkbox is a full-width row with its label beside it, which is what the session list does with
+        "Show the session list".
+      */}
+      <label className="settings-toggle">
+        <input
+          type="checkbox"
+          checked={on}
+          onChange={(event) => onChange(event.target.checked)}
+          aria-describedby="session-browser-note"
+        />
+        <span>Preview its work in a browser</span>
+      </label>
+      <p className="settings-note" id="session-browser-note">
+        {/* State the DEFAULT only when the reader has expressed no opinion, or the note would contradict the switch. */}
+        {pref === undefined && installDefault
+          ? "On by default for this installation, set by PI_CENTRAL_SIDECAR=1 where Pi Central was started. This switch overrides it."
+          : "A new session gets a browser of its own, beside its sandbox, and can open the dev server it runs. Unticked, sessions get none — and a session already running cannot gain one."}
+      </p>
+      {/* A path with no label is a fact with no name; the label says WHICH fact, and the path stays unbroken. */}
+      <p className={browserExists ? "settings-note" : "settings-note settings-updates"}>
+        {browserExists ? (
+          <>
+            <span>Browser </span>
+            <span className="settings-browser-path">{browser}</span>
+          </>
+        ) : (
+          `No browser at ${browser} — a session browser cannot start. Set PI_CENTRAL_BROWSER to a Chromium binary.`
+        )}
+      </p>
+    </section>
+  );
+}
+
 export function Settings({
   install,
   ready,
@@ -176,6 +241,7 @@ export function Settings({
   railPrefs,
   onRailPrefs,
   railMaxWidth,
+  sessionBrowser,
   initialSection = "display",
 }: {
   install: InstallFacts | undefined;
@@ -199,6 +265,21 @@ export function Settings({
   onRailPrefs?: ((change: (current: RailPrefs) => RailPrefs) => void) | undefined;
   /** The widest this window can give, so the slider's maximum is the number the drag would also stop at. */
   railMaxWidth?: number | undefined;
+  /**
+   * The session browser's switch (ADR-0018 §15c).
+   *
+   * Present only when the orchestrator reports a browser it can drive. Before this existed the feature could only be
+   * switched on with `PI_CENTRAL_SIDECAR=1` — which a dock PWA or a Finder-launched `.app` inherits no environment
+   * for, so the advertised way to run Pi Central was the one way it could not be turned on.
+   *
+   * `installDefault` is shown as well as the reader's own answer, because they are different facts and the switch alone
+   * cannot explain why a session got a browser the reader never asked for.
+   */
+  sessionBrowser?: {
+    pref: SidecarPref;
+    installDefault: boolean;
+    onChange: (next: SidecarPref) => void;
+  } | undefined;
   /**
    * Whether a snapshot has arrived yet.
    *
@@ -308,6 +389,19 @@ export function Settings({
             {section === "display" ? (
               <>
                 <ReadingPanel />
+                {/*
+                  Beside the display preferences because it is one: how a new session is started. Rendered only when a
+                  browser exists, so a machine without one is told nothing rather than offered a switch that would fail.
+                */}
+                {sessionBrowser !== undefined && install?.sidecar !== undefined && (
+                  <SessionBrowserPanel
+                    pref={sessionBrowser.pref}
+                    installDefault={sessionBrowser.installDefault}
+                    browser={install.sidecar.browser}
+                    browserExists={install.sidecar.browserExists}
+                    onChange={sessionBrowser.onChange}
+                  />
+                )}
                 {railPrefs !== undefined && onRailPrefs !== undefined && (
                   <RailPanel prefs={railPrefs} onChange={onRailPrefs} maxWidth={railMaxWidth ?? RAIL_MAX_WIDTH} />
                 )}
@@ -330,6 +424,24 @@ export function Settings({
                         buildInfo().commit === "dev"
                           ? "built outside a git checkout, so there is no commit to name"
                           : undefined
+                      }
+                    />
+                    {/*
+                      What the ORCHESTRATOR is serving, beside what this page IS.
+
+                      Two different questions that look identical when a change does not appear: the entry bundle the
+                      served `index.html` names, and the commit this page was built from. When they disagree the tab
+                      is holding an older document than the one on disk, which is exactly the state that made a new
+                      control invisible while the code was correct -- and there was no way to see it from the app.
+                    */}
+                    <Fact
+                      label="Served UI"
+                      value={install?.ui?.entry}
+                      monospace
+                      note={
+                        install?.ui === undefined
+                          ? "the orchestrator did not report what it is serving"
+                          : `built ${install.ui.builtAt.slice(0, 16).replace("T", " ")}`
                       }
                     />
                     <Fact

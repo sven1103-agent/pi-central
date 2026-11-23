@@ -9,10 +9,12 @@
  * That is checked before anything else, because the failure it prevents is not loud: every
  * session would fail to spawn with EPERM and look like a launcher bug.
  */
+import { existsSync } from "node:fs";
 import { defaultConfig } from "./config.ts";
 import { Supervisor } from "./supervisor.ts";
 import { Transport } from "./transport.ts";
-import { describeBuiltUi, explainStartupError } from "./startup-error.ts";
+import { describeBuiltUi, describeSidecar, explainStartupError } from "./startup-error.ts";
+import { siblingUiDir, staleBuiltUi } from "./static-ui.ts";
 import { assertNotSandboxed, SandboxedEnvironmentError } from "./sandbox-guard.ts";
 import { describeKeychainCheck } from "./keychain.ts";
 import { hasBuiltUi, resolveUiDistDir } from "./static-ui.ts";
@@ -29,6 +31,13 @@ interface Options {
   showVersion: boolean;
   /** `--help`: print and exit, likewise. */
   showHelp: boolean;
+  /**
+   * Whether a session browser is offered, for the startup line.
+   *
+   * Absent when the entry point did not tell us, which is the honest "unknown" -- a fabricated value here would make the
+   * one line meant to explain the sidecar the one line that could lie about it.
+   */
+  sidecar?: { offered: boolean; browser: string; browserExists: boolean } | undefined;
 }
 
 /**
@@ -97,6 +106,18 @@ function parseArgs(argv: string[]): Options {
     uiDir: resolveUiDistDir(),
     showVersion: false,
     showHelp: false,
+    // Resolved here rather than in the config module so `--version` and `--help` stay side-effect free: a browser check
+    // stats a path, and a flag that prints a version should not touch the filesystem.
+    ...(() => {
+      const config = defaultConfig();
+      return {
+        sidecar: {
+          offered: config.sidecarOffered === true,
+          browser: config.browser,
+          browserExists: existsSync(config.browser),
+        },
+      };
+    })(),
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -317,12 +338,23 @@ async function main(): Promise<number> {
     // in Settings, which is the other half: the terminal says what is on disk, the page says what the tab
     // is running, and comparing the two is the whole diagnosis.
     console.log(`  UI build: ${describeBuiltUi(options.uiDir)}`);
+    // Named here because the symptom is invisible: a new control missing from a window that is otherwise fine reads
+    // as a code bug, not as a stale build. Measured -- the picker's browser toggle was absent from the running app
+    // while present in the source and in the freshly built workspace copy.
+    const sibling = siblingUiDir(options.uiDir);
+    const stale = sibling === undefined ? undefined : staleBuiltUi(options.uiDir, sibling);
+    if (stale !== undefined) console.log(`  WARNING: ${stale}`);
   } else {
     console.log(
       `No built UI at ${options.uiDir}\n` +
         `  Build it with:  npm run ui:build\n` +
         `  Or serve the socket only with:  --no-ui  (and run npm run ui:dev)`,
     );
+  }
+  // Always printed, whether or not a UI is served: a session browser is independent of the UI build, and the absence of
+  // this line is one reason "0 servers configured" took four round trips to attribute.
+  if (options.sidecar !== undefined) {
+    console.log(`  Session browser: ${describeSidecar(options.sidecar)}`);
   }
   console.log("");
   // The connection detail belongs here rather than in a README the user has to find: if the UI

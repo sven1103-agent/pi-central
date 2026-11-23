@@ -10,6 +10,64 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+### Changed
+
+- The UI-sidecar spike briefs state no version and their paths resolve, so `verify` is green again ([#276]).
+- Playwright's MCP server is ruled out as the sidecar: nothing host-side narrows its 25 tools ([#276]).
+- A CDP client of 183 lines replaces `playwright` for capture and probe, using `ws` ([#276]).
+- ADR-0018 proposes a browser sidecar as a sibling sandbox, driven by four host-side verbs ([#276]).
+- A session can no longer be handed a Chromium feature: `playwright-chrome` composed cleanly before ([#276]).
+- The sidecar's fragment is rendered from the shared deny set, so a new deny reaches it too ([#276]).
+- The renderer is denied `~/.npmrc` and the gh caches, which the base profile grants ([#276]).
+- The sidecar's URL policy and four-verb set are decided in one pure, tested module ([#276]).
+- The CDP driver behind those verbs interpolates no caller input into an expression ([#276]).
+- `pi --mcp-config` is measured to point a session at a config outside agent-writable `~/.pi` ([#276]).
+- The sidecar process serves its four verbs over MCP stdio, with no listening socket ([#276]).
+- A sidecar is spawned beside its session with an MCP config outside agent-writable `~/.pi` ([#276]).
+- Closing the sidecar's stdin takes it down, so a killed orchestrator leaves no browser behind ([#276]).
+- A sandboxed session with `PI_CENTRAL_SIDECAR_PORT` set is handed an MCP config and its own sidecar ([#276]).
+- The Inspector's command string now matches the argv that actually runs ([#276]).
+- The sidecar is granted read-only access to its own code, so a source-launched one starts at all ([#276]).
+- The sidecar drives its browser over a pipe rather than loopback, which its own egress rule blocks ([#276]).
+- A CDP `sessionId` rides the message envelope, so page commands reach the page and not the browser ([#276]).
+- The sidecar's captured PNG is byte-identical under the policy and without it ([#276]).
+- `capture` returns an MCP image block, so the picture reaches the transcript instead of base64 text ([#276]).
+- A session's sidecar port is a per-session option, so testing one session needs no app-wide setup ([#276]).
+- The sidecar launch carries `PATH`, without which `safehouse` does not resolve and it never starts ([#276]).
+- The sidecar is started with `node` and its real flags, not with `pi` and a `--port` it never accepted ([#276]).
+- The sidecar's `HOME` is its own profile, because Node refuses to start without one ([#276]).
+- The sidecar is reached over loopback HTTP with a bearer token, so Pi connects instead of spawning it ([#276]).
+- The sidecar's own `--port` and token are passed to it, and the token travels in the environment ([#276]).
+- The sidecar's launch forwards its token with `--env-pass`, which Safehouse requires ([#276]).
+- A safehouse flag can no longer be placed after the `--`, where it becomes the sidecar's argument ([#276]).
+- The checkpoint harness collapses Chrome's expected macOS noise instead of burying the result in it ([#276]).
+- The capture tool says how to show its image from a codemode script ([#276]).
+- Each session with a sidecar is assigned its own dev-server port and told it, with `PI_CENTRAL_SIDECAR=1` ([#276]).
+- An assigned dev port that something already holds is skipped, and a dev server left on one is stopped with its session ([#276]).
+- The published package ships the sidecar as its own bundle, so an installed copy can start one ([#276]).
+- The sidecar's loopback endpoint is tested to refuse a missing, wrong or another session's token ([#276]).
+- The directory picker offers a session a browser, and the Inspector shows the address it can see ([#276]).
+- A served UI older than the other build in the checkout says so at startup, naming the rebuild ([#276]).
+- `npm run ui:build` also refreshes the copy the app serves, so a fresh build is the one on screen ([#276]).
+- Running from a checkout refuses to launch a different installed package, naming the override ([#276]).
+- A checkout run refuses to adopt an unidentified running orchestrator, naming the pid to stop ([#276]).
+- The session instruction says when a project cannot serve its own orchestrator, and what to serve instead ([#276]).
+- A session with a sidecar can read the MCP config it is pointed at, which the sandbox was denying ([#276]).
+- Startup states whether a session browser is offered, and names the browser path ([#276]).
+- The app shows the orchestrator's startup lines in the terminal instead of discarding all but its URL ([#276]).
+- A checkout launch is recognised when the entry path is relative, so the package and adoption refusals fire ([#276]).
+- A session can screenshot a page it served itself, and the model receives the image ([#276]).
+- Settings has a **Session browser** switch, so the feature no longer needs `PI_CENTRAL_SIDECAR=1` to be reachable ([#276]).
+- Unticking the browser checkbox now opts a session out, instead of being ignored ([#276]).
+- A session's browser appears in the rail as `browser :48005`, so it is visible while it runs ([#276]).
+- Stopping a session removes its browser's config, policy and profile, not only the process ([#276]).
+- A session with no browser is told so, instead of investigating a stale MCP cache entry ([#276]).
+- A session only reports a browser once it is listening, and a failed one is a warning rather than a log line ([#276]).
+- `docs/UI-SIDECAR-DESIGN-OPTIONS.md` compares the four verbs with a containerised MCP browser, in diagrams ([#276]).
+- A browser renders a local page under the sidecar's own profile with egress confined to one port ([#276]).
+- A two-verb host-side service is measured against shipping `playwright` for UI capture ([#276]).
+- A hand-written credential deny list failed open on `~/.gitconfig`, as C15c predicts ([#276]).
+
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
 ## [0.15.0] — 2026-11-22
@@ -842,6 +900,7 @@ The spike that answered whether this was worth building.
 [#263]: https://github.com/sven1103-agent/pi-central/issues/263
 [#265]: https://github.com/sven1103-agent/pi-central/issues/265
 [#269]: https://github.com/sven1103-agent/pi-central/issues/269
+[#276]: https://github.com/sven1103-agent/pi-central/issues/276
 [#274]: https://github.com/sven1103-agent/pi-central/issues/274
 [#275]: https://github.com/sven1103-agent/pi-central/issues/275
 [#281]: https://github.com/sven1103-agent/pi-central/issues/281

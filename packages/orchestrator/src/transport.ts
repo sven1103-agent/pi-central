@@ -41,6 +41,7 @@ import type { OsActionError } from "./os-actions.ts";
 import { acceptImages } from "./prompt-images.ts";
 import { discover, sessionAt } from "./registry.ts";
 import { abbreviate, listPlace, nameOf, placesFor } from "./places.ts";
+import { existsSync } from "node:fs";
 import { deleteSessionFile } from "./delete-session.ts";
 import type { Config } from "./config.ts";
 import type { KeychainCheck } from "./keychain.ts";
@@ -287,6 +288,11 @@ export class Transport {
       agentRoot: this.#config.agentRoot,
       agentRootManaged: this.#config.agentRootManaged,
       protocol: PROTOCOL_VERSION,
+      // Only when the capability is offered: a machine with no browser is told nothing, rather than shown a switch that
+      // would fail. `browserExists` is re-stated here because it is what the switch's own note explains.
+      ...(this.#config.sidecarOffered === true
+        ? { sidecar: { browser: this.#config.browser, browserExists: existsSync(this.#config.browser) } }
+        : {}),
     };
     return this.#install;
   }
@@ -361,6 +367,9 @@ export class Transport {
       home: this.#config.home,
       installationRoot: this.#config.installationRoot,
       install: this.#snapshotInstallFacts(),
+      // Absent when the installation does not offer one, and absent is what an older orchestrator sends too.
+      ...(this.#config.sidecarOffered === true ? { sidecarOffered: true } : {}),
+      ...(this.#config.sidecar === true ? { sidecarDefault: true } : {}),
     });
 
     // Then the CURRENT conversation for each live session, FETCHED rather than replayed.
@@ -456,6 +465,10 @@ export class Transport {
           ...(control.cwd ? { cwd: control.cwd } : {}),
           ...(control.name ? { name: control.name } : {}),
           ...(control.mode ? { mode: control.mode } : {}),
+          // Validated where it is used, not here: start() returns a structured failure, and a bad port reads better
+          // as a message beside the session than as a dropped control message.
+          ...(control.sidecarPort === undefined ? {} : { sidecarPort: control.sidecarPort }),
+          ...(control.sidecar === undefined ? {} : { sidecar: control.sidecar }),
         });
         if (!result.ok) {
           this.#broadcast({ kind: "error", message: result.message });
@@ -518,7 +531,10 @@ export class Transport {
               cwdExists: true,
               scratch: owner.scratch,
             },
-            control.mode ? { mode: control.mode } : {},
+            {
+              ...(control.mode ? { mode: control.mode } : {}),
+              ...(control.sidecar === undefined ? {} : { sidecar: control.sidecar }),
+            },
           );
           if (!resumed.ok) {
             this.#broadcast({ kind: "error", message: resumed.message });
@@ -527,7 +543,10 @@ export class Transport {
           this.#broadcast({ kind: "session", session: resumed.session });
           return;
         }
-        const result = this.#supervisor.resume(target, control.mode ? { mode: control.mode } : {});
+        const result = this.#supervisor.resume(target, {
+          ...(control.mode ? { mode: control.mode } : {}),
+          ...(control.sidecar === undefined ? {} : { sidecar: control.sidecar }),
+        });
         if (!result.ok) {
           this.#broadcast({ kind: "error", message: result.message });
           return;

@@ -185,6 +185,9 @@ async function harness(mode: "handled" | "started" | "throws" | "slow"): Promise
     providerAgentDir: agentDir,
     home: root,
     installationRoot: join(root, "installation"),
+    // Added by the sidecar slice (ADR-0018): a session browser is opt-in, and this test needs none.
+    sidecarPort: undefined,
+    browser: "/nonexistent/chrome",
   });
   supervisor.on("error", () => {});
   const records: PiRecord[] = [];

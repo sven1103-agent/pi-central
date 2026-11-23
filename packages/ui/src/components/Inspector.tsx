@@ -228,6 +228,16 @@ export function Inspector({
           </dd>
           <dt>Policy</dt>
           <dd>{session.isolation}</dd>
+          {session.sidecarOrigin !== undefined && (
+            <>
+              <dt>Browser</dt>
+              <dd>
+                {/* The address it can SEE, not the port it listens on: a reader whose preview is on another port needs
+                    the one that works, and the sidecar serves exactly one. */}
+                <span className="chip chip-idle mono">{session.sidecarOrigin}</span>
+              </dd>
+            </>
+          )}
         </dl>
         {session.mode === "direct" && (
           <p style={{ color: "var(--warn-text)", fontSize: 11, marginTop: 8 }}>
