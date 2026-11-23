@@ -63,7 +63,9 @@ function fail(message) {
 // starts.
 console.log("build-package: building the UI (vite)");
 const { spawnSync } = await import("node:child_process");
-const vite = spawnSync("npm", ["run", "ui:build", "--silent"], {
+// `ui:build:only`, not `ui:build`: the syncing variant would copy `packages/ui/dist` into `dist/ui` and this script
+// then copies it again, which is the same tree onto itself. The sync exists for the DEV loop (`npm run app`).
+const vite = spawnSync("npm", ["run", "ui:build:only", "--silent"], {
   cwd: root,
   stdio: "inherit",
   // `npm` is a shell script on some platforms, so it needs a shell to be found at all.

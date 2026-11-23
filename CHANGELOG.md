@@ -48,6 +48,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The sidecar's loopback endpoint is tested to refuse a missing, wrong or another session's token ([#276]).
 - The directory picker offers a session a browser, and the Inspector shows the address it can see ([#276]).
 - A served UI older than the other build in the checkout says so at startup, naming the rebuild ([#276]).
+- `npm run ui:build` also refreshes the copy the app serves, so a fresh build is the one on screen ([#276]).
 - A browser renders a local page under the sidecar's own profile with egress confined to one port ([#276]).
 - A two-verb host-side service is measured against shipping `playwright` for UI capture ([#276]).
 - A hand-written credential deny list failed open on `~/.gitconfig`, as C15c predicts ([#276]).

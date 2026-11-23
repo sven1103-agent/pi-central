@@ -295,6 +295,24 @@ export function Settings({
                           : undefined
                       }
                     />
+                    {/*
+                      What the ORCHESTRATOR is serving, beside what this page IS.
+
+                      Two different questions that look identical when a change does not appear: the entry bundle the
+                      served `index.html` names, and the commit this page was built from. When they disagree the tab
+                      is holding an older document than the one on disk, which is exactly the state that made a new
+                      control invisible while the code was correct -- and there was no way to see it from the app.
+                    */}
+                    <Fact
+                      label="Served UI"
+                      value={install?.ui?.entry}
+                      monospace
+                      note={
+                        install?.ui === undefined
+                          ? "the orchestrator did not report what it is serving"
+                          : `built ${install.ui.builtAt.slice(0, 16).replace("T", " ")}`
+                      }
+                    />
                     <Fact
                       label="Protocol"
                       value={orchestratorProtocol === undefined ? undefined : `v${orchestratorProtocol}`}
