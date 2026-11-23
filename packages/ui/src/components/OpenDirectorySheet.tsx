@@ -54,6 +54,7 @@ export function OpenDirectorySheet({
   onClose,
   onOpen,
   sidecarOffered,
+  sidecarDefault,
 }: {
   /** Where Pi Central is running from, or `undefined` if it could not be identified (issue #25). */
   installationRoot: string | undefined;
@@ -100,6 +101,14 @@ export function OpenDirectorySheet({
    * than not offering it: the reader would conclude the feature is broken rather than absent.
    */
   sidecarOffered?: boolean | undefined;
+  /**
+   * Whether a session gets a browser when the reader expresses no preference.
+   *
+   * The checkbox starts at this value. Measured defect it fixes: the box started UNTICKED while the default supplied a
+   * browser anyway, so the control contradicted the outcome -- unticking it changed nothing, because `false` from an
+   * untouched box was indistinguishable from "no preference".
+   */
+  sidecarDefault?: boolean | undefined;
 }) {
   const [path, setPath] = useState(initialPath);
   /**
@@ -108,7 +117,7 @@ export function OpenDirectorySheet({
    * A browser is a process and a port per session, so it is something the reader asks for rather than something they
    * discover afterwards. The toggle is only rendered when the installation offers one at all.
    */
-  const [sidecar, setSidecar] = useState(false);
+  const [sidecar, setSidecar] = useState(sidecarDefault === true);
   const inputRef = useRef<HTMLInputElement>(null);
 
   /**
@@ -451,7 +460,13 @@ export function OpenDirectorySheet({
                   "Preview" rather than "capture" or "test": it is the verb a frontend toolchain already uses, and it
                   implies looking rather than asserting, which is what the four verbs do.
                  */}
-                <span>Preview its work in a browser</span>
+                <span>
+                  Preview its work in a browser
+                  {/* Stated, not implied: when the installation turns this on by default, an already-ticked box is not
+                      an explanation, and a reader who does not want a browser per session needs to know they are opting
+                      OUT of something rather than opting into it. */}
+                  {sidecarDefault === true && <span className="sidecar-default"> (on for new sessions)</span>}
+                </span>
               </label>
             )}
             <button type="submit" className="btn btn-primary-sheet" disabled={problem !== undefined}>

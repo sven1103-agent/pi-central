@@ -133,6 +133,18 @@ through a fixed verb set over CDP, with no new shipped dependency.**
     `LiveSession.sidecarOrigin` then shows the reader which address the session can see, and the Inspector renders
     it. **No protocol bump:** both fields are optional and absent means the old behaviour, which is the same rule the
     snapshot's `install` field follows, and `wire-surface.test.ts` moves the version only with the set of kinds.
+15a. **The reader's answer is three-valued, and both non-answers matter.** `sidecar` is `true` (give this session a
+    browser), `false` (do not, even when the installation defaults to one) or absent (the default decides). It began
+    two-valued, and that made the checkbox decorative: the picker always sends the reader's answer, so an unticked box
+    sent `false`, the old code read it as "no opt-in", and the default supplied a browser anyway. Measured in the first
+    real run — ticking and unticking produced the same session. The snapshot therefore carries `sidecarDefault` as well
+    as `sidecarOffered`, because "may I offer this" and "is it on unless you say no" are different questions and the
+    checkbox needs both to start in the right state and to say so when it is a default.
+15b. **A session's browser is visible in the rail.** `LiveSession.sidecarOrigin` renders as `browser :48005` on the
+    row's metrics line: a sidecar is a process and a port per session, and its presence was otherwise observable only if
+    an agent happened to call a tool. The port is shown because two sessions on different ports is the mechanism keeping
+    them apart, so a reader comparing two rows can see it. In calm density the badge earns a row on its own, on the same
+    rule as the context bar — it is present or it is not, and absence renders nothing rather than a placeholder.
 
 ## Consequences
 

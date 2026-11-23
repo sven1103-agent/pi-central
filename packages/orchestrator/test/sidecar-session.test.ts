@@ -512,3 +512,25 @@ test("the config-directory grant is passed only for a session that has a sidecar
   );
   assert.match(source, /stateRoot, "sidecars", input\.id/, "and the directory must be the one spawnSidecar writes to");
 });
+
+test("an explicit FALSE opts out, even when the installation gives browsers by default", () => {
+  if (skip) return console.log(skip);
+  // The defect this holds, measured in the first real run: the picker always sends the reader's answer, so an unticked
+  // box sends false. The old code read false as "not an opt-in" and let the default supply a browser anyway, which made
+  // the checkbox decorative -- ticking and unticking produced the same session.
+  const state = join(root as string, "opt-out");
+  const app = new Supervisor(config({ sidecar: true, stateRoot: state }) as never, { rememberOpenSessions: false });
+  app.on("error", () => {});
+  app.on("log", () => {});
+  const refused = app.start({ cwd: root as string, mode: "sandboxed", sidecar: false });
+  const byDefault = app.start({ cwd: root as string, mode: "sandboxed" });
+  assert.ok(refused.ok && byDefault.ok);
+  if (!refused.ok || !byDefault.ok) return;
+  assert.equal(refused.session.sidecarOrigin, undefined, "an explicit false must win over the default");
+  assert.ok(
+    !existsSync(join(state, "sidecars", refused.session.id, "mcp.json")),
+    "and no sidecar process or config for it",
+  );
+  assert.match(byDefault.session.sidecarOrigin ?? "", /^http:\/\/localhost:\d+$/, "while an absent answer takes the default");
+  return app.stopAll().then(() => undefined);
+});

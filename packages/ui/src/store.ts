@@ -61,6 +61,8 @@ export interface UiState {
    * this additive rather than a breaking change.
    */
   sidecarOffered: boolean;
+  /** True when a new session gets a browser unless the reader says otherwise (ADR-0018 §15). */
+  sidecarDefault: boolean;
   /**
    * Facts about the running installation, for the Settings surface (issue #58).
    *
@@ -202,6 +204,7 @@ export function initialState(): UiState {
     home: undefined,
     installationRoot: undefined,
     sidecarOffered: false,
+    sidecarDefault: false,
     install: undefined,
     transcripts: {},
     transcriptErrors: {},
@@ -493,6 +496,7 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
         home: event.home,
         installationRoot: event.installationRoot,
         sidecarOffered: event.sidecarOffered === true,
+        sidecarDefault: event.sidecarDefault === true,
         install: event.install,
         focusedId,
         ready: true,

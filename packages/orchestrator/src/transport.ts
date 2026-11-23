@@ -363,6 +363,7 @@ export class Transport {
       install: this.#snapshotInstallFacts(),
       // Absent when the installation does not offer one, and absent is what an older orchestrator sends too.
       ...(this.#config.sidecarOffered === true ? { sidecarOffered: true } : {}),
+      ...(this.#config.sidecar === true ? { sidecarDefault: true } : {}),
     });
 
     // Then the CURRENT conversation for each live session, FETCHED rather than replayed.

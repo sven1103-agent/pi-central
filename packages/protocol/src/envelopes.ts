@@ -638,6 +638,14 @@ export type Event =
        * `wire-surface.test.ts`, whose whole point is that a version moves only with the set of KINDS.
        */
       sidecarOffered?: boolean | undefined;
+      /**
+       * Whether a new session gets a browser when the reader expresses no preference.
+       *
+       * Separate from `sidecarOffered` and it is not redundancy: "may I offer this" and "is it on unless you say no"
+       * are different questions, and the checkbox needs the second to start in the right state. Measured: the box
+       * started unticked while the default gave a browser anyway, so the control contradicted the outcome.
+       */
+      sidecarDefault?: boolean | undefined;
       /** True history total, as distinct from the length of `history`. */
       historyTotal: number;
       /**

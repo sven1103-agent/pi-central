@@ -101,11 +101,19 @@ export interface StartRequest {
    */
   sidecarPort?: number | null;
   /**
-   * Ask for a UI sidecar on an ASSIGNED port (ADR-0018 §14).
+   * The reader's answer to "Preview its work in a browser" (ADR-0018 §15).
    *
-   * The client's way of saying "the reader turned this on", so the picker can offer it for one session without the
-   * orchestrator default being on for every session. It cannot grant a browser the machine does not have: that is
-   * still configuration's decision, which is why the flag alone does nothing when no browser is configured.
+   * THREE-VALUED, and the middle one is the point:
+   *
+   *   `true`      -- give this session a browser, even when the default is off
+   *   `false`     -- do NOT, even when the default is on
+   *   `undefined` -- the installation's default decides
+   *
+   * It began two-valued, and that made the checkbox decorative: the picker always sends the reader's answer, so an
+   * unticked box sent `false`, which the old code read as "not an opt-in" and then let the default supply a browser
+   * anyway. Measured in the first real run.
+   *
+   * It still cannot GRANT a browser the machine does not have: `sidecarOffered` decides whether the checkbox is shown.
    */
   sidecar?: boolean;
   /**
@@ -623,7 +631,7 @@ export class Supervisor extends EventEmitter {
     // Precedence: an explicit per-session value, then an explicit global pin, then the port Pi Central assigns
     // (when sidecars are on at all). ASSIGNED is the default because a discovered port collides across sessions.
     const sidecarPort =
-      input.sidecarPort === null
+      input.sidecarPort === null || input.sidecar === false
         ? undefined
         : (input.sidecarPort ??
           this.#config.sidecarPort ??

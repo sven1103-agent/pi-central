@@ -1731,8 +1731,18 @@ export function App() {
     // Ask for focus BEFORE the control goes out: the orchestrator answers `start` with the new `session`
     // event synchronously, so the intent has to be in the store when that event lands (issue #144).
     dispatch({ kind: "expectNewSession" });
-    send({ kind: "start" });
-  }, [send]);
+    /*
+     * A scratch session gets the DEFAULT, said out loud rather than left to the orchestrator.
+     *
+     * Measured inconsistency this closes: opening a directory offered a browser checkbox, while "New session" offered
+     * nothing and got whatever the default was -- so the same feature behaved differently depending on which button
+     * started the session, and nothing on screen said which.
+     *
+     * It is not a choice here, because a scratch session has no directory to serve yet. Sending the default explicitly
+     * means the two paths agree by construction, and the Inspector states the outcome either way.
+     */
+    send({ kind: "start", ...(state.sidecarDefault ? { sidecar: true } : {}) });
+  }, [send, state.sidecarDefault]);
 
   /**
    * Ask for the chooser's places, or for one directory inside them (issue #76, ADR-0012).
@@ -2921,6 +2931,7 @@ export function App() {
         <OpenDirectorySheet
           installationRoot={state.installationRoot}
           sidecarOffered={state.sidecarOffered}
+          sidecarDefault={state.sidecarDefault}
           home={state.home}
           /* Derived from history, not stored (issue #149). `state.history` is the newest page, which is
              exactly the right input: "recent" cannot be older than the page it is drawn from. */

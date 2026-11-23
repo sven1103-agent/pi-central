@@ -173,11 +173,32 @@ export function initialRailPrefs(rowsOnDisk = 0): RailPrefs {
  */
 export function showsRowMetrics(
   density: RailDensity,
-  session: { contextPercent: number | null; pending: number; state: string } | undefined,
+  session: { contextPercent: number | null; pending: number; state: string; sidecarOrigin?: string | undefined } | undefined,
 ): boolean {
   if (session === undefined) return false;
   if (density === "full") return true;
-  return isNearFull(session.contextPercent) || session.pending > 0 || session.state === "failed";
+  // A browser is a PROCESS and a port per session, and its presence is otherwise invisible until an agent happens to use
+  // it. In calm density it earns a row only when it is actually there -- a session without one shows nothing, which is
+  // the same rule as `contextPercent` rendering nothing rather than a fabricated zero.
+  return (
+    isNearFull(session.contextPercent) ||
+    session.pending > 0 ||
+    session.state === "failed" ||
+    session.sidecarOrigin !== undefined
+  );
+}
+
+/**
+ * What to call a session's browser in the rail, or nothing when it has none.
+ *
+ * The PORT, not the full origin: the rail row is narrow and the host is always localhost. A reader comparing two rows
+ * needs to see they are on different ports, which is the whole mechanism that keeps them apart (ADR-0018 §14).
+ */
+export function sidecarBadge(session: { sidecarOrigin?: string | undefined }): string | undefined {
+  const origin = session.sidecarOrigin;
+  if (origin === undefined) return undefined;
+  const port = /:(\d+)$/.exec(origin)?.[1];
+  return port === undefined ? "browser" : `browser :${port}`;
 }
 
 /** The widest the rail may be in this window. */

@@ -22,7 +22,7 @@ globalThis.window = dom.window;
 globalThis.document = dom.window.document;
 
 let server;
-let OpenDirectorySheet, reduce, initialState;
+let OpenDirectorySheet, reduce, initialState, sidecarBadge, showsRowMetrics;
 
 before(async () => {
   server = await createServer({
@@ -33,6 +33,7 @@ before(async () => {
   });
   ({ OpenDirectorySheet } = await server.ssrLoadModule("/src/components/OpenDirectorySheet.tsx"));
   ({ reduce, initialState } = await server.ssrLoadModule("/src/store.ts"));
+  ({ sidecarBadge, showsRowMetrics } = await server.ssrLoadModule("/src/rail-prefs.ts"));
 });
 
 after(async () => {
@@ -109,4 +110,32 @@ test("the orchestrator reports the capability on the snapshot, so the UI has som
     /kind: "snapshot",[\s\S]{0,600}?sidecarOffered/,
     "the snapshot must carry sidecarOffered, from configuration",
   );
+});
+
+test("a session's browser is visible in the rail, and a session without one says nothing", () => {
+  // Invisible feature, reported from use: "we don't see it in the UI". A sidecar is a process and a port per session, and
+  // its presence was only observable if an agent happened to call a tool.
+  assert.equal(sidecarBadge({ sidecarOrigin: "http://localhost:48005" }), "browser :48005");
+  assert.equal(sidecarBadge({}), undefined, "no origin, no badge -- never a fabricated one");
+  assert.equal(sidecarBadge({ sidecarOrigin: "http://localhost" }), "browser", "no port to show, but still a browser");
+
+  // The PORT is what a reader comparing two rows needs: different ports is the mechanism keeping two sessions apart.
+  const calm = "calm";
+  const base = { contextPercent: 10, pending: 0, state: "idle" };
+  assert.equal(showsRowMetrics(calm, base), false, "nothing to say about a quiet session");
+  assert.equal(showsRowMetrics(calm, { ...base, sidecarOrigin: "http://localhost:48001" }), true, "a browser earns a row");
+  // A session with no process cannot have one, and must not gain a row from this.
+  assert.equal(showsRowMetrics(calm, undefined), false);
+});
+
+test("the checkbox starts in the installation's default state, and says when that is on", () => {
+  // Measured contradiction this fixes: the box started UNTICKED while the default supplied a browser anyway, so ticking
+  // and unticking produced the same session -- the control was decorative.
+  const off = render({ sidecarOffered: true, sidecarDefault: false });
+  assert.ok(!/type="checkbox"[^>]*checked/.test(off), "off by default, so the box starts clear");
+  assert.ok(!off.includes("on for new sessions"), "and no note about a default that does not exist");
+
+  const on = render({ sidecarOffered: true, sidecarDefault: true });
+  assert.match(on, /type="checkbox"[^>]*checked/, "on by default, so the box starts ticked");
+  assert.ok(on.includes("on for new sessions"), "and the reader is told this is a default they are opting OUT of");
 });

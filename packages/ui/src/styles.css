@@ -2946,6 +2946,8 @@ select.btn { font-family: var(--sans); }
   user-select: none;
 }
 .dialog-actions .sidecar-toggle input { accent-color: var(--accent); cursor: pointer; }
+/* The "on for new sessions" note, quieter than the label it follows: it explains a default rather than naming an action. */
+.dialog-actions .sidecar-default { opacity: 0.75; }
 .dialog-actions .sidecar-toggle:has(input:disabled) { opacity: 0.5; cursor: default; }
 .dialog-body input[type="text"], .dialog-body textarea {
   width: 100%;
@@ -7147,3 +7149,11 @@ select.btn { font-family: var(--sans); }
  * underlined on hover, so the affordance is truthfully "this is where you are", not "this goes somewhere".
  */
 .chooser-crumb-root { color: var(--dim); }
+
+/* The browser badge on a rail row. Deliberately NOT a chip: a chip reads as isolation state ("Safehouse",
+   "NO ISOLATION"), and this is a fact about what is running. Mono, because it ends in a port number. */
+.rail-sidecar {
+  font-family: var(--mono);
+  font-size: 10px;
+  opacity: 0.85;
+}
