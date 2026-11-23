@@ -118,3 +118,13 @@ test("a nested package root still counts as the same checkout", () => {
   });
   assert.ok(refusal !== undefined, "a prefix match must not span a directory boundary");
 });
+
+test("a checkout run must not adopt a running orchestrator it cannot attribute", () => {
+  // The second half of the same failure, found in the log rather than reasoned about: the launch was ATTACHED to
+  // pid 89370 started earlier from a different package, so the window loaded that process's UI. `shellSourceRoot`
+  // being defined is what identifies a checkout run; the decision to refuse belongs with it, because that is the
+  // condition under which serving someone else's interface is a mistake rather than a choice.
+  assert.equal(shellSourceRoot("/Users/x/git/pi-central/packages/app/src/main.ts"), "/Users/x/git/pi-central");
+  // An installed bundle has no sources beside it, so adoption stays the designed path there.
+  assert.equal(shellSourceRoot("/Applications/Pi Central.app/Contents/Resources/app.asar/main.js"), undefined);
+});

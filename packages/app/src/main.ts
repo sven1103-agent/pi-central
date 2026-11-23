@@ -609,6 +609,30 @@ async function launch(): Promise<void> {
   console.log(`Pi Central: ${decision.reason}`);
 
   if (decision.verdict === "attach" && record !== undefined) {
+    /*
+     * Adoption is where a launch from a checkout goes wrong MOST often, because it wins over every other decision.
+     *
+     * Measured: a dev run was adopted by an orchestrator started earlier from a DIFFERENT package, so the window loaded
+     * that process's UI -- an interface containing none of the working tree's changes -- and the log's only trace was a
+     * pid and a port. The reader sees a plausible app, no error, and a missing control: every symptom points at the
+     * code rather than at which process is on screen.
+     *
+     * So a run from a checkout refuses to adopt a process it cannot attribute. There is no honest way to ask a running
+     * orchestrator which package it was started from, so the answer is "unknown", and unknown is enough to refuse. The
+     * remedy is to stop it, which is stated rather than assumed.
+     */
+    const shell = shellSourceRoot(process.argv[1]);
+    if (shell !== undefined) {
+      const message =
+        `an orchestrator from an earlier launch is running (pid ${record.pid}, port ${record.port}), and this run was ` +
+        `started from the checkout at ${shell}. Loading that process would show ITS interface, which may be a different ` +
+        `package's — not your working tree's.` +
+        `\n\nStop it and launch again:  kill ${record.pid}` +
+        `\n\nOr quit that app with "Keep sessions running" off, then reopen this one.`;
+      console.error(`Pi Central: ${message}`);
+      renderFailure("Another orchestrator is running", message);
+      return;
+    }
     adopt(record, decision.reason);
     return;
   }
