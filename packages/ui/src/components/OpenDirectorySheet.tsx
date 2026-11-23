@@ -434,7 +434,7 @@ export function OpenDirectorySheet({
                * one option of this dialog rather than a setting, and it needs no label of its own beyond the sentence
                * that says what the session gets.
                */
-              <label className="sidecar-toggle" title="Gives the session a browser in its own sandbox, on a port Pi Central assigns it (48000 and up). It can reach that one port and nothing else.">
+              <label className="sidecar-toggle" title="A sandboxed browser for this session, reaching only the dev port Pi Central assigns it">
                 <input
                   type="checkbox"
                   checked={sidecar}
