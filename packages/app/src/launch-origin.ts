@@ -26,6 +26,8 @@
  */
 
 /** Where a launch is serving Pi Central from. */
+import { resolve } from "node:path";
+
 export interface LaunchOrigin {
   /** The package root the orchestrator will be started from. */
   packageRoot: string;
@@ -95,7 +97,17 @@ export function describeLaunch(origin: LaunchOrigin): {
  */
 export function shellSourceRoot(entryPath: string | undefined): string | undefined {
   if (entryPath === undefined || entryPath === "") return undefined;
-  const match = /^(.*)[/\\]packages[/\\]app[/\\]src[/\\][^/\\]+$/.exec(entryPath);
+  /*
+   * Resolved to an absolute path BEFORE matching, and that ordering is the whole fix.
+   *
+   * `npm run app` passes Electron a RELATIVE entry -- `packages/app/src/main.ts` -- so the pattern, which requires a
+   * separator before `packages`, matched nothing and this returned `undefined`. Undefined means "an installed app",
+   * which means the checkout refusal and the adopt-a-stranger refusal both stayed silent while the app adopted an
+   * orchestrator started from a different package. Measured: `npm run app` from this checkout loaded pid 4806 and
+   * printed four lines about adoption, with no refusal.
+   */
+  const absolute = resolve(entryPath);
+  const match = /^(.*)[/\\]packages[/\\]app[/\\]src[/\\][^/\\]+$/.exec(absolute);
   return match?.[1];
 }
 

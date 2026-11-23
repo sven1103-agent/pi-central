@@ -128,3 +128,15 @@ test("a checkout run must not adopt a running orchestrator it cannot attribute",
   // An installed bundle has no sources beside it, so adoption stays the designed path there.
   assert.equal(shellSourceRoot("/Applications/Pi Central.app/Contents/Resources/app.asar/main.js"), undefined);
 });
+
+test("a RELATIVE entry is recognised, because that is what npm run app passes", () => {
+  // Measured defect this holds: `npm run app` passes Electron `packages/app/src/main.ts`, and the pattern required a
+  // separator before `packages`. It matched nothing, returned undefined, and undefined means "an installed app" -- so
+  // BOTH refusals (wrong package, adopting a stranger) stayed silent while the app adopted an orchestrator started
+  // from a different package. The tests passed because every case they had was absolute.
+  assert.equal(shellSourceRoot("packages/app/src/main.ts"), process.cwd());
+  assert.equal(shellSourceRoot("./packages/app/src/main.ts"), process.cwd());
+  // Still absolute-friendly, and still undefined for a bundle with no sources beside it.
+  assert.equal(shellSourceRoot("/Users/x/git/pi-central/packages/app/src/main.ts"), "/Users/x/git/pi-central");
+  assert.equal(shellSourceRoot("/Applications/Pi Central.app/Contents/Resources/app.asar/main.js"), undefined);
+});
