@@ -379,6 +379,7 @@ test("reapDevPort never signals the process that asks", async () => {
 });
 
 test("the sidecar entry is resolved for the installation that exists, not for one mode", () => {
+  if (skip) return console.log(skip);
   // Measured defect: the supervisor launched `<dir>/sidecar.ts`. From source that is right; in the published package
   // the sources are not shipped (and Node will not strip types under node_modules), so every installed session got
   // no browser and no error. Resolved by looking, so BOTH layouts are exercisable here.
@@ -439,6 +440,7 @@ test("a Pi Central checkout is told it cannot serve its own orchestrator, and wh
   // Measured: an agent asked to start the dev server and look at the login page in a Pi Central checkout spent its
   // whole turn discovering C1, offering three workarounds, and showed no screenshot. The instruction said nothing about
   // a project whose own start script spawns a sandboxed child, which is the one case a session cannot work around.
+  if (skip) return console.log(skip);
   const dir = join(root as string, "self-hosted");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "pi-central" }));
@@ -457,6 +459,7 @@ test("a Pi Central checkout is told it cannot serve its own orchestrator, and wh
 
 test("a project merely NAMED pi-central is not the checkout", () => {
   // The detector reads the manifest name, so this case is the one it would get wrong if it matched a path or a word.
+  if (skip) return console.log(skip);
   const theirs = join(root as string, "not-ours");
   mkdirSync(theirs, { recursive: true });
   writeFileSync(join(theirs, "package.json"), JSON.stringify({ name: "pi-central-dashboard" }));
@@ -556,6 +559,7 @@ test("stopping a session removes its sidecar's state, not only its process", () 
 });
 
 test("removing sidecar state is scoped to one session, and survives a directory that is already gone", () => {
+  if (skip) return console.log(skip);
   const state = join(root as string, "remove-scope");
   mkdirSync(join(state, "sidecars", "s1", "policy"), { recursive: true });
   mkdirSync(join(state, "sidecars", "s2", "policy"), { recursive: true });
@@ -591,4 +595,27 @@ test("a SCRATCH session is sandboxed, so the mode gate does not exclude it", () 
   if (!scratch.ok) return;
   assert.match(scratch.session.sidecarOrigin ?? "", /^http:\/\/localhost:\d+$/, "a scratch session has a page to render");
   return app.stopAll().then(() => undefined);
+});
+
+test("every test in this file that needs the private root SKIPS without it", () => {
+  /*
+   * The failure this holds, measured in CI on a green local tree: four tests used `root as string` before checking
+   * `skip`, so with no `PI_CENTRAL_TEST_PRIVATE_ROOT` they passed `undefined` to `join` and threw
+   * "The path argument must be of type string". Locally they PASSED, because this suite is habitually run with the
+   * variable set -- so the local signal was green on every commit while CI was red.
+   *
+   * The check is structural rather than behavioural, because the defect is in the test file itself: a test that
+   * exercises the supervisor cannot run without a private root, and the fix is only ever "guard it". Reading the
+   * source is the honest way to hold that, and it fails loudly if someone adds another unguarded one.
+   */
+  const source = readFileSync(new URL("./sidecar-session.test.ts", import.meta.url), "utf8");
+  const blocks = source.split(/^test\(/m).slice(1);
+  const unguarded: string[] = [];
+  for (const block of blocks) {
+    const name = (/^"([^"]+)"/.exec(block) ?? [])[1] ?? "?";
+    if (name.startsWith("every test in this file")) continue;
+    const chunk = block.split(/^\}\);/m)[0] ?? "";
+    if (/root as string/.test(chunk) && !/if \(skip\)/.test(chunk)) unguarded.push(name);
+  }
+  assert.deepEqual(unguarded, [], "these tests use root without guarding on skip, so CI cannot run them");
 });
