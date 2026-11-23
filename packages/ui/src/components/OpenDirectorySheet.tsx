@@ -434,7 +434,7 @@ export function OpenDirectorySheet({
                * one option of this dialog rather than a setting, and it needs no label of its own beyond the sentence
                * that says what the session gets.
                */
-              <label className="sidecar-toggle" title="A sandboxed browser for this session, reaching only the dev port Pi Central assigns it">
+              <label className="sidecar-toggle" title="The session gets a sandboxed browser, so it can open your dev server and check its own work. It reaches that one port and nothing else.">
                 <input
                   type="checkbox"
                   checked={sidecar}
@@ -442,12 +442,16 @@ export function OpenDirectorySheet({
                   disabled={problem !== undefined}
                 />
                 {/*
-                  "Let the session see it" rather than "Let it see my dev server", and the difference is the reader's
-                  pronoun. The sheet's own footnote says "The session is sandboxed to this directory", so the subject in
-                  this row should be the session too -- and "my dev server" claims there IS one, at a moment when the
-                  reader has not started it yet. The tooltip names the port range for anyone who wants the detail.
-                */}
-                <span>Let the session see its dev server</span>
+                  Named for the OUTCOME, not the plumbing.
+
+                  Two earlier versions described infrastructure -- "my dev server", then "its dev server" -- which is a
+                  thing the reader has not started yet and does not say what they get for it. The feature's own point is
+                  that the agent can check its UI work without a human taking screenshots, so the label says that.
+
+                  "Preview" rather than "capture" or "test": it is the verb a frontend toolchain already uses, and it
+                  implies looking rather than asserting, which is what the four verbs do.
+                 */}
+                <span>Preview its work in a browser</span>
               </label>
             )}
             <button type="submit" className="btn btn-primary-sheet" disabled={problem !== undefined}>

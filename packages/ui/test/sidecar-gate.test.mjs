@@ -51,7 +51,7 @@ function render(props = {}) {
   );
 }
 
-const TOGGLE = "Let the session see its dev server";
+const TOGGLE = "Preview its work in a browser";
 
 test("with no browser configured, the toggle is not rendered at all", () => {
   // The failure this prevents is the specific one that reads worst: a control that is present and inert. A reader
