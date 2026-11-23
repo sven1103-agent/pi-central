@@ -13,6 +13,7 @@ import { defaultConfig } from "./config.ts";
 import { Supervisor } from "./supervisor.ts";
 import { Transport } from "./transport.ts";
 import { describeBuiltUi, explainStartupError } from "./startup-error.ts";
+import { siblingUiDir, staleBuiltUi } from "./static-ui.ts";
 import { assertNotSandboxed, SandboxedEnvironmentError } from "./sandbox-guard.ts";
 import { describeKeychainCheck } from "./keychain.ts";
 import { hasBuiltUi, resolveUiDistDir } from "./static-ui.ts";
@@ -317,6 +318,12 @@ async function main(): Promise<number> {
     // in Settings, which is the other half: the terminal says what is on disk, the page says what the tab
     // is running, and comparing the two is the whole diagnosis.
     console.log(`  UI build: ${describeBuiltUi(options.uiDir)}`);
+    // Named here because the symptom is invisible: a new control missing from a window that is otherwise fine reads
+    // as a code bug, not as a stale build. Measured -- the picker's browser toggle was absent from the running app
+    // while present in the source and in the freshly built workspace copy.
+    const sibling = siblingUiDir(options.uiDir);
+    const stale = sibling === undefined ? undefined : staleBuiltUi(options.uiDir, sibling);
+    if (stale !== undefined) console.log(`  WARNING: ${stale}`);
   } else {
     console.log(
       `No built UI at ${options.uiDir}\n` +

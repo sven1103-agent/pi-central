@@ -158,6 +158,46 @@ function runningFromSource(from: string): boolean {
   return /[\\/]packages[\\/][^\\/]+[\\/]src[\\/]/.test(fileURLToPath(from));
 }
 
+/**
+ * Warn when the UI being served is older than the other copy in this checkout.
+ *
+ * A checkout holds two copies: `packages/ui/dist` (written by `npm run ui:build`) and `dist/ui` (copied there
+ * by `npm run build:package`, and what the packaged app serves). Serving the stale one looks like a code bug --
+ * measured: the session picker's new control was missing from the running app while present in the source AND in
+ * the freshly built workspace copy, because `npm run app` spawns the orchestrator from `bin/pi-central.js`,
+ * which serves `dist/ui`. The only difference is a build step, and nothing on screen said so.
+ *
+ * Takes the two directories rather than finding them, so this is a pure comparison a test can drive: the discovery
+ * half is `siblingUiDir`. Silent when there is nothing to say -- the same entry bundle, a missing copy, or a copy
+ * that is not newer. A warning that fires when nothing is wrong trains people to ignore warnings.
+ */
+export function staleBuiltUi(uiDir: string, other: string): string | undefined {
+  if (resolve(other) === resolve(uiDir) || !hasBuiltUi(other)) return undefined;
+  const served = servedUiIdentity(uiDir);
+  const alternative = servedUiIdentity(other);
+  if (served === undefined || alternative === undefined) return undefined;
+  if (served.entry === alternative.entry) return undefined;
+  const servedAt = Date.parse(served.builtAt);
+  const otherAt = Date.parse(alternative.builtAt);
+  // Only when the copy NOT being served is NEWER. A stale workspace copy beside a fresh package is the ordinary
+  // state after `build:package`, and warning there would be noise.
+  if (!Number.isFinite(servedAt) || !Number.isFinite(otherAt) || otherAt <= servedAt) return undefined;
+  return `the served UI is older than ${other} -- this window may be missing recent changes. Rebuild: npm run build:package`;
+}
+
+/**
+ * The OTHER built UI in this checkout, given the one being served.
+ *
+ * Returns undefined outside a checkout (`findOwnPackage` fails in a packed install), where there is only ever one
+ * copy and so nothing to compare.
+ */
+export function siblingUiDir(uiDir: string, from: string = import.meta.url): string | undefined {
+  const own = findOwnPackage(from);
+  if (own === undefined) return undefined;
+  const servingPackaged = resolve(uiDir).startsWith(join(own.root, "dist"));
+  return servingPackaged ? join(own.root, "packages", "ui", "dist") : join(own.root, "dist", "ui");
+}
+
 export type StaticResolution =
   | { kind: "file"; path: string }
   | { kind: "denied"; reason: string };
