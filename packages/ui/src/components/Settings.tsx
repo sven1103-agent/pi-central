@@ -197,25 +197,38 @@ function SessionBrowserPanel({
   return (
     <section>
       <h4>Session browser</h4>
-      <label className="reading-row">
-        <span>Preview its work in a browser</span>
+      {/*
+        NOT a `.reading-row`, which is what this first used and what made it look broken. That class is a three-column grid
+        sized for two sliders — a 76px label column and a 44px value column — so a sentence-length label wrapped to four
+        lines in the first column while the checkbox sat in the value column, reading as a value for "Preview it" rather
+        than a control. A checkbox is a full-width row with its label beside it, which is what the session list does with
+        "Show the session list".
+      */}
+      <label className="settings-toggle">
         <input
           type="checkbox"
           checked={on}
           onChange={(event) => onChange(event.target.checked)}
           aria-describedby="session-browser-note"
         />
+        <span>Preview its work in a browser</span>
       </label>
       <p className="settings-note" id="session-browser-note">
         {/* State the DEFAULT only when the reader has expressed no opinion, or the note would contradict the switch. */}
         {pref === undefined && installDefault
-          ? `On by default for this installation. Set by PI_CENTRAL_SIDECAR=1 in the environment Pi Central was started from; this switch overrides it.`
-          : "A new session gets a browser of its own, beside its sandbox, and can open the dev server it runs. Unticked, sessions get none. A session already running cannot gain one."}
+          ? "On by default for this installation, set by PI_CENTRAL_SIDECAR=1 where Pi Central was started. This switch overrides it."
+          : "A new session gets a browser of its own, beside its sandbox, and can open the dev server it runs. Unticked, sessions get none — and a session already running cannot gain one."}
       </p>
-      <p className={browserExists ? "settings-note settings-verify" : "settings-note settings-updates"}>
-        {browserExists
-          ? `Browser: ${browser}`
-          : `No browser at ${browser} — a session browser cannot start. Set PI_CENTRAL_BROWSER to a Chromium binary.`}
+      {/* A path with no label is a fact with no name; the label says WHICH fact, and the path stays unbroken. */}
+      <p className={browserExists ? "settings-note" : "settings-note settings-updates"}>
+        {browserExists ? (
+          <>
+            <span>Browser </span>
+            <span className="settings-browser-path">{browser}</span>
+          </>
+        ) : (
+          `No browser at ${browser} — a session browser cannot start. Set PI_CENTRAL_BROWSER to a Chromium binary.`
+        )}
       </p>
     </section>
   );

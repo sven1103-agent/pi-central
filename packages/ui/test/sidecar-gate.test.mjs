@@ -184,3 +184,29 @@ test("an unticked box survives the trip to the wire as false", () => {
   );
   assert.match(source, /\.\.\.\(sidecar === undefined \? \{\} : \{ sidecar \}\)/, "and it must pass the answer through");
 });
+
+test("the session-browser row is a checkbox row, not a slider row", () => {
+  /*
+   * Reported from a real screenshot: the section read as broken. The cause was reusing `.reading-row`, a three-column grid
+   * built for the two sliders above it — 76px label, 1fr control, 44px value. A sentence-length label wrapped to FOUR
+   * lines in the 76px column while the checkbox sat in the value column, which reads as a number for the label rather
+   * than a switch to flip. "Preview it / work in a / browser" is what the screenshot shows.
+   *
+   * Asserted on the SOURCE rather than the rendered markup because the defect is a class choice: the markup was valid and
+   * the checkbox was present and functional, so nothing about the DOM is wrong. What was wrong is which grid it joined.
+   */
+  const settings = readFileSync(new URL("../../ui/src/components/Settings.tsx", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  const panel = settings.slice(settings.indexOf("function SessionBrowserPanel"));
+  const section = panel.slice(0, panel.indexOf("</section>"));
+  assert.ok(!/reading-row/.test(section), "the browser switch must not reuse the sliders' three-column grid");
+  assert.match(section, /className="settings-toggle"/, "it is a full-width checkbox row with its label beside it");
+  // And the CSS has to exist, or the class is a promise with nothing behind it.
+  const css = readFileSync(new URL("../../ui/src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.settings-toggle \{[^}]*display: flex/, "the flex row the label needs");
+  // The rule body, not merely the selector: an assertion on the selector alone passes while the property is gone, which is
+  // what the first version did -- it named `word-break` in the regex without anchoring to the block that must hold it.
+  const pathRule = /\.settings-browser-path[^{]*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.match(pathRule, /word-break:\s*break-all/, "a path that wraps instead of truncating");
+});

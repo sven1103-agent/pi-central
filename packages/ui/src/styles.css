@@ -7157,3 +7157,30 @@ select.btn { font-family: var(--sans); }
   font-size: 10px;
   opacity: 0.85;
 }
+
+/*
+ * A checkbox row with a sentence for a label (ADR-0018 15c).
+ *
+ * Not `.reading-row`: that is a three-column grid built for the two sliders above it (76px label, 1fr control, 44px
+ * value), so a full-sentence label wrapped to four lines in the first column and the control sat in the value column --
+ * which read as a NUMBER FOR the label rather than a switch you can flip. Measured in a real screenshot of Settings.
+ *
+ * Full width instead: control first, label beside it, the way "Show the session list" reads in the section below.
+ */
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--dim);
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+.settings-toggle input { accent-color: var(--accent); cursor: pointer; flex: none; }
+/* The browser path is a FACT, not prose, so it is mono and allowed to wrap mid-token: a path broken at a slash is
+   still readable, a path truncated with an ellipsis is not -- and the path is the whole point of the line. */
+.settings-browser-path, .settings .settings-browser-path {
+  font-family: var(--mono);
+  font-style: normal;
+  word-break: break-all;
+}
