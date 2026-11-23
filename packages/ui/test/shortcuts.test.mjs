@@ -39,6 +39,7 @@ import {
   SHORTCUTS,
   SHORTCUT_GROUPS,
   STOP_CHORD,
+  QUEUE_CHORD,
   chordOf,
   detectPlatform,
   displayChord,
@@ -314,7 +315,14 @@ test("next/previous session walks the rows in the order they are SHOWN", () => {
   assert.match(listener, /matchesChord\(event, "alt\+arrowdown"\)/, "it listens for the down key");
   assert.match(listener, /matchesChord\(event, "alt\+arrowup"\)/, "and the up key");
   assert.match(listener, /event\.preventDefault\(\)/, "and claims the key, so the list does not also scroll");
-  assert.match(listener, /onFocusRow\(row\)/, "and it moves the focus, which is the whole behaviour");
+  assert.match(listener, /onFocusRow\(row, true\)/, "and it moves the focus, which is the whole behaviour");
+  /*
+   * The second argument says the move came from the KEYBOARD (issue #275), and the shell needs the difference: walking
+   * the list while the rail is summoned must keep it open, while a pointer selection closes the overlay over the
+   * conversation just chosen. Dropping the flag would make `⌥↓` dismiss the list one row along.
+   */
+  assert.match(code(app), /onFocusRow=\{\(row, viaKeyboard\)/, "the shell reads which surface asked");
+  assert.match(code(app), /if \(viaKeyboard\) setRailOpen\(true\);/, "and keeps a summoned rail open for the keys");
   // A window listener also fires while a dialog is in front, and moving focus behind a dialog changes what its own
   // buttons are about — so the rail stands down when the shell says a modal is up.
   assert.match(railCode, /if \(modalOpen\) return undefined;/, "a dialog in front stops the rail acting");
@@ -399,3 +407,28 @@ test("a keystroke that cannot act says so, in the app's one error surface", () =
   assert.match(code(app), /kind: "noteError"/, "the shell reports it locally");
   assert.match(code(app), /it is open in the running session/, "in the orchestrator's own words");
 });
+test("a surface that answers its own chord reads it from the registry, not from event.key", () => {
+  /*
+   * The `⌥Q` defect, and it shipped: the registry declared `alt+q` for the queued-messages sheet AND `Composer.tsx`
+   * decided for itself with `event.altKey && event.key === "q"`. Two copies of one fact, and the copy in the component
+   * was dead on macOS — Option is a dead key for letters, so the event carries `key: "œ"` and the comparison never held.
+   * The sheet has listed that key since it was written, and it had never worked on the platform this app is built for.
+   *
+   * The rule this asserts is the one the registry states in its own header: handlers switch on IDS, never on keys. A
+   * literal comparison in a component makes "what can I press" a question with two answers, and only one of them is
+   * tested.
+   *
+   * Falsified by restoring the literal comparison: the second assertion reports a surface that reads the chord itself.
+   */
+  const composer = readFileSync(new URL("../src/components/Composer.tsx", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  assert.match(composer, /matchesChord\(event, QUEUE_CHORD\)/, "the queue sheet answers the registry's chord");
+  assert.ok(
+    !/event\.key === "q"/.test(composer),
+    "and does not also compare the composed character, which is what Option replaces",
+  );
+  // The chord itself is still the registry's, so the tooltip, the sheet and the handler cannot disagree.
+  assert.equal(QUEUE_CHORD, "alt+q");
+});
+

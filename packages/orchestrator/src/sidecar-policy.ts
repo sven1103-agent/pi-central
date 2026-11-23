@@ -1,5 +1,5 @@
 /**
- * Launching the UI sidecar: the SECOND place Safehouse argv is assembled (ADR-0015).
+ * Launching the UI sidecar: the SECOND place Safehouse argv is assembled (ADR-0018).
  *
  * `policy.ts` says it is the single place a session command line is built, and that guarantee exists so
  * every session's grant set derives from one function. This module adds a second assembler, so the
@@ -82,7 +82,7 @@ export interface SidecarSpec {
   /** Directory to write the rendered fragment into. Created if absent, mode 0700. */
   fragmentDir: string;
   safehouse: string;
-  /** The sidecar executable: a fixed binary driven by the four verbs (ADR-0015 §2). */
+  /** The sidecar executable: a fixed binary driven by the four verbs (ADR-0018 §2). */
   sidecar: string;
   /**
    * The directory the sidecar's own code lives in, granted READ-ONLY.

@@ -20,7 +20,10 @@ reader can tell whether a decision still holds.
 | [0012](0012-directory-chooser.md) | A placed directory browser in the orchestrator, not a native OS panel | Accepted |
 | [0013](0013-application-shell.md) | An optional desktop shell that is a launcher, never the update target | Accepted |
 | [0014](0014-os-actions.md) | The orchestrator may take one bounded OS action on a path it resolved | Accepted |
-| [0015](0015-ui-sidecar.md) | A browser sidecar in its own sibling sandbox, driven by four verbs | Proposed |
+| [0018](0018-ui-sidecar.md) | A browser sidecar in its own sibling sandbox, driven by four verbs | Proposed |
+| [0015](0015-reload-through-an-extension.md) | Reloading a session's resources goes through Pi Central's own extension | Accepted |
+| [0016](0016-rail-visibility.md) | The rail's visibility, width, density and folds are reader preferences; the breakpoint is only a floor | Accepted |
+| [0017](0017-calm-transcript.md) | A followed transcript keeps its newest line above the window's foot and glides rather than teleporting; text coalescing is a separate slice | Accepted |
 
 ## Format
 

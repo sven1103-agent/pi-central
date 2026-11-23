@@ -1,5 +1,5 @@
 /**
- * What the sidecar will agree to do (ADR-0015 §2, §7, §8).
+ * What the sidecar will agree to do (ADR-0018 §2, §7, §8).
  *
  * This module is deliberately pure: no process, no socket, no browser. It holds the two decisions that
  * make the sidecar safe rather than merely convenient, and both are decisions a reviewer can read in one
@@ -48,7 +48,7 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
  * Decide whether the sidecar may open a URL.
  *
  * `registered` is the set of origins this sidecar was started for — one per session, because egress is
- * pinned to one port (ADR-0015 §5). The check is against the *parsed* origin, never a string prefix:
+ * pinned to one port (ADR-0018 §5). The check is against the *parsed* origin, never a string prefix:
  * `http://localhost:4173.evil.com` starts with `http://localhost:4173` and is a different host.
  *
  * Every branch returns a `Refusal` rather than throwing, because a refusal is a normal answer the model
@@ -111,7 +111,7 @@ export interface ProbeVerb {
   /**
    * WHICH checks to run, never how they work.
    *
-   * The agent may choose from a fixed battery (ADR-0015 §3, #276 open question 2). It cannot pass a
+   * The agent may choose from a fixed battery (ADR-0018 §3, #276 open question 2). It cannot pass a
    * selector-driven assertion, a script, or a threshold — so "broken" stays a property the sidecar
    * defines. That is the difference between a reviewer and a defendant.
    */

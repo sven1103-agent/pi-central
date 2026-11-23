@@ -15,7 +15,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The UI-sidecar spike briefs state no version and their paths resolve, so `verify` is green again ([#276]).
 - Playwright's MCP server is ruled out as the sidecar: nothing host-side narrows its 25 tools ([#276]).
 - A CDP client of 183 lines replaces `playwright` for capture and probe, using `ws` ([#276]).
-- ADR-0015 proposes a browser sidecar as a sibling sandbox, driven by four host-side verbs ([#276]).
+- ADR-0018 proposes a browser sidecar as a sibling sandbox, driven by four host-side verbs ([#276]).
 - A session can no longer be handed a Chromium feature: `playwright-chrome` composed cleanly before ([#276]).
 - The sidecar's fragment is rendered from the shared deny set, so a new deny reaches it too ([#276]).
 - The renderer is denied `~/.npmrc` and the gh caches, which the base profile grants ([#276]).
@@ -63,6 +63,63 @@ They are kept because each one is the reason a constraint or an invariant test e
 - A hand-written credential deny list failed open on `~/.gitconfig`, as C15c predicts ([#276]).
 
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
+
+## [0.15.0] — 2026-11-22
+
+### Added
+
+- A followed transcript holds its newest line above the window's foot, and the reader can put it back at the foot ([#279]).
+- Following the tail glides instead of teleporting, capped at one prose line per frame ([#279]).
+- The transcript's scrollbar is replaced by a fade at each end, so the reading column has one width ([#279]).
+- ADR-0017 records the anchor and the scroll, and defers the coalescing of streaming text to its own slice ([#279]).
+
+### Fixed
+
+- The session's details are laid out by the width they actually have, so the peek panel no longer clips its own content on the left ([#281]).
+- A focused control inside the peek panel no longer leaves a horizontal offset behind it ([#281]).
+- The session band spans the conversation instead of stopping at the details column's width ([#281]).
+- No child of the session details is wider than the box it is given, so the block no longer paints past the row's right edge into the panel ([#281]).
+- The prose and the composer end on the same right edge again, and the reading column keeps its width when a transcript grows past one screen ([#281]).
+- The transcript stays centred in the reading row in every state, with the session's details occupying the trailing margin ([#281]).
+- Hovering the session list's control previews the roster, and the preview can be used: it follows the pointer onto the list and a press pins it open ([#281]).
+
+## [0.14.0] — 2026-11-22
+
+### Added
+
+- The session list's width, density and visibility are the reader's, remembered across restarts, with a resize handle and a Session list section in Settings ([#275]).
+- Idle and Stopped fold from the whole heading, with a disclosure mark large enough to see, keeping the count and opening themselves when a session arrives in them ([#275]).
+- ADR-0016 records the decision: the list’s visibility is a reader preference and the 1024px breakpoint is only a floor ([#275]).
+- Reading focus (`⌘⇧.`) gives the conversation the window: the fleet counts, the session band and the composer's hint row step aside, and the panel keeps everything they stated ([#275]).
+- The conversation is centred on its own lane rather than on the pair it forms with the session header, so hiding the list no longer leaves it off centre ([#275]).
+
+### Fixed
+
+- The session header stays on screen between 1080px and the width where the lane and the header both fit, instead of being drawn past the right edge ([#275]).
+- A long transcript scrolls again, and the composer stays below it instead of being pushed behind the text ([#275]).
+- Reading focus keeps the session header while the panel is closed, so the session's controls are never unreachable ([#275]).
+- In reading focus the session's details keep their own column beside the conversation, narrowed to a tab that opens on hover, focus or click ([#275]).
+- The details tab states the session's state and its context pressure, and Escape closes the panel instead of stopping the run beneath it ([#275]).
+- The details panel no longer opens empty when the Session panel already states the same facts ([#275]).
+- The details panel opens at its own width instead of collapsing to the width of its tab ([#275]).
+- The details keep their layout inside that panel, instead of rendering as unformatted text ([#275]).
+
+### Changed
+
+- In reading focus the session's details rest as a named tab on the conversation's edge, peek on hover or focus, and latch on click for that session ([#275]).
+- A row's metrics line is shown only when it can change a decision: a nearly-full context, queued work, or a failure ([#275]).
+- An activity bar item shows its name on hover and on keyboard focus, so the glyphs no longer have to be remembered ([#275]).
+- Zen mode is the reading-focus mode by its popular name, and `⌥⇧Z` toggles it beside `⌘⇧.` ([#275]).
+- Option chords match the physical key against every letter it could carry, so a binding on an Option letter fires on macOS on a non-US keyboard without asking the browser for the layout ([#275]).
+- The session list can be hidden above the breakpoint, and the left bar's `☰` brings it back as a column rather than as a modal ([#275]).
+- The left bar separates page navigation from the session list's toggle, so `Sessions` never rearranges the page it navigates to ([#275]).
+- The session list's toggle shows the list from any page instead of changing a preference that page cannot display ([#275]).
+- A running session can re-read its extensions, skills, prompt templates, MCP servers and context files without being stopped, and asks before abandoning a run in flight ([#274]).
+- Pi Central says whether a session's toolset has changed since it last read its resources, or that it cannot tell ([#274]).
+- A followed transcript holds its newest line above the window's foot, and the reader can put it back at the foot ([#279]).
+- Following the tail glides instead of teleporting, capped at one prose line per frame ([#279]).
+- The transcript's scrollbar is replaced by a fade at each end, so the reading column has one width ([#279]).
+- ADR-0017 records the anchor and the scroll, and defers the coalescing of streaming text to its own slice ([#279]).
 
 ## [0.13.0] — 2026-11-21
 
@@ -838,3 +895,7 @@ The spike that answered whether this was worth building.
 [#265]: https://github.com/sven1103-agent/pi-central/issues/265
 [#269]: https://github.com/sven1103-agent/pi-central/issues/269
 [#276]: https://github.com/sven1103-agent/pi-central/issues/276
+[#274]: https://github.com/sven1103-agent/pi-central/issues/274
+[#275]: https://github.com/sven1103-agent/pi-central/issues/275
+[#281]: https://github.com/sven1103-agent/pi-central/issues/281
+[#279]: https://github.com/sven1103-agent/pi-central/issues/279

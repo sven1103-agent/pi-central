@@ -1,5 +1,5 @@
 /**
- * Spawning a sidecar beside a session, and taking it down with it (ADR-0015 §1, §11).
+ * Spawning a sidecar beside a session, and taking it down with it (ADR-0018 §1, §11).
  *
  * ## Why the lifetime needs code and not a signal
  *
@@ -103,7 +103,7 @@ function sessionOrdinal(sessionId: string): number {
 export const DEV_PORT_BASE = 48000;
 
 /**
- * The dev-server port Pi Central assigns a session (ADR-0015 §14).
+ * The dev-server port Pi Central assigns a session (ADR-0018 §14).
  *
  * Assigned rather than discovered, because the sidecar's egress is pinned to ONE port and an agent cannot know
  * its dev server's: frameworks default to 5173 or 3000 and silently move to the next free port, which in a

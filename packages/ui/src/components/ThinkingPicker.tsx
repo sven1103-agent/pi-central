@@ -23,7 +23,7 @@
  * readers with no code, and it cannot be broken by a focus bug.
  */
 import type { LiveSession } from "@pi-central/protocol";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 export interface ThinkingPickerProps {
   session: LiveSession;
@@ -67,6 +67,8 @@ export function ThinkingPicker({ session, levels, error, onRequest, onSelect }: 
   // `levels` may belong to a previous model. Reporting an unread list as "no levels" would be a
   // claim about the model rather than about the attempt, so the two are rendered differently.
   const loaded = levels !== undefined;
+  /** Unique per MOUNT, because the same session's details can be on screen twice — see `ModelPicker`'s note. */
+  const thinkingId = useId();
   const current = session.thinkingLevel ?? "—";
 
   if (error !== undefined) {
@@ -95,11 +97,11 @@ export function ThinkingPicker({ session, levels, error, onRequest, onSelect }: 
 
   return (
     <div className="picker">
-      <label className="picker-label" htmlFor={`thinking-${session.id}`}>
+      <label className="picker-label" htmlFor={thinkingId}>
         Thinking
       </label>
       <select
-        id={`thinking-${session.id}`}
+        id={thinkingId}
         className="picker-select picker-select-narrow"
         // The session's value, never the request's: a level Pi refused leaves the control where it
         // was rather than showing what was asked for.

@@ -66,7 +66,7 @@ export interface FragmentOptions {
   /** The agent keychain to grant, when `keychain` is on. */
   keychainPath?: string;
   /**
-   * The directory holding this session's UI sidecar config (ADR-0015).
+   * The directory holding this session's UI sidecar config (ADR-0018).
    *
    * Pi is launched with `--mcp-config <stateRoot>/sidecars/<id>/mcp.json`, and that path is OUTSIDE the session's
    * workdir. Measured on a real machine: the file existed and named the right URL, the sidecar was listening and
@@ -264,7 +264,7 @@ export function renderPolicyFragment(options: FragmentOptions = {}): string {
     );
   }
 
-  // --- The UI sidecar's config (ADR-0015) ------------------------------------------------
+  // --- The UI sidecar's config (ADR-0018) ------------------------------------------------
   //
   // Pi opens this file at launch and re-reads it per tool call. It lives outside the workdir, so without this grant the
   // open is DENIED and Pi reports "0 servers configured" -- the sidecar is running, the token is right, and the only
@@ -323,7 +323,7 @@ export function renderPolicyFragment(options: FragmentOptions = {}): string {
  * The host-credential denies alone — the part every sandboxed process needs.
  *
  * Exported separately because the UI sidecar needs exactly this block and nothing else
- * (ADR-0015). It is a **separate entry point, not a copy**: the sidecar renders its fragment with
+ * (ADR-0018). It is a **separate entry point, not a copy**: the sidecar renders its fragment with
  * this function, so a name added to `HOST_DENIES` reaches the renderer in the same commit that
  * reaches a session.
  *

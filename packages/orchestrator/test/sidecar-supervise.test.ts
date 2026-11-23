@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { mcpConfigArgs, spawnSidecar, type SidecarHandle, type SidecarSpawn } from "../src/sidecar-supervise.ts";
 
 /**
- * The supervisor wiring (ADR-0015 §1, §11).
+ * The supervisor wiring (ADR-0018 §1, §11).
  *
  * These spawn a REAL process, because the properties worth having are properties of a running child: that
  * the MCP config lands where Pi can read it and the agent cannot write it, and that closing stdin takes the

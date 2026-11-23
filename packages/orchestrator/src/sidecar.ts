@@ -1,5 +1,5 @@
 /**
- * The sidecar process: four verbs over MCP streamable HTTP on loopback, behind a bearer token (ADR-0015 §12).
+ * The sidecar process: four verbs over MCP streamable HTTP on loopback, behind a bearer token (ADR-0018 §12).
  *
  * ## Why HTTP and not stdio
  *
@@ -37,7 +37,7 @@ export interface SidecarConfig {
   /**
    * The one origin this sidecar serves.
    *
-   * An input, never a constant: egress is pinned to a single port (ADR-0015 §6), so a sidecar is correct
+   * An input, never a constant: egress is pinned to a single port (ADR-0018 §6), so a sidecar is correct
    * for exactly one dev server.
    */
   origin: string;
@@ -180,7 +180,7 @@ export async function handleRequest(
      * block would make the model read a wall of base64 and would render as nothing at all to the user —
      * thousands of tokens spent on a string nobody can see.
      *
-     * Still bytes, still no path: the sidecar writes nothing and names no file (ADR-0015 §9). What changes is
+     * Still bytes, still no path: the sidecar writes nothing and names no file (ADR-0018 §9). What changes is
      * the TYPE of the block, which is what decides whether a human ends up looking at the picture.
      */
     return {
@@ -250,7 +250,7 @@ export async function serve(config: SidecarConfig): Promise<void> {
   };
   process.once("SIGTERM", () => void shutdown().then(() => process.exit(0)));
   process.once("SIGINT", () => void shutdown().then(() => process.exit(0)));
-  // The lifetime mechanism (ADR-0015 §11): stdin closing means the orchestrator is gone.
+  // The lifetime mechanism (ADR-0018 §11): stdin closing means the orchestrator is gone.
   process.stdin.once("end", () => void shutdown().then(() => process.exit(0)));
 
   /**
@@ -296,11 +296,11 @@ export async function serve(config: SidecarConfig): Promise<void> {
   };
 
   /**
-   * MCP over streamable HTTP on loopback (ADR-0015 §1, amended).
+   * MCP over streamable HTTP on loopback (ADR-0018 §1, amended).
    *
    * **Why not stdio, which was built first and is gone.** A stdio MCP server is spawned BY PI, so it inherits
    * the session's sandbox: it becomes a child of the session rather than a sibling, which is the one
-   * arrangement ADR-0015 forbids and C1 makes impossible. Measured: it failed with `Path does not exist`,
+   * arrangement ADR-0018 forbids and C1 makes impossible. Measured: it failed with `Path does not exist`,
    * which is what a DENIED stat looks like — the reader-side processes cannot see their own policy, profile
    * or code from inside the session.
    *
@@ -396,7 +396,7 @@ export async function serve(config: SidecarConfig): Promise<void> {
 
   process.once("SIGTERM", () => void shutdown().then(() => process.exit(0)));
   process.once("SIGINT", () => void shutdown().then(() => process.exit(0)));
-  // The lifetime mechanism (ADR-0015 §11): the orchestrator holds our stdin, and closing it means it is gone.
+  // The lifetime mechanism (ADR-0018 §11): the orchestrator holds our stdin, and closing it means it is gone.
   process.stdin.once("end", () => void shutdown().then(() => process.exit(0)));
   process.stdin.resume();
 }

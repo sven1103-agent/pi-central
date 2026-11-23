@@ -12,7 +12,7 @@ import {
 import { composePolicy, type SessionSpec } from "../src/policy.ts";
 
 /**
- * Two assemblers now exist (ADR-0015), so the guarantee `policy.ts` states — one function derives a
+ * Two assemblers now exist (ADR-0018), so the guarantee `policy.ts` states — one function derives a
  * session's grant set — has to be restated as something that can fail. Each test below names what it
  * would take to make it pass with the defect present.
  *

@@ -1,0 +1,247 @@
+/*
+ * Harness layout only. Every transcript rule comes from src/styles.css, unmodified — the point of the harness is
+ * that it shows the real component, so overriding anything in it would defeat the exercise.
+ */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: var(--fs-base) / 1.45 var(--sans);
+  overflow: hidden;
+}
+
+.hx {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.hx-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 12px;
+}
+
+.hx-bar strong {
+  font-size: 13px;
+  margin-right: 4px;
+}
+
+.hx-bar button {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 11px;
+  border-radius: 5px;
+  cursor: pointer;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+}
+
+.hx-bar button[aria-pressed="true"] {
+  background: var(--panel-3);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.hx-hint {
+  color: var(--dim);
+  margin-left: auto;
+  max-width: 46ch;
+  line-height: 1.45;
+}
+
+.hx-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  padding: 0 18px;
+}
+
+.hx-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.hx-speed select {
+  font: inherit;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 3px 6px;
+}
+/* The live scroll readout: green while the motion is inside our budget, red when a jump happened. */
+.hx-probe {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ok-text);
+  padding: 3px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.hx-probe.is-jump {
+  color: var(--danger-text);
+  border-color: var(--danger);
+  background: var(--danger-tint);
+}
+/* --- the tuning panel ---------------------------------------------------------------- */
+
+.hx-tuning {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+  font-size: 11px;
+}
+
+.hx-tune {
+  display: grid;
+  grid-template-columns: auto 110px auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 1px 6px;
+  color: var(--dim);
+}
+
+.hx-tune-name {
+  font-family: var(--mono);
+  color: var(--text);
+}
+
+.hx-tune input[type="range"] {
+  width: 110px;
+}
+
+.hx-tune-value {
+  font-family: var(--mono);
+  color: var(--accent-text);
+  min-width: 48px;
+  text-align: right;
+}
+
+/* The note spans the whole row, so it explains the slider without widening it. */
+.hx-tune-note {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  opacity: 0.65;
+}
+
+.hx-tuning button {
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 9px;
+  border-radius: 4px;
+  cursor: pointer;
+  background: var(--panel-3);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+}
+
+/* The live config, copyable so a setting can be pasted into a report. */
+.hx-config {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ok-text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 7px;
+  max-width: 46ch;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+/* The settle table: what the CURRENT values cost, so a slider is legible as well as felt. */
+.hx-settle {
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.hx-settle th {
+  text-align: right;
+  padding: 0 6px;
+  font-weight: 600;
+  color: var(--dim);
+  border-bottom: 1px solid var(--line);
+}
+
+.hx-settle td {
+  text-align: right;
+  padding: 1px 6px;
+}
+
+/* A row whose peak step exceeded the cap: the arithmetic and the setting disagree. */
+.hx-settle tr.is-over td {
+  color: var(--danger-text);
+}
+.hx-tuning-truth {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-left: 2px solid rgb(90 140 200);
+  background: rgb(90 140 200 / 10%);
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgb(200 210 225);
+}
+
+.hx-tuning-truth b {
+  color: rgb(235 240 250);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A slider that provably cannot affect the motion at real token rates. Dimmed, not hidden: seeing WHY it is
+   inert is the point, and hiding it would invite the question again. */
+.hx-tune {
+  display: grid;
+  grid-template-columns: 96px 1fr 56px 84px;
+  gap: 6px 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  opacity: 0.55;
+}
+
+.hx-tune-active {
+  opacity: 1;
+}
+
+.hx-tune-reach {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgb(150 160 175);
+  white-space: nowrap;
+}
+
+.hx-tune-active .hx-tune-reach {
+  color: rgb(110 200 140);
+}
+
+.hx-tune-note {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  color: rgb(120 130 145);
+}

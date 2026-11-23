@@ -24,7 +24,7 @@ import {
   stateLabel,
   transcriptFor,
 } from "../src/store.ts";
-import type { HistoricalSession, LiveSession } from "@pi-central/protocol";
+import type { HistoricalSession, LiveSession, ToolsetStatus } from "@pi-central/protocol";
 import { emptyTranscript, noticeIsOpen } from "../src/transcript.ts";
 
 function live(over: Partial<LiveSession> = {}): LiveSession {
@@ -904,4 +904,41 @@ test("installFacts leaves session state untouched, because it carries none (issu
   const next = reduce(state, { kind: "installFacts", install: facts });
   assert.equal(next, state, "no state change, so no re-render on a per-focus message");
   assert.equal(next.install?.version, "1.0.0", "the snapshot remains the authority on the facts the UI renders");
+});
+
+// --- The toolset (issue #274) --------------------------------------------------------------
+
+const toolset: ToolsetStatus = {
+  freshness: "changed",
+  resourcesLoadedAt: 1000,
+  watched: [{ scope: "project", kind: "skills", path: "/w/.pi/skills", mtimeMs: 2000 }],
+  unwatched: ["MCP servers registered from an installed package"],
+  unreadable: [],
+};
+
+test("a toolset answer replaces the previous one, and an error is cleared by it", () => {
+  // The `models` rule, applied here: a successful read must not leave a stale failure on screen, or a reader who
+  // fixed the directory would go on reading about a check that now works.
+  let state = reduce(initialState(), { kind: "toolsetError", sessionId: "s1", message: "ENOENT" });
+  assert.equal(state.toolsetErrors["s1"], "ENOENT");
+  state = reduce(state, { kind: "toolset", sessionId: "s1", status: toolset });
+  assert.deepEqual(state.toolsets["s1"], toolset);
+  assert.equal(state.toolsetErrors["s1"], undefined, "a working check clears the failure");
+});
+
+test("an ask that failed is NOT an answer of unknown, and they land in different places", () => {
+  // The distinction the protocol makes: `unknown` freshness is a RESULT (the check ran and could not conclude),
+  // while `toolsetError` is the check not running at all. Collapsing them is the eternal-spinner failure C14
+  // describes, one level up: a surface would show "cannot tell" about a question nobody managed to ask.
+  const answered = reduce(initialState(), {
+    kind: "toolset",
+    sessionId: "s1",
+    status: { ...toolset, freshness: "unknown", resourcesLoadedAt: undefined },
+  });
+  assert.equal(answered.toolsets["s1"]?.freshness, "unknown");
+  assert.deepEqual(answered.toolsetErrors, {}, "an answer is not an error");
+
+  const failed = reduce(initialState(), { kind: "toolsetError", sessionId: "s1", message: "no such session: s1" });
+  assert.equal(failed.toolsets["s1"], undefined, "a failure is not an answer");
+  assert.equal(failed.toolsetErrors["s1"], "no such session: s1");
 });

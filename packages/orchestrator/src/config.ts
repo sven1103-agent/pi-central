@@ -96,7 +96,7 @@ export interface Config {
    */
   sidecarPort: number | undefined;
   /**
-   * Give every sandboxed session a sidecar, on a dev port Pi Central assigns it (ADR-0015 §14).
+   * Give every sandboxed session a sidecar, on a dev port Pi Central assigns it (ADR-0018 §14).
    *
    * Optional so existing configurations keep meaning "no sidecar". An explicit `sidecarPort` still wins, which is
    * what a harness or a manual run wants; a single global port is only right for a single session.

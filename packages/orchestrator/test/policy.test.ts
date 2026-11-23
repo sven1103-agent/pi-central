@@ -238,3 +238,39 @@ test("direct mode has no --env-pass, because there is no Safehouse to pass it to
   // Direct mode still gets the values — it inherits the spawn environment directly.
   assert.equal(policy.launch.env["GH_CONFIG_DIR"], "/x/gh");
 });
+
+test("the reload extension is loaded with --extension, after the pi command", () => {
+  // ADR-0015: the command that reaches `ctx.reload()` must be loaded from Pi Central's own artifact, by path.
+  // Auto-discovery would put an executable file in the reader's extensions directory, and an `extensions` entry in
+  // settings.json would be dropped by `--no-extensions` — this flag is not affected by it.
+  const policy = composePolicy(spec({ extension: "/agent/pi-central/extensions/reload.js" }));
+  assert.deepEqual(policy.launch.args, [
+    "--workdir",
+    dir,
+    "--",
+    "pi",
+    "--mode",
+    "rpc",
+    "--extension",
+    "/agent/pi-central/extensions/reload.js",
+  ]);
+});
+
+test("direct mode carries the same extension, because a capability must not depend on the mode", () => {
+  const policy = composePolicy(spec({ mode: "direct", extension: "/agent/pi-central/extensions/reload.js" }));
+  assert.deepEqual(policy.launch.args.slice(0, 2), ["--mode", "rpc"]);
+  const at = policy.launch.args.indexOf("--extension");
+  assert.ok(at !== -1, `direct mode must load it too: ${policy.launch.args.join(" ")}`);
+  assert.equal(policy.launch.args[at + 1], "/agent/pi-central/extensions/reload.js");
+});
+
+test("no extension means no --extension flag, so a failed provisioning is not a broken command line", () => {
+  const policy = composePolicy(spec());
+  assert.ok(!policy.launch.args.includes("--extension"));
+});
+
+test("a relative extension path is refused rather than resolved against the sandbox cwd", () => {
+  // The only free value on this command line is a path, and a relative one would be resolved against whatever
+  // directory the wrapped process happened to run in — which is exactly the shape this module refuses elsewhere.
+  assert.throws(() => composePolicy(spec({ extension: "pi-central/extensions/reload.js" })), /must be absolute/);
+});

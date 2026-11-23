@@ -20,7 +20,7 @@ import {
 } from "../src/sidecar-supervise.ts";
 
 /**
- * The join between the sidecar and a session (ADR-0015).
+ * The join between the sidecar and a session (ADR-0018).
  *
  * `sidecar-supervise.test.ts` proves the spawn and the lifetime in isolation; this proves the SUPERVISOR
  * uses them — specifically that a session with a configured port is launched with `--mcp-config`, and that

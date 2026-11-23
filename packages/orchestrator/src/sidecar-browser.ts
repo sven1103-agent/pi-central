@@ -1,5 +1,5 @@
 /**
- * Launch Chromium for the sidecar, on a CDP PIPE (ADR-0015).
+ * Launch Chromium for the sidecar, on a CDP PIPE (ADR-0018).
  *
  * Two measured facts shape this file, and both replaced an earlier version:
  *

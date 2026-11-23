@@ -62,7 +62,7 @@ async function startSidecar(token: string, ambientToken?: string): Promise<Runni
     child.once("exit", (code) => { clearTimeout(timer); fail(new Error("the sidecar exited with " + String(code) + ": " + seen)); });
   });
   const stop = async (): Promise<void> => {
-    // stdin is the lifetime mechanism (ADR-0015 §11): closing it is how the orchestrator says "you are alone now".
+    // stdin is the lifetime mechanism (ADR-0018 §11): closing it is how the orchestrator says "you are alone now".
     child.stdin.end();
     await new Promise<void>((done) => {
       if (child.exitCode !== null) return done();

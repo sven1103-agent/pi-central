@@ -8,7 +8,7 @@ import {
 } from "../src/sidecar-control.ts";
 
 /**
- * The sidecar's two boundary decisions (ADR-0015 §2, §7, §8). Pure: no browser, no socket.
+ * The sidecar's two boundary decisions (ADR-0018 §2, §7, §8). Pure: no browser, no socket.
  *
  * **What would make each test pass with the defect present** is named above the assertion it protects.
  * These are the checks an adversarial client tries first, so a test that only exercises the happy path

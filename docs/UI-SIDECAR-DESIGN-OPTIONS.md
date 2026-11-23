@@ -1,7 +1,7 @@
 # UI sidecar: current design vs a containerised MCP browser
 
 **Status:** comparison for a decision that has not been made. Nothing here is implemented.
-**Parent:** [ADR-0015](decisions/0015-ui-sidecar.md) - **Issue:** [#276](https://github.com/sven1103-agent/pi-central/issues/276)
+**Parent:** [ADR-0018](decisions/0018-ui-sidecar.md) - **Issue:** [#276](https://github.com/sven1103-agent/pi-central/issues/276)
 
 This document exists because the question keeps returning in the same form -- *"why not just run Playwright's
 MCP server, maybe in Docker, one per session?"* -- and the answer is different for each half of it:

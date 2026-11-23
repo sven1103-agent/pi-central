@@ -8,7 +8,7 @@ import { renderPolicyFragment } from "../src/fragment.ts";
 import { renderSidecarFragment } from "../src/sidecar-fragment.ts";
 
 /**
- * The UI sidecar's fragment (ADR-0015). Content assertions run everywhere; the SBPL syntax check
+ * The UI sidecar's fragment (ADR-0018). Content assertions run everywhere; the SBPL syntax check
  * needs `sandbox-exec`, which is macOS-only (C10), and reports its skip rather than passing silently.
  *
  * **The falsification these tests are built around.** The Phase 0C spike hand-wrote a four-name deny
@@ -85,7 +85,7 @@ test("the sidecar is rendered from the shared deny set, not restated", () => {
 
 test("the sidecar has no agent root, no keychain, and no writable subtree", () => {
   const sidecar = rules(renderSidecarFragment({ port: PORT }));
-  assert.ok(!sidecar.includes("SecurityServer"), "a renderer resolves no provider key (ADR-0015 §9)");
+  assert.ok(!sidecar.includes("SecurityServer"), "a renderer resolves no provider key (ADR-0018 §9)");
   // About ALLOWS, not about text: the shared deny block legitimately names ~/.ssh/allowed_signers, so a
   // substring check would fail on correct input. What must not exist is a grant.
   for (const block of sidecar.split("(allow").slice(1)) {

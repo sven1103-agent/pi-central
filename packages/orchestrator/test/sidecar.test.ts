@@ -4,7 +4,7 @@ import { handleRequest, toolDefinitions } from "../src/sidecar.ts";
 import { PROBE_CHECKS, VERB_NAMES } from "../src/sidecar-control.ts";
 
 /**
- * The sidecar's transport layer (ADR-0015). Pure: `handleRequest` is given a page thunk, so a test can
+ * The sidecar's transport layer (ADR-0018). Pure: `handleRequest` is given a page thunk, so a test can
  * assert what the transport does WITHOUT a browser — which is the point of splitting it from the driver.
  *
  * The significant assertions are the negatives: `info` must not launch, and a refused target must not

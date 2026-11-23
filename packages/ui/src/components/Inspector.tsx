@@ -6,7 +6,7 @@
  * whole premise is that isolation is *verifiable* rather than asserted — so the UI has to be
  * able to show the policy, not just a "sandboxed" badge.
  */
-import type { LiveSession } from "@pi-central/protocol";
+import type { LiveSession, ToolsetStatus } from "@pi-central/protocol";
 import { formatCost, formatTokens, shortenPath } from "../format.ts";
 import { hasProcess, isRunning } from "../roster.ts";
 import { CopyButton } from "./CopyButton.tsx";
@@ -56,6 +56,8 @@ export function sessionControlsFor(
     onDelete?: (() => void) | undefined;
     /** Compact this session's context now (issue #263). Absent when the orchestrator cannot. */
     onCompact?: (() => void) | undefined;
+    /** Open the reload confirmation (issue #274). Absent when the orchestrator cannot reload. */
+    onReload?: (() => void) | undefined;
   },
 ): SessionControl[] {
   const controls: SessionControl[] = [];
@@ -123,6 +125,24 @@ export function sessionControlsFor(
         disabled: compacting,
       });
     }
+    /*
+     * RELOAD (issue #274) — for a running session only, because the command is delivered to a live Pi and there is
+     * nothing to deliver to a stopped one. What it does is bounded and worth stating on the control: Pi shuts down
+     * and rebinds its extension instances, the transcript and the working directory are untouched, and a run in
+     * flight is refused by Pi unless the reader confirms that the run is affected.
+     */
+    if (caps.onReload !== undefined && hasProcess(session)) {
+      const reloading = session.reloading === true;
+      controls.push({
+        key: "reload",
+        label: reloading ? "Reloading resources" : "Reload resources",
+        title: reloading
+          ? "A reload is already running. Pi shuts down and rebinds its extensions, so this is not instant."
+          : "Re-read extensions, skills, prompt templates, MCP servers and context files without stopping the session. The transcript and the working directory are untouched.",
+        onSelect: caps.onReload,
+        disabled: reloading,
+      });
+    }
     if (caps.onStop !== undefined) {
       controls.push({ key: "stop", label: "Stop session", title: "Stop this session. Its transcript stays on disk.", onSelect: caps.onStop });
     }
@@ -153,6 +173,10 @@ export function Inspector({
   onForget,
   onDelete,
   onCompact,
+  toolset,
+  toolsetError,
+  onRefreshToolset,
+  onReload,
 }: {
   session: LiveSession | undefined;
   home: string | undefined;
@@ -167,6 +191,14 @@ export function Inspector({
   onDelete?: (() => void) | undefined;
   /** Compact this session's context now (issue #263). Absent when the orchestrator cannot. */
   onCompact?: (() => void) | undefined;
+  /** What was established about this session's toolset, or `undefined` when nobody asked (issue #274). */
+  toolset?: ToolsetStatus | undefined;
+  /** Why the toolset question could not be answered. Distinct from `unknown` freshness, which IS an answer. */
+  toolsetError?: string | undefined;
+  /** Ask again. Absent when the connected orchestrator speaks an older protocol. */
+  onRefreshToolset?: (() => void) | undefined;
+  /** Open the reload confirmation. Absent when the orchestrator cannot reload or the session has no process. */
+  onReload?: (() => void) | undefined;
 }) {
   if (!session) {
     return (
@@ -285,6 +317,41 @@ export function Inspector({
         </dl>
       </section>
 
+      {/*
+        THE TOOLSET (issue #274).
+
+        Placed between Usage and Warnings because it answers a question of the same kind as the model and the
+        context meter — "what does this session have, and is what I just installed in it?" — rather than a fact
+        about the launch.
+
+        The three answers are rendered as three different sentences, and that is the whole component. "Up to date"
+        over a check that failed, or over a location it never looked at, is the fabricated-clean-result failure
+        C14 describes: the reader would connect nothing, reload nothing, and look in the wrong place.
+      */}
+      <section>
+        <h3>Toolset</h3>
+        {toolset === undefined && toolsetError === undefined ? (
+          <p className="hint" style={{ margin: 0 }}>
+            Not checked.{" "}
+            {onRefreshToolset === undefined ? (
+              "Reload the page to ask."
+            ) : (
+              <button type="button" className="btn btn-quiet btn-inline" onClick={onRefreshToolset}>
+                Check for changes
+              </button>
+            )}
+          </p>
+        ) : toolsetError !== undefined ? (
+          // A question that could not be ASKED is not an answer of "unknown". Saying so is the difference between
+          // "the check found nothing to report" and "the check is broken".
+          <p style={{ color: "var(--danger-text)", fontSize: 11, margin: 0, whiteSpace: "pre-wrap" }}>
+            Could not check: {toolsetError}
+          </p>
+        ) : (
+          toolset !== undefined && <ToolsetReport status={toolset} onRefresh={onRefreshToolset} />
+        )}
+      </section>
+
       {session.warnings.length > 0 && (        <section>
           <h3>Warnings</h3>
           {session.warnings.map((warning, index) => (
@@ -327,6 +394,7 @@ export function Inspector({
             ...(onForget === undefined ? {} : { onForget }),
             ...(onDelete === undefined ? {} : { onDelete }),
             ...(onCompact === undefined ? {} : { onCompact }),
+            ...(onReload === undefined ? {} : { onReload }),
           }).map((control) => (
             <button
               key={control.key}
@@ -342,6 +410,118 @@ export function Inspector({
         </div>
       </section>
     </div>
+  );
+}
+
+/**
+ * What the toolset check found, in the three forms it can honestly take (issue #274).
+ *
+ * ## Why each value is a different sentence, and not a badge colour
+ *
+ * A single word ("Stale" / "Fresh" / "Unknown") would be shorter and would lose the only thing this panel is for:
+ * the reader's next decision. `unchanged` has to name what it looked at, because a session can be stale for a
+ * reason outside every watched location — an `extensions` path in the agent's `settings.json`, an MCP server from an
+ * installed package. `unknown` has to name what stopped it from looking, because "I could not check" and "the check
+ * found nothing" are the two claims C14 exists to keep apart.
+ *
+ * ## Why the watched locations are listed
+ *
+ * It is the evidence for the sentence above it. A claim that a toolset is current, made without saying what was
+ * compared, is exactly the unverifiable assertion the Inspector's own header refuses ("isolation is verifiable rather
+ * than asserted").
+ */
+function ToolsetReport({
+  status,
+  onRefresh,
+}: {
+  status: ToolsetStatus;
+  onRefresh?: (() => void) | undefined;
+}) {
+  const present = status.watched.filter((location) => location.mtimeMs !== undefined);
+  const absent = status.watched.length - present.length;
+  return (
+    <>
+      {status.freshness === "changed" ? (
+        <p style={{ color: "var(--warn-text)", fontSize: 11, margin: "0 0 6px" }}>
+          <strong>Changed since this session loaded them.</strong> A file under one of the locations below is newer
+          than the moment this session read its resources, so it may not have what you just installed. Reloading is
+          what proves it either way.
+        </p>
+      ) : status.freshness === "unchanged" ? (
+        <p style={{ fontSize: 11, margin: "0 0 6px" }}>
+          No change in the {present.length} location{present.length === 1 ? "" : "s"} below since this session read
+          its resources.
+          {/*
+            The limit, stated where the claim is made. Without it, "no change" reads as "up to date", which this check
+            cannot establish — see the `unwatched` field's comment.
+          */}
+          {status.unwatched.length > 0 && (
+            <span style={{ color: "var(--dim)" }}>
+              {" "}
+              It cannot see {status.unwatched.join(", ")}.
+            </span>
+          )}
+        </p>
+      ) : (
+        <p style={{ color: "var(--warn-text)", fontSize: 11, margin: "0 0 6px" }}>
+          <strong>Cannot tell.</strong>{" "}
+          {status.resourcesLoadedAt === undefined
+            ? "Pi Central never saw this session read its resources, so there is nothing to compare against."
+            : status.unreadable.length > 0
+              ? `${status.unreadable.length} location${status.unreadable.length === 1 ? "" : "s"} could not be read, so this is not evidence that nothing changed.`
+              : "Nothing could be compared."}
+        </p>
+      )}
+      <dl className="kv">
+        <dt>Checked</dt>
+        <dd>
+          {present.length === 0 ? (
+            <span title="None of the watched locations exists on this machine">none</span>
+          ) : (
+            <span>
+              {present.length} location{present.length === 1 ? "" : "s"}
+              {absent > 0 ? ` (${absent} absent)` : ""}
+            </span>
+          )}
+        </dd>
+        {status.resourcesLoadedAt !== undefined && (
+          <>
+            <dt>Loaded</dt>
+            <dd>{new Date(status.resourcesLoadedAt).toLocaleTimeString()}</dd>
+          </>
+        )}
+      </dl>
+      {present.length > 0 && (
+        <details>
+          <summary className="hint" style={{ cursor: "pointer" }}>
+            What was compared
+          </summary>
+          <ul className="toolset-paths">
+            {present.map((location) => (
+              <li key={location.path} title={location.path}>
+                <span className="mono">{location.kind}</span>{" "}
+                <span style={{ color: "var(--dim)" }}>{location.scope}</span>{" "}
+                <span className="mono">{location.path}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {status.unreadable.length > 0 && (
+        <ul className="toolset-paths">
+          {status.unreadable.map((location) => (
+            <li key={location.path} style={{ color: "var(--danger-text)" }}>
+              <span className="mono">{location.path}</span> {location.code ?? "unreadable"}
+            </li>
+          ))}
+        </ul>
+      )}
+      {onRefresh !== undefined && (
+        <button type="button" className="btn btn-quiet btn-inline" onClick={onRefresh} style={{ marginTop: 6 }}>
+          Check again
+        </button>
+      )}
+    </>
   );
 }
 

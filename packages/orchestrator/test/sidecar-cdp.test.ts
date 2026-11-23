@@ -4,10 +4,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * The CDP driver (ADR-0015 §4), asserted on its SOURCE TEXT rather than on a run.
+ * The CDP driver (ADR-0018 §4), asserted on its SOURCE TEXT rather than on a run.
  *
  * Why static: the browser half needs a browser and CI has none — that half is the spike harness
- * (spikes/ui-sidecar/harness/cdp-shot.mjs) from a plain terminal, the `verified/manual` row of ADR-0015
+ * (spikes/ui-sidecar/harness/cdp-shot.mjs) from a plain terminal, the `verified/manual` row of ADR-0018
  * §Verification. What can be asserted everywhere is the property that makes the driver safe:
  * **no caller input is ever interpolated into a CDP expression, and no public method accepts a script.**
  *

@@ -60,6 +60,22 @@ export interface SessionSpec {
   pi: string;
   /** Optional session display name (`--name`). */
   name?: string;
+  /**
+   * Absolute path of Pi Central's own reload extension (issue #274, ADR-0015).
+   *
+   * Loaded with `--extension` rather than left to auto-discovery, and the choice is load-bearing:
+   *
+   *   - **auto-discovery would put an executable file in the reader's own extensions directory.** Pi Central's
+   *     extension would then be indistinguishable from theirs — listed by their tools, removable by an action
+   *     meant for their own — and a reader who cleaned up "stray" files would silently lose the reload control.
+   *   - **`--extension` survives the setting that matters.** It is a CLI path, so it is loaded even with
+   *     `--no-extensions`; an `extensions` entry in the agent's `settings.json` would not be, and a session
+   *     started with `--no-extensions` would then have a reload control that answers "not loaded".
+   *
+   * Omitted when provisioning failed (an agent tree Pi Central does not own), which is the case `Supervisor#reload`
+   * refuses with a stated reason rather than reloading nothing and calling it success.
+   */
+  extension?: string;
 }
 
 export interface ComposedPolicy {
@@ -139,7 +155,12 @@ export function composePolicy(spec: SessionSpec): ComposedPolicy {
     return {
       launch: {
         command: spec.pi,
-        args: ["--mode", "rpc", ...(spec.name ? ["--name", spec.name] : [])],
+        args: [
+          "--mode",
+          "rpc",
+          ...(spec.name ? ["--name", spec.name] : []),
+          ...extensionArgs(spec),
+        ],
         cwd: spec.cwd,
         env: buildSessionEnv(spec.env ? { set: spec.env } : {}),
       },
@@ -208,6 +229,9 @@ export function composePolicy(spec: SessionSpec): ComposedPolicy {
 
   args.push("--", spec.pi, "--mode", "rpc");
   if (spec.name) args.push("--name", spec.name);
+  // After the `--`, so this is a PI argument rather than a Safehouse one — the same placement rule as `--session`
+  // (`Supervisor#buildLaunch`), and the reason it matters is that Safehouse would reject an unknown flag.
+  args.push(...extensionArgs(spec));
 
   const result: ComposedPolicy = {
     launch: { command: spec.safehouse, args, cwd: spec.cwd, env },
@@ -219,6 +243,25 @@ export function composePolicy(spec: SessionSpec): ComposedPolicy {
   };
   if (fragmentFile !== undefined) result.fragmentFile = fragmentFile;
   return result;
+}
+
+/**
+ * The `--extension` pair for Pi Central's own reload command, or nothing (issue #274).
+ *
+ * One function so both launch modes carry it identically: a direct-mode session used to differ from a sandboxed
+ * one in exactly this kind of detail, and a capability that exists in one mode and not the other is a defect
+ * that only shows up on the host that took the other branch.
+ *
+ * The path is validated as absolute here rather than trusted, because it is interpolated into a command line
+ * whose shapes are fixed by design — the one free value allowed is a path that exists, and a relative one would
+ * be resolved against whatever cwd the sandbox chose.
+ */
+function extensionArgs(spec: SessionSpec): string[] {
+  if (spec.extension === undefined) return [];
+  if (!spec.extension.startsWith("/")) {
+    throw new Error(`the reload extension path must be absolute: ${JSON.stringify(spec.extension)}`);
+  }
+  return ["--extension", spec.extension];
 }
 
 /**

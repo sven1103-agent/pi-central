@@ -38,7 +38,7 @@
  *     distinction one level up.
  */
 import type { LiveSession, ModelOption } from "@pi-central/protocol";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { truncateMiddle } from "../format.ts";
 import { emptyScope, refKey, scopeIsSet, scopeView, type ModelScope } from "../model-scope.ts";
 import { isCurrentModel, modelControlUsable, modelsByProvider } from "../store.ts";
@@ -121,6 +121,13 @@ export function ModelPicker({
   thinking,
 }: ModelPickerProps) {
   const selectRef = useRef<HTMLSelectElement | null>(null);
+  /**
+   * The select's id, and it is `useId` rather than `model-${session.id}` for one reason: the SAME session's details
+   * now render in two frames at once — the column in the reading row, and the peek overlay a reader may open beside it —
+   * so a per-session id names two elements, and every `<label htmlFor>` in that state points at whichever the DOM
+   * happened to parse first. A label that focuses the wrong control is not a cosmetic defect.
+   */
+  const modelId = useId();
   /**
    * A click that arrived before the catalogue did, waiting for it.
    *
@@ -273,7 +280,7 @@ export function ModelPicker({
         {session.provider ?? "—"}
       </span>
 
-      <label className="picker-label" data-picker-row="model" data-picker-label="" htmlFor={`model-${session.id}`}>
+      <label className="picker-label" data-picker-row="model" data-picker-label="" htmlFor={modelId}>
         Model
       </label>
       <span className="picker-controls" data-picker-row="model">
@@ -297,7 +304,7 @@ export function ModelPicker({
             <span className="picker-display-text">{modelLabel}</span>
           </span>
           <select
-            id={`model-${session.id}`}
+            id={modelId}
             ref={selectRef}
             className="picker-select"
             title={fullLabel}

@@ -1,5 +1,5 @@
 /**
- * The UI sidecar's policy fragment (ADR-0015).
+ * The UI sidecar's policy fragment (ADR-0018).
  *
  * A **sibling** of the session fragment, not a variant of it. The sidecar is not an agent: it has no
  * `agentRoot` grant and no keychain grant, because it resolves no provider key and must hold no identity
@@ -78,14 +78,14 @@ export function renderSidecarFragment(options: SidecarFragmentOptions): string {
 
   const out: string[] = [
     ";; ---------------------------------------------------------------------------",
-    ";; Pi Central — UI sidecar fragment (ADR-0015).",
+    ";; Pi Central — UI sidecar fragment (ADR-0018).",
     ";;",
     ";; Generated; do not edit by hand. Deterministic, so drift is diffable.",
     ";; Appended AFTER Safehouse's generated rules: SBPL is last-match-wins, so these",
     ";; denies override the base policy's broader allows.",
     ";;",
     ";; Purpose: a renderer that reaches exactly one dev server and no credential. It is",
-    ";; NOT an agent — no agent root, no keychain, no identity (ADR-0010, ADR-0015 §9).",
+    ";; NOT an agent — no agent root, no keychain, no identity (ADR-0010, ADR-0018 §9).",
     ";;",
     ";; Chromium runs with --no-sandbox here, because Safehouse cannot permit its nested",
     ";; Seatbelt sandbox (see `safehouse --help`). This fragment is therefore the renderer's",

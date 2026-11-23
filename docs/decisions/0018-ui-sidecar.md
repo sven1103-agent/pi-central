@@ -1,4 +1,4 @@
-# ADR-0015 — A browser sidecar in its own sibling sandbox, driven by four verbs
+# ADR-0018 — A browser sidecar in its own sibling sandbox, driven by four verbs
 
 - **Status:** Proposed — the shape is decided; Phase 2 is not started
 - **Date:** 2026-11-22

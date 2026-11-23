@@ -30,7 +30,7 @@ approvals, tool trace, and the sanitized `.md` pipeline are all named in `docs/S
 ```
 ┌ topbar 44px ───────────────────────────────────────────────────────────────┐
 │ mark · fleet counts · connection · [Show panel]                             │
-├ rail 288px (240–420) ─┬─ transcript column 1fr ─┬─ panel var, 280–1200 ────┤
+├ rail var (220–480) ──┬─ transcript column 1fr ─┬─ panel var, 280–1200 ────┤
 │ New session (primary) │ session header          │ [Session|Files]  ← modes  │
 │ Open in a directory…  │ header: ctx/tok/cost ▾  │ Session: Isolation,Paths │
 │ filter (/)            │ run bar                 │ Files:   tree + document │
@@ -53,7 +53,7 @@ approvals, tool trace, and the sanitized `.md` pipeline are all named in `docs/S
 
 **The panel is context, and its door is the context bar.** The show/hide control is the **first** item of the right bar, above a hairline rule that separates it from the modes — it is a different kind of control (it shows or hides the region the modes live in), and at the bottom of a full-height column it was out of reach. The glyph pair is `◫`/`◨`: a divided square with two panes, or the same square with its right half filled when the panel is hidden — not a word in the topbar, which made a session-level region's control look like window chrome. The bar and the panel share ONE condition (`!panel.collapsed && tab === "sessions"`): a bar whose door closes while the room stays leaves content with no control, and the reverse opens nothing. The bar itself renders on the Sessions page even with no session focused, because it is the only door to a collapsed panel and collapsed is the default; the mode items are what require a session.
 
-**A page owns its furniture.** The left bar chooses a page, and the page decides what it shows. The session rail is the *Sessions* page's list, so it is not rendered beside History — which is one full-width list with its own search (§6). The context bar follows the same rule: Session/Files/Trace are views of a live session, so on a page about the session archive the bar would name a context the page does not have. When a page has no list of its own, `.panes.is-pageless` releases the rail's 288px track rather than reserving it for a column that is not there.
+**A page owns its furniture.** The left bar chooses a page, and the page decides what it shows. The session rail is the *Sessions* page's list, so it is not rendered beside History — which is one full-width list with its own search (§6). The context bar follows the same rule: Session/Files/Trace are views of a live session, so on a page about the session archive the bar would name a context the page does not have. When a page has no list of its own, `.panes.is-pageless` releases the rail's track rather than reserving it for a column that is not there — and since ADR-0016 the same rule serves `.panes.is-rail-less`, which fires when the rail is hidden by the reader rather than by the page.
 
 **Primary:** the focused session, its approvals, its composer. **Secondary:** history, rename, stop, model/thinking pickers. **Absent:** any directory field on the primary path; any "move this session"; any per-session isolation toggle.
 
@@ -75,7 +75,7 @@ Interruptible/reversible: focus switch (instant), abort (queue text is restored 
 
 ## 2. Layout concept
 
-One sentence: **a fixed 288px triage rail, a single wide document column optimised for reading, and a narrow auditable sidecar — separated by 1px `--line` gutters rather than borders or cards** (the `#panes` technique, as implemented: `display:grid; gap:1px; background:var(--line)`). Alignment is **left throughout**, including the empty state, because every surface is either a scan list or a document; centring would break the column rhythm and the mono-value alignment that makes the rail scannable.
+One sentence: **a resizable triage rail (288px by default, the reader's number), a single wide document column optimised for reading, and a narrow auditable sidecar — separated by 1px `--line` gutters rather than borders or cards** (the `#panes` technique, as implemented: `display:grid; gap:1px; background:var(--line)`). Alignment is **left throughout**, including the empty state, because every surface is either a scan list or a document; centring would break the column rhythm and the mono-value alignment that makes the rail scannable.
 
 Spacing rhythm: 4px base. Rail padding 12/16, rows 8px apart, group gaps 16px, column padding 18px, section gaps 12px. Content measure caps at **72ch** in the transcript (`max-width:72ch`) — prose stays readable on a 27" display while tool output may use full width.
 
@@ -100,7 +100,11 @@ The `1024–1439` sheet in an earlier revision was **not implemented**: a fixed 
 
 ## 3. Wireframes
 
-Geometry: **activity bars 48px each** · rail 288px · gutter 1px `--line` · **panel** 360px default, 280px min, max `min(1200, 60vw)`, stored as `--panel-width` · topbar 44px · rail row 68px · session header one band · run bar 2px · composer min 96px.
+Geometry: **activity bars 48px each** · rail `--rail-width` default 288px, min 220px, max `min(480, 40vw)` — the **reader's** number, not the layout's (ADR-0016) · gutter 1px `--line` · **panel** 360px default, 280px min, max `min(1200, 60vw)`, stored as `--panel-width` · topbar 44px · rail row 68px · session header one band · run bar 2px · composer min 96px.
+
+**The rail is a preference, not a constant (ADR-0016).** Four things are the reader's, stored under `pi-central.rail` and parsed by `rail-prefs.ts`: its **width** (dragged or nudged by keyboard, committed once per gesture), its **density** (`full`, or `calm` where a row's metrics line appears only when it can change a decision — pressure, queued work, a failure), whether it is **docked at all** (hidden above the breakpoint, summoned by the left bar's `☰`, the same control that hides it), and which of `Idle`/`Stopped` are **folded**. `Needs you`, `Failed` and `Running` are not foldable at any setting: a session blocked on a dialog cannot progress without the reader, and a session that is spending money must never be hidden by a layout choice. The 1024px breakpoint is now only a **floor** — below it the drawer is the only shape that fits, whatever the preferences say.
+
+**Reading focus (`⌘⇧.`, ADR-0015) is the mode where the window is the conversation.** The fleet counts leave the topbar (the rail's business), the activity bars narrow 48px → 36px, the session header's 340px companion leaves the reading row so the prose takes its width, and the composer's permanent hint line folds away with the same two facts stated on the field's `title`. What it does **not** touch is the conversation itself — no rule in this mode governs the lane, the measure, the scroller or the field — and nothing consequential goes with the chrome: warnings, dialog docks, the queue rail and the error strip all stay. The session's identity and controls are one click away in the panel, which is the property that lets the header leave rather than merely shrink.
 
 **The two bars are edges, and they cost 96px.** Measured against the shell's `minWidth: 900`: below 1024 the rail is already a drawer (`.panes` is a single column), so only the right bar is a column there and the cost is 48px; at 1280 with both bars and the panel open, the transcript is 534px. The bars arrived because the topbar had become one 44px strip holding nine unrelated things — a mark, the word mark, a duplicated "Sessions" control, two view tabs, fleet counts, a connection dot and two actions — with nothing saying which were navigation, which were state and which were actions. See the note under "Navigation" for what moved where.
 
@@ -408,14 +412,15 @@ Rendering spec (exact, from `LiveSession`):
 | cost | **not shown per row**; the header's `Usage` disclosure and the Session panel carry it |
 | pending | `+2 queued` appended only when `pending > 0` |
 | warnings | a `⚠` prefix on line 3 replaces the metric line if `warnings.length > 0` |
+| line 3, `calm` density | shown only when it can change a decision: a nearly-full context, `pending > 0`, or a failed state. At 3 % with nothing queued there is nothing to act on, and a column of gauges becomes texture (ADR-0017) |
 
-Full line 3 at 288px: `sonnet-4.5 · high · ctx 62% · $0.0142` = 37 chars at 11px mono (6.6px/char) fits in 264px. Mono is not decoration here — it is what makes six values line up in a column across 20 rows.
+Full line 3 at the default 288px: `sonnet-4.5 · high · ctx 62% · $0.0142` = 37 chars at 11px mono (6.6px/char) fits in 264px. Mono is not decoration here — it is what makes six values line up in a column across 20 rows.
 
 **20 sessions without chaos** — six rules, in order of effect:
 
 1. **Order by attention, not creation.** Groups: `Needs you` → `Running` → `Idle` → `Stopped (n)` → `Failed (n)`. `Needs you` rows put the ask itself on line 3, so the rail answers "what about?" before you click.
 2. **History is not here.** The rail defaults to live sessions; on-disk sessions live in the History tab (833 on this machine).
-3. **Collapse by state**, never by count. `Stopped`/`Failed` are collapsed by default with a count; `Needs you`/`Running`/`Idle` always show their rows.
+3. **Collapse by state**, never by count. `Idle` and `Stopped` can be folded to their heading, which keeps the count, the state mark and a `folded` pill; `Needs you`, `Failed` and `Running` always show their rows, and the type refuses the request rather than the UI merely not offering it. A folded section **opens itself when a row arrives in it**, once — which is how #68's *"i now see directly when sth has finished without scrolling"* survives folding, since a session finishing is exactly that arrival. A large roster (>4 rows on disk) starts folded once, and only if no preference is stored (ADR-0016).
 4. **Filter** (`/` focuses the field): matches name, cwd, model. A filter input plus 3 collapsible groups beats a palette for a 20-row list; a ⌘K palette is optional (Phase 2 if cheap).
 5. **Focus changes only on user action.** Starting a session focuses it. An approval arriving in session 9 must *never* yank you out of session 4 — it badges, it counts, it does not teleport. (This is the single most important behavioural rule in the rail.)
 6. **Dismissal, not deletion.** `Dismiss from rail` on stopped/failed rows removes them from the rail, and the removal **persists** — across later broadcasts and across a reload (issue #204). No file is ever deleted from the rail — deleting a scratch workspace is an explicit action in the inspector and lands in Phase 2.5.

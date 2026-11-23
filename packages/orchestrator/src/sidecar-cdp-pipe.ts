@@ -1,5 +1,5 @@
 /**
- * CDP over a PIPE rather than a WebSocket (ADR-0015).
+ * CDP over a PIPE rather than a WebSocket (ADR-0018).
  *
  * ## Why the pipe, measured rather than preferred
  *

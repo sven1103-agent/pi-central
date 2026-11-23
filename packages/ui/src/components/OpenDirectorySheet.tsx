@@ -94,7 +94,7 @@ export function OpenDirectorySheet({
    */
   onOpen: (cwd: string, sidecar?: boolean) => void;
   /**
-   * Whether to offer the browser toggle at all (ADR-0015 §15).
+   * Whether to offer the browser toggle at all (ADR-0018 §15).
    *
    * Off when the installation has no browser configured. Offering a switch that silently does nothing would be worse
    * than not offering it: the reader would conclude the feature is broken rather than absent.

@@ -1,5 +1,5 @@
 /**
- * The CDP driver behind the sidecar's verbs (ADR-0015 §4).
+ * The CDP driver behind the sidecar's verbs (ADR-0018 §4).
  *
  * CDP (Chrome DevTools Protocol) is JSON over a WebSocket, and `ws` is already a shipped dependency and
  * already a WebSocket client — so this replaces Playwright with no new dependency and no new protocol.
@@ -161,7 +161,7 @@ export class CdpPage {
     await new Promise<void>((done) => setTimeout(done, 150));
   }
 
-  /** The pixel. Returns bytes; the caller decides where they go (ADR-0015 §8: no path parameters). */
+  /** The pixel. Returns bytes; the caller decides where they go (ADR-0018 §8: no path parameters). */
   async capture(clip?: { x: number; y: number; width: number; height: number }, fullPage = false): Promise<Screenshot> {
     const params: Record<string, unknown> = { format: "png" };
     if (fullPage) params["captureBeyondViewport"] = true;
@@ -232,7 +232,7 @@ export class CdpPage {
    * concatenated into expression source — so a selector like `")||fetch('https://evil')`,
    * `); process.exit(1); ("` is inert text handed to `querySelector`, which either matches something or
    * throws a `SyntaxError`. Interpolating it would make this method `browser_evaluate` with a selector
-   * parameter, which is precisely what ADR-0015 §2 forbids.
+   * parameter, which is precisely what ADR-0018 §2 forbids.
    *
    * The click itself is a real mouse event at the element's centre rather than `element.click()`, because a
    * synthetic `.click()` bypasses hit-testing: it fires on an element that is covered by an overlay and

@@ -7,12 +7,13 @@
  * pane with its own search, because two orderings in one scrolling column cannot both be
  * legible.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { isEditableTarget, matchesChord, nextRowKey, type TargetLike } from "../shortcuts.ts";
 import type { LiveSession } from "@pi-central/protocol";
 import { displayName, formatContext, isNearFull, nameLabel, shortenPath, whereLine } from "../format.ts";
 import { stateLabel } from "../store.ts";
 import { groupRows, isRunning, rosterLabel, rowActivity, type RosterRow } from "../roster.ts";
+import { defaultRailPrefs, isFolded, showsRowMetrics, type RailPrefs } from "../rail-prefs.ts";
 import { ContextBar } from "./ContextMeter.tsx";
 
 /**
@@ -23,6 +24,21 @@ import { ContextBar } from "./ContextMeter.tsx";
  *
  * These sections are kept deliberately (#68, settled): *"i now see directly when sth has finished without
  * scrolling"*. A stable list with a state chip would show the same fact on a row the reader may not be looking at.
+ *
+ * ## Which of them may FOLD, and how #68 is paid for (issue #275)
+ *
+ * `idle` and `stopped` can be folded to their heading; the other three cannot, and that is a rule rather than a
+ * default. A session blocked on a dialog cannot progress without the reader, and a session that is spending money
+ * must stay on screen — the two conditions `roster.ts` and this component already treat as inviolable.
+ *
+ * #68 asked to SEE that something finished, not to see every finished row. Three things keep that property while a
+ * section is folded, and each one is load-bearing:
+ *
+ *   1. **The heading carries the count**, and the heading is a state-coloured chip rather than a grey label.
+ *   2. **A section that CHANGES while folded opens itself**, once — a session finishing is exactly the event the
+ *      decision was made for, and a heading that quietly increments a number would be the reversal.
+ *   3. **A fold is a reader choice**, remembered. Nothing folds on its own after the first render, so the rail never
+ *      moves while it is being aimed at — the failure `roster.ts` records for row order.
  */
 const GROUPS = [
   { key: "needs", label: "Needs you" },
@@ -49,6 +65,10 @@ export function SessionRail({
   firstPromptFor,
   openAsDrawer = false,
   onCloseDrawer,
+  onPeekPointerEnter,
+  onPeekPointerLeave,
+  prefs = defaultRailPrefs(),
+  onToggleFolded,
 }: {
   /**
    * The roster, with activity joined in (issue #89).
@@ -59,8 +79,15 @@ export function SessionRail({
   rows: RosterRow[];
   /** The focused row's key: a live session's id, or a row's file path. */
   focusedId: string | undefined;
-  /** Focus a row. A row that is not running focuses too, so the composer can send and resume on send. */
-  onFocusRow: (row: RosterRow) => void;
+  /**
+   * Focus a row. A row that is not running focuses too, so the composer can send and resume on send.
+   *
+   * `viaKeyboard` says which surface asked, and the shell needs the difference (issue #275): a POINTER selection closes
+   * a summoned rail, because the overlay would cover the conversation just chosen, while `⌥↑`/`⌥↓` must keep it open —
+   * walking the list with the rail vanishing at every step would make the keys unusable, and summoning the rail for a
+   * keystroke aimed at a list nobody can see would be worse.
+   */
+  onFocusRow: (row: RosterRow, viaKeyboard?: boolean) => void;
   /**
    * Take a row off the roster.
    *
@@ -127,6 +154,33 @@ export function SessionRail({
   openAsDrawer?: boolean;
   /** Close the drawer. Called after choosing a session, so a selection does not leave the overlay covering it. */
   onCloseDrawer?: (() => void) | undefined;
+  /**
+   * Keeps a HOVER PREVIEW alive while the pointer is on the list itself.
+   *
+   * A preview that could only be looked at is worse than none: the reader hovers the control, sees the session they want,
+   * and the list disappears the moment they move toward it — *"i cant because leaving the icon closes the roster again"*.
+   * So the preview is a real surface, and these two callbacks are how it stays open long enough to be used.
+   *
+   * Absent means no preview is in play: a docked column and a summoned drawer need neither, because neither depends on
+   * where the pointer is.
+   */
+  onPeekPointerEnter?: (() => void) | undefined;
+  onPeekPointerLeave?: (() => void) | undefined;
+  /**
+   * The reader's rail preferences (issue #275): density and which sections are folded.
+   *
+   * Defaulted rather than required so the many tests that render this component without a shell stay valid — and so a
+   * shell that has no preference store still gets a working rail rather than a component that must be configured
+   * before it renders anything.
+   */
+  prefs?: RailPrefs;
+  /**
+   * Fold or unfold one section.
+   *
+   * Absent means the headings are not controls, which is the same rule every other capability in this rail follows:
+   * a surface that cannot remember the choice does not offer it.
+   */
+  onToggleFolded?: ((group: "idle" | "stopped") => void) | undefined;
 }) {
   const [filter, setFilter] = useState("");
 
@@ -142,6 +196,47 @@ export function SessionRail({
   }, [rows, filter]);
 
   const sections = useMemo(() => groupRows(filtered), [filtered]);
+
+  /*
+   * A folded section that CHANGES opens itself, once.
+   *
+   * This is how #68 survives folding: *"i now see directly when sth has finished without scrolling"* is a claim about
+   * being told, and a heading whose number quietly went from 8 to 9 does not tell anyone. A session finishing while
+   * `Stopped` is folded is precisely the event that decision was about, so the fold yields for it.
+   *
+   * The comparison is over row KEYS, not the count, and this is the whole subtlety: a roster where one session
+   * finishes and another is dismissed in the same snapshot keeps the same count, so a count comparison would miss the
+   * arrival. Keys are what the rows are keyed by anyway (`rowKey`), so nothing second is created.
+   *
+   * The ref starts empty, so the FIRST render after a load does not open everything: that would spend one render per
+   * section and land the reader on the exact wall the fold existed to remove.
+   */
+  const prevKeys = useRef<Record<string, string[]> | undefined>(undefined);
+  useEffect(() => {
+    const previous = prevKeys.current;
+    // The FIRST snapshot seeds the comparison and never opens anything: doing otherwise would unfold every section on
+    // launch and hand the reader the exact wall the fold exists to remove.
+    prevKeys.current = Object.fromEntries(sections.map((section) => [section.group, section.rows.map(rowKey)]));
+    if (previous === undefined) return;
+
+    let opened: "idle" | "stopped" | undefined;
+    for (const section of sections) {
+      if (opened !== undefined) break;
+      if (!isFolded(prefs, section.group)) continue;
+      /*
+       * A section that was not in the previous snapshot is ALL arrivals — and that is the ordinary case for the one
+       * event #68 is about: a session finishes, and `Stopped` appears where the group was empty before (`groupRows`
+       * filters empty sections out). Treating "absent before" as "no arrival" missed exactly the case the fold has to
+       * keep visible.
+       */
+      const was = previous[section.group] ?? [];
+      if (!section.rows.some((row) => !was.includes(rowKey(row)))) continue;
+      opened = section.group as "idle" | "stopped";
+    }
+    // Already unfolded by the reader in the same commit: nothing to do, and calling it would write a preference the
+    // reader did not ask for.
+    if (opened !== undefined) onToggleFolded?.(opened);
+  }, [sections, prefs, onToggleFolded]);
 
   /*
    * `⌥↑` / `⌥↓` move the focus one row, in the order the reader SEES.
@@ -172,7 +267,7 @@ export function SessionRail({
       const row = sections.flatMap((section) => section.rows).find((candidate) => rowKey(candidate) === next);
       if (row === undefined) return;
       event.preventDefault();
-      onFocusRow(row);
+      onFocusRow(row, true);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -183,6 +278,15 @@ export function SessionRail({
       id="session-rail"
       className={`rail${openAsDrawer ? " open" : ""}`}
       aria-label="Sessions"
+      /*
+        THE LIST ITSELF IS PART OF THE HOVER AREA.
+
+        Moving from the control to the list crosses a gutter, and a preview that ended on the first stray pixel would be
+        unusable — which is exactly what was reported. These two only exist while a preview is in play; a docked column
+        and a summoned drawer pass neither, so nothing about them changes.
+      */
+      onPointerEnter={onPeekPointerEnter}
+      onPointerLeave={onPeekPointerLeave}
     >
       <div className="rail-start">
         {/* The PRIMARY action, first in the rail, with no path field anywhere near it (US-1). */}
@@ -215,20 +319,72 @@ export function SessionRail({
         ) : sections.length === 0 ? (
           <p className="rail-empty">No sessions match “{filter}”.</p>
         ) : (
-          sections.map((section) => (
+          sections.map((section) => {
+            const folded = isFolded(prefs, section.group);
+            /* Which of this section's controls exist. The types are the rule: only these two keys are foldable. */
+            const foldable = (section.group === "idle" || section.group === "stopped") && onToggleFolded !== undefined;
+            return (
             <section key={section.group} aria-label={labelOf(section.group)}>
-              <h3 className="group-header">
-                {/*
-                  The heading STATES the group, and for Stopped it also ACTS on it.
+              {/*
+                Heading order, left to right: the fold mark (Idle/Stopped), the group's word — or, for Stopped with a
+                delete capability, the *bulk-selection control* that has carried that word since issue #253 — the count,
+                the rule, and a "folded" pill for a section whose rows are hidden.
 
-                  A bulk action needs a scope, and "every finished session" is the scope a reader actually means: the
-                  group is already the answer to "which ones are finished", so the control belongs on the group's own
-                  heading rather than in a toolbar that would have to re-derive the same set. The count stays beside it,
-                  because a control that selects N things must say N.
+                One word per heading, always. The earlier attempt put the word inside the fold button as well, which read
+                well for `Idle` and produced two controls both called "Stopped" in the one heading that also selects rows:
+                a reader would have had to tell apart two identically named buttons that do different things.
+
+                AND THE WHOLE HEADING FOLDS IT. Reported from a screenshot: the mark is "way too small, users can barely
+                see it", and aiming for it is a precision task on a row where everything else is a wide target. So the
+                heading itself is the button for a foldable section, and the two controls inside it keep their own jobs:
+                a press that lands on either one is theirs alone, checked on the event rather than by stopping
+                propagation in four handlers. The mark remains, and remains a BUTTON: it is what says the section can
+                fold, and it is the keyboard stop and the accessible name for the action — an `h3` with a click handler
+                is a pointer convenience and not a control, so nothing is reachable only through it.
+              */}
+              <h3
+                className={`group-header${folded ? " is-folded" : ""}${foldable ? " is-foldable" : ""}`}
+                onClick={
+                  foldable
+                    ? (event) => {
+                        // A press on the mark or on the bulk selection is that control's press. Without this the mark
+                        // would toggle twice (its own handler, then the bubble), which reads as "nothing happened".
+                        if ((event.target as HTMLElement).closest("button") !== null) return;
+                        onToggleFolded?.(section.group as "idle" | "stopped");
+                      }
+                    : undefined
+                }
+              >
+                {/*
+                  THE DISCLOSURE MARK, and only the mark.
+
+                  The first version put the group's word inside this button, which read well for `Idle` and produced two
+                  controls both called "Stopped" in the one heading that also offers the bulk selection — a reader would
+                  have had to choose between two identically named buttons that do different things. The word stays with
+                  the selection control it has always belonged to, and the mark carries the fold with `aria-label` and
+                  `title` saying exactly what it does and how many rows it affects.
+
+                  `▸`/`▾` rather than a chevron from the Technical block: `⌫` from that block rendered as an empty box on
+                  this machine (`SessionControlBar` records the measurement), and a tofu square where the only affordance
+                  is would read as a broken control.
+
+                  The mark is `aria-hidden` inside a button that names the action, which is why enlarging it costs
+                  nothing in speech: it is a picture of "this folds", not a second label.
                 */}
-                {section.group !== "stopped" || onSelectGroup === undefined ? (
-                  <span>{labelOf(section.group)}</span>
-                ) : (
+                {foldable && (
+                  <button
+                    type="button"
+                    className="group-fold"
+                    aria-expanded={!folded}
+                    aria-label={`${folded ? "Show" : "Hide"} ${section.rows.length} ${labelOf(section.group).toLowerCase()} session${section.rows.length === 1 ? "" : "s"}`}
+                    /* The action and the count, where a hovering reader reads it — the rule `PanelToggle` records. */
+                    title={`${folded ? "Show" : "Hide"} ${section.rows.length} ${labelOf(section.group).toLowerCase()} session${section.rows.length === 1 ? "" : "s"}`}
+                    onClick={() => onToggleFolded(section.group as "idle" | "stopped")}
+                  >
+                    <span className="group-fold-mark" aria-hidden="true">{folded ? "▸" : "▾"}</span>
+                  </button>
+                )}
+                {section.group === "stopped" && onSelectGroup !== undefined ? (
                   <button
                     type="button"
                     className="group-select"
@@ -237,10 +393,13 @@ export function SessionRail({
                   >
                     {labelOf(section.group)}
                   </button>
+                ) : (
+                  <span>{labelOf(section.group)}</span>
                 )}
                 <span className="count">{section.rows.length}</span>
+                {folded && <span className="group-fold-note">folded</span>}
               </h3>
-              {section.rows.map((row) => (
+              {!folded && section.rows.map((row) => (
                 <RailRow
                   key={rowKey(row)}
                   row={row}
@@ -251,10 +410,12 @@ export function SessionRail({
                   retryAvailable={retryAvailable}
                   home={home}
                   firstPromptFor={firstPromptFor}
+                  prefs={prefs}
                 />
               ))}
             </section>
-          ))
+            );
+          })
         )}
 
         {historyTotal > 0 && (
@@ -350,6 +511,7 @@ function RailRow({
   onRetry,
   retryAvailable,
   home,
+  prefs,
 }: {
   row: RosterRow;
   focused: boolean;
@@ -365,6 +527,8 @@ function RailRow({
   retryAvailable: boolean;
   home: string | undefined;
   firstPromptFor?: ((row: RosterRow) => string | undefined) | undefined;
+  /** The reader's density (issue #275): `calm` drops the metrics line where it says nothing. */
+  prefs: RailPrefs;
 }) {
   const session = row.session;
   /*
@@ -400,7 +564,7 @@ function RailRow({
       The trigger floats at the row's trailing edge; without the reservation its 22px landed over the ctx gauge and the
       cost on the third line — visible in a screenshot as the button covering the numbers it was next to.
     */
-    <div className={`rail-row state-${activity}${focused ? " is-focused" : ""}`}>
+    <div className={`rail-row state-${activity}${focused ? " is-focused" : ""}${prefs.density === "calm" ? " is-calm" : ""}`}>
       <button
         type="button"
         className="rail-row-main"
@@ -441,7 +605,14 @@ function RailRow({
         row with no process shows no metrics line at all, which is the same rule as `contextPercent` returning
         null rather than a fabricated zero.
       */}
-      {session !== undefined && (
+      {/*
+        The metrics line, only when it can change a decision (issue #275).
+
+        `showsRowMetrics` owns the rule; the short version is that `calm` keeps pressure, queued work and failure, and
+        drops the rows whose answer is "nothing to do here". In `full` density it is always true, so this is a no-op
+        for a reader who never opens Settings.
+      */}
+      {session !== undefined && showsRowMetrics(prefs.density, session) && (
         <>
           <span className="r3">
             {/*

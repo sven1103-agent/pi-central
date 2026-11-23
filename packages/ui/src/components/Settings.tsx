@@ -46,6 +46,8 @@ import {
   READING_SIZE_MIN,
   clampReadingMeasure,
   clampReadingSize,
+  READING_TAIL_FOOT,
+  READING_TAIL_MIDDLE,
   defaultReadingPrefs,
   parseReadingPrefs,
   readingStyle,
@@ -53,6 +55,13 @@ import {
   type ReadingPrefs,
 } from "../reading.ts";
 import { READING_PREFS_KEY } from "../reading.ts";
+import {
+  RAIL_DEFAULT_WIDTH,
+  RAIL_MAX_WIDTH,
+  RAIL_MIN_WIDTH,
+  defaultRailPrefs,
+  type RailPrefs,
+} from "../rail-prefs.ts";
 import { CopyButton } from "./CopyButton.tsx";
 
 /**
@@ -164,9 +173,32 @@ export function Settings({
   install,
   ready,
   onClose,
+  railPrefs,
+  onRailPrefs,
+  railMaxWidth,
   initialSection = "display",
 }: {
   install: InstallFacts | undefined;
+  /**
+   * The session rail's preferences (issue #275), read from and written to the SHELL.
+   *
+   * Not local state, unlike the reading preferences below, and the difference is structural rather than stylistic:
+   * `reading.ts`'s effect writes CSS custom properties on `:root`, so the panel can own its own copy and the rest of
+   * the app sees the result through the cascade. The rail's preferences are consumed by REACT — whether the column
+   * exists, which sections are folded — so a copy here would be a second answer to a question the shell has already
+   * answered, and the rail would keep rendering the old one until the dialog closed.
+   */
+  /**
+   * Absent together, and then the section is not rendered at all.
+   *
+   * The rule every other capability in this app follows: a surface that cannot carry out the choice does not offer
+   * it. It also keeps this dialog renderable in isolation — the component tests build it with the installation facts
+   * alone, and a required preference store would have made "render Settings" mean "build half a shell".
+   */
+  railPrefs?: RailPrefs | undefined;
+  onRailPrefs?: ((change: (current: RailPrefs) => RailPrefs) => void) | undefined;
+  /** The widest this window can give, so the slider's maximum is the number the drag would also stop at. */
+  railMaxWidth?: number | undefined;
   /**
    * Whether a snapshot has arrived yet.
    *
@@ -274,7 +306,12 @@ export function Settings({
 
           <div className="settings-content">
             {section === "display" ? (
-              <ReadingPanel />
+              <>
+                <ReadingPanel />
+                {railPrefs !== undefined && onRailPrefs !== undefined && (
+                  <RailPanel prefs={railPrefs} onChange={onRailPrefs} maxWidth={railMaxWidth ?? RAIL_MAX_WIDTH} />
+                )}
+              </>
             ) : (
               <>
                 <section>
@@ -460,7 +497,11 @@ function ReadingPanel() {
           type="button"
           className="btn btn-quiet"
           onClick={() => setPrefs(defaultReadingPrefs())}
-          disabled={prefs.sizePx === defaultReadingPrefs().sizePx && prefs.measure === defaultReadingPrefs().measure}
+          disabled={
+            prefs.sizePx === defaultReadingPrefs().sizePx &&
+            prefs.measure === defaultReadingPrefs().measure &&
+            prefs.tail === defaultReadingPrefs().tail
+          }
           title="Back to what this build ships with"
         >
           Reset to defaults
@@ -518,6 +559,37 @@ function ReadingPanel() {
       </label>
 
       {/*
+        WHERE THE NEWEST LINE SITS (ADR-0017).
+
+        Two radio buttons rather than a slider, because this is not a quantity — it is a choice between "the tail
+        is held above the foot" and "the tail sits flush with the foot". A slider would invite a third value at
+        the top, which the ADR refuses: it doubles the space under the tail for a complaint nobody made.
+
+        Judged live in the transcript behind the dialog, like the size, rather than by a preview.
+      */}
+      <fieldset className="reading-row reading-tail">
+        <legend>Newest line</legend>
+        <label>
+          <input
+            type="radio"
+            name="reading-tail"
+            checked={prefs.tail === READING_TAIL_MIDDLE}
+            onChange={() => setPrefs((c) => ({ ...c, tail: READING_TAIL_MIDDLE }))}
+          />
+          Held above the foot
+        </label>
+        <label>
+          <input
+            type="radio"
+            name="reading-tail"
+            checked={prefs.tail === READING_TAIL_FOOT}
+            onChange={() => setPrefs((c) => ({ ...c, tail: READING_TAIL_FOOT }))}
+          />
+          Flush with the foot
+        </label>
+      </fieldset>
+
+      {/*
         The sample shows the SIZE, and deliberately not the width (issue #142).
 
         A width preview inside a 440px dialog is a lie twice over: the dialog clamps it, so 82ch and 100ch
@@ -531,6 +603,181 @@ function ReadingPanel() {
           The quick brown fox jumps over the lazy dog.
         </span>
       </div>
+    </section>
+  );
+}
+
+/**
+ * The session rail's own controls (issue #275).
+ *
+ * ## Why these are preferences and not a layout decision
+ *
+ * *"it becomes distracting if you see it all the time"* has no single right answer, which is the same conclusion
+ * `reading.ts` reached about the transcript's measure. At twelve sessions the rail cost roughly thirty-three lines of
+ * chrome beside the conversation; at two it costs six and is the fleet view the product exists for. Only the reader
+ * knows which of those they are having.
+ *
+ * ## Four controls, and what each one is allowed to hide
+ *
+ *   - **Width** — geometry only. Nothing becomes unreachable.
+ *   - **Density** — `calm` keeps the state edge, the name and the chips, and drops the metrics line where it says
+ *     nothing (nothing near-full, nothing queued, no failure). The reasons to ACT are never dropped; that is the rule
+ *     `showsRowMetrics` states and the row's own comment asks for.
+ *   - **Show the session list** — the rail becomes summoned rather than docked, which is the only option that gives the
+ *     transcript more room instead of re-arranging what competes for it. The control that hides it is also the one that
+ *     brings it back: the activity bar's `☰`.
+ *   - **Folded sections** — `Idle` and `Stopped` only. `Needs you`, `Failed` and `Running` are not offered here
+ *     because they are not foldable at all: a session blocked on a dialog cannot progress without the reader, and a
+ *     session that is spending money must stay on screen.
+ */
+function RailPanel({
+  prefs,
+  onChange,
+  maxWidth,
+}: {
+  prefs: RailPrefs;
+  onChange: (change: (current: RailPrefs) => RailPrefs) => void;
+  maxWidth: number;
+}) {
+  return (
+    <section>
+      <div className="reading-head">
+        <h4>Session list</h4>
+        {/*
+          Reset, for the reason the reading panel records: a preference you cannot get back from is a trap, and a reader
+          who has nudged four controls has no way to know what "normal" was. Disabled at the defaults, so the control
+          says whether there is anything to undo rather than offering a no-op (issue #142).
+        */}
+        <button
+          type="button"
+          className="btn btn-quiet"
+          onClick={() => onChange(() => defaultRailPrefs())}
+          disabled={
+            prefs.width === RAIL_DEFAULT_WIDTH &&
+            prefs.density === "full" &&
+            !prefs.hidden &&
+            !prefs.focus &&
+            !prefs.collapsed.idle &&
+            !prefs.collapsed.stopped
+          }
+          title="Back to what this build ships with"
+        >
+          Reset to defaults
+        </button>
+      </div>
+      <p className="settings-note" style={{ marginTop: 0 }}>
+        Affects the list of sessions only. A session that is running, failed, or waiting for an answer is always shown.
+      </p>
+
+      <label className="reading-row">
+        <span>Width</span>
+        <input
+          type="range"
+          min={RAIL_MIN_WIDTH}
+          max={maxWidth}
+          step={8}
+          value={Math.min(prefs.width, maxWidth)}
+          aria-label="Session list width in pixels"
+          /*
+            Clamped to the range THIS dialog offers, not through `clampRailWidth` — which needs a viewport width and
+            would have to be given a guess. The slider's own `min`/`max` are `RAIL_MIN_WIDTH` and `railMaxWidth(vw)`, so
+            the guard here is only against a value that is not a number at all.
+          */
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            if (!Number.isFinite(next)) return;
+            onChange((c) => ({ ...c, width: Math.min(maxWidth, Math.max(RAIL_MIN_WIDTH, Math.round(next))) }));
+          }}
+        />
+        <span className="mono reading-value">{prefs.width}px</span>
+      </label>
+
+      <label className="reading-row">
+        <span>Row density</span>
+        <span style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+          <input
+            type="checkbox"
+            checked={prefs.density === "calm"}
+            aria-label="Show one line per session where there is nothing to act on"
+            onChange={(event) => onChange((c) => ({ ...c, density: event.target.checked ? "calm" : "full" }))}
+          />
+          Compact rows where nothing needs doing
+        </span>
+        <span />
+      </label>
+
+      <label className="reading-row">
+        <span>Show the session list</span>
+        <span style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+          <input
+            type="checkbox"
+            checked={!prefs.hidden}
+            onChange={(event) => onChange((c) => ({ ...c, hidden: !event.target.checked }))}
+          />
+          {/*
+            The consequence is stated where the choice is made, because it is the one control here that moves a surface
+            off the page: a reader who unticked it and could not find the list again would have no reason to connect the
+            two. Below 1024px this box does nothing — the window has already made the decision — and saying so is
+            better than a control that appears inert.
+          */}
+          {prefs.hidden ? "Hidden — open it from ☰ in the left bar" : "Shown beside the conversation"}
+        </span>
+        <span />
+      </label>
+
+      <label className="reading-row">
+        {/*
+          "Zen mode", the name the reader used, with the app's own name for it after — `Zen mode (reading focus)`.
+          Two names were in play: the code and the ADR say "reading focus", and the request said *"many apps call it Zen
+          Mode, and the Option + Shift + Z can toggle Zen mode"*. A reader who learns one and finds the other has to
+          decide whether they are the same thing, so the surface a reader meets states both — and the chord, since this
+          is the only place the mode is offered by name.
+        */}
+        <span>Zen mode (reading focus)</span>
+        <span style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+          <input
+            type="checkbox"
+            checked={prefs.focus}
+            aria-label="Give the conversation the window"
+            onChange={(event) => onChange((c) => ({ ...c, focus: event.target.checked }))}
+          />
+          {prefs.focus ? "The conversation has the window" : "Step the chrome back around the conversation"}
+        </span>
+        <span />
+      </label>
+      <p className="settings-note">
+        Folds the window's own chrome — not the conversation. The session's details become a tab on the conversation's
+        edge: hover it to peek, click to pin, Escape to unpin. Toggled with the keys in Settings’ own shortcut list (⌘K), and from the keyboard directly.
+      </p>
+
+      <label className="reading-row">
+        <span>Fold small groups</span>
+        <span style={{ display: "flex", gap: 12, alignItems: "center", fontSize: 12, flexWrap: "wrap" }}>
+          <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            <input
+              type="checkbox"
+              checked={prefs.collapsed.idle}
+              onChange={(event) => onChange((c) => ({ ...c, collapsed: { ...c.collapsed, idle: event.target.checked } }))}
+            />
+            Idle
+          </span>
+          <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            <input
+              type="checkbox"
+              checked={prefs.collapsed.stopped}
+              onChange={(event) =>
+                onChange((c) => ({ ...c, collapsed: { ...c.collapsed, stopped: event.target.checked } }))
+              }
+            />
+            Stopped
+          </span>
+        </span>
+        <span />
+      </label>
+      <p className="settings-note">
+        A folded group opens itself when a session arrives in it, so a session finishing is still visible without
+        expanding anything. Its count stays on the heading either way.
+      </p>
     </section>
   );
 }
