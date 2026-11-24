@@ -10,7 +10,11 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
-<!-- Empty at tag time: a release cannot ship undocumented changes. -->
+### Fixed
+
+- A session browser that fails to start says why — the exit status and the process's own last words — and the advice is chosen from the cause instead of promising a log that does not hold it.
+- A port refusal is one stated line rather than a stack trace, so the cause survives into the message that reports it.
+- A session browser's port is assigned by the operating system instead of derived from the session number, so a sidecar left over from an earlier launch can no longer take the port a new session needs.
 
 ## [0.16.1] — 2026-11-24
 

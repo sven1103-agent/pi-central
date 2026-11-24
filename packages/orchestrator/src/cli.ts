@@ -132,7 +132,7 @@ async function resume(config: ReturnType<typeof defaultConfig>, options: Options
   const keychain = await supervisor.ensureKeychainState();
   if (keychain.report !== undefined) console.log(`agent keychain: ${describeKeychainCheck(keychain)}`);
 
-  const result = supervisor.resume(match, { mode: options.mode });
+  const result = await supervisor.resume(match, { mode: options.mode });
   if (!result.ok) {
     console.error(`could not resume: ${result.message}`);
     return 1;
@@ -185,7 +185,7 @@ async function run(config: ReturnType<typeof defaultConfig>, options: Options): 
   const keychain = await supervisor.ensureKeychainState();
   if (keychain.report !== undefined) console.log(`agent keychain: ${describeKeychainCheck(keychain)}`);
 
-  const result = supervisor.start({ ...(options.cwd ? { cwd: options.cwd } : {}), mode: options.mode });
+  const result = await supervisor.start({ ...(options.cwd ? { cwd: options.cwd } : {}), mode: options.mode });
   if (!result.ok) {
     console.error(`could not start: ${result.message}`);
     return 1;

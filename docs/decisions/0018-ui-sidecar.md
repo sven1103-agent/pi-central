@@ -114,9 +114,14 @@ through a fixed verb set over CDP, with no new shipped dependency.**
     sibling. So the orchestrator spawns the sidecar and `mcp.json` names `http://127.0.0.1:<port>/mcp` with
     `Authorization: Bearer ${PI_CENTRAL_SIDECAR_TOKEN}`. The token is 24 random bytes, checked on every
     request including `initialize`, and forwarded with `--env-pass` because Safehouse rebuilds the
-    environment. The port is `47800 + the session's ordinal`, so the orchestrator knows it before the child
-    starts. **Consequence: a loopback port is reachable from every session (C5), so the token is the access
-    control.** CDP between the sidecar and Chrome uses fds 3 and 4, not a WebSocket.
+    environment. The port is **chosen by the kernel**: the sidecar binds port 0 and announces the port it was
+    given, and `mcp.json` is written from that announcement. It was originally `47800 + the session's ordinal`,
+    which assumed one orchestrator — session ids restart at `s1` on every launch, so a sidecar left over from an
+    earlier run held the number a new launch derived for its own `s18`, and that launch lost the bind (reported
+    from use as a failed browser on port 47818 with no second window open). Probing the range beforehand does not
+    fix it; two fleets probe before either binds. Only the bind cannot be raced. **Consequence: a loopback port is
+    reachable from every session (C5), so the token is the access control.** CDP between the sidecar and Chrome
+    uses fds 3 and 4, not a WebSocket.
 13. **Agents must call the typed function to receive the image.** Measured at Checkpoint B: through
     `tools.mcp({ tool })` and the `tools.mcp__<server>({ tool })` proxy the result is the caption alone;
     through `tools.mcp__pi_central_sidecar__capture` it carries the image block, shown with

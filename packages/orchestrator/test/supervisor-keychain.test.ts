@@ -176,7 +176,7 @@ test("a spawn alone never asks the keychain, even when the check never ran", asy
 
   const supervisor = new Supervisor(config, { keychainProbe: probe });
   supervisor.on("error", () => {});
-  const started = supervisor.start({ cwd });
+  const started = await supervisor.start({ cwd });
   assert.equal(started.ok, true);
   if (!started.ok) return;
 

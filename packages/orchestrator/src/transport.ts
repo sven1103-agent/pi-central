@@ -516,7 +516,7 @@ export class Transport {
         return;
       }
       case "start": {
-        const result = this.#supervisor.start({
+        const result = await this.#supervisor.start({
           ...(control.cwd ? { cwd: control.cwd } : {}),
           ...(control.name ? { name: control.name } : {}),
           ...(control.mode ? { mode: control.mode } : {}),
@@ -573,7 +573,7 @@ export class Transport {
            * does not exist. Filling them with zeros would be inventing facts, so they are stated as what they are —
            * nothing yet — and the supervisor's own `checkResumable` decides the directory's fate.
            */
-          const resumed = this.#supervisor.resume(
+          const resumed = await this.#supervisor.resume(
             {
               path: control.path,
               cwd: owner.cwd,
@@ -598,7 +598,7 @@ export class Transport {
           this.#broadcast({ kind: "session", session: resumed.session });
           return;
         }
-        const result = this.#supervisor.resume(target, {
+        const result = await this.#supervisor.resume(target, {
           ...(control.mode ? { mode: control.mode } : {}),
           ...(control.sidecar === undefined ? {} : { sidecar: control.sidecar }),
         });

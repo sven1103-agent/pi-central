@@ -141,9 +141,11 @@ picker, or let the setting cover every new session. For a scripted launch, `PI_C
 default — the in-app switch overrides it either way, and it exists because a dock PWA inherits no shell
 environment at all.
 
-Nothing else to wire: the session is told its port (`PI_CENTRAL_DEV_PORT`, `48000` plus its session number),
-runs its dev server there, and reaches the sidecar at `127.0.0.1:47800+<n>` because Pi Central wrote the
-`--mcp-config` file for it.
+Nothing else to wire: the session is told its dev port (`PI_CENTRAL_DEV_PORT`, `48000` plus its session
+number), runs its dev server there, and reaches the sidecar at a port the operating system assigned it — Pi Central
+writes the `--mcp-config` file that names it once the sidecar is listening. The port is not predictable by design:
+a sidecar must be reachable at exactly one address, and deriving that address from a session number collided with
+sidecars left over from earlier launches.
 
 ### Four verbs, and no fifth
 
@@ -174,7 +176,7 @@ sibling process without a new protocol, a new extension, or a new dependency.
 
 | Piece | What it decides |
 |---|---|
-| **Transport** | streamable HTTP on `127.0.0.1`, one port per session (`47800` plus its number). Not stdio: a stdio server is spawned *by Pi*, which puts it inside the session's sandbox — a child, not a sibling, which C1 forbids. |
+| **Transport** | streamable HTTP on `127.0.0.1`, one port per session, **chosen by the kernel** (the sidecar binds port 0 and announces it). Not stdio: a stdio server is spawned *by Pi*, which puts it inside the session's sandbox — a child, not a sibling, which C1 forbids. |
 | **Access control** | 24 random bytes as a bearer token, checked on **every** request including `initialize`. Loopback is reachable by every local process ([C5](docs/CONSTRAINTS.md)), so the token is the boundary, not hygiene. |
 | **Where the token lives** | the environment, as `PI_CENTRAL_SIDECAR_TOKEN`. The `mcp.json` refers to it as a variable, so no secret is written to a file that outlives the session. |
 | **Where the config lives** | `--mcp-config <state root>/sidecars/<id>/mcp.json`, mode `0600`, **outside `~/.pi`** — because `~/.pi` is writable from inside every session ([C6](docs/CONSTRAINTS.md)), which would let an agent point Pi at a server of its choosing. |
@@ -231,7 +233,7 @@ own fragment denies those files outright.
 **2. The neighbouring session — one compromised agent reaches another's browser.** Loopback is reachable across
 every session on the machine ([C5](docs/CONSTRAINTS.md)): the session fragment denies the launchd and
 ssh-agent sockets and leaves loopback alone. So a session that runs a malicious `npm install` can scan
-`127.0.0.1:47800–48000` and — with Playwright's server — call `browser_evaluate` on **another session's**
+local loopback — the ephemeral range a sidecar binds, and `48000–48200` for dev servers — and, with
 browser, reading the uncommitted work that session is serving. Measured here instead: an anonymous client gets
 `401`, a wrong token gets `401`, and only that session's 24-byte token opens it ([C5](docs/CONSTRAINTS.md) is
 why the token exists at all).

@@ -24,8 +24,8 @@ import { join } from "node:path";
 import type { Command, HistoricalSession, LiveSession, ModelOption, PiRecord, ToolsetStatus } from "@pi-central/protocol";
 import { composePolicy, describe, type LaunchMode, type SessionSpec } from "./policy.ts";
 import {
-  mcpConfigArgs,
   pickDevPort,
+  readyMcpConfigArgs,
   reapDevPort,
   removeSidecarState,
   sidecarFailureWarning,
@@ -45,6 +45,7 @@ import { KEYCHAIN_FILE, inspectProviderAuth, readStore } from "./agent-store.ts"
 import { assessAgentCapabilities, agentKeychainPath } from "./capabilities.ts";
 import { createKeychainProbe, type KeychainCheck, type KeychainProbe } from "./keychain.ts";
 import { renderPolicyFragment } from "./fragment.ts";
+import { boundedTail, exitReason } from "./child-output.ts";
 import { inspectToolset } from "./toolset.ts";
 import { RELOAD_COMMAND, provisionReloadExtension } from "./reload-extension.ts";
 import {
@@ -370,7 +371,7 @@ export class Supervisor extends EventEmitter {
         report.missingFile.push(entry.sessionFile);
         continue;
       }
-      const result = this.resume(session, { mode: entry.mode });
+      const result = await this.resume(session, { mode: entry.mode });
       if (!result.ok) {
         // The entry survives: `checkResumable`'s refusals include a directory that is not there at
         // the moment — a volume that will remount — and only an explicit stop may forget a session.
@@ -422,7 +423,7 @@ export class Supervisor extends EventEmitter {
    * workspace for the new session's id (US-1 with US-3), rather than defaulting to `$HOME`
    * or the orchestrator's own directory.
    */
-  start(request: StartRequest = {}): StartResult | StartFailure {
+  async start(request: StartRequest = {}): Promise<StartResult | StartFailure> {
     const mode = request.mode ?? "sandboxed";
 
     // The id is allocated before the cwd, because a scratch workdir is derived from it.
@@ -461,10 +462,10 @@ export class Supervisor extends EventEmitter {
    * directory rather than prompting (C2). The session's directory is never changed
    * (ADR-0008); an unusable directory is refused, not retargeted.
    */
-  resume(
+  async resume(
     session: HistoricalSession,
     options: { mode?: LaunchMode; env?: Record<string, string>; sidecar?: boolean } = {},
-  ): StartResult | StartFailure {
+  ): Promise<StartResult | StartFailure> {
     const readiness = checkResumable(session);
     if (!readiness.ok) return { ok: false, message: readiness.message };
 
@@ -488,7 +489,7 @@ export class Supervisor extends EventEmitter {
 
     const id = `s${++this.#created}`;
     const mode = options.mode ?? "sandboxed";
-    const spawned = this.#spawn({
+    const spawned = await this.#spawn({
       id,
       cwd: readiness.cwd,
       mode,
@@ -602,7 +603,7 @@ export class Supervisor extends EventEmitter {
     // race the old one for the same session file.
     await previous?.stop().catch(() => undefined);
 
-    return this.#spawn({
+    return await this.#spawn({
       id,
       cwd: existing.cwd,
       mode: existing.mode,
@@ -623,7 +624,15 @@ export class Supervisor extends EventEmitter {
     });
   }
 
-  #spawn(input: {
+  /**
+   * Spawn a session, which now has to WAIT for its sidecar to bind.
+   *
+   * `async` because the browser's MCP config names a port the kernel assigns: the file cannot be written until the
+   * child announces it, and the argv cannot carry `--mcp-config` until the file exists. Everything else about this
+   * function was already effectively asynchronous (it spawns a process and wires event handlers); the return type
+   * is what changed.
+   */
+  async #spawn(input: {
     id: string;
     cwd: string;
     mode: LaunchMode;
@@ -636,7 +645,7 @@ export class Supervisor extends EventEmitter {
     sidecarPort?: number | null;
     /** Per-session opt-IN, so a client can turn the browser on without a global default. */
     sidecar?: boolean;
-  }): StartResult | StartFailure {
+  }): Promise<StartResult | StartFailure> {
     // A resumed session must reopen its file; a new one gets a fresh name.
     //
     // The environment carries the agent-scoped routing (ADR-0010 §3): GH_CONFIG_DIR and
@@ -847,7 +856,7 @@ export class Supervisor extends EventEmitter {
      * mode that is already reported (the warning and the log). What is NOT fudged: `sidecarOrigin` is only set when the
      * sidecar announces, so the session never claims a browser it does not have.
      */
-    const launch = this.#buildLaunch(policy.launch, input.sessionPath, liveSidecar, input.cwd);
+    const launch = await this.#buildLaunch(policy.launch, input.sessionPath, liveSidecar, input.cwd);
     // The Inspector shows this string, so it has to be the argv that actually runs. It was computed from
     // `policy` before the sidecar existed, which showed a session without `--mcp-config` while the process
     // had one — a display that disagrees with reality in the one place that exists to be truthful (the house
@@ -914,11 +923,20 @@ export class Supervisor extends EventEmitter {
    * `cwd` is passed so the instruction can say when a project cannot be served at all (Pi Central's own checkout,
    * where C1 stops its orchestrator). Advisory only: it changes what the agent is told.
    */
-  #buildLaunch(launch: LaunchSpec, sessionPath: string | undefined, sidecar: SidecarHandle | undefined, cwd: string): LaunchSpec {
+  async #buildLaunch(
+    launch: LaunchSpec,
+    sessionPath: string | undefined,
+    sidecar: SidecarHandle | undefined,
+    cwd: string,
+  ): Promise<LaunchSpec> {
     const extra: string[] = [];
     // BEFORE any subcommand: `pi mcp list --mcp-config X` reports "Unknown option" (Phase 0D measured it,
     // and a probe nearly concluded the flag did not exist because of the ordering).
-    extra.push(...mcpConfigArgs(sidecar));
+    //
+    // AWAITED, because the config file names the port the sidecar was actually given and does not exist until it
+    // announces one. `readyMcpConfigArgs` swallows a dead sidecar, so a browser that failed is simply absent from
+    // the argv rather than a path Pi cannot read.
+    extra.push(...(await readyMcpConfigArgs(sidecar)));
     // `offered` so a session WITHOUT a browser is told it has none only where the installation could have given it
     // one: on a machine with none configured, a paragraph about a feature the reader never had is noise.
     extra.push(...sidecarPromptArgs(sidecar, cwd, this.#config.sidecarOffered === true));
@@ -1814,58 +1832,7 @@ export function describeExitFailure(
   );
 }
 
-/** How many stderr lines survive into the message. */
-const STDERR_TAIL_LINES = 12;
-
-/**
- * The first line of a failure message: what ended the process.
- *
- * `code` is the exit status and `signal` the terminating signal, and they are rarely both populated: a shell
- * wrapping a killed child exits `128 + n`, so nobody sees `SIGKILL` — only `137`. Decoding it is the difference
- * between a number and a sentence. The raw numbers are kept, because they are the evidence.
- */
-export function exitReason(code: number | null, signal: string | null): string {
-  const raw = `pi exited (code=${code ?? "-"}, signal=${signal ?? "-"})`;
-  if (signal) return `${raw} — killed by ${signal}`;
-  // `128 + n` is how a SHELL reports a signalled child. Naming it is a reading of the number, not a guess about
-  // intent: a kill and an OOM kill both land here, which is why the number is kept alongside the name.
-  if (code !== null && code > 128 && code <= 128 + 64) {
-    const name = signame(code - 128);
-    if (name !== undefined) return `${raw} — killed by ${name}`;
-  }
-  return raw;
-}
-
-/** The conventional short name for a signal number, for the ones a session plausibly dies from. */
-function signame(number: number): string | undefined {
-  const names: Record<number, string> = {
-    1: "SIGHUP",
-    2: "SIGINT",
-    3: "SIGQUIT",
-    6: "SIGABRT",
-    9: "SIGKILL",
-    11: "SIGSEGV",
-    13: "SIGPIPE",
-    15: "SIGTERM",
-  };
-  return names[number];
-}
-
-/**
- * The last lines of stderr, with a count of what was dropped.
- *
- * Trimmed from the TOP rather than the bottom because the cause is at the end: a process writes its banner as it
- * starts and the fatal line as it dies.
- */
-export function boundedTail(stderr: string): string {
-  const text = stderr.replace(/\s+$/, "");
-  if (text === "") return "";
-  const lines = text.split("\n");
-  if (lines.length <= STDERR_TAIL_LINES) return text;
-  const kept = lines.slice(-STDERR_TAIL_LINES);
-  const omitted = lines.length - STDERR_TAIL_LINES;
-  return `… ${omitted} earlier line${omitted === 1 ? "" : "s"} of output omitted\n${kept.join("\n")}`;
-}
+export { boundedTail, exitReason };
 
 /**
  * A session with no name of its own is named by its HANDLE, not by its directory.

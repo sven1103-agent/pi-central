@@ -193,7 +193,7 @@ async function harness(mode: "handled" | "started" | "throws" | "slow"): Promise
   const records: PiRecord[] = [];
   supervisor.on("record", (_sessionId: string, record: PiRecord) => records.push(record));
 
-  const started = supervisor.resume(
+  const started = await supervisor.resume(
     {
       path: sessionFile,
       id: "uuid-1",

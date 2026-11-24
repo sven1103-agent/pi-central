@@ -26,11 +26,19 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { composeSidecarPolicy, type SidecarSpec } from "./sidecar-policy.ts";
+import { exitReason, failureTail } from "./child-output.ts";
 
 export interface SidecarHandle {
-  /** The MCP config file Pi is pointed at. */
+  /**
+   * The MCP config file Pi is pointed at. ONLY VALID once `ready` has resolved.
+   *
+   * It cannot be known at spawn time any more, and that is the fix rather than a wart: the file names the sidecar's
+   * port, the port is chosen by the kernel when the child binds, so the file is written when the bind is announced.
+   * A caller that reads this before awaiting `ready` gets a path that does not exist yet — which is why `piArgs`
+   * below exists, so the argv can only be built from a handle that already waited.
+   */
   configFile: string;
-  /** The origin this sidecar serves, for the Inspector. */
+  /** The origin this sidecar serves, for the Inspector. Known once `ready` resolves. */
   origin: string;
   /** The dev-server port this session was assigned, which the sidecar's egress is pinned to. */
   devPort: number;
@@ -38,7 +46,13 @@ export interface SidecarHandle {
   token: string;
   /** The port the sidecar actually bound, once it said so. */
   port: () => number | undefined;
-  /** Resolves once the sidecar has announced its port, or rejects when it exits first. */
+  /**
+   * Resolves once the sidecar has BOUND a port and its MCP config has been written, or rejects when it exits first.
+   *
+   * The port is the kernel's choice (`--port 0`), not arithmetic on the session id. That is what makes two fleets
+   * unable to collide: with `47800 + ordinal` a second launch derived the same number for its own `s18` and lost
+   * the bind to a sidecar left over from the first.
+   */
   ready: Promise<number>;
   /** Stop it and wait. Idempotent. */
   stop: () => Promise<void>;
@@ -322,7 +336,22 @@ export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
     sidecar: options.sidecar,
     sidecarCodeDir: options.sidecarCodeDir,
     browser: options.browser,
-    listenPort: SIDECAR_PORT_BASE + sessionOrdinal(options.sessionId),
+    /*
+     * PORT 0 — the kernel chooses, and the child announces what it got.
+     *
+     * The arithmetic was `SIDECAR_PORT_BASE + sessionOrdinal(id)`, justified as unique because session ids are
+     * unique *per orchestrator*. That is true and it is not the property needed: ids restart at `s1` on every
+     * launch, so a sidecar left over from an earlier run derives the same number for its own `s18` and wins the
+     * bind. Reported from use as a failed session browser on port 47818 with no second window open.
+     *
+     * Probing before spawning does NOT fix it — measured, both fleets probe before either binds, see the port free,
+     * and both pick it. The only thing that cannot be raced is the bind, so the kernel decides and two sidecars
+     * cannot be handed the same port.
+     *
+     * The cost: the port is unknown until the child reports it, so `mcp.json` is written then, and the argv that
+     * carries `--mcp-config` is built after. That is why `start`/`resume` are async now.
+     */
+    listenPort: 0,
     token,
     ...(options.sidecarArgs === undefined ? {} : { sidecarArgs: options.sidecarArgs }),
   };
@@ -372,16 +401,40 @@ export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
    * and `gone` stay truthful either way.
    */
   let spawnError: Error | undefined;
+  /**
+   * HOW it ended, kept for the failure message.
+   *
+   * The exit status used to be discarded here, so the only thing that could be said about a dead sidecar was "it
+   * exited before it could listen" — true, and useless. It is recorded once (`??=`) because `exit` and `close`
+   * both fire, and the first is the one that carries the status.
+   */
+  let ended: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+  /**
+   * Resolves on `close`, which is the event that means "the process is gone AND its stdio is drained".
+   *
+   * This is NOT the same moment as `exit`, and the difference is the whole point of this fix. `exit` fires when
+   * the process ends; `close` fires once the last of stderr has been delivered on the pipe. Measured: rejecting
+   * on `exit` produced a failure message with NO tail at all for a sidecar that died on an uncaught exception —
+   * the fatal line arrived on the next tick, after the promise had already been rejected. So the promise waits for
+   * `close`, and `exit` only records the status.
+   *
+   * `stop()` awaited `exited` before this change too, so it already tolerated the extra tick: it is the same
+   * condition, stated more precisely.
+   */
   const exited = new Promise<void>((done) => {
-    const finish = (): void => {
+    child.once("exit", (code, signal) => {
+      ended ??= { code, signal };
+      gone = true;
+    });
+    child.once("close", (code, signal) => {
+      ended ??= { code, signal };
       gone = true;
       done();
-    };
-    child.once("exit", finish);
-    child.once("close", finish);
+    });
     child.once("error", (error) => {
       spawnError = error;
-      finish();
+      gone = true;
+      done();
     });
   });
 
@@ -411,54 +464,84 @@ export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
   };
 
   /**
-   * A port chosen BEFORE the spawn, deterministically, so the config can name it.
+   * PORT 0: the kernel chooses, and the child announces what it got.
    *
-   * The first version asked the child for port 0 and waited for it to announce the real one. That is more
-   * correct in principle and it made `spawnSidecar` async, which made `start` async, which rippled into the
-   * transport and every test — a large change justified by a detail. Session ids are unique per orchestrator,
-   * so a base plus the id's number is unique too, and a collision with an unrelated process surfaces as a
-   * stated bind failure rather than a silent mix-up.
+   * ## Why the arithmetic was wrong, measured two ways
    *
-   * `SIDECAR_PORT_BASE` is high and uncommon on purpose; the range is bounded so two sessions cannot drift
-   * into each other.
+   * It was `SIDECAR_PORT_BASE + ordinal`, justified as unique because session ids are unique *per orchestrator*.
+   * True, and not the property needed: ids restart at `s1` on every launch, so a second launch derives the same
+   * port for its own `s18` — reported from use as a failed session browser on port 47818 with no second window
+   * open. The port was held by a sidecar left over from an earlier launch, because nothing ever reaped a listen
+   * port (there is a `reapDevPort` for the dev port and no equivalent here).
+   *
+   * ## Why probing first does not fix it
+   *
+   * Tried and measured: two fleets pumped a sidecar each, BOTH derived 47801, and the second died on EADDRINUSE.
+   * A pre-bind probe answers "free now", so both conclude yes and both pick it. Two processes cannot agree on a
+   * number by looking at it.
+   *
+   * ## What this does instead
+   *
+   * The only thing that cannot be raced is the bind itself, so the kernel picks. Two sidecars cannot be given the
+   * same port, and a leftover from a dead launch simply holds a different one.
+   *
+   * ## The cost, stated
+   *
+   * The port is not known until the child announces, so `mcp.json` — which must name it — is written THEN, and the
+   * argv that carries `--mcp-config` must be built after. That is why this file exposes `piArgs`/`mcpConfigArgs` as
+   * promises and why `Supervisor.start`/`resume` became async. It was knowingly traded away before ("a large
+   * change justified by a detail"); the detail turned out to be a shipped defect.
    */
-  const port = SIDECAR_PORT_BASE + sessionOrdinal(options.sessionId);
 
+
+  const configFile = join(root, "mcp.json");
+
+  /** The port the child reported. Undefined until it does, which is the whole reason `ready` exists. */
+  let bound: number | undefined;
 
   /**
-   * The config is written AFTER the bind, because it must name the real port.
+   * Write the MCP config for a port that has actually been bound.
    *
    * The token is referenced by name, not written: Pi interpolates `${PI_CENTRAL_SIDECAR_TOKEN}` from its own
    * environment, and C15 is why the variable must also be requested through `--env-pass` — Safehouse runs a
    * session under `env -i`, so an inherited variable is discarded. A literal token here would work and would
    * also leave a secret in a file that outlives the session.
+   *
+   * Mode 0600, and 0700 on the directory: the file names a bearer-authenticated endpoint, so it is as private as
+   * the token it refers to.
    */
-  const configFile = join(root, "mcp.json");
-  writeFileSync(
-    configFile,
-    JSON.stringify(
-      {
-        mcpServers: {
-          pi_central_sidecar: {
-            // A URL, not a command: the orchestrator owns the process, so Pi CONNECTS rather than spawning it
-            // inside the session's sandbox (which C1 makes impossible — measured as "Path does not exist").
-            url: `http://127.0.0.1:${port}/mcp`,
-            headers: { Authorization: "Bearer ${PI_CENTRAL_SIDECAR_TOKEN}" },
+  const writeConfig = (target: number): void => {
+    writeFileSync(
+      configFile,
+      JSON.stringify(
+        {
+          mcpServers: {
+            pi_central_sidecar: {
+              // A URL, not a command: the orchestrator owns the process, so Pi CONNECTS rather than spawning it
+              // inside the session's sandbox (which C1 makes impossible — measured as "Path does not exist").
+              url: `http://127.0.0.1:${target}/mcp`,
+              headers: { Authorization: "Bearer ${PI_CENTRAL_SIDECAR_TOKEN}" },
+            },
           },
         },
-      },
-      null,
-      2,
-    ),
-    { mode: 0o600 },
-  );
+        null,
+        2,
+      ),
+      { mode: 0o600 },
+    );
+  };
 
   return {
     configFile,
+    /*
+     * The Inspector's address is the DEV server the browser may reach, not the sidecar's own listening port.
+     * Two different ports answering two different questions (ADR-0018 §12), and the reader wants the one they can
+     * click. Known at spawn time, so it does not have to wait for the bind.
+     */
     origin: `http://localhost:${options.port}`,
     devPort: options.port,
     token,
-    port: () => (gone ? undefined : port),
+    port: () => (gone ? undefined : bound),
     /*
      * The spawn is already in flight, so "ready" must not be a resolved promise: a sidecar that died at launch was
      * handed to the supervisor as healthy, the session was launched with --mcp-config and a token for a server that
@@ -486,16 +569,47 @@ export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
       timer.unref?.();
       void exited.then(() => {
         clearTimeout(timer);
-        reject(spawnError ?? new Error(`the sidecar exited before it could listen (port ${port})`));
+        /*
+         * THE message the reader and the agent both read, so it carries the evidence rather than a restatement of
+         * the symptom.
+         *
+         * Measured: a reader saw "the sidecar exited before it could listen (port 47816)" and asked what went
+         * wrong. Nothing in this process could answer, because the child's stderr was collected into `stderrTail`
+         * and never read — the child had printed `listen EADDRINUSE` and the orchestrator threw it away. So the
+         * exit status and the tail are both in the sentence now: the first because it distinguishes a crash from a
+         * killed process, the tail because it names the cause.
+         */
+        reject(
+          spawnError ??
+            new Error(
+              `${exitReason(ended?.code ?? null, ended?.signal ?? null, "the sidecar")} before it could listen` +
+                `${failureTail(stderrTail) ? `:\n${failureTail(stderrTail)}` : ""}`,
+            ),
+        );
       });
-      // The announcement arrives on stderr as `sidecar listening on 127.0.0.1:<port> origin=...`. Matched on that shape
-      // rather than on the number appearing anywhere in a line: a port number is not distinctive, and a log line that
-      // mentions it must not be mistaken for a bind.
+      /*
+       * The announcement is the ONLY way the port is known now, so this pattern is load-bearing.
+       *
+       * It arrives on stderr as `sidecar listening on 127.0.0.1:<port> origin=...`. The port is captured rather
+       * than compared, because the kernel chose it — the old comparison against a predicted number cannot work at
+       * all here. Anchored to that shape rather than to a bare number so a log line that happens to mention a port
+       * cannot be mistaken for the bind.
+       */
       pendingPortListeners.push((line: string) => {
-        if (line.includes(`listening on 127.0.0.1:${port}`)) {
-          clearTimeout(timer);
-          resolve(port);
+        const match = /sidecar listening on 127\.0\.0\.1:(\d+)/.exec(line);
+        if (match === null) return;
+        const announced = Number(match[1]);
+        if (!Number.isInteger(announced) || announced < 1 || announced > 65535) return;
+        clearTimeout(timer);
+        bound = announced;
+        // Written HERE, not before the spawn: the file names the port, and the port did not exist until now.
+        try {
+          writeConfig(announced);
+        } catch (error) {
+          reject(error as Error);
+          return;
         }
+        resolve(announced);
       });
     })),
     stop,
@@ -512,8 +626,33 @@ export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
  * caller cannot accidentally place it after the subcommand — `pi mcp list --mcp-config X` reports
  * "Unknown option", which is how Phase 0D nearly concluded the flag did not exist.
  */
-export function mcpConfigArgs(handle: SidecarHandle | undefined): string[] {
-  return handle === undefined ? [] : ["--mcp-config", handle.configFile];
+export function mcpConfigArgs(handle: SidecarHandle | undefined): Promise<string[]> {
+  return Promise.resolve(handle === undefined ? [] : ["--mcp-config", handle.configFile]);
+}
+
+/**
+ * The `--mcp-config` argument, once it CAN be named.
+ *
+ * The config file is written when the sidecar announces its bound port, so a caller that reads `configFile`
+ * before that gets a path that does not exist and Pi reports "0 servers configured" — measured, and the exact
+ * symptom that sent a session hunting `mcp-cache.json`.
+ *
+ * The wrong-right answer is to keep the file path static and write it early from a predicted port; that is the
+ * defect this replaced. So the wait is explicit and happens HERE, at the one place the argv is assembled, rather
+ * than being remembered at every call site.
+ *
+ * A sidecar that dies is not fatal to the session: the browser is a capability, so the rejection is swallowed and
+ * the session is launched without `--mcp-config`. The absence is already reported on the session's warnings and to
+ * the agent's system prompt (see `sidecarPromptArgs`), which is where the reader and the model both look.
+ */
+export async function readyMcpConfigArgs(handle: SidecarHandle | undefined): Promise<string[]> {
+  if (handle === undefined) return [];
+  try {
+    await handle.ready;
+  } catch {
+    return [];
+  }
+  return ["--mcp-config", handle.configFile];
 }
 
 /** The system-prompt text for a session that has a sidecar, as Pi arguments. Nothing when it has none. */
@@ -552,9 +691,44 @@ export const NO_SIDECAR_INSTRUCTION = [
  */
 export function sidecarFailureWarning(cause: string): string {
   return (
-    `No session browser: ${cause}. This is a fault rather than a setting — sessions here get one normally, so the ` +
-    "orchestrator's log has the detail. This session cannot capture a page."
+    `No session browser: ${cause}. This is a fault rather than a setting — sessions here get one normally. ` +
+    `${sidecarFailureAdvice(cause)} This session cannot capture a page.`
   );
+}
+
+/**
+ * What to DO about it, chosen from the cause.
+ *
+ * One sentence for every cause was the defect: it ended "the orchestrator's log has the detail", which is true for
+ * a crash and actively wrong twice over for the other two. A C1 refusal is not a fault at all — the reader's setup
+ * is fine and the product cannot work from where it was started — and nothing about it is in the orchestrator's
+ * log, so the advice sent them to read a file that would not answer them.
+ *
+ * Matched on the child's own words, which is why this can only exist once the tail reaches the message (see the
+ * rejection in `spawnSidecar`). Order matters: the C1 case is checked first because `safehouse` reports it before
+ * anything else can fail.
+ */
+export function sidecarFailureAdvice(cause: string): string {
+  if (/sandbox_apply|Operation not permitted/i.test(cause)) {
+    return (
+      "This is Seatbelt refusing to nest (C1): the orchestrator is itself sandboxed, so it cannot apply a policy " +
+      "for the browser's sandbox. Run Pi Central from a plain terminal — not from an editor task, a sandboxed " +
+      "agent harness, or another Safehouse session."
+    );
+  }
+  if (/cannot listen|EADDRINUSE/i.test(cause)) {
+    return (
+      "The port is already in use — a previous Pi Central launch (or another session) is still holding this " +
+      "session's browser port. Quit the other instance, or start this session again to be given a different port."
+    );
+  }
+  if (/ENOENT|no such file|cannot find/i.test(cause)) {
+    return (
+      "A file the browser needs is missing: the browser executable or the sidecar bundle named in configuration " +
+      "does not exist at that path."
+    );
+  }
+  return "The orchestrator's log has the rest of the detail.";
 }
 
 export function sidecarPromptArgs(
