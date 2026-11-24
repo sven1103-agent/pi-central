@@ -198,6 +198,34 @@ export class CdpPage {
     await new Promise<void>((done) => setTimeout(done, 150));
   }
 
+  /**
+   * Is the page already at this address?
+   *
+   * The comparison is done **host-side, on parsed URLs**, never by string: the browser's own spelling of the
+   * address it is showing can differ from the one a caller wrote (`http://localhost:4173` versus `…:4173/`),
+   * and a string test would reload a page that is already there — the defect this method exists to prevent,
+   * one spelling further along. A query or a fragment IS a difference: those name state the caller asked for.
+   *
+   * `false` on anything unreadable, so the caller navigates rather than assuming: a page that cannot report its
+   * address is not the page that was asked for.
+   */
+  async isAt(href: string): Promise<boolean> {
+    const measured = (await this.#call("Runtime.evaluate", {
+      expression: LOCATION_EXPRESSION,
+      returnByValue: true,
+    })) as { result?: { value?: unknown } };
+    const here = measured.result?.value;
+    if (typeof here !== "string") return false;
+    try {
+      // BOTH sides are normalised here rather than trusting the caller to have done it: "the same address
+      // spelled two ways" is a property of URLs, and a method that only reads one side of the comparison with
+      // care would be correct for exactly the callers that remembered to be.
+      return new URL(here).href === new URL(href).href;
+    } catch {
+      return false;
+    }
+  }
+
   async capture(
     clip?: { x: number; y: number; width: number; height: number },
     fullPage = false,
@@ -306,6 +334,9 @@ export class CdpPage {
   }
 }
 const VIEWPORT_EXPRESSION = `({ width: window.innerWidth, height: window.innerHeight })`;
+
+/** Where the page is. A constant, like every other expression here: nothing is interpolated into it. */
+const LOCATION_EXPRESSION = `location.href`;
 
 const OVERFLOW_EXPRESSION = `(() => {
   const vw = window.innerWidth, vh = window.innerHeight;

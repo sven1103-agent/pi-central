@@ -112,7 +112,10 @@ export function toolDefinitions(): ToolDefinition[] {
     },
     {
       name: "act",
-      description: "Click one element by CSS selector, then leave the page as it is.",
+      description:
+        "Click one element by CSS selector, then leave the page as it is. The page persists between verbs, " +
+        "so the next `probe` or `capture` on the same url shows the state after the click, and a second " +
+        "`act` adds to the first rather than reloading it.",
       inputSchema: {
         type: "object",
         properties: {
@@ -167,7 +170,18 @@ export async function handleRequest(
 
   const session = await page();
   await session.setViewport(verb.kind === "probe" ? verb.viewport : { width: 1280, height: 800 });
-  await session.navigate(target.url, 15_000);
+  /**
+   * One page for the sidecar's life, so a verb's `url` means **"be at this address"**, not
+   * "start over".
+   *
+   * This is the difference between an interaction and a screenshot. Navigating unconditionally left every
+   * click on a document that no longer existed: on a page counting loads in `sessionStorage` and clicks in
+   * memory, `capture` → `act` → `capture` produced 3 loads and 0 surviving clicks, and a dialog opened with
+   * `act` was absent from the next screenshot (issue #288).
+   *
+   * The comparison is on parsed URLs and lives in the driver, so a trailing slash cannot cause a reload.
+   */
+  if (!(await session.isAt(target.url))) await session.navigate(target.url, 15_000);
 
   if (verb.kind === "capture") {
     const shot = await session.capture(verb.clip, verb.fullPage);
