@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The session browser: one session, one sibling sandbox, one port, four verbs (README).
+
+  Drawn for the same reason as architecture.svg, and by the same rules: SVG so it renders at any width and
+  follows the reader's theme, explicit class+media pairs rather than CSS custom properties (var() inside an
+  SVG <style> is ignored by librsvg, which rendered a blank diagram once already).
+
+  The TWO things this drawing must make obvious:
+    1. The sidecar is a SIBLING of the session, not a child of it — shown by the gap, and by the two
+       separate frames. The orchestrator spawns both.
+    2. The only way in is one wire, and it is labelled with what decides (MCP over HTTP, bearer token).
+  Everything else the picture would like to say (CDP over fd 3/4, no keychain) sits BELOW the wire, because
+  it is the answer to "what if it is compromised" rather than to "how does it work".
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 520" width="880" height="520"
+     role="img" aria-labelledby="sidecar-title sidecar-desc">
+  <title id="sidecar-title">How a session reaches its browser</title>
+  <desc id="sidecar-desc">The Pi Central UI talks to the orchestrator over a loopback WebSocket. The
+    orchestrator spawns two siblings with a gap between them: on the left a sandboxed session running pi
+    and its dev server on port 48001, on the right a sandboxed renderer running Chrome. The two frames do
+    not touch, so neither can read the other. The only connection between them is one wire labelled MCP
+    over HTTP on 127.0.0.1:47801, authorised by a bearer token on every request. Inside the renderer:
+    Chrome driven over file descriptors 3 and 4, egress pinned to the session's single dev-server port, no
+    keychain and no SSH keys. Below: four verbs, capture probe act info, and no fifth.</desc>
+
+  <style>
+    /* Dark first: the app is dark-only, and a light diagram on a dark page is the commoner mistake. */
+    .bg          { fill: #0e1116; }
+    .card        { fill: #161b22; stroke: #262d3a; stroke-width: 1.5; }
+    .frame-fill  { fill: #3fa383; opacity: 0.07; }
+    .frame       { fill: none; stroke: #3fa383; stroke-width: 2; stroke-dasharray: 7 5; }
+    .title       { fill: #e6edf3; font: 600 15px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .label       { fill: #e6edf3; font: 600 13px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .body        { fill: #8b949e; font: 12px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .mono        { fill: #e6edf3; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .mono-dim    { fill: #8b949e; font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .wire        { stroke: #3a4354; stroke-width: 1.5; fill: none; }
+    .wire-accent { stroke: #4c9aff; stroke-width: 1.5; fill: none; }
+    .arrow       { fill: #3a4354; }
+    .arrow-accent{ fill: #4c9aff; }
+    .badge       { fill: #3fa383; opacity: 0.14; }
+    .badge-text  { fill: #3fa383; font: 600 10.5px ui-sans-serif, -apple-system, sans-serif;
+                   letter-spacing: 0.04em; }
+    .chip        { fill: #1d2430; stroke: #2d3546; stroke-width: 1; }
+    .chip-text   { fill: #c9d1d9; font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    @media (prefers-color-scheme: light) {
+      .bg          { fill: #ffffff; }
+      .card        { fill: #f6f8fa; stroke: #d0d7de; }
+      .frame-fill  { fill: #1a7f62; opacity: 0.06; }
+      .frame       { stroke: #1a7f62; }
+      .title       { fill: #1f2328; }
+      .label       { fill: #1f2328; }
+      .body        { fill: #59636e; }
+      .mono        { fill: #1f2328; }
+      .mono-dim    { fill: #59636e; }
+      .wire        { stroke: #afb8c1; }
+      .wire-accent { stroke: #0969da; }
+      .arrow       { fill: #afb8c1; }
+      .arrow-accent{ fill: #0969da; }
+      .badge       { fill: #1a7f62; opacity: 0.10; }
+      .badge-text  { fill: #1a7f62; }
+      .chip        { fill: #ffffff; stroke: #d0d7de; }
+      .chip-text   { fill: #1f2328; }
+    }
+  </style>
+
+  <rect class="bg" x="0" y="0" width="880" height="520" rx="10"/>
+
+  <!-- 1. What the reader looks at. -->
+  <rect class="card" x="100" y="20" width="680" height="58" rx="8"/>
+  <text class="label" x="122" y="46">Pi Central UI</text>
+  <text class="body" x="122" y="64">session rail · transcript · approvals · the picture the agent took</text>
+  <rect class="badge" x="652" y="34" width="112" height="20" rx="10"/>
+  <text class="badge-text" x="664" y="48">localhost only</text>
+
+  <line class="wire-accent" x1="440" y1="78" x2="440" y2="106"/>
+  <polygon class="arrow-accent" points="440,114 435,104 445,104"/>
+  <text class="mono-dim" x="452" y="96">WebSocket, typed envelopes</text>
+
+  <!-- 2. The orchestrator: outside every sandbox, and the only place the verbs exist. -->
+  <rect class="card" x="100" y="114" width="680" height="62" rx="8"/>
+  <text class="label" x="122" y="140">Orchestrator</text>
+  <text class="body" x="122" y="158">MCP config · four-verb dispatch · the URL policy · the bearer token</text>
+  <rect class="badge" x="636" y="128" width="128" height="20" rx="10"/>
+  <text class="badge-text" x="648" y="142">outside any sandbox</text>
+
+  <!-- 3. Two spawns, two frames, and a gap that is the design. -->
+  <text class="mono-dim" x="100" y="198">spawns two siblings — never one inside the other</text>
+  <line class="wire" x1="220" y1="204" x2="220" y2="226"/>
+  <line class="wire" x1="660" y1="204" x2="660" y2="226"/>
+  <polygon class="arrow" points="220,234 215,224 225,224"/>
+  <polygon class="arrow" points="660,234 655,224 665,224"/>
+
+  <!-- 4. The session: the agent and the thing it built. -->
+  <rect class="frame-fill" x="60" y="240" width="310" height="176" rx="8"/>
+  <rect class="frame" x="60" y="240" width="310" height="176" rx="8"/>
+  <text class="badge-text" x="72" y="260">SANDBOX · THE AGENT</text>
+  <text class="mono" x="72" y="286">pi --mode rpc</text>
+  <text class="body" x="72" y="306">writes the page, runs its dev server</text>
+  <text class="mono-dim" x="72" y="330">localhost:48001</text>
+  <text class="body" x="72" y="358">reads only its own workdir:</text>
+  <text class="mono-dim" x="72" y="376">~/git/web</text>
+  <text class="body" x="72" y="398">cannot launch a browser here</text>
+
+  <!-- 5. The one wire into the renderer. Everything about authority is on it. -->
+  <line class="wire-accent" x1="376" y1="324" x2="486" y2="324"/>
+  <polygon class="arrow-accent" points="494,324 484,319 484,329"/>
+  <text class="mono-dim" x="440" y="292" text-anchor="middle">MCP over HTTP</text>
+  <text class="mono-dim" x="440" y="308" text-anchor="middle">the only way in</text>
+  <text class="mono-dim" x="440" y="342" text-anchor="middle">bearer token on</text>
+  <text class="mono-dim" x="440" y="358" text-anchor="middle">every request</text>
+
+  <!-- 6. The sidecar: a sibling sandbox of its own, and the four verbs are all it will do. -->
+  <rect class="frame-fill" x="510" y="240" width="310" height="176" rx="8"/>
+  <rect class="frame" x="510" y="240" width="310" height="176" rx="8"/>
+  <text class="badge-text" x="522" y="260">SANDBOX · THE RENDERER</text>
+  <text class="mono" x="522" y="286">Chrome --no-sandbox</text>
+  <text class="body" x="522" y="306">driven over fd 3/4, not a port</text>
+  <text class="mono-dim" x="522" y="330">127.0.0.1:47801/mcp</text>
+  <text class="body" x="522" y="358">egress: one port, one way</text>
+  <text class="body" x="522" y="376">no keychain · no ~/.ssh · no ~/.pi</text>
+  <text class="body" x="522" y="398">cannot reach the internet</text>
+
+  <!-- 7. The whole surface, as chips. The absence of a fifth is the argument. -->
+  <text class="body" x="60" y="444">The entire surface a session can ask for:</text>
+  <g>
+    <rect class="chip" x="60" y="456" width="92" height="28" rx="14"/>
+    <text class="chip-text" x="78" y="475">capture</text>
+    <rect class="chip" x="162" y="456" width="76" height="28" rx="14"/>
+    <text class="chip-text" x="182" y="475">probe</text>
+    <rect class="chip" x="248" y="456" width="60" height="28" rx="14"/>
+    <text class="chip-text" x="268" y="475">act</text>
+    <rect class="chip" x="318" y="456" width="68" height="28" rx="14"/>
+    <text class="chip-text" x="338" y="475">info</text>
+  </g>
+  <text class="body" x="404" y="475">no script · no CDP method · no file path</text>
+
+  <text class="body" x="60" y="504">A click survives into the next verb, so act then capture shows the dialog it opened.</text>
+</svg>
