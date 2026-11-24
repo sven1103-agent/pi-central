@@ -4052,3 +4052,79 @@ test("the composer does not offer Reload for a session with no process", async (
   }));
   assert.ok(!/Reload resources/.test(text(html)), "a stopped session has nothing to deliver the command to");
 });
+
+// --- Where preferences are kept, stated (issue #285) ---------------------------------------------
+
+test("Settings states where preferences live, and names the consequence of the weaker home", async () => {
+  /*
+   * The surface exists because the failure was SILENT (issue #285).
+   *
+   * A preference written to `localStorage` was written successfully and read from an origin that had never seen it,
+   * so the loss happened with no error anywhere. Given the reader cannot be warned at the moment of loss, they can at
+   * least be told what the app is promising: that the value follows the installation, or that it belongs to one
+   * address and will go when the port changes.
+   *
+   * Two claims are asserted, and they must be DIFFERENT claims. A single sentence covering both would be the silent
+   * equivalence this change exists to remove.
+   */
+  const kept = renderToString(
+    createElement(Settings, {
+      install: installFacts(),
+      ready: true,
+      onClose() {},
+      initialSection: "about",
+      prefsPersistence: "installation",
+    }),
+  );
+  assert.match(kept, /Preferences/, "the row must be there");
+  assert.match(kept, /survive a restart and an update/);
+
+  const perOrigin = renderToString(
+    createElement(Settings, {
+      install: installFacts(),
+      ready: true,
+      onClose() {},
+      initialSection: "about",
+      prefsPersistence: "origin",
+    }),
+  );
+  assert.match(perOrigin, /a different port loses them/, "an old peer must state the consequence, not hide it");
+  assert.ok(!/survive a restart and an update/.test(perOrigin), "and must NOT claim the strong promise");
+
+  const memory = renderToString(
+    createElement(Settings, {
+      install: installFacts(),
+      ready: true,
+      onClose() {},
+      initialSection: "about",
+      prefsPersistence: "memory",
+    }),
+  );
+  assert.match(memory, /lost when this window closes/, "a store with nowhere to write must say so plainly");
+});
+
+test("an unmeasured preference home reads as 'not reported', not as a fabricated one", async () => {
+  // The convention `Fact` already sets, and the reason the prop is optional: a component test renders this dialog
+  // without a shell, and a fabricated "saved in the app" would be a claim nothing measured.
+  const html = renderToString(createElement(Settings, { install: installFacts(), ready: true, onClose() {}, initialSection: "about" }));
+  assert.match(html, /Preferences/);
+  assert.match(html, /not reported/);
+});
+
+test("the message about preferences that cannot be kept is shown in Settings, not only in the strip", async () => {
+  // The strip is dismissible and scrolls away; a fact about every preference the reader is about to set is worth
+  // leaving somewhere they can look at again.
+  const problem = "Pi Central cannot remember your preferences: no store is available in this window.";
+  const html = renderToString(
+    createElement(Settings, {
+      install: installFacts(),
+      ready: true,
+      onClose() {},
+      initialSection: "about",
+      prefsPersistence: "memory",
+      prefsProblem: problem,
+    }),
+  );
+  assert.match(html, /cannot remember your preferences/);
+});
+

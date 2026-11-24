@@ -10,7 +10,10 @@
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { PROTOCOL_VERSION, supportsCompact, supportsDelete, supportsPlaces, supportsReload, supportsRetry, supportsReveal, type Control, type HistoricalSession, type InstallFacts, type LiveSession, type ModelOption } from "@pi-central/protocol";
-import { Connection, socketUrl, type ConnectionStatus } from "./connection.ts";
+// The WIRE event, aliased because the DOM has an `Event` of its own and this file uses both (issue #285 adds the
+// first explicit mention of the type; until then it only travelled through `Connection`'s handler signature).
+import type { Event as WireEvent } from "@pi-central/protocol";
+import { type Connection, type ConnectionHandlers, type ConnectionStatus } from "./connection.ts";
 import { ActivityBar } from "./components/ActivityBar.tsx";
 import { ConfirmDelete } from "./components/ConfirmDelete.tsx";
 import { StoppedSession } from "./components/StoppedSession.tsx";
@@ -29,6 +32,8 @@ import {
 } from "./update-check.ts";
 import logoIcon from "./assets/logo-icon.svg";
 import { readTracePrefs, writeTracePrefs, type SessionScroll } from "./scroll.ts";
+import { PrefsStore, type PrefsPersistence } from "./prefs-store.ts";
+import { READING_PREFS_KEY, parseReadingPrefs, serializeReadingPrefs } from "./reading.ts";
 import {
   directoryAt,
   fileAt,
@@ -61,7 +66,6 @@ import { rosterLabel } from "./roster.ts";
 import {
   RAIL_PREFS_KEY,
   clampRailWidth,
-  defaultRailPrefs,
   parseRailPrefs,
   appClass,
   railMaxWidth,
@@ -164,7 +168,6 @@ import {
   PANEL_FILES_DEFAULT_WIDTH,
   PANEL_PREFS_KEY,
   clampPanelWidth,
-  defaultPanelPrefs,
   parsePanelPrefs,
   serializePanelPrefs,
   type PanelMode,
@@ -178,7 +181,6 @@ import {
   CHOOSER_PREFS_KEY,
   loadChooserPrefs,
   openingDirectory,
-  safeLocalStorage,
   serializeChooserPrefs,
   type ChooserPrefs,
 } from "./chooser-prefs.ts";
@@ -209,7 +211,53 @@ import {
 
 type Tab = "sessions" | "history";
 
-export function App() {
+/**
+ * The page's props.
+ *
+ * `prefs` is a PROP rather than a module singleton, and it is the one prop this shell takes (issue #285). Two
+ * reasons: the store has to exist before `main.tsx` reads the reading preferences for the first paint, so `main`
+ * owns it; and a test can then supply a store with an injected seed, which is the only way to exercise a migration
+ * without a browser.
+ */
+export interface AppProps {
+  prefs: PrefsStore;
+  /** Where the preferences ended up, so the one surface that says so can say it. */
+  prefsPersistence: PrefsPersistence;
+  /**
+   * The socket, created by the bootstrap so the preference read could happen before the first paint.
+   *
+   * Handed in rather than built here for that reason alone — see `main.tsx`. This component still owns the
+   * HANDLERS, because they close over its state; it takes them over on mount and gives them back on unmount.
+   */
+  connection: Connection;
+  /** Events the socket delivered before this component existed, in arrival order. */
+  pendingEvents: readonly WireEvent[];
+  /** Connection statuses from the same window. The last one wins. */
+  pendingStatuses: readonly { status: ConnectionStatus; detail?: string }[];
+  /** Messages the preference store produced before the error strip existed. */
+  pendingProblems: readonly string[];
+  /** Told where to send events, so the bootstrap can stop buffering them. */
+  onHandlers: (handlers: ConnectionHandlers) => void;
+  /**
+   * Told where to send a preference problem that happens AFTER the page is up.
+   *
+   * The buffered ones arrive in `pendingProblems`, and they are the load-time case. But a `setPrefs` that fails an
+   * hour later is the ordinary case, and a store whose message went into an array nobody reads again would be the
+   * silent loss this change exists to end (issue #285).
+   */
+  onPreferenceProblem: (listener: (message: string) => void) => void;
+}
+
+export function App({
+  prefs,
+  prefsPersistence,
+  connection,
+  pendingEvents,
+  pendingStatuses,
+  pendingProblems,
+  onHandlers,
+  onPreferenceProblem,
+}: AppProps) {
   const [state, dispatch] = useReducer(reduce, undefined, initialState);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [connectionDetail, setConnectionDetail] = useState<string | undefined>(undefined);
@@ -299,11 +347,11 @@ export function App() {
   // collapse the trace, switch away, come back, and it is open again.
   //
   // Persisted, like the panel geometry (issue #108: "it should survive restarts of the application").
-  // Read through an initialiser so a corrupt value cannot throw during the first render — the same rule
-  // `parsePanelPrefs` follows, and for the same reason: `localStorage` outlives upgrades and is shared
-  // with whatever else runs on this origin.
+  // Read through the shared store (issue #285) and through `readTracePrefs`, which validates every entry: the value
+  // outlives upgrades and is shared with whatever else can reach the store, so a stored id may name a session that
+  // no longer exists and a marker may be a string.
   const [showMarkersBySession, setShowMarkersBySession] = useState<Record<string, boolean>>(
-    () => readTracePrefs().markers,
+    () => readTracePrefs(prefs).markers,
   );
   //
   // Which activity groups the reader has opened, keyed by `sessionId` and then by the group's own key.
@@ -326,28 +374,16 @@ export function App() {
   // Both are the reader's choices about a surface they use repeatedly, so neither belongs in `SessionView` (which remounts
   // per session) nor in the component's own state (which dies with the panel). Read through initialisers so a corrupt
   // stored value cannot throw during the first render — the same rule `parsePanelPrefs` follows.
-  const [traceOrder, setTraceOrder] = useState<TraceOrder>(() => {
-    try {
-      return parseTraceOrder(localStorage.getItem(TRACE_ORDER_KEY));
-    } catch {
-      return "oldest";
-    }
-  });
+  const [traceOrder, setTraceOrder] = useState<TraceOrder>(() =>
+    parseTraceOrder(prefs.get(TRACE_ORDER_KEY)),
+  );
   const [traceDetailHeight, setTraceDetailHeight] = useState(TRACE_DETAIL_DEFAULT_HEIGHT);
 
 
   // The right panel's geometry and mode, restored from the last visit (issue #8; #15 generalises
-  // this to drafts and focus). Read through the initialiser so a corrupt value cannot throw during
-  // the first render — `parsePanelPrefs` validates every field rather than trusting the JSON.
-  const [panel, setPanel] = useState<PanelPrefs>(() => {
-    try {
-      return parsePanelPrefs(localStorage.getItem(PANEL_PREFS_KEY));
-    } catch {
-      // `localStorage` throws outright when storage is disabled or the origin is opaque, which is a
-      // real configuration rather than a bug — the panel just does not remember itself.
-      return defaultPanelPrefs();
-    }
-  });
+  // this to drafts and focus). Read from the store through `parsePanelPrefs`, which validates every field rather than
+  // trusting the JSON — the store hands back a string, so the discipline is unchanged by where it lives (#285).
+  const [panel, setPanel] = useState<PanelPrefs>(() => parsePanelPrefs(prefs.get(PANEL_PREFS_KEY)));
   // The viewport width is read for clamping and re-read on resize, because the panel's maximum is a
   // fraction of the window: a window narrowed after a drag must not leave the panel wider than the
   // transcript can survive.
@@ -382,15 +418,7 @@ export function App() {
   */
   const [sidecarPref, setSidecarPref] = useState<SidecarPref>(readSidecarPref);
 
-  const [railPrefs, setRailPrefs] = useState<RailPrefs>(() => {
-    try {
-      return parseRailPrefs(localStorage.getItem(RAIL_PREFS_KEY), 0);
-    } catch {
-      // Storage disabled or an opaque origin: the defaults still apply, the rail just does not remember.
-      return defaultRailPrefs();
-    }
-  });
-
+  const [railPrefs, setRailPrefs] = useState<RailPrefs>(() => parseRailPrefs(prefs.get(RAIL_PREFS_KEY), 0));
   /**
    * Is the rail a summoned overlay rather than a column?
    *
@@ -549,13 +577,18 @@ export function App() {
      * both appear where pressing would put them — only the backdrop says "this is a commitment you must dismiss".
      */
     (railHovering ? " is-rail-peek" : "");
-  const persistRail = useCallback((next: RailPrefs) => {
-    try {
-      localStorage.setItem(RAIL_PREFS_KEY, serializeRailPrefs(next));
-    } catch {
-      // Storage full or disabled. Losing the remembered width is not worth failing a render over.
-    }
-  }, []);
+  /*
+   * ONE writer for the rail (issue #285).
+   *
+   * The `try/catch` that used to be here is gone because `prefs.set` cannot throw: a store that cannot persist
+   * records the failure and reports it once, through one message for the whole page. Twelve handlers each handling
+   * "storage is unavailable" was twelve chances to differ about what to say, and twelve identical messages in the
+   * strip.
+   */
+  const persistRail = useCallback(
+    (next: RailPrefs) => prefs.set(RAIL_PREFS_KEY, serializeRailPrefs(next)),
+    [prefs],
+  );
 
   const setRailWidth = useCallback(
     (width: number) => {
@@ -671,32 +704,26 @@ export function App() {
    * a rail the reader opened.
    */
   useEffect(() => {
-    let hasStored = true;
-    try {
-      hasStored = localStorage.getItem(RAIL_PREFS_KEY) !== null;
-    } catch {
-      // Storage unavailable: nothing can be remembered, so there is nothing to default differently either.
-      return;
-    }
-    if (hasStored) return;
-    const prefs = initialRailPrefs(rosterEstimate(state.roster.length, state.historyTotal));
-    setRailPrefs(prefs);
-    persistRail(prefs);
-  }, [state.roster.length, state.historyTotal, persistRail]);
+    /*
+     * `prefs.has`, not a read of `localStorage` (issue #285): the question is "has the reader chosen a rail width",
+     * and the store is the only thing that knows where that value lives. Asking a specific store was the mistake
+     * this whole change is about.
+     */
+    if (prefs.has(RAIL_PREFS_KEY)) return;
+    const initial = initialRailPrefs(rosterEstimate(state.roster.length, state.historyTotal));
+    setRailPrefs(initial);
+    persistRail(initial);
+  }, [prefs, state.roster.length, state.historyTotal, persistRail]);
 
   // Persisted on change, not on every render: the maps only change when a toggle is pressed.
   useEffect(() => {
-    writeTracePrefs({ collapsed: {}, markers: showMarkersBySession });
-  }, [showMarkersBySession]);
+    writeTracePrefs(prefs, { collapsed: {}, markers: showMarkersBySession });
+  }, [prefs, showMarkersBySession]);
 
   // Persisted on change, not on every render: both only change when the reader acts.
   useEffect(() => {
-    try {
-      localStorage.setItem(TRACE_ORDER_KEY, traceOrder);
-    } catch {
-      // Storage disabled or full. A preference that is not remembered is not an error.
-    }
-  }, [traceOrder]);
+    prefs.set(TRACE_ORDER_KEY, traceOrder);
+  }, [prefs, traceOrder]);
 
   const setPanelWidth = useCallback((width: number, userSized: boolean) => {
     setPanel((current) => ({ ...current, width, userSized }));
@@ -711,28 +738,20 @@ export function App() {
   const togglePanelCollapsed = useCallback(() => {
     setPanel((current) => {
       const next = { ...current, collapsed: !current.collapsed };
-      try {
-        localStorage.setItem(PANEL_PREFS_KEY, serializePanelPrefs(next));
-      } catch {
-        // Storage disabled or full: the panel simply does not remember itself. Not worth failing a
-        // render over, and the toggle still works for this session.
-      }
+      prefs.set(PANEL_PREFS_KEY, serializePanelPrefs(next));
       return next;
     });
-  }, []);
+  }, [prefs]);
 
   const persistPanel = useCallback(() => {
-    // Persisted on gesture END, not per pointermove: a drag emits hundreds of moves and writing
-    // `localStorage` synchronously on each one makes the drag stutter.
+    // Persisted on gesture END, not per pointermove: a drag emits hundreds of moves and a write per move is work
+    // nobody asked for. (Since #285 the write is batched anyway, but the gesture end is still the moment the
+    // reader's choice is complete.)
     setPanel((current) => {
-      try {
-        localStorage.setItem(PANEL_PREFS_KEY, serializePanelPrefs(current));
-      } catch {
-        // Storage full or disabled. Losing the remembered width is not worth failing a render over.
-      }
+      prefs.set(PANEL_PREFS_KEY, serializePanelPrefs(current));
       return current;
     });
-  }, []);
+  }, [prefs]);
 
   const setPanelMode = useCallback(
     (mode: PanelMode) => {
@@ -745,15 +764,11 @@ export function App() {
             ? clampPanelWidth(PANEL_FILES_DEFAULT_WIDTH, viewportWidth)
             : current.width;
         const next = { ...current, mode, width };
-        try {
-          localStorage.setItem(PANEL_PREFS_KEY, serializePanelPrefs(next));
-        } catch {
-          // As above.
-        }
+        prefs.set(PANEL_PREFS_KEY, serializePanelPrefs(next));
         return next;
       });
     },
-    [viewportWidth],
+    [prefs, viewportWidth],
   );
 
 
@@ -772,23 +787,24 @@ export function App() {
   /**
    * Where the chooser was left, and how it lists (issue #76).
    *
-   * *"Don't let them start from the default again, pick up the last directory."* Persisted in `localStorage` because it
-   * has to survive a reload and a PWA window reopen; `chooser-prefs.ts` validates every field, since a stored path may
-   * name a directory that no longer exists.
-   */
-  const chooserStorage = useMemo(() => safeLocalStorage(), []);
-  /*
+   * *"Don't let them start from the default again, pick up the last directory."* Persisted because it has to survive a
+   * reload and a PWA window reopen; `chooser-prefs.ts` validates every field, since a stored path may name a directory
+   * that no longer exists.
+   *
+   * Read through the shared store since issue #285, which is why there is no `safeLocalStorage()` here any more: the
+   * key is the same, the validation is the same, and only the place the string lives has changed.
+   *
    * `loadChooserPrefs`, not `parseChooserPrefs`: an existing browser may hold a `lastDirectory` written by the release
    * that persisted it on every descent — the folder the reporter could not account for. That value is dropped on read
    * (`chooser-prefs.ts` explains why), so the fix reaches a reader who does not clear storage.
    */
-  const [chooser, setChooser] = useState<ChooserPrefs>(() => loadChooserPrefs((key) => chooserStorage.getItem(key)));
+  const [chooser, setChooser] = useState<ChooserPrefs>(() => loadChooserPrefs((key) => prefs.get(key)));
   const rememberChooser = useCallback(
     (next: ChooserPrefs) => {
       setChooser(next);
-      chooserStorage.setItem(CHOOSER_PREFS_KEY, serializeChooserPrefs(next));
+      prefs.set(CHOOSER_PREFS_KEY, serializeChooserPrefs(next));
     },
-    [chooserStorage],
+    [prefs],
   );
   /**
    * Remember the directory a session was STARTED in — and nothing else.
@@ -805,11 +821,11 @@ export function App() {
       setChooser((current) => {
         if (current.lastDirectory === path) return current;
         const next = { ...current, lastDirectory: path };
-        chooserStorage.setItem(CHOOSER_PREFS_KEY, serializeChooserPrefs(next));
+        prefs.set(CHOOSER_PREFS_KEY, serializeChooserPrefs(next));
         return next;
       });
     },
-    [chooserStorage],
+    [prefs],
   );
   /**
    * The reader's model list (issue #265).
@@ -818,19 +834,17 @@ export function App() {
    * reading `localStorage` on their own would disagree the moment one of them wrote. One piece of state and one writer
    * is what makes "two sessions share the list" true rather than likely.
    *
-   * `safeLocalStorage` because private mode and a full quota both throw on the first `setItem`; a picker that cannot
-   * remember a list must still open, and `model-scope.ts` degrades a stored value it cannot parse to "no list".
+   * Read through the shared store since issue #285, which is what makes this list survive a relaunch of the desktop
+   * app: the store reaches the installation, whose identity does not depend on the port the shell happened to get.
+   * `model-scope.ts` still degrades a value it cannot parse to "no list", so the change of home bought no trust.
    */
-  const scopeStorage = useMemo(() => safeLocalStorage(), []);
-  const [modelScope, setModelScope] = useState<ModelScope>(() =>
-    loadModelScope((key) => scopeStorage.getItem(key)),
-  );
+  const [modelScope, setModelScope] = useState<ModelScope>(() => loadModelScope((key) => prefs.get(key)));
   const rememberModelScope = useCallback(
     (next: ModelScope) => {
       setModelScope(next);
-      scopeStorage.setItem(MODEL_SCOPE_KEY, serializeModelScope(next));
+      prefs.set(MODEL_SCOPE_KEY, serializeModelScope(next));
     },
-    [scopeStorage],
+    [prefs],
   );
   /**
    * Whether the model list editor is open.
@@ -874,6 +888,35 @@ export function App() {
    * `supportsInstall` treats as supported — the same convention `supportsRetry` documents.
    */
   const protocolRef = useRef<number | undefined>(undefined);
+  /**
+   * Whether this handler is still the live one.
+   *
+   * Three of the branches in `onEvent` act on the app — reload the page, rewrite `focusedId` through `send`, move a
+   * modal's focus — and StrictMode mounts, unmounts and remounts in development, so a handler from a dead mount can
+   * still run. A `dispatch` from one is harmless (the reducer is pure and the newest state wins); a reload, or an
+   * effect taken on behalf of a page that is no longer there, is not.
+   */
+  const liveRef = useRef(false);
+  /**
+   * The one message about preferences that could not be kept (issue #285), shown in Settings as well as in the strip.
+   *
+   * In memory rather than in the store: it is a fact about the environment, and the environment is re-measured on
+   * every load. Recreating it from a stored flag would keep telling a reader about a window that closed months ago.
+   */
+  const [prefsProblem, setPrefsProblem] = useState<string | undefined>(undefined);
+
+  /**
+   * Whether an event should be ASSESSED for a stale page, or merely applied.
+   *
+   * `false` until the full mount is over, and the field exists for one measured reason. In development React runs
+   * every effect, unmounts it, and runs it again (StrictMode). If the second run replayed `pendingEvents`, the first
+   * activity-bar `install` re-check would find a bundle mismatch and RELOAD the page — in a loop, because the reload
+   * re-runs the same sequence. That would make `npm run app` unusable while looking like an app-level defect.
+   *
+   * The events are not dropped: they are dispatched exactly as before, and only the two decisions that act on the
+   * page (reload, banner) are skipped. Session state, errors and the composer are unaffected.
+   */
+  const assessEvents = useRef(false);
 
   /**
    * The stale-page banner (issue #184). Set when the one-shot reload was already spent on this
@@ -962,9 +1005,16 @@ export function App() {
     [pageEntry, updateMarks, reloadForUpdate],
   );
 
-  useEffect(() => {
-    const connection = new Connection(socketUrl(), {
-      onEvent: (event) => {
+  /**
+   * The socket's handlers, owned here and handed to the connection the bootstrap opened (issue #285).
+   *
+   * A `useCallback` rather than a closure inside the effect, because the same function must run twice: once over the
+   * events that arrived while the preference store was being read, and then live. Two paths that each did the
+   * dispatch sequence would be two places the stale-page assessment could be forgotten in — which is exactly the
+   * defect #213 was corrected for.
+   */
+  const onEvent: ConnectionHandlers["onEvent"] = useCallback(
+    (event: WireEvent) => {
         /*
          * Stale-page detection runs BEFORE the store (issue #184), and it runs for BOTH carriers of the facts
          * (issue #220): a `snapshot` and an `installFacts` answer. Neither may decide for itself — `assessInstall`
@@ -980,7 +1030,7 @@ export function App() {
           // Recorded even when the assessment is silent: the return-to-view re-check reads it to decide whether
           // this peer can be asked at all, and the listener must not depend on a re-render to see it.
           protocolRef.current = event.install?.protocol;
-          if (!assessInstall(event.install)) return;
+          if (assessEvents.current && !assessInstall(event.install)) return;
         }
         /*
          * A `hello` skew is the same class of event with the same cure, and it is NOT routed to
@@ -1039,7 +1089,10 @@ export function App() {
               places: event.places,
               home: event.home,
               ...(() => {
-                const start = openingDirectory(chooser, event.places, event.home);
+                // `prefs.get` rather than the `chooser` state: this handler is created once and captured `chooser`
+                // at its first value, so a directory remembered after the socket opened would never be seen here.
+                // The store is the authority anyway (issue #285), and the two write through the same key.
+                const start = openingDirectory(loadChooserPrefs((key) => prefs.get(key)), event.places, event.home);
                 return start === undefined ? {} : { resumeAt: start };
               })(),
             });
@@ -1112,15 +1165,58 @@ export function App() {
           default:
             break;
         }
-      },
-      onStatus: (status, detail) => {
-        setConnectionStatus(status);
-        setConnectionDetail(detail);
-      },
-    });
+    },
+    // The connection is a stable object owned by the bootstrap; the store likewise. Neither is a dependency that
+    // can change under a mounted page, which is why this list is not empty by oversight.
+    [prefs, updateMarks, reloadForUpdate, assessInstall],
+  );
+
+  const onStatus = useCallback((status: ConnectionStatus, detail?: string) => {
+    setConnectionStatus(status);
+    setConnectionDetail(detail);
+  }, []);
+
+  /**
+   * Take over the socket, and drain whatever arrived before this component existed.
+   *
+   * The drain runs through the SAME `onEvent`, so an event buffered during the preference read is assessed for a
+   * stale page exactly like a live one. A separate replay path would be a second place that decision could be
+   * forgotten (issue #213).
+   */
+  useEffect(() => {
     connectionRef.current = connection;
-    connection.connect();
-    return () => connection.disconnect();
+    onHandlers({ onEvent, onStatus });
+    liveRef.current = true;
+    // The last status wins: an intermediate "reconnecting in 0.5s" is not worth replaying.
+    const last = pendingStatuses[pendingStatuses.length - 1];
+    if (last !== undefined) onStatus(last.status, last.detail);
+    for (const event of pendingEvents) onEvent(event);
+    // From the NEXT event onwards the page may act on what it hears. See `assessEvents`.
+    assessEvents.current = true;
+    for (const message of pendingProblems) {
+      dispatch({ kind: "error", message });
+      // The refusal that matters most is "nothing can be remembered" (issue #285), and a dismissible strip is the
+      // wrong place for a fact about every preference the reader is about to set. It is ALSO shown in Settings,
+      // where it can be looked at again after the strip has scrolled away.
+      setPrefsProblem(message);
+    }
+    // A problem that arrives LATER goes the same way, through the same two surfaces. Registered here so the write
+    // that fails an hour from now is reported then, rather than into a queue the bootstrap stopped reading.
+    onPreferenceProblem((message) => {
+      dispatch({ kind: "error", message });
+      setPrefsProblem(message);
+    });
+    return () => {
+      // `liveRef` is cleared BEFORE the handlers are handed back: a real reconnect after a remount must not be
+      // treated as the same page, and the effect that re-registers is the one that sets it again.
+      liveRef.current = false;
+      assessEvents.current = false;
+      // Handed back so nothing is buffered that would never be drained — a remount under StrictMode runs this
+      // effect twice, and the second run's handlers are the ones that must be live.
+      onHandlers({ onEvent: () => undefined, onStatus: () => undefined });
+    };
+    // Deliberately once per mount: the buffered arrays are the bootstrap's, and it does not refill them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const send = useCallback((control: Control) => {
@@ -1622,15 +1718,19 @@ export function App() {
   /*
    * The roster, persisted (issue #89).
    *
-   * Read ONCE on mount, then written whenever it changes. `localStorage` is the right home — `roster.ts`
-   * explains why this is a view preference rather than installation configuration — and it is read through
-   * `parseRoster` rather than trusted, for the reason `panel.ts` gives: it outlives upgrades and is shared with
-   * whatever else runs on this origin.
+   * Read ONCE on mount, then written whenever it changes. `roster.ts` explains why this is a view preference, and
+   * it is read through `parseRoster` rather than trusted, for the reason `panel.ts` gives: the value outlives
+   * upgrades and is shared with whatever else can reach the store.
+   *
+   * The store is the shared one since issue #285. Before that it was `localStorage`, which the desktop shell lost on
+   * every launch because each launch loads the UI from a different port — and this list, rebuilt from the live
+   * sessions in spawn order, is why "the roster came back reordered" and "the roster was never stored" looked
+   * identical from the outside.
    */
   useEffect(() => {
-    const restored = parseRoster(localStorage.getItem(ROSTER_PREFS_KEY));
+    const restored = parseRoster(prefs.get(ROSTER_PREFS_KEY));
     dispatch({ kind: "loadRoster", entries: restored.entries, forgotten: restored.forgotten });
-  }, []);
+  }, [prefs]);
 
   /*
    * Everything this process is running belongs in the roster.
@@ -1659,15 +1759,10 @@ export function App() {
     }
   }, [state.live]);
 
-  // Persist whatever the rail is showing. One writer, so storage cannot drift from what is rendered.
+  // Persist whatever the rail is showing. One writer, so the store cannot drift from what is rendered.
   useEffect(() => {
-    try {
-      localStorage.setItem(ROSTER_PREFS_KEY, serializeRoster(state.roster, state.forgotten));
-    } catch {
-      // A full or disabled `localStorage` must not break the rail: the roster is a convenience, and an
-      // unwritable store degrades to "not remembered", which is the behaviour before this feature existed.
-    }
-  }, [state.roster]);
+    prefs.set(ROSTER_PREFS_KEY, serializeRoster(state.roster, state.forgotten));
+  }, [prefs, state.roster]);
 
   /*
    * RESUME-ON-SEND (issue #89).
@@ -2927,6 +3022,20 @@ export function App() {
             column exists at all), so a second copy would be a second answer to "is the rail hidden", and the shell
             would keep rendering the old one.
           */
+          prefsPersistence={prefsPersistence}
+          {...(prefsProblem === undefined ? {} : { prefsProblem })}
+          /*
+            The reading preferences come from the same store (issue #285).
+
+            They used to be read and written by `ReadingPanel` itself, against `localStorage` — the one dialog that
+            edits a preference was also the one place that stored it somewhere the next launch could not find. The
+            value is a string in the store; this reads and writes it through the store's own parsers, so the dialog
+            and the pre-paint application in `main.tsx` cannot describe the value differently.
+          */
+          reading={{
+            get: () => parseReadingPrefs(prefs.get(READING_PREFS_KEY)),
+            set: (next) => prefs.set(READING_PREFS_KEY, serializeReadingPrefs(next)),
+          }}
           railPrefs={railPrefs}
           onRailPrefs={(change) =>
             setRailPrefsAndPersist((current) => {

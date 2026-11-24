@@ -116,6 +116,25 @@ Loopback is still not a boundary (C5). The listener serves one directory, refuse
 resolves outside it (a `..` segment is *denied* with a 403, not normalized away), and must not be
 bound beyond `127.0.0.1` — the transport guarantees the binding, not the static handler.
 
+### The origin is not an identity, so preferences do not live in one
+
+A single listener with an **ephemeral port** means a single listener with a **different origin on every launch**: the
+desktop shell passes `--port 0` and never chooses a port (ADR-0013 §4), so the window loads
+`http://127.0.0.1:<a port nobody chose>`. `localStorage` is partitioned per origin, so anything stored there is
+written to a bucket the next launch cannot see — which is where every reader preference used to live, and why all of
+them were lost on every restart of the app with nothing failing.
+
+A reader's preferences therefore belong to the **installation**, and travel on the same socket as everything else
+(`getPrefs` / `setPrefs`, `prefs` / `prefsError`; ADR-0019). They are one file in the orchestrator's state root,
+beside the open-session list, and its identity does not depend on the port. The page keeps a synchronous copy so the
+twelve call sites that used to touch `localStorage` did not have to become asynchronous — what changed is where the
+string comes from.
+
+The rule this leaves behind is worth stating, because it is one line and the defect cost a year:
+
+> **Nothing durable may be keyed on something the launcher chooses freely.** The port is the launcher's; the
+> installation is the app's.
+
 ## Session registry
 
 Two sources, deliberately:
