@@ -69,3 +69,38 @@ test("the README states why Playwright's MCP server was not reused", () => {
     );
   }
 });
+
+test("the Playwright rejection is presented as a comparison of authority, not of capability", () => {
+  // The question arrives as "is our server better?" and the honest answer is that it is not more careful — it
+  // is narrower BY CONSTRUCTION. If that framing is lost, the section reads as a preference between two
+  // browsers, and the four probes below it look like supporting detail rather than the reason.
+  const section = readme.slice(
+    readme.indexOf("Why not just run Playwright's MCP server?"),
+    readme.indexOf("### What it is not"),
+  );
+  assert.match(section, /where the decision is\s+made|where the decision is made/i, "it must name WHERE the limit lives");
+  assert.ok(
+    /the browser\*\* — 25 tools|\*\*the browser\*\*/.test(section),
+    "and that Playwright offers the browser rather than a verb set",
+  );
+  // The three scenarios are the part a reader acts on, so each must stay, and each must name the mechanism.
+  for (const scenario of ["confused deputy", "neighbouring session", "injected instruction"]) {
+    assert.ok(section.toLowerCase().includes(scenario), "the section must keep the " + scenario + " scenario");
+  }
+});
+
+test("every security claim in the README says whether it was measured or inferred", () => {
+  // The failure this prevents is the seductive one: a threat model written in the past tense, where a
+  // reasonable inference reads exactly like a run. The table has to exist and has to keep both columns
+  // populated, or a reader cannot tell which sentences survived contact with a machine.
+  const section = readme.slice(
+    readme.indexOf("What is measured, and what is inferred"),
+    readme.indexOf("### What it is not"),
+  );
+  assert.ok(section.length > 400, "the grading table must exist");
+  assert.ok(section.includes("**measured**"), "at least one row must claim a measurement");
+  assert.ok(section.includes("**inferred**"), "and the inferences must be labelled as such, not left implicit");
+  // Three of the six rows are inferences, and a table that drifted to all-measured would be a false claim.
+  const inferred = section.split("**inferred**").length - 1;
+  assert.ok(inferred >= 3, "the three scenarios are inferences and must stay labelled; found " + inferred);
+});
