@@ -1,6 +1,8 @@
 # UI sidecar: current design vs a containerised MCP browser
 
-**Status:** comparison for a decision that has not been made. Nothing here is implemented.
+**Status:** section 1 is implemented and shipped (ADR-0018); the container in section 3 is not evaluated and
+not built. This was a comparison written before the decision, kept because the measurements in section 2 are why
+the four verbs exist.
 **Parent:** [ADR-0018](decisions/0018-ui-sidecar.md) - **Issue:** [#276](https://github.com/sven1103-agent/pi-central/issues/276)
 
 This document exists because the question keeps returning in the same form -- *"why not just run Playwright's

@@ -23,6 +23,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - A value stored by the release before this one is carried into the installation instead of being lost on the first launch after the upgrade ([#285]).
 - A preference that cannot be saved is reported once, rather than silently dropped or reported once per key ([#285]).
 - A corrupt or unreadable preferences file is reported as a failure, so the reader is not shown defaults as though they had chosen them ([#285]).
+- `act` clicks a page the sidecar keeps, so the next `capture` or `probe` shows the state after the click ([#288]).
 
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
