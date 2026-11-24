@@ -10,11 +10,15 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+<!-- Empty at tag time: a release cannot ship undocumented changes. -->
+
+## [0.16.2] — 2026-11-24
+
 ### Fixed
 
-- A session browser that fails to start says why — the exit status and the process's own last words — and the advice is chosen from the cause instead of promising a log that does not hold it.
-- A port refusal is one stated line rather than a stack trace, so the cause survives into the message that reports it.
-- A session browser's port is assigned by the operating system instead of derived from the session number, so a sidecar left over from an earlier launch can no longer take the port a new session needs.
+- A session browser that fails to start says why — the exit status and the process's own last words — and the advice is chosen from the cause instead of promising a log that does not hold it ([#296]).
+- A port refusal is one stated line rather than a stack trace, so the cause survives into the message that reports it ([#296]).
+- A session browser's port is assigned by the operating system instead of derived from the session number, so a sidecar left over from an earlier launch can no longer take the port a new session needs ([#296]).
 
 ## [0.16.1] — 2026-11-24
 
@@ -895,6 +899,7 @@ The spike that answered whether this was worth building.
 [#276]: https://github.com/sven1103-agent/pi-central/issues/276
 [#288]: https://github.com/sven1103-agent/pi-central/issues/288
 [#293]: https://github.com/sven1103-agent/pi-central/pull/293
+[#296]: https://github.com/sven1103-agent/pi-central/pull/296
 [#274]: https://github.com/sven1103-agent/pi-central/issues/274
 [#275]: https://github.com/sven1103-agent/pi-central/issues/275
 [#281]: https://github.com/sven1103-agent/pi-central/issues/281
