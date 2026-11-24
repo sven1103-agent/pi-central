@@ -10,28 +10,28 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+<!-- Empty at tag time: a release cannot ship undocumented changes. -->
+
+## [0.16.1] — 2026-11-24
+
 ### Added
 
 - The reader's preferences are kept by the installation and read over the socket, so they survive a restart, an update and a change of port ([#285]).
 - ADR-0019 records the decision, and why a fixed port, a bounded retry list, a cross-origin copy and a custom protocol were all refused ([#285]).
 - Settings says where preferences are kept, and states when they cannot be ([#285]).
 
+### Changed
+
+- The README sells the session browser: a diagram of the sandbox, the MCP wiring, and why Playwright's MCP server was refused ([#293]).
+
 ### Fixed
 
+- `act` clicks a page the sidecar keeps, so the next `capture` or `probe` shows the state after the click ([#288]).
 - The chosen set of models survives quitting and relaunching the desktop app, and an update ([#285]).
 - The roster, the rail, the panel, the transcript's measure, the trace and the chooser directory survive too ([#285]).
 - A value stored by the release before this one is carried into the installation instead of being lost on the first launch after the upgrade ([#285]).
 - A preference that cannot be saved is reported once, rather than silently dropped or reported once per key ([#285]).
 - A corrupt or unreadable preferences file is reported as a failure, so the reader is not shown defaults as though they had chosen them ([#285]).
-- `act` clicks a page the sidecar keeps, so the next `capture` or `probe` shows the state after the click ([#288]).
-
-<!-- Empty at tag time: a release cannot ship undocumented changes. -->
-
-## [0.16.1] — 2026-11-24
-
-### Fixed
-
-- `act` clicks a page the sidecar keeps, so the next `capture` or `probe` shows the state after the click ([#288]).
 
 ## [0.16.0] — 2026-11-22
 
@@ -890,6 +890,7 @@ The spike that answered whether this was worth building.
 [#269]: https://github.com/sven1103-agent/pi-central/issues/269
 [#276]: https://github.com/sven1103-agent/pi-central/issues/276
 [#288]: https://github.com/sven1103-agent/pi-central/issues/288
+[#293]: https://github.com/sven1103-agent/pi-central/pull/293
 [#274]: https://github.com/sven1103-agent/pi-central/issues/274
 [#275]: https://github.com/sven1103-agent/pi-central/issues/275
 [#281]: https://github.com/sven1103-agent/pi-central/issues/281
