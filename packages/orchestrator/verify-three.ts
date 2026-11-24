@@ -315,7 +315,7 @@ async function main(): Promise<number> {
 
   const started: { c: Case; session: LiveSession }[] = [];
   for (const c of CASES) {
-    const result = supervisor.start({ cwd: c.dir, name: `phase1-${c.label}` });
+    const result = await supervisor.start({ cwd: c.dir, name: `phase1-${c.label}` });
     if (!result.ok) {
       console.error(`\n\x1b[31mcould not start ${c.label}: ${result.message}\x1b[0m`);
       await supervisor.stopAll();

@@ -19,7 +19,7 @@ import { join } from "node:path";
 const { Supervisor } = await import("../src/supervisor.ts");
 
 /** A supervisor over a real temp tree, with one session rooted at `cwd`. */
-function supervisorWith(cwd: string, root: string) {
+async function supervisorWith(cwd: string, root: string) {
   const supervisor = new Supervisor({
     workspaceRoot: join(root, "workspaces"),
     stateRoot: join(root, "state"),
@@ -38,12 +38,12 @@ function supervisorWith(cwd: string, root: string) {
   // Without a listener, the launch failure this test run provokes becomes an unhandled exception
   // and fails the run for a reason unrelated to what is under test.
   supervisor.on("error", () => {});
-  const started = supervisor.start({ cwd: realpathSync(cwd) });
+  const started = await supervisor.start({ cwd: realpathSync(cwd) });
   if (!started.ok) throw new Error(`start refused: ${started.message}`);
   return { supervisor, sessionId: started.session.id };
 }
 
-test("the session's own cwd is the root, not the process cwd", () => {
+test("the session's own cwd is the root, not the process cwd", async () => {
   // The whole point of routing through the supervisor: `listFiles` must resolve against the
   // SESSION's directory. A resolver handed `process.cwd()` would pass every test in `files.test.ts`
   // and still browse the wrong tree here.
@@ -55,7 +55,7 @@ test("the session's own cwd is the root, not the process cwd", () => {
     // A sibling of the session's cwd. Reachable from the process, and must NOT be reachable here.
     writeFileSync(join(root, "outside.txt"), "not in the session cwd\n");
 
-    const { supervisor, sessionId } = supervisorWith(work, root);
+    const { supervisor, sessionId } = await supervisorWith(work, root);
 
     const listing = supervisor.listFiles(sessionId, "");
     assert.equal(listing.ok, true);
@@ -77,14 +77,14 @@ test("the session's own cwd is the root, not the process cwd", () => {
   }
 });
 
-test("an unknown session is refused as such, never resolved against another root", () => {
+test("an unknown session is refused as such, never resolved against another root", async () => {
   // A stale session id must not silently browse *something*. If this fell back to any root, a UI
   // tab left open across a restart would browse a directory with no relation to what it claimed.
   const root = mkdtempSync(join(tmpdir(), "pi-central-sup-"));
   try {
     const work = join(root, "work");
     mkdirSync(work);
-    const { supervisor, sessionId } = supervisorWith(work, root);
+    const { supervisor, sessionId } = await supervisorWith(work, root);
 
     const listing = supervisor.listFiles("s-does-not-exist", "");
     assert.equal(listing.ok, false);
@@ -101,7 +101,7 @@ test("an unknown session is refused as such, never resolved against another root
   }
 });
 
-test("reading through the supervisor is confined too, and a symlink escape is refused", () => {
+test("reading through the supervisor is confined too, and a symlink escape is refused", async () => {
   // A read must be held to the same root as a listing. Checking only `listFiles` would leave the
   // path that actually returns file CONTENTS unsupervised.
   const root = mkdtempSync(join(tmpdir(), "pi-central-sup-"));
@@ -112,7 +112,7 @@ test("reading through the supervisor is confined too, and a symlink escape is re
     writeFileSync(join(root, "secret.txt"), "must not be readable\n");
     symlinkSync(join(root, "secret.txt"), join(work, "link.txt"));
 
-    const { supervisor, sessionId } = supervisorWith(work, root);
+    const { supervisor, sessionId } = await supervisorWith(work, root);
 
     const ok = supervisor.readFile(sessionId, "inside.txt");
     assert.equal(ok.ok, true);
@@ -135,7 +135,7 @@ test("reading through the supervisor is confined too, and a symlink escape is re
   }
 });
 
-test("a session rooted at HOME still confines to that directory, whatever HOME is", () => {
+test("a session rooted at HOME still confines to that directory, whatever HOME is", async () => {
   // #49 is the open issue that a session whose cwd IS `$HOME` gets the run of the home tree. This
   // asserts the narrower fact that is in scope for #8: the resolver's root is exactly the session's
   // cwd, so the confinement boundary and the session boundary coincide. Whether such a session
@@ -144,7 +144,7 @@ test("a session rooted at HOME still confines to that directory, whatever HOME i
   try {
     mkdirSync(join(fauxHome, "git"));
     writeFileSync(join(fauxHome, ".npmrc"), "//registry:_authToken=secret\n");
-    const { supervisor, sessionId } = supervisorWith(fauxHome, fauxHome);
+    const { supervisor, sessionId } = await supervisorWith(fauxHome, fauxHome);
 
     const atHome = supervisor.listFiles(sessionId, "");
     assert.equal(atHome.ok, true);
@@ -160,7 +160,7 @@ test("a session rooted at HOME still confines to that directory, whatever HOME i
   }
 });
 
-test("the reveal is confined by the SESSION's cwd, which only the supervisor knows (ADR-0014)", () => {
+test("the reveal is confined by the SESSION's cwd, which only the supervisor knows (ADR-0014)", async () => {
   /*
    * `os-actions.test.ts` proves the action reuses `resolveWithin`. What it cannot prove is that the ROOT
    * handed to that resolver is the session's own `cwd` — a reveal wired to `process.cwd()` would pass every
@@ -178,7 +178,7 @@ test("the reveal is confined by the SESSION's cwd, which only the supervisor kno
     writeFileSync(join(work, "here.txt"), "in the session cwd\n");
     writeFileSync(join(root, "outside.txt"), "not in the session cwd\n");
 
-    const { supervisor, sessionId } = supervisorWith(work, root);
+    const { supervisor, sessionId } = await supervisorWith(work, root);
 
     // Inside the tree: reaches the platform check, which is the last thing before the spawn.
     const inside = supervisor.reveal(sessionId, "here.txt", { platform: "linux" });
@@ -196,7 +196,7 @@ test("the reveal is confined by the SESSION's cwd, which only the supervisor kno
   }
 });
 
-test("an unknown session is refused by `reveal`, never resolved against another root", () => {
+test("an unknown session is refused by `reveal`, never resolved against another root", async () => {
   // The same rule `readFile` follows: falling back to any root would let a stale id act on a directory
   // that had nothing to do with it — and for an OS action the consequence is a Finder window over someone
   // else's files rather than a wrong listing.
@@ -205,7 +205,7 @@ test("an unknown session is refused by `reveal`, never resolved against another 
     const work = join(root, "work");
     mkdirSync(work);
     writeFileSync(join(work, "here.txt"), "x\n");
-    const { supervisor, sessionId } = supervisorWith(work, root);
+    const { supervisor, sessionId } = await supervisorWith(work, root);
     supervisor.stop(sessionId);
 
     const unknown = supervisor.reveal("no-such-session", "here.txt", { platform: "darwin" });

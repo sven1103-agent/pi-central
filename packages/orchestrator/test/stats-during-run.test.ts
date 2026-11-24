@@ -191,7 +191,7 @@ test("a turn reports context usage and cost, so a long task is not unmeasured un
   const seen: LiveSession[] = [];
   supervisor.on("update", (session: LiveSession) => seen.push({ ...session }));
 
-  const started = supervisor.resume(
+  const started = await supervisor.resume(
     {
       path: sessionFile,
       id: "uuid-1",

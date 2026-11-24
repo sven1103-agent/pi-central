@@ -112,19 +112,19 @@ function config(over: Record<string, unknown> = {}) {
   };
 }
 
-test("no configured port means no --mcp-config on the session argv", () => {
+test("no configured port means no --mcp-config on the session argv", async () => {
   // The pure half of the decision, and the one that must never regress: most machines never set this.
-  assert.deepEqual(mcpConfigArgs(undefined), []);
+  assert.deepEqual(await mcpConfigArgs(undefined), []);
 });
 
-test("a session with a port is launched with --mcp-config, and one without gets none", () => {
+test("a session with a port is launched with --mcp-config, and one without gets none", async () => {
   if (skip) return console.log(skip);
   // Both sessions are spawned for real; the stub binaries exit immediately, so what is inspected is the
   // argv the supervisor COMPOSED rather than any process that survived.
   const supervisor = new Supervisor(config() as never, { rememberOpenSessions: false });
   supervisor.on("error", () => {});
 
-  const withoutPort = supervisor.start({ cwd: root as string, mode: "sandboxed" });
+  const withoutPort = await supervisor.start({ cwd: root as string, mode: "sandboxed" });
   assert.equal(withoutPort.ok, true);
   if (withoutPort.ok) {
     assert.ok(
@@ -138,7 +138,7 @@ test("a session with a port is launched with --mcp-config, and one without gets 
   // The spawn is expected to be attempted and may legitimately fail (no browser, no stub safehouse): a sidecar
   // is a capability, not a precondition, so the session starts regardless. What is under test is the argv.
   withPort.on("log", () => {});
-  const started = withPort.start({ cwd: root as string, mode: "sandboxed" });
+  const started = await withPort.start({ cwd: root as string, mode: "sandboxed" });
   assert.equal(started.ok, true);
   if (started.ok) {
     const configFile = join(root as string, "state", "sidecars", started.session.id, "mcp.json");
@@ -154,7 +154,7 @@ test("a session with a port is launched with --mcp-config, and one without gets 
   return Promise.all([supervisor.stopAll(), withPort.stopAll()]).then(() => undefined);
 });
 
-test("a sidecar is not spawned for a direct (unsandboxed) session", () => {
+test("a sidecar is not spawned for a direct (unsandboxed) session", async () => {
   if (skip) return console.log(skip);
   // Direct mode applies no policy at all, so a sidecar beside it would be confined by nothing -- the one
   // arrangement worse than no browser.
@@ -168,7 +168,7 @@ test("a sidecar is not spawned for a direct (unsandboxed) session", () => {
     rememberOpenSessions: false,
   });
   supervisor.on("error", () => {});
-  const started = supervisor.start({ cwd: root as string, mode: "direct" });
+  const started = await supervisor.start({ cwd: root as string, mode: "direct" });
   assert.equal(started.ok, true);
   if (started.ok) {
     assert.ok(
@@ -179,7 +179,7 @@ test("a sidecar is not spawned for a direct (unsandboxed) session", () => {
   return supervisor.stopAll().then(() => undefined);
 });
 
-test("the sidecar port resolves per session: override, opt-out, or default", () => {
+test("the sidecar port resolves per session: override, opt-out, or default", async () => {
   // Three cases that must not collapse, because each is a different intention:
   //   a number -> THIS session gets a sidecar on that port
   //   null     -> this session opts OUT even though the app configures a default
@@ -190,7 +190,7 @@ test("the sidecar port resolves per session: override, opt-out, or default", () 
   });
   app.on("error", () => {});
 
-  const optedOut = app.start({ cwd: root as string, mode: "sandboxed", sidecarPort: null });
+  const optedOut = await app.start({ cwd: root as string, mode: "sandboxed", sidecarPort: null });
   assert.equal(optedOut.ok, true);
   if (optedOut.ok) {
     assert.ok(
@@ -199,7 +199,7 @@ test("the sidecar port resolves per session: override, opt-out, or default", () 
     );
   }
 
-  const overridden = app.start({ cwd: root as string, mode: "sandboxed", sidecarPort: 5173 });
+  const overridden = await app.start({ cwd: root as string, mode: "sandboxed", sidecarPort: 5173 });
   assert.equal(overridden.ok, true);
   if (overridden.ok) {
     const configFile = join(root as string, "resolve", "sidecars", overridden.session.id, "mcp.json");
@@ -237,21 +237,34 @@ test("the instruction names the port itself and forbids falling back to another"
   assert.deepEqual(sidecarPromptArgs(undefined), [], "a session with no sidecar must be told nothing about one");
 });
 
-test("with sidecars on, a session is assigned a dev port, pinned in its policy and told in its prompt", () => {
+test("with sidecars on, a session is assigned a dev port, pinned in its policy and told in its prompt", async () => {
   if (skip) return console.log(skip);
   const state = join(root as string, "assigned");
   const app = new Supervisor(config({ sidecar: true, stateRoot: state }) as never, { rememberOpenSessions: false });
   app.on("error", () => {});
   app.on("log", () => {});
-  const first = app.start({ cwd: root as string, mode: "sandboxed" });
-  const second = app.start({ cwd: root as string, mode: "sandboxed" });
-  assert.ok(first.ok && second.ok);
-  if (!first.ok || !second.ok) return;
+  /*
+   * The fragment is read BETWEEN the two starts, not after both.
+   *
+   * `pi` is a stub that does not exist in this fixture, so each session dies immediately and `#stopSidecar` removes
+   * its whole directory — fragment included. That was always true; it became visible when `start` grew an await for
+   * the sidecar bind, which is enough of a tick for the first session's teardown to land before the second start
+   * returns. The property under test is what the fragment SAID when the session launched, so it is captured then.
+   */
+  const first = await app.start({ cwd: root as string, mode: "sandboxed" });
+  assert.ok(first.ok);
+  if (!first.ok) return;
+  const firstFragment = readFileSync(join(state, "sidecars", first.session.id, "policy", first.session.id + ".sb"), "utf8");
 
-  const portOf = (id: string): number =>
-    Number(/localhost:(\d+)/.exec(readFileSync(join(state, "sidecars", id, "policy", id + ".sb"), "utf8"))?.[1]);
-  assert.equal(portOf(first.session.id), devPortFor(first.session.id), "the policy must pin the ASSIGNED port");
-  assert.notEqual(portOf(first.session.id), portOf(second.session.id), "two sessions must not share a port");
+  const second = await app.start({ cwd: root as string, mode: "sandboxed" });
+  assert.ok(second.ok);
+  if (!second.ok) return;
+  const secondId = second.session.id;
+  const secondFragment = readFileSync(join(state, "sidecars", secondId, "policy", secondId + ".sb"), "utf8");
+
+  const portOf = (fragment: string): number => Number(/localhost:(\d+)/.exec(fragment)?.[1]);
+  assert.equal(portOf(firstFragment), devPortFor(first.session.id), "the policy must pin the ASSIGNED port");
+  assert.notEqual(portOf(firstFragment), portOf(secondFragment), "two sessions must not share a port");
 
   const argv = ([] as string[]).concat(first.session.command as never).join(" ");
   assert.ok(argv.includes("--append-system-prompt"), "the session must be told about its browser");
@@ -262,14 +275,14 @@ test("with sidecars on, a session is assigned a dev port, pinned in its policy a
   return app.stopAll().then(() => undefined);
 });
 
-test("an explicit port still wins over the assigned one, and null still opts out", () => {
+test("an explicit port still wins over the assigned one, and null still opts out", async () => {
   if (skip) return console.log(skip);
   const state = join(root as string, "precedence");
   const app = new Supervisor(config({ sidecar: true, stateRoot: state }) as never, { rememberOpenSessions: false });
   app.on("error", () => {});
   app.on("log", () => {});
-  const pinned = app.start({ cwd: root as string, mode: "sandboxed", sidecarPort: 5173 });
-  const optedOut = app.start({ cwd: root as string, mode: "sandboxed", sidecarPort: null });
+  const pinned = await app.start({ cwd: root as string, mode: "sandboxed", sidecarPort: 5173 });
+  const optedOut = await app.start({ cwd: root as string, mode: "sandboxed", sidecarPort: null });
   assert.ok(pinned.ok && optedOut.ok);
   if (!pinned.ok || !optedOut.ok) return;
   assert.match(readFileSync(join(state, "sidecars", pinned.session.id, "policy", pinned.session.id + ".sb"), "utf8"), /localhost:5173/);
@@ -277,7 +290,7 @@ test("an explicit port still wins over the assigned one, and null still opts out
   return app.stopAll().then(() => undefined);
 });
 
-test("on a machine with no browser, a session gets no sidecar and no instruction", () => {
+test("on a machine with no browser, a session gets no sidecar and no instruction", async () => {
   if (skip) return console.log(skip);
   // `sidecarOffered: false` is the config of a machine where no Chromium was found: the capability is absent, so the
   // instruction would be a paragraph about a feature this installation cannot offer. The other half -- offered but not
@@ -286,7 +299,7 @@ test("on a machine with no browser, a session gets no sidecar and no instruction
     rememberOpenSessions: false,
   });
   app.on("error", () => {});
-  const started = app.start({ cwd: root as string, mode: "sandboxed" });
+  const started = await app.start({ cwd: root as string, mode: "sandboxed" });
   assert.ok(started.ok);
   if (!started.ok) return;
   const argv = ([] as string[]).concat(started.session.command as never).join(" ");
@@ -344,7 +357,7 @@ test("a session started while its own dev port is occupied is given a different 
     const app = new Supervisor(config({ sidecar: true, stateRoot: state }) as never, { rememberOpenSessions: false });
     app.on("error", () => {});
     app.on("log", () => {});
-    const started = app.start({ cwd: root as string, mode: "sandboxed" });
+    const started = await app.start({ cwd: root as string, mode: "sandboxed" });
     assert.ok(started.ok);
     if (!started.ok) return;
     const fragment = readFileSync(join(state, "sidecars", started.session.id, "policy", started.session.id + ".sb"), "utf8");
@@ -379,7 +392,7 @@ test("a stray dev server on an assigned port is stopped when its session stops",
   const app = new Supervisor(config({ sidecar: true, stateRoot: state }) as never, { rememberOpenSessions: false });
   app.on("error", () => {});
   app.on("log", () => {});
-  const started = app.start({ cwd: root as string, mode: "sandboxed" });
+  const started = await app.start({ cwd: root as string, mode: "sandboxed" });
   assert.ok(started.ok);
   if (!started.ok) return;
   const fragment = readFileSync(join(state, "sidecars", started.session.id, "policy", started.session.id + ".sb"), "utf8");
@@ -407,7 +420,7 @@ test("a server on an EXPLICIT port is never stopped, because it is somebody's ow
   assert.ok(stray, "the stand-in dev server must start");
   if (!stray) return;
   try {
-    const started = app.start({ cwd: root as string, mode: "sandboxed", sidecarPort: explicit });
+    const started = await app.start({ cwd: root as string, mode: "sandboxed", sidecarPort: explicit });
     assert.ok(started.ok);
     await app.stopAll();
     await new Promise((done) => setTimeout(done, 500));
@@ -451,8 +464,8 @@ test("a session can opt IN per session, without the app default being on", async
   const app = new Supervisor(config({ stateRoot: state }) as never, { rememberOpenSessions: false });
   app.on("error", () => {});
   app.on("log", () => {});
-  const asked = app.start({ cwd: root as string, mode: "sandboxed", sidecar: true });
-  const plain = app.start({ cwd: root as string, mode: "sandboxed" });
+  const asked = await app.start({ cwd: root as string, mode: "sandboxed", sidecar: true });
+  const plain = await app.start({ cwd: root as string, mode: "sandboxed" });
   assert.ok(asked.ok && plain.ok);
   if (!asked.ok || !plain.ok) return;
   assert.ok(
@@ -471,7 +484,7 @@ test("a session can opt IN per session, without the app default being on", async
   return app.stopAll().then(() => undefined);
 });
 
-test("a per-session opt-in cannot grant a browser that the installation does not offer", () => {
+test("a per-session opt-in cannot grant a browser that the installation does not offer", async () => {
   if (skip) return console.log(skip);
   // Both halves of the gate: the client may ask, and the orchestrator still decides. A machine with no browser
   // configured, or an app with the feature off, must not be turned on by a control message.
@@ -479,7 +492,7 @@ test("a per-session opt-in cannot grant a browser that the installation does not
     rememberOpenSessions: false,
   });
   app.on("error", () => {});
-  const started = app.start({ cwd: root as string, mode: "direct", sidecar: true });
+  const started = await app.start({ cwd: root as string, mode: "direct", sidecar: true });
   assert.ok(started.ok);
   if (!started.ok) return;
   // A DIRECT session applies no policy at all, so a sidecar beside it would be confined by nothing: that refusal is
@@ -578,8 +591,8 @@ test("an explicit FALSE opts out, even when the installation gives browsers by d
   const app = new Supervisor(config({ sidecar: true, stateRoot: state }) as never, { rememberOpenSessions: false });
   app.on("error", () => {});
   app.on("log", () => {});
-  const refused = app.start({ cwd: root as string, mode: "sandboxed", sidecar: false });
-  const byDefault = app.start({ cwd: root as string, mode: "sandboxed" });
+  const refused = await app.start({ cwd: root as string, mode: "sandboxed", sidecar: false });
+  const byDefault = await app.start({ cwd: root as string, mode: "sandboxed" });
   assert.ok(refused.ok && byDefault.ok);
   if (!refused.ok || !byDefault.ok) return;
   assert.equal(refused.session.sidecarOrigin, undefined, "an explicit false must win over the default");
@@ -595,7 +608,7 @@ test("an explicit FALSE opts out, even when the installation gives browsers by d
   return app.stopAll().then(() => undefined);
 });
 
-test("stopping a session removes its sidecar's state, not only its process", () => {
+test("stopping a session removes its sidecar's state, not only its process", async () => {
   if (skip) return console.log(skip);
   // The PROCESS was already stopped on every path that ends a session. The DIRECTORY was not, and it holds a rendered
   // fragment pinning a port plus an mcp.json naming a token from that launch. Measured on a dev install: five of them,
@@ -604,7 +617,7 @@ test("stopping a session removes its sidecar's state, not only its process", () 
   const app = new Supervisor(config({ sidecar: true, stateRoot: state }) as never, { rememberOpenSessions: false });
   app.on("error", () => {});
   app.on("log", () => {});
-  const started = app.start({ cwd: root as string, mode: "sandboxed" });
+  const started = await app.start({ cwd: root as string, mode: "sandboxed" });
   assert.ok(started.ok);
   if (!started.ok) return;
   const dir = join(state, "sidecars", started.session.id);
@@ -646,7 +659,7 @@ test("a SCRATCH session is sandboxed, so the mode gate does not exclude it", asy
   });
   app.on("error", () => {});
   app.on("log", () => {});
-  const scratch = app.start({ cwd: join(workspaceRoot, "s1"), mode: "sandboxed" });
+  const scratch = await app.start({ cwd: join(workspaceRoot, "s1"), mode: "sandboxed" });
   assert.ok(scratch.ok);
   if (!scratch.ok) return;
   assert.match(
@@ -703,7 +716,7 @@ test("a session with no browser is told so, instead of being left to investigate
   assert.match(text, /Do NOT investigate/, "the instruction is to stop, not to diagnose");
   assert.match(text, /starts a NEW session/, "with the one action that changes it");
 });
-test("a sidecar that dies before it listens is not reported as healthy", () => {
+test("a sidecar that dies before it listens is not reported as healthy", async () => {
   if (skip) return console.log(skip);
   /*
    * THE false positive this file existed to hide, found while investigating a real report.
@@ -722,7 +735,7 @@ test("a sidecar that dies before it listens is not reported as healthy", () => {
   );
   app.on("error", () => {});
   app.on("log", () => {});
-  const started = app.start({ cwd: root as string, mode: "sandboxed", sidecar: true });
+  const started = await app.start({ cwd: root as string, mode: "sandboxed", sidecar: true });
   assert.ok(started.ok, "the session still starts: a missing browser is not fatal");
   if (!started.ok) return;
   return new Promise<void>((done) => {
@@ -745,7 +758,7 @@ test("a sidecar that dies before it listens is not reported as healthy", () => {
   }).then(() => app.stopAll().then(() => undefined));
 });
 
-test("resuming a session honours the browser answer, like starting one", () => {
+test("resuming a session honours the browser answer, like starting one", async () => {
   if (skip) return console.log(skip);
   /*
    * Measured gap: four call sites resume a session and none passed a sidecar, so a reopened session had no browser however
@@ -770,7 +783,7 @@ test("resuming a session honours the browser answer, like starting one", () => {
   const transcript = join(dir, "session.jsonl");
   writeFileSync(transcript, "");
   const historical = { path: transcript, cwd: dir, name: "resumed", updatedAt: Date.now(), bytes: 0, messageCount: 0, firstMessage: "" };
-  const resumed = app.resume(historical as never, { mode: "sandboxed", sidecar: true });
+  const resumed = await app.resume(historical as never, { mode: "sandboxed", sidecar: true });
   assert.ok(resumed.ok);
   if (!resumed.ok) return;
   assert.ok(

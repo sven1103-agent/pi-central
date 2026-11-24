@@ -399,7 +399,23 @@ export async function serve(config: SidecarConfig): Promise<void> {
   };
 
   await new Promise<void>((done, fail) => {
-    server.once("error", fail);
+    server.once("error", (error: NodeJS.ErrnoException) => {
+      /*
+       * A bind failure said in one line, and then exit — rather than the uncaught rejection it used to be.
+       *
+       * Measured: with the port already held, this process printed an `UVExceptionWithHostPort` and a twenty-line
+       * stack that never contained the words "port" and "in use" in a sentence a reader could act on, then exited 1.
+       * The orchestrator's failure message is built from the FIRST line of stderr plus its last twelve, so a stack
+       * like that told it nothing — which is how "the sidecar exited before it could listen" became the whole
+       * story. One stated line makes the cause survive the trip.
+       *
+       * Exit 2 rather than 1 so the caller can tell a refused bind from a crash in its own code.
+       */
+      process.stderr.write(
+        `sidecar cannot listen on 127.0.0.1:${config.port}: ${error.code ?? error.message}\n`,
+      );
+      process.exit(2);
+    });
     server.listen(config.port, "127.0.0.1", () => done());
   });
   const address = server.address();

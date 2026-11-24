@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createServer } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
@@ -126,6 +127,51 @@ test("the endpoint accepts only /mcp, and only POST", async () => {
     assert.equal(get.status, 405, "a GET must be refused rather than answered");
   } finally {
     await a.stop();
+  }
+});
+
+test("a port already in use is one stated line, not a stack trace", async () => {
+  if (skip) return console.log(skip);
+  /*
+   * Falsification: revert the `server.once("error")` handler in `serve()` to `(error) => fail(error)` and this
+   * test fails — the process prints an `UVExceptionWithHostPort`, a twenty-line stack, and exits 1, so the first
+   * line is `node:net:2390` and the words a reader needs are nowhere.
+   *
+   * Why it matters beyond tidiness: the orchestrator builds the reader-facing message from the FIRST stderr line
+   * plus the last twelve. Measured against the stack form, that message carried no mention of a port at all, which
+   * is exactly how "the sidecar exited before it could listen" became the whole story.
+   */
+  const dir = mkdtempSync(join(ROOT as string, "sidecar-bind-"));
+  // Hold a port first, so the sidecar has somewhere to collide.
+  const holder = createServer();
+  await new Promise<void>((done) => holder.listen(0, "127.0.0.1", () => done()));
+  const address = holder.address();
+  const taken = typeof address === "object" && address !== null ? address.port : 0;
+  try {
+    const child = spawn(
+      process.execPath,
+      [
+        ENTRY,
+        "--executable", join(dir, "no-such-chrome"),
+        "--profile", dir,
+        "--origin", "http://localhost:49100",
+        "--token", "t",
+        "--port", String(taken),
+      ],
+      { stdio: ["pipe", "ignore", "pipe"], env: { PATH: "/usr/bin:/bin", HOME: dir } },
+    );
+    let stderr = "";
+    child.stderr.on("data", (chunk) => (stderr += String(chunk)));
+    const code = await new Promise<number | null>((done) => child.once("close", (c) => done(c)));
+
+    const first = stderr.split("\n").find((line) => line.trim() !== "") ?? "";
+    assert.match(first, /cannot listen/, "the first line must state the bind, because that is the line that survives");
+    assert.match(first, new RegExp(String(taken)), "and it names the port, which is the only actionable part");
+    assert.match(first, /EADDRINUSE/, "and the code, so the cause is greppable");
+    assert.ok(!/^node:net:/.test(first), "not a stack frame");
+    assert.equal(code, 2, "a refused bind is its own status, not the generic failure 1");
+  } finally {
+    await new Promise<void>((done) => holder.close(() => done()));
   }
 });
 

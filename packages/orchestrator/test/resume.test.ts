@@ -128,7 +128,7 @@ test("resuming an entry whose transcript was never written starts fresh instead 
     });
     supervisor.on("error", () => {});
 
-    const result = supervisor.resume(
+    const result = await supervisor.resume(
       { path: missing, cwd, id: "abc", created: "", modifiedMs: 0, bytes: 0, messageCount: 0, firstMessage: "", cwdExists: true, scratch: false },
       {},
     );
@@ -185,7 +185,7 @@ test("a STOPPED session is found by file, so resuming it is not refused as unkno
     });
     supervisor.on("error", () => {});
 
-    const started = supervisor.start({ cwd });
+    const started = await supervisor.start({ cwd });
     assert.equal(started.ok, true);
     if (!started.ok) return;
     const file = join(root, "sessions", "--work--", "x.jsonl");

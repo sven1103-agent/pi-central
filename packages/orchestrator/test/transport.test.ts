@@ -1269,7 +1269,7 @@ test("retry reaches the supervisor instead of being rejected as an unknown kind"
     await client.next("snapshot");
 
     // A live session to retry, so the transport has something to forward.
-    const created = supervisor.start({ cwd: "/tmp/retry-test" });
+    const created = await supervisor.start({ cwd: "/tmp/retry-test" });
     assert.ok(created.ok);
 
     client.send({ kind: "retry", sessionId: created.session.id });

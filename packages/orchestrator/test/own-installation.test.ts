@@ -176,7 +176,7 @@ test("a session started in the installation's own tree carries the warning", asy
     // and a missing one is refused (D-4). Building the shape matters — an empty temp root would have
     // failed for a reason unrelated to what is under test.
     mkdirSync(join(root, "packages", "ui"), { recursive: true });
-    const dangerous = supervisor.start({ cwd: join(root, "packages", "ui") });
+    const dangerous = await supervisor.start({ cwd: join(root, "packages", "ui") });
     if (!dangerous.ok) throw new Error(`start refused: ${dangerous.message}`);
     assert.ok(
       dangerous.session.warnings.includes(OWN_INSTALLATION_WARNING),
@@ -187,7 +187,7 @@ test("a session started in the installation's own tree carries the warning", asy
     supervisor.on("error", () => {});
     supervisor.stop(dangerous.session.id);
 
-    const safe = supervisor.start({ cwd: safeRoot });
+    const safe = await supervisor.start({ cwd: safeRoot });
     if (!safe.ok) throw new Error(`start refused: ${safe.message}`);
     assert.ok(
       !safe.session.warnings.includes(OWN_INSTALLATION_WARNING),

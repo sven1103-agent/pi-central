@@ -50,14 +50,14 @@ function supervisorFor(root: string) {
   return supervisor;
 }
 
-test("an unnamed session is named by its handle, never by its directory", () => {
+test("an unnamed session is named by its handle, never by its directory", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-central-naming-"));
   try {
     const supervisor = supervisorFor(root);
     // The same directory twice, which is the case #149 makes easy and the case a directory name breaks: two rows,
     // one label.
-    const first = supervisor.start({ cwd: root });
-    const second = supervisor.start({ cwd: root });
+    const first = await supervisor.start({ cwd: root });
+    const second = await supervisor.start({ cwd: root });
     assert.equal(first.ok, true);
     assert.equal(second.ok, true);
     if (!first.ok || !second.ok) return;
@@ -75,11 +75,11 @@ test("an unnamed session is named by its handle, never by its directory", () => 
   }
 });
 
-test("a name the caller supplies is kept — this is about the DEFAULT only", () => {
+test("a name the caller supplies is kept — this is about the DEFAULT only", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-central-naming-"));
   try {
     const supervisor = supervisorFor(root);
-    const started = supervisor.start({ cwd: root, name: "  my task  " });
+    const started = await supervisor.start({ cwd: root, name: "  my task  " });
     assert.equal(started.ok, true);
     if (!started.ok) return;
     assert.equal(started.session.name, "my task", "trimmed, and not replaced by the handle");

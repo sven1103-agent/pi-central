@@ -213,7 +213,7 @@ async function harness(mode: "ok" | "slow" | "refuse"): Promise<Harness> {
   });
   supervisor.on("error", () => {});
 
-  const started = supervisor.resume(
+  const started = await supervisor.resume(
     {
       path: sessionFile,
       id: "uuid-1",

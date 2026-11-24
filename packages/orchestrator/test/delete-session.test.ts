@@ -247,7 +247,7 @@ test("forgetFile drops a stopped entry, so a snapshot cannot restore it", async 
     });
     supervisor.on("error", () => {});
 
-    const started = supervisor.start({ cwd });
+    const started = await supervisor.start({ cwd });
     assert.equal(started.ok, true);
     if (!started.ok) return;
     const file = join(root, "sessions", "--work--", "x.jsonl");
@@ -288,7 +288,7 @@ test("forgetFile refuses a RUNNING session, so a live process is never orphaned"
       browser: "/nonexistent/chrome",
     });
     supervisor.on("error", () => {});
-    const started = supervisor.start({ cwd });
+    const started = await supervisor.start({ cwd });
     assert.equal(started.ok, true);
     if (!started.ok) return;
     const file = join(root, "sessions", "--work--", "x.jsonl");
