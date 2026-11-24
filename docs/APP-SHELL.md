@@ -126,6 +126,12 @@ What is deliberately *shared* is your Pi installation (`~/.pi`) and your agent r
 the real thing, and `resolveAgentRoot` treats `~/.agent` as external and read-only, so redirecting the state root does
 not create a second credential store.
 
+The state root is also where your **preferences** live (`preferences.json`), which is why the split above matters more
+than it looks: the shell launches the orchestrator with `--port 0` and never picks a port (ADR-0013 §4), so the window
+gets a different ORIGIN on every launch — and a browser's `localStorage` is partitioned by origin. Anything stored there
+is lost on the next launch, which is exactly what happened to every preference before ADR-0019. A dev run therefore has
+its own preference set, beside the rest of its own state, and the installed app's is untouched.
+
 **The dev window says so**: its title is `Pi Central (dev)`, and the terminal prints which state directory it is using.
 
 ## Keeping your privacy grants across rebuilds

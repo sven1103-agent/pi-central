@@ -57,3 +57,48 @@ test("the complaint names the VERSION, never a symptom like an unknown kind", ()
   assert.ok(!/bad control/i.test(message), `must not report a symptom, got: ${message}`);
   assert.match(message, /protocol mismatch/i);
 });
+
+// --- The handshake is readable before the first render (issue #285) -----------------------------
+
+test("the peer's version is readable from the handshake, and is a BOUNDED wait", async () => {
+  /*
+   * Why `Connection` grew this (issue #285).
+   *
+   * The page asks the orchestrator for the reader's preferences before it paints, and it must ask an older peer
+   * NOTHING — a v12 orchestrator answers `bad control: unknown kind 'getPrefs'`, which reads as a broken feature
+   * rather than as a version skew. The version arrives in `hello`, so it has to be readable from the connection
+   * object itself rather than only off `InstallFacts`, which is a fact about a snapshot that arrives later.
+   *
+   * The bound is asserted separately, because a wait with no timeout would leave the window blank forever when the
+   * orchestrator is down — the one outcome a browser UI must never produce.
+   */
+  const { Connection } = await import("../src/connection.ts");
+  const events: string[] = [];
+  const connection = new Connection("ws://127.0.0.1:1/ws", {
+    onEvent: () => void events.push("event"),
+    onStatus: () => undefined,
+  });
+  assert.equal(connection.protocol, undefined, "nothing announced is not a version");
+
+  // A listen that never opens: the promise must still settle, and with `undefined` — an ANSWER, not a rejection,
+  // because the caller has to proceed either way.
+  const started = Date.now();
+  const protocol = await connection.handshake(30);
+  connection.disconnect();
+  assert.equal(protocol, undefined);
+  assert.ok(Date.now() - started >= 25, "it waited for the bound rather than returning immediately");
+});
+
+test("a preference answer is given to the store and never dispatched as an event", async () => {
+  /*
+   * The routing decision, asserted where it is made. `main.tsx` is the socket's only handler before `App` exists, and
+   * the `return` after `prefs.accept` is what keeps a preference out of the reducer — the failure it prevents is
+   * silent, because `store.ts` has an explicit no-op arm for these kinds precisely so a stray one cannot become a fact
+   * about a conversation.
+   */
+  const { readFileSync } = await import("node:fs");
+  const page = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  assert.match(page, /event\.kind === "prefs" \|\| event\.kind === "prefsError"/);
+  assert.match(page, /prefs\.accept\(event\);\s*\n\s*return;/);
+});
+

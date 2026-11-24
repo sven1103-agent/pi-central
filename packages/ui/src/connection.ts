@@ -59,6 +59,8 @@ export class Connection {
   #closedByUs = false;
   #status: ConnectionStatus = "connecting";
   #timer: ReturnType<typeof setTimeout> | undefined;
+  #protocol: number | undefined;
+  #opened: ((protocol: number | undefined) => void) | undefined;
 
   constructor(url: string, handlers: ConnectionHandlers) {
     this.#url = url;
@@ -67,6 +69,40 @@ export class Connection {
 
   get status(): ConnectionStatus {
     return this.#status;
+  }
+
+  /**
+   * The protocol version the peer announced in `hello`, or `undefined` before it has.
+   *
+   * Kept here rather than read off `InstallFacts` — where the same number also arrives — because this is the fact
+   * the HANDSHAKE establishes, and one of its uses (issue #285) has to be decided BEFORE the first render, when no
+   * snapshot has been seen. A page that asked for preferences on an older peer would get
+   * `bad control: unknown kind 'getPrefs'`, which reads as a broken feature rather than as a version skew.
+   */
+  get protocol(): number | undefined {
+    return this.#protocol;
+  }
+
+  /**
+   * Resolve once the peer has announced its protocol version, or with `undefined` after `timeoutMs`.
+   *
+   * `undefined` is an ANSWER here, not a failure: the page's bootstrap has to proceed either way, and a socket that
+   * never opened must not leave the window blank. The caller decides what an unknown version means — for preferences
+   * it means "ask anyway", because `supportsPrefs(undefined)` is true by the same convention `supportsRetry` uses.
+   */
+  handshake(timeoutMs: number): Promise<number | undefined> {
+    if (this.#protocol !== undefined) return Promise.resolve(this.#protocol);
+    return new Promise<number | undefined>((resolve) => {
+      const timer = setTimeout(() => {
+        this.#opened = undefined;
+        resolve(undefined);
+      }, timeoutMs);
+      this.#opened = (protocol) => {
+        clearTimeout(timer);
+        this.#opened = undefined;
+        resolve(protocol);
+      };
+    });
   }
 
   connect(): void {
@@ -89,6 +125,14 @@ export class Connection {
 
     socket.onopen = () => {
       this.#attempt = 0;
+      /*
+       * The version is cleared on every connection, not only on the first (issue #285).
+       *
+       * The orchestrator can be REPLACED under a page that stays open — that is the update case — and a stale
+       * version would then say the new peer cannot keep preferences when it can, or the reverse. `undefined` is
+       * "not reported yet", which every `supportsX` treats as unknown rather than as old.
+       */
+      this.#protocol = undefined;
       this.#setStatus("open");
     };
 
@@ -103,6 +147,8 @@ export class Connection {
         return;
       }
       if (payload.kind === "hello") {
+        this.#protocol = payload.protocol;
+        this.#opened?.(payload.protocol);
         const skew = versionSkew(payload.protocol);
         if (skew !== undefined) this.#handlers.onEvent({ kind: "error", message: skew });
         return;

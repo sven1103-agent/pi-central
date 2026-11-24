@@ -196,6 +196,28 @@ and **Settings → About** prints the same value for the tab you have open. If t
 tab is running a different build from the one on disk — which is exactly the situation above, stated
 before you go looking for it. Both come from issue #114.
 
+## Verifying that a preference survives a relaunch (issue #285)
+
+```bash
+npm run verify:prefs
+```
+
+Preferences used to live in `localStorage`, which a browser partitions per **origin** — and the shell starts the
+orchestrator with `--port 0` and never picks a port (ADR-0013 §4), so the window got a different origin on every
+launch and every preference was written to a bucket the next launch could not read. Nothing failed; every parser
+correctly fell back to its default.
+
+The script starts the orchestrator **twice**, on two ephemeral ports, and asserts the ports differ — the fact the
+whole defect rests on — then writes a model scope in the first launch and reads it in the second. It uses a
+temporary `PI_CENTRAL_STATE`, so your own preferences are untouched.
+
+Three checks, and the first is a guard rather than a claim: if the OS happened to hand out the same port twice, the
+run proves nothing and says so instead of passing on a coincidence.
+
+**What it cannot check.** It does not launch the desktop app, so the acceptance criterion that names quitting and
+relaunching through the shell is still yours: set three models in the app, `⌘Q`, reopen it, and confirm the list is
+intact. Then repeat after an update.
+
 ## Verifying what quitting means (issue #216)
 
 One command, from a **plain terminal** (not an agent's sandbox — Seatbelt does not nest, C1):

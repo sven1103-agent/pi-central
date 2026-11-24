@@ -195,10 +195,28 @@ function booleanRecord(value: unknown): Record<string, boolean> {
   return out;
 }
 
-/** Read the persisted trace preferences. Never throws; absent or corrupt means empty. */
-export function readTracePrefs(): { collapsed: Record<string, boolean>; markers: Record<string, boolean> } {
+/**
+ * The reader's preferences, as this module needs them (issue #285).
+ *
+ * Narrower than `PrefsStore` on purpose: a component and its test only need "read a string, write a string", and
+ * taking the store's whole class here would couple a drag's arithmetic to a store that can talk to a socket. The same
+ * shape `PrefsReader` in `chooser-prefs.ts` already uses, one operation wider.
+ */
+export interface PrefsAccess {
+  get: (key: string) => string | null;
+  set: (key: string, value: string) => void;
+}
+
+/**
+ * Read the persisted trace preferences. Never throws; absent or corrupt means empty.
+ *
+ * The `try` remains even though a store cannot throw (issue #285): this function is also reachable from a test that
+ * passes a plain object, and it was the `localStorage` READ that could throw before. Keeping the guard costs nothing
+ * and means the signature change did not quietly weaken the contract this file documents.
+ */
+export function readTracePrefs(prefs: PrefsAccess): { collapsed: Record<string, boolean>; markers: Record<string, boolean> } {
   try {
-    const raw = localStorage.getItem(TRACE_PREFS_KEY);
+    const raw = prefs.get(TRACE_PREFS_KEY);
     if (raw === null || raw === "") return { collapsed: {}, markers: {} };
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return { collapsed: {}, markers: {} };
@@ -210,17 +228,15 @@ export function readTracePrefs(): { collapsed: Record<string, boolean>; markers:
   }
 }
 
-/** Write the persisted trace preferences. Silent on failure, for the same reason as `readTracePrefs`. */
-export function writeTracePrefs(prefs: {
-  collapsed: Record<string, boolean>;
-  markers: Record<string, boolean>;
-}): void {
-  try {
-    localStorage.setItem(
-      TRACE_PREFS_KEY,
-      JSON.stringify({ collapsed: prefs.collapsed, markers: prefs.markers }),
-    );
-  } catch {
-    // Full or disabled. Losing a remembered toggle is not worth failing a render over.
-  }
+/**
+ * Write the persisted trace preferences. Silent on failure, for the same reason as `readTracePrefs`.
+ *
+ * Silent in the sense that matters here — a remembered toggle is not worth failing a render over — and no longer
+ * silent to the READER: a store that cannot persist says so once, for the whole page (issue #285).
+ */
+export function writeTracePrefs(
+  prefs: PrefsAccess,
+  value: { collapsed: Record<string, boolean>; markers: Record<string, boolean> },
+): void {
+  prefs.set(TRACE_PREFS_KEY, JSON.stringify({ collapsed: value.collapsed, markers: value.markers }));
 }

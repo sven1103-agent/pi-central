@@ -46,6 +46,7 @@ import { deleteSessionFile } from "./delete-session.ts";
 import type { Config } from "./config.ts";
 import type { KeychainCheck } from "./keychain.ts";
 import { createUiRequestHandler, resolveUiDistDir, servedUiIdentity } from "./static-ui.ts";
+import { acceptPrefs, readPrefs, writePrefs } from "./prefs-store.ts";
 
 export interface TransportOptions {
   host?: string;
@@ -108,6 +109,8 @@ export interface TransportAddress {
 const CONTROL_KINDS: Record<Control["kind"], true> = {
   list: true,
   install: true,
+  getPrefs: true,
+  setPrefs: true,
   start: true,
   prompt: true,
   clearQueue: true,
@@ -412,7 +415,7 @@ export class Transport {
     }
 
     try {
-      await this.#dispatch(control);
+      await this.#dispatch(socket, control);
     } catch (error) {
       this.#send(socket, { kind: "error", message: (error as Error).message });
     }
@@ -423,8 +426,13 @@ export class Transport {
    *
    * The switch is exhaustive over `Control`, so adding a command to the protocol without
    * handling it here is a compile error rather than a silent no-op.
+   *
+   * `socket` is the ASKER, and it is threaded through for the two controls whose answer is per client rather than
+   * per process (issue #285): a preference read or write must reply to the page that asked, because two surfaces can
+   * legitimately hold different preferences at the same moment. Every other kind reaches every client through
+   * `#broadcast`, which is the same shape the snapshot already had.
    */
-  async #dispatch(control: Control): Promise<void> {
+  async #dispatch(socket: WebSocket, control: Control): Promise<void> {
     switch (control.kind) {
       case "list": {
         const discovered = await this.#discover(this.#config);
@@ -458,6 +466,53 @@ export class Transport {
          * it is not.
          */
         this.#broadcast({ kind: "installFacts", install: this.#snapshotInstallFacts() });
+        return;
+      }
+      /*
+       * The reader's preferences (issue #285).
+       *
+       * ## Why they are here rather than in the page
+       *
+       * `localStorage` is partitioned per origin, and the shell launches this process with `--port 0`, so the origin
+       * changes on every launch and every preference was written to a bucket the next launch never read. This process
+       * is the one thing whose identity does not depend on the port.
+       *
+       * ## Why the answer is sent to the asker only
+       *
+       * The state is per reader, unlike `installFacts` — two surfaces can legitimately hold different preferences
+       * (a page that has not written yet, a second window mid-drag), and broadcasting one client's map to another
+       * would overwrite a value the other had just changed. So this is a reply, not an announcement.
+       */
+      case "getPrefs": {
+        const stored = readPrefs(this.#config.stateRoot);
+        if (!stored.ok) {
+          this.#send(socket, { kind: "prefsError", reason: stored.reason, message: stored.message });
+          return;
+        }
+        this.#send(socket, { kind: "prefs", prefs: stored.prefs });
+        return;
+      }
+      case "setPrefs": {
+        /*
+         * Stored, then answered with what was actually kept.
+         *
+         * The reply carries the ACCEPTED map rather than an acknowledgement, because the two can differ: this store
+         * drops a key it will not keep, and a client that assumed its whole map was written would be wrong about
+         * what the next launch will show. Echoing the accepted set makes that difference visible in the protocol
+         * instead of leaving it to be discovered.
+         */
+        const { prefs, dropped } = acceptPrefs(control.prefs);
+        if (dropped.length > 0) {
+          console.error(`preferences: ${dropped.length} key(s) not stored: ${dropped.join(", ")}`);
+        }
+        const written = writePrefs(this.#config.stateRoot, prefs);
+        if (!written.ok) {
+          // Reported as a failure and NOT as an empty map: the reader's settings are still on this page, and saying
+          // "nothing is stored" would invite the next write to replace whatever is actually there.
+          this.#send(socket, { kind: "prefsError", reason: "unreadable", message: written.message });
+          return;
+        }
+        this.#send(socket, { kind: "prefs", prefs });
         return;
       }
       case "start": {
@@ -936,8 +991,14 @@ export class Transport {
     });
   }
 
-  /** Fan out to every client. One slow client must not stall the others. */
-  #broadcast(event: Event): void {
+  /**
+   * Fan out to every client. One slow client must not stall the others.
+   *
+   * Takes `ServerPayload` rather than `Event` since issue #285: `prefs` IS an `Event`, so nothing widened — but
+   * the signature now says what the function does (send whatever a client may receive), which is the distinction
+   * that keeps a per-client reply from being written as a broadcast by mistake.
+   */
+  #broadcast(event: ServerPayload): void {
     for (const socket of this.#clients) this.#send(socket, event);
   }
 
