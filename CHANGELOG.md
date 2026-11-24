@@ -10,6 +10,20 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+### Added
+
+- The reader's preferences are kept by the installation and read over the socket, so they survive a restart, an update and a change of port ([#285]).
+- ADR-0019 records the decision, and why a fixed port, a bounded retry list, a cross-origin copy and a custom protocol were all refused ([#285]).
+- Settings says where preferences are kept, and states when they cannot be ([#285]).
+
+### Fixed
+
+- The chosen set of models survives quitting and relaunching the desktop app, and an update ([#285]).
+- The roster, the rail, the panel, the transcript's measure, the trace and the chooser directory survive too ([#285]).
+- A value stored by the release before this one is carried into the installation instead of being lost on the first launch after the upgrade ([#285]).
+- A preference that cannot be saved is reported once, rather than silently dropped or reported once per key ([#285]).
+- A corrupt or unreadable preferences file is reported as a failure, so the reader is not shown defaults as though they had chosen them ([#285]).
+
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
 ## [0.16.1] — 2026-11-24
@@ -878,4 +892,5 @@ The spike that answered whether this was worth building.
 [#274]: https://github.com/sven1103-agent/pi-central/issues/274
 [#275]: https://github.com/sven1103-agent/pi-central/issues/275
 [#281]: https://github.com/sven1103-agent/pi-central/issues/281
+[#285]: https://github.com/sven1103-agent/pi-central/issues/285
 [#279]: https://github.com/sven1103-agent/pi-central/issues/279

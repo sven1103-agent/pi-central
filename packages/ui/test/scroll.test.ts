@@ -282,22 +282,20 @@ test("the toggle is a real control, and its label carries the state", () => {
 
 // --- The trace's view state is per session and survives a restart (issue #108) ---------------------
 
+/** A string store standing in for the shared preference store (issue #285). */
+function memoryPrefs(): { get: (key: string) => string | null; set: (key: string, value: string) => void; store: Map<string, string> } {
+  const store = new Map<string, string>();
+  return { store, get: (key) => store.get(key) ?? null, set: (key, value) => void store.set(key, value) };
+}
+
 test("trace preferences are keyed by session, so one session's toggle cannot move another's", () => {
   // The report: "when I have my tool window collapsed and I return to the session, the tool window
   // opens again". The cause was `useState` inside `SessionView`, which remounts on every switch because
   // it carries `key={focused?.id}` — so the state was destroyed and came back at its default.
-  const store = new Map<string, string>();
-  globalThis.localStorage = {
-    getItem: (key: string) => store.get(key) ?? null,
-    setItem: (key: string, value: string) => store.set(key, value),
-    removeItem: (key: string) => store.delete(key),
-    clear: () => store.clear(),
-    key: () => null,
-    length: 0,
-  } as unknown as Storage;
+  const prefs = memoryPrefs();
 
-  writeTracePrefs({ collapsed: { s1: true }, markers: { s1: false, s2: true } });
-  const read = readTracePrefs();
+  writeTracePrefs(prefs, { collapsed: { s1: true }, markers: { s1: false, s2: true } });
+  const read = readTracePrefs(prefs);
   assert.equal(read.collapsed["s1"], true, "s1's collapse is remembered");
   assert.equal(read.collapsed["s2"], undefined, "and s2 has no opinion of its own");
   assert.equal(read.markers["s1"], false);
@@ -305,8 +303,8 @@ test("trace preferences are keyed by session, so one session's toggle cannot mov
 });
 
 test("a corrupt or absent stored value degrades to nothing, and never throws", () => {
-  // `localStorage` outlives upgrades and is shared with whatever else runs on this origin, so each of
-  // these is reachable rather than hypothetical.
+  // The value outlives upgrades and is shared with whatever else can reach the store, so each of these is
+  // reachable rather than hypothetical.
   const cases: (string | null)[] = [
     null,
     "",
@@ -316,20 +314,12 @@ test("a corrupt or absent stored value degrades to nothing, and never throws", (
     '{"collapsed":"nope"}',
     '{"collapsed":{"s1":"yes"},"markers":{"s2":1}}',
   ];
-  const store = new Map<string, string>();
-  globalThis.localStorage = {
-    getItem: (key: string) => store.get(key) ?? null,
-    setItem: (key: string, value: string) => store.set(key, value),
-    removeItem: (key: string) => store.delete(key),
-    clear: () => store.clear(),
-    key: () => null,
-    length: 0,
-  } as unknown as Storage;
 
+  const prefs = memoryPrefs();
   for (const raw of cases) {
-    if (raw === null) store.delete(TRACE_PREFS_KEY);
-    else store.set(TRACE_PREFS_KEY, raw);
-    const read = readTracePrefs();
+    if (raw === null) prefs.store.delete(TRACE_PREFS_KEY);
+    else prefs.store.set(TRACE_PREFS_KEY, raw);
+    const read = readTracePrefs(prefs);
     assert.deepEqual(read.collapsed, {}, `collapsed for ${JSON.stringify(raw)}`);
     assert.deepEqual(read.markers, {}, `markers for ${JSON.stringify(raw)}`);
   }
@@ -346,8 +336,10 @@ test("the trace state lives in App, not in the pane that remounts", () => {
     "the per-session trace maps must not be inside SessionView: it remounts",
   );
   assert.match(app, /key=\{focused\?\.id\}/, "…and that key is why");
-  assert.match(app, /readTracePrefs\(\)/, "the state is restored on load");
-  assert.match(app, /writeTracePrefs\(/, "…and written back");
+  // The store is passed in since issue #285 — the value lives in the installation, not in `localStorage` — so the
+  // assertion is that App reads and writes THROUGH it rather than that it reaches for a global.
+  assert.match(app, /readTracePrefs\(prefs\)/, "the state is restored on load");
+  assert.match(app, /writeTracePrefs\(prefs,/, "…and written back");
 });
 
 // --- A position is only recorded when there is something to measure (issue #141 follow-up) --------

@@ -9,12 +9,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocket } from "ws";
-import { PROTOCOL_VERSION, type Event } from "@pi-central/protocol";
+import { PROTOCOL_VERSION, supportsPrefs, type Event } from "@pi-central/protocol";
 import { parseControl, Transport } from "../src/transport.ts";
+import { prefsPath, readPrefs } from "../src/prefs-store.ts";
 import type { Config } from "../src/config.ts";
 import type { LiveSession } from "@pi-central/protocol";
 
@@ -1651,3 +1652,131 @@ test("a launch that never asked reports NO keychain, rather than an unlocked one
     await transport.close();
   }
 });
+
+// --- The reader's preferences over the socket (issue #285) ------------------------------------
+
+/**
+ * A config whose STATE ROOT is a real temporary directory.
+ *
+ * Every other path here is `/nonexistent`, because a transport test must not depend on the machine it runs on. The
+ * state root is the exception, and deliberately: the preferences are a FILE, and the property under test is that the
+ * file survives a process — so the test needs somewhere real to put it, and cleans up after itself.
+ */
+function configIn(stateRoot: string): Config {
+  return { ...emptyConfig(), stateRoot };
+}
+
+test("a stored map comes back over the wire, and an empty store answers with an EMPTY map", async () => {
+  // The two outcomes a page has to tell apart: "nothing has been stored yet" is a real answer and the one a first run
+  // gets; a failure is reported as a `prefsError`. Rendering the failure as an empty map would invite the next write
+  // to replace whatever is actually in the file.
+  const stateRoot = mkdtempSync(join(tmpdir(), "pi-central-prefs-wire-"));
+  const transport = new Transport(new FakeSupervisor() as never, configIn(stateRoot), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+
+    client.send({ kind: "getPrefs" });
+    assert.deepEqual(await client.next("prefs"), { kind: "prefs", prefs: {} });
+
+    client.send({ kind: "setPrefs", prefs: { "pi-central.model-scope": '{"models":[]}' } });
+    assert.deepEqual(await client.next("prefs"), {
+      kind: "prefs",
+      prefs: { "pi-central.model-scope": '{"models":[]}' },
+    });
+
+    /*
+     * And it is ON DISK, which is the whole point: the next launch is a different process, on a different port, and
+     * it reads the value from here rather than from an origin that has never seen it.
+     */
+    assert.deepEqual(readPrefs(stateRoot), { ok: true, prefs: { "pi-central.model-scope": '{"models":[]}' } });
+    client.close();
+  } finally {
+    await transport.close();
+    rmSync(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("the reply is what was STORED, not the map that was sent", async () => {
+  // The store drops a key it will not keep, and a client that assumed its whole map was written would be wrong about
+  // what the next launch shows. Echoing the accepted set makes that difference visible in the protocol rather than
+  // leaving it to be discovered.
+  const stateRoot = mkdtempSync(join(tmpdir(), "pi-central-prefs-wire-"));
+  const transport = new Transport(new FakeSupervisor() as never, configIn(stateRoot), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "setPrefs", prefs: { "pi-central.rail": "kept", "../escaped": "dropped" } });
+    assert.deepEqual(await client.next("prefs"), { kind: "prefs", prefs: { "pi-central.rail": "kept" } });
+    client.close();
+  } finally {
+    await transport.close();
+    rmSync(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("the answer goes to the ASKER, not to everybody", async () => {
+  // Preferences are per reader. Two surfaces can legitimately hold different values at the same moment — a page that
+  // has not written yet, a second window mid-drag — so broadcasting one client's map would overwrite the other's.
+  const stateRoot = mkdtempSync(join(tmpdir(), "pi-central-prefs-wire-"));
+  const transport = new Transport(new FakeSupervisor() as never, configIn(stateRoot), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const asker = await TestClient.connect(address.url);
+    const bystander = await TestClient.connect(address.url);
+    await asker.next("snapshot");
+    await bystander.next("snapshot");
+
+    asker.send({ kind: "setPrefs", prefs: { "pi-central.rail": "askers" } });
+    await asker.next("prefs");
+
+    // A short settle, because the assertion is about something that must NOT arrive.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.deepEqual(
+      bystander.received.filter((event) => event.kind === "prefs"),
+      [],
+      "a second client must not receive the first client's preferences",
+    );
+    asker.close();
+    bystander.close();
+  } finally {
+    await transport.close();
+    rmSync(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("an unreadable store is a FAILURE, not an empty map", async () => {
+  // A directory where the file belongs is the cheapest way to produce a non-ENOENT read error in any environment.
+  // The distinction is the one C14 draws about a transcript: "you have none" and "I could not look" are opposite
+  // facts, and the second must not be rendered as the first.
+  const stateRoot = mkdtempSync(join(tmpdir(), "pi-central-prefs-wire-"));
+  mkdirSync(prefsPath(stateRoot), { recursive: true });
+  const transport = new Transport(new FakeSupervisor() as never, configIn(stateRoot), { uiDir: null });
+  const address = await transport.listen();
+  try {
+    const client = await TestClient.connect(address.url);
+    await client.next("snapshot");
+    client.send({ kind: "getPrefs" });
+    const answer = await client.next("prefsError");
+    if (answer.kind !== "prefsError") throw new Error(`expected prefsError, got ${answer.kind}`);
+    assert.equal(answer.reason, "unreadable");
+    assert.match(answer.message, /preferences\.json/);
+    client.close();
+  } finally {
+    await transport.close();
+    rmSync(stateRoot, { recursive: true, force: true });
+  }
+});
+
+test("the preferences pair is gated on the version that introduced it", () => {
+  // The consequence of getting this wrong is specific: a control that answers `bad control: unknown kind 'getPrefs'`
+  // — a symptom rather than a version skew — and values silently stored per origin again, which IS the defect.
+  assert.equal(supportsPrefs(12), false, "v12 has no preferences pair");
+  assert.equal(supportsPrefs(13), true, "v13 introduced it");
+  assert.equal(supportsPrefs(14), true, "a later version still has it");
+  // Unknown is "the handshake has not finished", not "old" — the convention `supportsRetry` documents.
+  assert.equal(supportsPrefs(undefined), true);
+});
+

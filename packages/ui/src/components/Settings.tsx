@@ -34,7 +34,7 @@
  *   2. **The reason is stated once, not six times.** Each row said "the orchestrator has not sent this
  *      yet", which is six repetitions of one fact and buries the actionable part.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PROTOCOL_VERSION, type AgentKeychainFacts, type InstallFacts } from "@pi-central/protocol";
 import { buildInfo, buildLabel } from "../build-info.ts";
 import {
@@ -56,7 +56,7 @@ import {
 } from "../reading.ts";
 import { READING_PREFS_KEY } from "../reading.ts";
 import { effectiveSidecar, type SidecarPref } from "../sidecar-prefs.ts";
-import {
+import type { PrefsPersistence } from "../prefs-store.ts";import {
   RAIL_DEFAULT_WIDTH,
   RAIL_MAX_WIDTH,
   RAIL_MIN_WIDTH,
@@ -64,6 +64,25 @@ import {
   type RailPrefs,
 } from "../rail-prefs.ts";
 import { CopyButton } from "./CopyButton.tsx";
+
+/**
+ * Where preferences are kept, in the reader's words (issue #285).
+ *
+ * `undefined` is "not reported", not a fourth state: a component test renders this dialog without a shell, and a
+ * fabricated "saved in the app" would be a claim nothing measured — the convention `Fact` already sets.
+ */
+function prefsPersistenceLabel(persistence: PrefsPersistence | undefined): string | undefined {
+  switch (persistence) {
+    case "installation":
+      return "in this installation, so they survive a restart and an update";
+    case "origin":
+      return "in this browser's storage for this address only, so a different port loses them";
+    case "memory":
+      return "nowhere durable — they are lost when this window closes";
+    default:
+      return undefined;
+  }
+}
 
 /**
  * A row of the `key: value` table.
@@ -242,7 +261,9 @@ export function Settings({
   onRailPrefs,
   railMaxWidth,
   sessionBrowser,
-  initialSection = "display",
+  prefsPersistence,
+  prefsProblem,
+  reading,  initialSection = "display",
 }: {
   install: InstallFacts | undefined;
   /**
@@ -280,6 +301,29 @@ export function Settings({
     installDefault: boolean;
     onChange: (next: SidecarPref) => void;
   } | undefined;
+  /**
+   * Where the reader's preferences are actually kept (issue #285).
+   *
+   * Absent in a component test that builds this dialog from installation facts alone, which is why the statement
+   * below is conditional rather than required: "render Settings" must not mean "build half a shell".
+   */
+  prefsPersistence?: PrefsPersistence | undefined;
+  /**
+   * The message about preferences that cannot be kept, when there is one.
+   *
+   * Received from the shell rather than measured here, because the measurement already happened: the store probes
+   * once at load, and a second probe in this dialog would be a second answer to a question already answered — the
+   * shape `railPrefs` exists to avoid.
+   */
+  prefsProblem?: string | undefined;
+  /**
+   * The reading preferences, from the shell's one store (issue #285).
+   *
+   * Absent together, and then the panel keeps a LOCAL copy as before. They are passed in the app because the shell's
+   * store is the only thing that can reach the installation: a `localStorage` read here would be the per-origin bug
+   * this change removes, hiding in the one dialog that edits the value.
+   */
+  reading?: { get: () => ReadingPrefs; set: (next: ReadingPrefs) => void } | undefined;
   /**
    * Whether a snapshot has arrived yet.
    *
@@ -402,7 +446,7 @@ export function Settings({
                     onChange={sessionBrowser.onChange}
                   />
                 )}
-                {railPrefs !== undefined && onRailPrefs !== undefined && (
+                <ReadingPanel {...(reading === undefined ? {} : { reading })} />                {railPrefs !== undefined && onRailPrefs !== undefined && (
                   <RailPanel prefs={railPrefs} onChange={onRailPrefs} maxWidth={railMaxWidth ?? RAIL_MAX_WIDTH} />
                 )}
               </>
@@ -461,6 +505,20 @@ export function Settings({
                 <section>
                   <h4>Where things live</h4>
                   <dl className="kv">
+                    {/*
+                      Where the reader's preferences are kept (issue #285).
+
+                      Not decoration: before this, they were in `localStorage`, which belongs to an ORIGIN — and the
+                      desktop shell loads the UI from a different port on every launch, so every preference was lost
+                      silently. A reader who has just had their model list survive a relaunch deserves to know why,
+                      and a reader whose peer is too old to keep them deserves to be told before they spend ten
+                      minutes arranging a list that will not come back.
+                    */}
+                    <Fact
+                      label="Preferences"
+                      value={prefsPersistenceLabel(prefsPersistence)}
+                      {...(prefsProblem === undefined ? {} : { note: prefsProblem })}
+                    />
                     <Fact label="Sessions" value={install?.sessionsRoot} copyable monospace />
                     <Fact label="Workspaces" value={install?.workspaceRoot} copyable monospace />
                     <Fact
@@ -552,15 +610,34 @@ export function Settings({
  * have to close Settings to see what they did. It also makes the `ch`/`px` interaction visible: raising the
  * size widens the measure too, because `1ch` is measured in the prose's own font.
  */
-function ReadingPanel() {
-  const [prefs, setPrefs] = useState<ReadingPrefs>(() => {
-    try {
-      return parseReadingPrefs(localStorage.getItem(READING_PREFS_KEY));
-    } catch {
-      // Storage disabled or an opaque origin: the defaults still apply, the panel just does not remember.
-      return defaultReadingPrefs();
-    }
-  });
+function ReadingPanel({ reading }: { reading?: { get: () => ReadingPrefs; set: (next: ReadingPrefs) => void } }) {
+  /*
+   * TWO modes, and the fallback is not dead code.
+   *
+   * In the app (`reading` supplied) the shell's store owns the value, so a panel-local copy would be a second answer
+   * that disagrees with the one applied before the first paint — the shape `railPrefs` documents. In a component
+   * test, which renders this dialog from installation facts alone, no store exists, so a local copy keeps the panel
+   * renderable. That was the point of the optionality.
+   */
+  const [local, setLocal] = useState<ReadingPrefs>(() =>
+    reading === undefined ? defaultReadingPrefs() : reading.get(),
+  );
+  const prefs = reading === undefined ? local : reading.get();
+  /**
+   * One setter for both modes.
+   *
+   * A functional form, because every control here derives its next value from the current one and three sliders can
+   * emit inside one frame. In the app it writes through the shell's store, which is what reaches the installation;
+   * in a test it moves the local copy so the panel still renders.
+   */
+  const setPrefs = useCallback(
+    (change: (current: ReadingPrefs) => ReadingPrefs) => {
+      const next = change(prefs);
+      if (reading === undefined) setLocal(next);
+      else reading.set(next);
+    },
+    [prefs, reading],
+  );
 
   // Applied to `:root` so the whole app reads them, and written on every change — a size that did not
   // survive a reload would be a control lying about being a setting.
@@ -568,11 +645,6 @@ function ReadingPanel() {
     const root = document.documentElement;
     for (const [property, value] of Object.entries(readingStyle(prefs))) {
       root.style.setProperty(property, value);
-    }
-    try {
-      localStorage.setItem(READING_PREFS_KEY, serializeReadingPrefs(prefs));
-    } catch {
-      // As above.
     }
   }, [prefs]);
 
@@ -590,7 +662,7 @@ function ReadingPanel() {
         <button
           type="button"
           className="btn btn-quiet"
-          onClick={() => setPrefs(defaultReadingPrefs())}
+          onClick={() => setPrefs(() => defaultReadingPrefs())}
           disabled={
             prefs.sizePx === defaultReadingPrefs().sizePx &&
             prefs.measure === defaultReadingPrefs().measure &&

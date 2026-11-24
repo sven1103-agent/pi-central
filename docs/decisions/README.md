@@ -24,6 +24,7 @@ reader can tell whether a decision still holds.
 | [0015](0015-reload-through-an-extension.md) | Reloading a session's resources goes through Pi Central's own extension | Accepted |
 | [0016](0016-rail-visibility.md) | The rail's visibility, width, density and folds are reader preferences; the breakpoint is only a floor | Accepted |
 | [0017](0017-calm-transcript.md) | A followed transcript keeps its newest line above the window's foot and glides rather than teleporting; text coalescing is a separate slice | Accepted |
+| [0019](0019-preferences-belong-to-the-installation.md) | A reader's preferences belong to the installation, not to a browser origin | Accepted |
 
 ## Format
 

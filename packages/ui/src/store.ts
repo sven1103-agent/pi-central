@@ -749,6 +749,11 @@ function applyEvent(state: UiState, event: import("@pi-central/protocol").Event)
     // `installFacts` event's docstring. It carries no session data, so there is nothing here for it to replace —
     // and folding it into this state would make it a second, narrower author of what a snapshot owns (C14).
     case "installFacts":
+    // The reader's preferences (issue #285) are the same shape of no-op, for the same reason and one more: they are
+    // not session state at all, and their own store (`prefs-store.ts`) is what decides what to do with them — a
+    // failing read must become a notice, and a notice is not a fact about a conversation.
+    case "prefs":
+    case "prefsError":
       return state;
 
     case "error":

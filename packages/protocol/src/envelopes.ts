@@ -467,15 +467,47 @@ export type Control =
    */
   | { kind: "install" }
   /**
-   * Reopen a recorded session in its own directory.
+   * Read the reader's preferences, as this installation's orchestrator holds them (issue #285).
    *
-   * `sidecar` is the same three-valued answer `start` takes, and it was missing here first: resuming a session produced
-   * one with no browser regardless of the reader's switch, so a reader who turned the feature on and reopened yesterday's
-   * work got a session that could not see its own dev server -- and, because it was also told nothing, one that went
-   * looking for why. Resumed sessions are the common case after a restart, which is when it hurt most.
+   * ## Why preferences are no longer the page's private business
+   *
+   * They were in `localStorage`, which a browser partitions **per origin** — and the desktop shell launches the
+   * orchestrator with `--port 0`, so the origin is `http://127.0.0.1:51234` on Monday and `…:61802` on Tuesday.
+   * Every preference was written to the right place and read back from an origin that had never seen it, so the
+   * reader's chosen models, roster, rail and reading settings were lost on every launch, silently, with nothing
+   * failing anywhere.
+   *
+   * The orchestrator has the property the origin lacks: it is the same *installation* whatever port it happens to
+   * bind (ADR-0013 §4 keeps the port out of the shell's hands, so that cannot be fixed from the other end). Its
+   * state root already exists for open sessions (#185), so preferences live beside them and follow the install.
+   *
+   * Sent rather than pushed: the whole map is small, and a client asks once when it connects.
    */
+  | { kind: "getPrefs" }
+  /**
+   * Write the reader's preferences (issue #285).
+   *
+   * ## Why whole-value, not per-key
+   *
+   * A `setPrefs` carrying one key would make every write a chance for two surfaces to hold different halves of one
+   * value — the panel is written from a drag, the roster from a broadcast, and a merge on the server would then have
+   * to decide which of two versions of the SAME key wins. The map is a few kilobytes, a write is one file, and the
+   * client already holds the whole map (see the `prefs` event), so the round trip that avoids is worth more than
+   * the bytes it costs.
+   *
+   * `prefs` is REPLACED, not merged. A merge would make a deletion inexpressible: a key the client dropped would
+   * come back from the server forever.
+   *
+   * ## What the orchestrator does with the values
+   *
+   * It does not read them, and that is deliberate: the validation each preference needs lives with the thing that
+   * understands it (`model-scope.ts` knows what a model reference is; `prefs-store.ts` does not). What the
+   * orchestrator enforces is only what stops a store from being damaged — the key shape, the per-value size, the
+   * total size, and that a value is a string. Anything else is stored and returned verbatim, so a value written by a
+   * newer build survives a downgrade and is judged by the code that understands it.
+   */
+  | { kind: "setPrefs"; prefs: Record<string, string> }
   | { kind: "resume"; path: string; mode?: "sandboxed" | "direct"; sidecar?: boolean };
-
 /**
  * One image travelling on a prompt, from the UI to Pi.
  *
@@ -889,7 +921,27 @@ export type Event =
    * able to lose a transcript to a message about the version of a folder. What it is for is the comparison the
    * page cannot make alone: its own bundle against the one on disk now.
    */
-  | { kind: "installFacts"; install: InstallFacts };
+  | { kind: "installFacts"; install: InstallFacts }
+  /**
+   * The reader's preferences, as this installation holds them (issue #285).
+   *
+   * A whole-map event, and deliberately NOT part of `snapshot`. A snapshot is authoritative about LIVE STATE and
+   * REPLACES it wholesale (C14); folding preferences in would make a message about sessions also an author of the
+   * reader's settings, and a snapshot arriving after a delete could then rewrite them. Two kinds of state, two
+   * carriers.
+   *
+   * It is also the honest answer to a question with three possible outcomes:
+   *
+   *   - the event, when the store answered. An EMPTY map is a real answer ("nothing has been stored yet") and is
+   *     how a first run is expressed.
+   *   - `prefsError` (`unsupported`), against an orchestrator that predates this kind. The page then keeps using
+   *     `localStorage` — the behaviour before this existed — rather than pretending it has somewhere better.
+   *   - `prefsError` (anything else), when the store could not be read. Distinct from an empty map for the reason
+   *     C14 gives about a transcript: "you have no preferences" and "I could not look" are opposite facts.
+   */
+  | { kind: "prefs"; prefs: Record<string, string> }
+  /** Preferences could not be read, or this peer has no such feature. See the `prefs` event. */
+  | { kind: "prefsError"; reason: PrefsErrorReason; message: string };
 
 /**
  * The OS actions a client may ask for (ADR-0014).
@@ -956,6 +1008,19 @@ export type FileErrorReason =
   | "not-found"
   | "permission"
   | "unreadable";
+
+/**
+ * Why the reader's preferences could not be read (issue #285).
+ *
+ * Three causes with three different repairs, which is why they are three values rather than one message:
+ *
+ *   - `unsupported` — the peer predates the feature. Nothing is broken; the page keeps its per-origin store.
+ *   - `unreadable` — the file is there and could not be read. A permissions problem, or a volume that is not mounted.
+ *   - `corrupt` — the file is there, readable, and not a preferences document. The orchestrator reports this rather
+ *     than answering with an empty map, because an empty map means "you have never chosen anything" and that would be
+ *     a false statement about the reader's own settings.
+ */
+export type PrefsErrorReason = "unsupported" | "unreadable" | "corrupt";
 
 /** One root the directory chooser offers (issue #76). */
 export interface PlaceInfo {
@@ -1099,8 +1164,16 @@ export interface PlaceListingInfo {
  * button rather than as a version skew. `LiveSession.reloading` is an ADDED FIELD the fingerprint cannot see —
  * ignored by an older receiver, and only ever sent by an orchestrator whose `supportsReload` already gated the
  * control on the sender's side.
+ *
+ * v13 (issue #285): the `getPrefs` / `setPrefs` controls and the `prefs` / `prefsError` events.
+ *
+ * Four new KINDS, so `wire-surface.test.ts` catches this one — and the bump is not optional regardless. A v12
+ * orchestrator receiving `setPrefs` would answer `bad control: unknown kind 'setPrefs'`, which is a symptom rather
+ * than a version skew, and the reader's preferences are exactly the case where silence is worst: the write appears to
+ * work and the next launch finds nothing, which IS the defect this version exists to remove. So the page asks the
+ * peer's version first and keeps its old per-origin store when the answer is "no" (`supportsPrefs`).
  */
-export const PROTOCOL_VERSION = 12 as const;
+export const PROTOCOL_VERSION = 13 as const;
 
 /**
  * The first protocol version that understands the `retry` control (issue #11).
@@ -1198,6 +1271,23 @@ export const RELOAD_SINCE_PROTOCOL = 12;
 export function supportsReload(protocol: number | undefined): boolean {
   // `undefined` is "not reported yet", not "old" — the same convention `supportsRetry` documents.
   return protocol === undefined ? true : protocol >= RELOAD_SINCE_PROTOCOL;
+}
+
+/**
+ * The first protocol version that understands the preferences pair (issue #285).
+ *
+ * The same reasoning as `RELOAD_SINCE_PROTOCOL`, with a consequence of its own: the fallback is not "the control is
+ * withheld", because the reader's preferences must be remembered somewhere. A page that cannot store them on the
+ * installation keeps them in `localStorage`, per origin, exactly as it did before — and `docs/PROTOCOL.md` states
+ * that divergence rather than leaving it to be discovered on the second launch.
+ */
+export const PREFS_SINCE_PROTOCOL = 13;
+
+/** Whether a peer speaking `protocol` keeps the reader's preferences in the installation rather than per origin. */
+export function supportsPrefs(protocol: number | undefined): boolean {
+  // `undefined` is "not reported yet", not "old" — the same convention `supportsRetry` documents. Here that means a
+  // page asks once on connect and is answered from the handshake, rather than never asking.
+  return protocol === undefined ? true : protocol >= PREFS_SINCE_PROTOCOL;
 }
 
 /** Whether a peer speaking `protocol` can be asked to reveal a path in the file manager. */
