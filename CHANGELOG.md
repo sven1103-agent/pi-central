@@ -16,6 +16,12 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
+## [0.16.1] — 2026-11-24
+
+### Fixed
+
+- `act` clicks a page the sidecar keeps, so the next `capture` or `probe` shows the state after the click ([#288]).
+
 ## [0.16.0] — 2026-11-22
 
 ### Added
