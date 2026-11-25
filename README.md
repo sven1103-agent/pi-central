@@ -29,17 +29,54 @@ own working directory, each inside its own sandbox.** /paɪ ˈsɛntrəl/
 **Who this is for.** People who already run `pi` and want more than one session at a time.
 Contributors: jump to [Working on this project](#working-on-this-project).
 
-![Pi Central's dashboard: a session rail on the left listing one running, one idle and one stopped
-session with their working directories and context burn; the transcript in the middle showing the
-assistant's prose, a first-person turn containing a pasted screenshot rendered inline with its type
-and size, and a collapsed "Thinking…" group below it; the session panel on the right with the model
-and thinking pickers; the composer at the foot with its key hints and an auto-follow toggle; and a
-topbar reading two sessions, one running, one scratch and connected.](docs/images/dashboard.png)
+![An eight-second loop of the real dashboard. The rail on the left holds a new-session button and
+three groups: *Demo Session 1* under "Running 1" with its green working badge, its scratch workspace,
+session number and context burn; a second scratch session under "Idle 1"; and "Stopped 37" folded
+shut. In the transcript the assistant's prose streams in — a heading, then numbered sections of a
+story arriving line by line, with the *Thinking…* group above it. On the right the session panel
+carries the provider, model and thinking pickers; the composer at the foot has its key hints and an
+auto-follow toggle; and the topbar reads 2 sessions · 1 running · 2 scratch · connected.](docs/images/dashboard.gif)
 
-<!-- The screenshot predates the activity bars: it still shows the wordmark and the combined
-Sessions|History strip in the topbar. Alt text describes the IMAGE, so it is left matching what the
-file actually shows; the description of the current layout is in the prose and in DESIGN.md. Retaking
-it needs a browser, which the agent sandbox cannot launch. -->
+<!-- Recorded from the real app, not assembled, and cropped to the app window so no browser chrome appears.
+What a short loop cannot show is the approval dock and the tool trace; those want stills, and
+CONTRIBUTING.md says how to take them. -->
+
+**Why a GIF and not the MP4.** A `<video>` element that points at a file **in the repository** renders
+as nothing on GitHub — not a broken player, nothing at all, because the README body is sanitised.
+Measured on five repositories whose READMEs carry that markup in three different spellings —
+`<video src="assets/demo.mp4">` (DreamLite, quoroom), `<video><source src="images/…mp4">` (TscanPlus),
+and an absolute `raw.githubusercontent.com` URL (pwndoc, WPFDevelopers) — every one had **zero** video
+elements in the rendered page. The only form that survives is a `github.com/user-attachments` URL,
+which is an upload to GitHub's own storage rather than a file in the repository. A GIF renders
+everywhere, loops by itself and needs no player, so the recording ships as one.
+
+### Zen mode, when the conversation is all you want
+
+The dashboard gives the fleet half the window because watching several sessions is the point. Reading
+one of them is the other half, and it wants the whole window. **Zen mode** (the app calls it *reading
+focus*) steps the describing surfaces aside and leaves the conversation: the rail folds to a column of
+icons, the session panel collapses to a slim *Details* tab on the trailing edge that opens on hover or
+focus, and the composer's permanent hint line folds away — the keys it carried move to the field's own
+`title`, so nothing is dropped, only moved.
+
+![The dashboard in Zen mode: everything that describes the fleet has stepped aside. The rail is
+narrowed to a column of icons — the mark, a menu, the new-session button, a reload — with no session
+list in it; the prose runs as a centred column with the width of the window to itself; the session
+panel has collapsed to a slim *Details* tab on the trailing edge, showing the state dot and "1%", with
+the panel's own icons stacked beneath it. The composer is still at the foot as a bare field: its key
+hints are gone, though *Compact context*, *Reload resources* and *auto-follow on* remain. The topbar
+keeps the product mark and a green connection dot and drops the fleet
+counts.](docs/images/zen-mode.png)
+
+**What it does not touch is the point.** Nothing that *is* the conversation is governed by the mode — not
+the lane, not the measure, not the scroller, not the composer's field. And nothing is lost: the session's
+identity, model, thinking level, meter, cost and controls are all still in the *Details* tab, so the mode
+is a change of frame rather than a subtraction. Warnings, the approval dock, the queue rail and the error
+strip stay put — they are decisions, not descriptions.
+
+`⌥⇧Z` toggles it, beside `⌘⇧.`; the Shift is what keeps it clear of `⌘.`, which stops the run. The full
+reasoning, including the four boundaries the mode is held to by test rather than by taste, is
+[ADR-0016](docs/decisions/0016-rail-visibility.md).
 
 **Status: works end to end, verified, and published.** The version is deliberately not written here —
 `pi-central --version` reports the version of the package it shipped in. See

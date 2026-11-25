@@ -121,40 +121,91 @@ Nothing about isolation should be asserted without a test. The Phase 0 harness i
 [docs/SANDBOX.md](docs/SANDBOX.md#verification-harness) is the reference: two sessions,
 two cwds, cross-access must fail.
 
-## Screenshots in the README
+## The recording in the README
 
 The dashboard image in `README.md` is a real window, and it is worth keeping that way — a mockup
-cannot show the tool trace's durations, a live `responding` state, or the fleet counts.
+cannot show the tool trace's durations, a live `responding` state, or the fleet counts. It is an
+animated GIF (`docs/images/dashboard.gif`) made from a screen recording, not a still.
 
-**How to capture one**
+**Why a GIF.** GitHub sanitises `<video>` out of a README body, so a repo-relative
+`<video src="docs/…mp4">` renders as *nothing*. Five repositories were checked — three different
+spellings, including an absolute `raw.githubusercontent.com` URL — and all rendered zero video
+elements. Only a GIF is served inline, loops by itself, and needs no player. Measured, not assumed.
+
+**How to record and convert one**
 
 1. Run a session that is **mid-run** (`working`, ideally with a couple of tool calls behind it). A
    finished session shows none of the live states, and an empty one shows nothing at all.
-2. Leave the right-hand panel **collapsed**, which is the default. It is the more representative
-   state, and it gives the transcript the width the screenshot is about.
-3. Capture the window at whatever size it naturally is on your display — **do not pre-shrink it**.
-   See the note below on why resampling makes a screenshot worse rather than smaller.
-4. Save as `docs/images/dashboard.png` — that path is referenced from the README, and `check:docs`
-   fails if it stops resolving.
+2. Keep the right-hand panel **open** for the recording: it is what carries the model and thinking
+   pickers, and the panel is the part of the layout a still cannot explain.
+3. Record at whatever size the window naturally is on your display, then **crop to the app window** —
+   the browser's own tab strip and address bar are not the product, and a capture of them reads as a
+   screenshot of a web page rather than of an app.
+4. Save the converted loop as `docs/images/dashboard.gif` — that path is referenced from the README,
+   and `check:docs` fails if it stops resolving.
 
-**Do NOT downscale it.** This instruction used to say to, and following it produced a *worse and
-larger* file: resampling a UI screenshot smears intermediate greys along every glyph edge, and PNG
-compresses those badly — 1639×1131 went in at 354 KB and came out at 1300×897 and **386 KB**. So the
-"optimisation" cost 32 KB and made the text blurry.
-
-GitHub serves the image at the git blob's resolution and lets the browser scale it, so sharpness
-survives and the browser can use the extra pixels on a Retina display. Copy the capture byte for byte:
+**Converting a `.mov` to a GIF that is worth watching.** A naive `ffmpeg` conversion of a 30-second
+UI capture lands near 25 MB. What fits is a short loop at a small frame rate with a shared palette:
 
 ```bash
-cp "Screenshot 2026-11-01 at 15.20.44.png" docs/images/dashboard.png
+ffmpeg -ss 0 -t 8 -i "transcript.mov" \
+  -vf "crop=1728:996:34:79,fps=6,scale=1152:-1:flags=lanczos,\
+       tpad=stop_mode=clone:stop_duration=1.6,\
+       split[a][b];[a]palettegen=max_colors=128:stats_mode=full[p];[b][p]paletteuse=dither=none" \
+  -loop 0 docs/images/dashboard.gif
 ```
 
-The one real constraint is file size, not pixel width: keep a capture under ~500 KB by keeping the
-window modest and the session short.
+**Hold the last frame, or the loop reads as a glitch.** A transcript loop ends on a full page of prose and
+restarts on an empty one, so the seam is a hard jump backwards. Fading to black does not help — the UI is
+already near-black, so the fade is invisible and costs frames. `tpad=stop_mode=clone` repeats the final
+frame for 1.6 s instead, and the restart then reads as a deliberate pause rather than a stutter.
 
-**The macOS screenshot filename is gitignored.** A capture lands as `Screenshot 2026-11-01 at
-15.20.44.png`, with spaces, which `img*.png` does not match — so `.gitignore` names that pattern too.
-The real image must be copied to `docs/images/dashboard.png`, which is deliberately not ignored.
+Three choices in that line, each measured rather than copied:
+
+- **`crop`** removes the browser chrome. Find the rectangle once with
+  `ffmpeg -i in.mov -vf cropdetect=limit=24:reset=0 -frames:v 60 -f null -` and read the last line;
+  cropdetect stops at the window edge, not the tab strip, so drop the remaining toolbar rows by hand.
+- **`dither=none`** with a full-frame palette beats `bayer` here: this UI is flat panels and text, so
+  ordered dithering only adds moving noise around every glyph. Bayer measured slightly *larger* on the
+  same footage (0.72 MB against 0.70 MB) and visibly grainier.
+
+**What actually makes the file big** — the four levers on one crop and one clip, measured:
+
+| Change | Size |
+|---|---|
+| 8 s, 6 fps, 128 colours, 1152 wide — the shipped loop | **2.10 MB** |
+| 7 fps instead of 6 | 2.35 MB |
+| 8 fps instead of 6 | 2.69 MB |
+| 160 colours instead of 128 | 2.22 MB |
+| 12 s instead of 8 | 3.16 MB |
+| 19 s — the whole recording | **8.87 MB** |
+
+So **duration is the lever that runs away**, and it is not linear: a longer clip is a *busier* clip, since
+the prose keeps streaming and each new frame differs from the last where the earlier ones stood still. Cut
+seconds before you cut anything else; width and frame rate are the second and third levers, and colour
+depth is nearly free (128 to 160 costs 0.12 MB and there is no visible difference on this UI).
+
+**Streaming text is far more expensive than a cursor moving.** An earlier loop of the same window with
+little text and one session changing state came in at 0.70 MB for 14 s at 10 fps; this one is 2.10 MB for
+9.7 s at 6 fps, because nearly every frame repaints a wall of glyphs. Budget by content, not by duration
+alone. Keep the loop under about 3 MB and the width at 1152 or less.
+
+GitHub serves the GIF at its blob resolution, so a wider one is not sharper in a README column — it is
+only heavier.
+
+**The Zen mode still.** `docs/images/zen-mode.png` is a single frame lifted from a recording with
+`-frames:v 1` — not a separate capture, so it cannot drift from the loop. Take it from a moment when the
+mode is already on and the prose column is full; in the shipped one that is 89 s into the dashboard
+recording. Crop to the app window by the same rule as the GIF, which for that recording is
+`crop=1728:1020:56:81` — note the different offsets, because the two recordings were taken at
+different window positions. Copying the crop rectangle from one recording into the other is how the
+first attempt kept a strip of browser chrome at the top of the still.
+
+**The macOS recording filename is gitignored.** A capture lands as `Screen Recording 2026-11-24 at
+14.22.39.mov`, with spaces and a capital `S`; `.gitignore` names the `Screenshot*.png` pattern and
+`Screen Recording*.mov`, so delete or move the source recording once the GIF is made rather than
+leaving it in the working tree. The two images are `docs/images/dashboard.gif` and
+`docs/images/zen-mode.png`, which are deliberately not ignored.
 
 **Before committing, check the image for things that are not the product**
 
