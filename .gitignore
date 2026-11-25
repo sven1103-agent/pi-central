@@ -30,8 +30,11 @@ img*.png
 # macOS screenshots are named `Screenshot 2026-11-01 at 15.20.44.png` — with SPACES — so `img*.png`
 # does not catch them. Same failure as the line above: this release had one in the working tree, and a
 # `git add -A` would have committed a full-desktop capture of a machine into the repository. The real
-# README image is `docs/images/dashboard.png` and is deliberately not matched.
+# README image is `docs/images/dashboard.gif` and is deliberately not matched.
 Screenshot*.png
+# macOS screen recordings are `Screen Recording 2026-11-24 at 14.22.39.mov` — also with spaces, also
+# large (10–20 MB each). The README carries a converted GIF; the source recording is working material.
+Screen Recording*.mov
 # Review reports produced by a subagent while triaging a screenshot. Same failure as the line above:
 # they are working files, and `git add -A` during a slice swept one into a PR twice. Named explicitly
 # rather than as `*.md` so real documentation can never be caught by it.
