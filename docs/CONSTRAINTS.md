@@ -698,3 +698,29 @@ properties rather than about the composition that broke.
 - **A test can hold a defect in place.** One assertion required `flex-direction: row` on `.panel` because that was
   the implementation of the moment, defect included. When a rule looks wrong on screen, check what the test asked
   for before changing the rule.
+
+## C21 — A running process's own interpreter path can be deleted under it
+
+`process.execPath` is fixed when a process starts and is never re-resolved. Homebrew increments node by *revision*,
+which changes the Cellar path and REMOVES the old directory:
+
+```
+in the error:  /opt/homebrew/Cellar/node/26.13.1_3/bin/node   ← the directory is gone
+on disk now:   /opt/homebrew/Cellar/node/26.13.1_4/bin/node
+```
+
+Measured (issue #299): an orchestrator that outlived a revision bump handed that dead path to every new sidecar, and the
+session browser failed with `env: …/node: No such file or directory`, exit 127 — reported under a warning that blamed
+the browser executable and the sidecar bundle, both of which were present.
+
+### Consequences
+
+- **Never pass `process.execPath` to a child without checking it still exists.** It is the one path the process cannot
+  notice changing, and the failure it produces is `127`, which reads as "command not found" rather than "your node was
+  upgraded".
+- **The fallback is a BARE NAME, not another hard-coded path.** `execvp` searches `PATH` for an entry with no slash, and
+  the `node` it finds is a current one. That is also why the child's environment must keep the `PATH` it is resolved
+  through (C15 one level down: `sidecar-policy.ts` gives the sidecar a `PATH` for exactly this reason).
+- **A missing interpreter is not a missing browser.** Both are reported by `ENOENT`-ish wording, so the cause has to be
+  classified structurally — `env:` names the first command of the launch, which is the interpreter and never the browser
+  — or the advice sends the reader to the files that are fine.

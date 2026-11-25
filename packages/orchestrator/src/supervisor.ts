@@ -1589,7 +1589,12 @@ export class Supervisor extends EventEmitter {
         // NODE, not `pi`. The first version passed `config.pi` and started the sidecar with Pi itself, which is
         // not an interpreter for a .ts file: the process died before printing anything and Pi reported only
         // "Connection closed".
-        sidecar: process.execPath,
+        sidecar: resolveSidecarEntry(import.meta.dirname),
+        // ...and its interpreter, handed to the assembler rather than used here. `process.execPath` is
+        // captured at this process's start and never re-resolved, so a node upgrade that deletes the directory it
+        // lived in left every new browser launching a path that was gone (issue #299). `composeSidecarPolicy` now
+        // checks it at launch and falls back to a bare `node` through the sidecar's PATH.
+        interpreter: process.execPath,
         sidecarArgs: [resolveSidecarEntry(import.meta.dirname)],
         // Read-only access to the sidecar's own code. Without it a source-launched sidecar cannot start at all:
         // the sandbox will not let the interpreter open a script outside its workdir.

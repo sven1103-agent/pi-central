@@ -75,8 +75,22 @@ export interface SidecarSpawn {
   /** Where the sidecar's state lives. Under the orchestrator's state root — never `/tmp` (D-5). */
   stateRoot: string;
   safehouse: string;
+  /**
+   * The `PATH` the launch may use. Defaults to this process's own, then to a minimal one
+   * (`composeSidecarPolicy`). A caller never passes it in production; a test does, to place the interpreter where
+   * it can — or to remove every one of them.
+   */
+  path?: string;
   /** The sidecar executable: a fixed binary (or an interpreter), driven by a fixed verb set. */
   sidecar: string;
+  /**
+   * The binary `sidecar` is, when it is a script rather than an executable — the interpreter, resolved at launch
+   * and NOT remembered from this process's start (issue #299).
+   *
+   * Passed through to `composeSidecarPolicy`, which resolves it beside the `PATH` it may use and refuses when
+   * nothing is there. Undefined means `sidecar` is its own executable.
+   */
+  interpreter?: string;
   /**
    * The directory the sidecar's code lives in, granted read-only to the sandbox.
    *
@@ -334,6 +348,8 @@ export function spawnSidecar(options: SidecarSpawn): SidecarHandle {
     // The sidecar is a NODE SCRIPT here rather than a compiled binary, because Phase 2 runs from source.
     // The argv shape is what matters and it is fixed: executable, then two flags with validated values.
     sidecar: options.sidecar,
+    ...(options.interpreter === undefined ? {} : { interpreter: options.interpreter }),
+    ...(options.path === undefined ? {} : { path: options.path }),
     sidecarCodeDir: options.sidecarCodeDir,
     browser: options.browser,
     /*
@@ -722,7 +738,41 @@ export function sidecarFailureAdvice(cause: string): string {
       "session's browser port. Quit the other instance, or start this session again to be given a different port."
     );
   }
-  if (/ENOENT|no such file|cannot find/i.test(cause)) {
+  /*
+   * The file the LAUNCH named, which is not the browser even when the wording is the same.
+   *
+   * Measured (issue #299): an orchestrator that outlived a node upgrade handed the sidecar a deleted path, the child
+   * said `env: …/node: No such file or directory`, and the /no such file/ branch below blamed "the browser
+   * executable or the sidecar bundle" — the two things that were fine. The message never mentioned the interpreter,
+   * so it sent the reader to check the wrong files. That is the defect this function's own doc comment records, one
+   * layer along.
+   *
+   * Two shapes, both STRUCTURAL rather than a guess about the wording: `env:` frames a failure to execute the
+   * FIRST command of the launch (env only execs that one, so the browser cannot appear there), and the other is
+   * `composeSidecarPolicy`'s own refusal, which is what this fix produces instead of exit 127 at all.
+   */
+  const unfound = /env:\s*'?([^:'\s]+)'?:\s*No such file/i.exec(cause)?.[1];
+  const refused = /no interpreter for the sidecar: (\S+?) does not exist/i.exec(cause)?.[1];
+  if (refused !== undefined) {
+    // The launch was never attempted: nothing to execute, and no bare name resolved either. A restart alone will not
+    // fix it, so the advice is the two things that will.
+    return (
+      `The sidecar's interpreter is missing — ${refused} — and no \`node\` was found on the PATH the sidecar gets, so ` +
+      "there is nothing to start it with. Install Node (or point Pi Central at one) and start a new session."
+    );
+  }
+  if (unfound !== undefined) {
+    return /\bnode\b/.test(unfound)
+      ? `The sidecar's interpreter is missing — ${unfound}. Node was upgraded (a Homebrew revision bump removes ` +
+          "the directory it lived in) while this Pi Central was already running, so the interpreter it started with " +
+          "no longer exists. Restart Pi Central, and the next session gets a current one; this one cannot capture a page."
+      : `The sidecar's own executable is missing — ${unfound}. It was removed while this Pi Central was running, or ` +
+          "the configuration names a path that does not exist. Fix the configuration and restart Pi Central.";
+  }
+  // `no browser at …` is the sidecar's OWN wording when the configured executable is not on disk, so the branch
+  // names both shapes: without it, a consumer reading "No session browser: … no browser at /opt/google/chrome" was
+  // told the orchestrator's log had the detail, when the message had already said it (measured by the test below).
+  if (/ENOENT|no such file|cannot find|no browser at/i.test(cause)) {
     return (
       "A file the browser needs is missing: the browser executable or the sidecar bundle named in configuration " +
       "does not exist at that path."
