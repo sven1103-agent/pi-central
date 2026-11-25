@@ -12,6 +12,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
+### Changed
+
+- The README shows a loop of the real dashboard instead of a screenshot that predated the activity bars ([#7]).
+
 ## [0.16.2] — 2026-11-24
 
 ### Fixed

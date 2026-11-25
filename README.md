@@ -29,17 +29,26 @@ own working directory, each inside its own sandbox.** /paɪ ˈsɛntrəl/
 **Who this is for.** People who already run `pi` and want more than one session at a time.
 Contributors: jump to [Working on this project](#working-on-this-project).
 
-![Pi Central's dashboard: a session rail on the left listing one running, one idle and one stopped
-session with their working directories and context burn; the transcript in the middle showing the
-assistant's prose, a first-person turn containing a pasted screenshot rendered inline with its type
-and size, and a collapsed "Thinking…" group below it; the session panel on the right with the model
-and thinking pickers; the composer at the foot with its key hints and an auto-follow toggle; and a
-topbar reading two sessions, one running, one scratch and connected.](docs/images/dashboard.png)
+![A fourteen-second loop of the real dashboard. The rail on the left starts with a new-session
+button, two idle sessions under "Idle 2" — one of them *Demo Session 1*, showing its scratch workspace,
+session number and context burn — and a folded "Stopped 37". A prompt is typed into the composer at
+the foot and sent; the rail regroups as *Demo Session 1* moves under "Running 1" with a green working
+badge while the other drops to "Idle 1", and a "Thinking…" group in the transcript opens onto the
+assistant's first-person prose. The session panel on the right holds the provider, model and thinking
+pickers, and the topbar reads 2 sessions · 1 running · 2 scratch · connected.](docs/images/dashboard.gif)
 
-<!-- The screenshot predates the activity bars: it still shows the wordmark and the combined
-Sessions|History strip in the topbar. Alt text describes the IMAGE, so it is left matching what the
-file actually shows; the description of the current layout is in the prose and in DESIGN.md. Retaking
-it needs a browser, which the agent sandbox cannot launch. -->
+<!-- Recorded from the real app, not assembled, and cropped to the app window so no browser chrome appears.
+What a fourteen-second loop cannot show is the approval dock and the tool trace; those want stills, and
+CONTRIBUTING.md says how to take them. -->
+
+**Why a GIF and not the MP4.** A `<video>` element that points at a file **in the repository** renders
+as nothing on GitHub — not a broken player, nothing at all, because the README body is sanitised.
+Measured on five repositories whose READMEs carry that markup in three different spellings —
+`<video src="assets/demo.mp4">` (DreamLite, quoroom), `<video><source src="images/…mp4">` (TscanPlus),
+and an absolute `raw.githubusercontent.com` URL (pwndoc, WPFDevelopers) — every one had **zero** video
+elements in the rendered page. The only form that survives is a `github.com/user-attachments` URL,
+which is an upload to GitHub's own storage rather than a file in the repository. A GIF renders
+everywhere, loops by itself and needs no player, so the recording ships as one.
 
 **Status: works end to end, verified, and published.** The version is deliberately not written here —
 `pi-central --version` reports the version of the package it shipped in. See
