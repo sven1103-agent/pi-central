@@ -29,16 +29,16 @@ own working directory, each inside its own sandbox.** /paɪ ˈsɛntrəl/
 **Who this is for.** People who already run `pi` and want more than one session at a time.
 Contributors: jump to [Working on this project](#working-on-this-project).
 
-![A fourteen-second loop of the real dashboard. The rail on the left starts with a new-session
-button, two idle sessions under "Idle 2" — one of them *Demo Session 1*, showing its scratch workspace,
-session number and context burn — and a folded "Stopped 37". A prompt is typed into the composer at
-the foot and sent; the rail regroups as *Demo Session 1* moves under "Running 1" with a green working
-badge while the other drops to "Idle 1", and a "Thinking…" group in the transcript opens onto the
-assistant's first-person prose. The session panel on the right holds the provider, model and thinking
-pickers, and the topbar reads 2 sessions · 1 running · 2 scratch · connected.](docs/images/dashboard.gif)
+![An eight-second loop of the real dashboard. The rail on the left holds a new-session button and
+three groups: *Demo Session 1* under "Running 1" with its green working badge, its scratch workspace,
+session number and context burn; a second scratch session under "Idle 1"; and "Stopped 37" folded
+shut. In the transcript the assistant's prose streams in — a heading, then numbered sections of a
+story arriving line by line, with the *Thinking…* group above it. On the right the session panel
+carries the provider, model and thinking pickers; the composer at the foot has its key hints and an
+auto-follow toggle; and the topbar reads 2 sessions · 1 running · 2 scratch · connected.](docs/images/dashboard.gif)
 
 <!-- Recorded from the real app, not assembled, and cropped to the app window so no browser chrome appears.
-What a fourteen-second loop cannot show is the approval dock and the tool trace; those want stills, and
+What a short loop cannot show is the approval dock and the tool trace; those want stills, and
 CONTRIBUTING.md says how to take them. -->
 
 **Why a GIF and not the MP4.** A `<video>` element that points at a file **in the repository** renders
@@ -49,6 +49,34 @@ and an absolute `raw.githubusercontent.com` URL (pwndoc, WPFDevelopers) — ever
 elements in the rendered page. The only form that survives is a `github.com/user-attachments` URL,
 which is an upload to GitHub's own storage rather than a file in the repository. A GIF renders
 everywhere, loops by itself and needs no player, so the recording ships as one.
+
+### Zen mode, when the conversation is all you want
+
+The dashboard gives the fleet half the window because watching several sessions is the point. Reading
+one of them is the other half, and it wants the whole window. **Zen mode** (the app calls it *reading
+focus*) steps the describing surfaces aside and leaves the conversation: the rail folds to a column of
+icons, the session panel collapses to a slim *Details* tab on the trailing edge that opens on hover or
+focus, and the composer's permanent hint line folds away — the keys it carried move to the field's own
+`title`, so nothing is dropped, only moved.
+
+![The dashboard in Zen mode: everything that describes the fleet has stepped aside. The rail is
+narrowed to a column of icons — the mark, a menu, the new-session button, a reload — with no session
+list in it; the prose runs as a centred column with the width of the window to itself; the session
+panel has collapsed to a slim *Details* tab on the trailing edge, showing the state dot and "1%", with
+the panel's own icons stacked beneath it. The composer is still at the foot as a bare field: its key
+hints are gone, though *Compact context*, *Reload resources* and *auto-follow on* remain. The topbar
+keeps the product mark and a green connection dot and drops the fleet
+counts.](docs/images/zen-mode.png)
+
+**What it does not touch is the point.** Nothing that *is* the conversation is governed by the mode — not
+the lane, not the measure, not the scroller, not the composer's field. And nothing is lost: the session's
+identity, model, thinking level, meter, cost and controls are all still in the *Details* tab, so the mode
+is a change of frame rather than a subtraction. Warnings, the approval dock, the queue rail and the error
+strip stay put — they are decisions, not descriptions.
+
+`⌥⇧Z` toggles it, beside `⌘⇧.`; the Shift is what keeps it clear of `⌘.`, which stops the run. The full
+reasoning, including the four boundaries the mode is held to by test rather than by taste, is
+[ADR-0016](docs/decisions/0016-rail-visibility.md).
 
 **Status: works end to end, verified, and published.** The version is deliberately not written here —
 `pi-central --version` reports the version of the package it shipped in. See

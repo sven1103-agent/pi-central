@@ -14,7 +14,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Changed
 
-- The README shows a loop of the real dashboard instead of a screenshot that predated the activity bars ([#7]).
+- The README shows a loop of the real dashboard instead of a screenshot that predated the activity bars, and a still of Zen mode beside it ([#7]).
 
 ## [0.16.2] — 2026-11-24
 

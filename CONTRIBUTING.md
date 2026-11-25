@@ -148,11 +148,17 @@ elements. Only a GIF is served inline, loops by itself, and needs no player. Mea
 UI capture lands near 25 MB. What fits is a short loop at a small frame rate with a shared palette:
 
 ```bash
-ffmpeg -ss 1.5 -t 14 -i "Screen Recording.mov" \
-  -vf "crop=1728:996:34:79,fps=10,scale=1152:-1:flags=lanczos,\
-       split[a][b];[a]palettegen=max_colors=192:stats_mode=full[p];[b][p]paletteuse=dither=none" \
+ffmpeg -ss 0 -t 8 -i "transcript.mov" \
+  -vf "crop=1728:996:34:79,fps=6,scale=1152:-1:flags=lanczos,\
+       tpad=stop_mode=clone:stop_duration=1.6,\
+       split[a][b];[a]palettegen=max_colors=128:stats_mode=full[p];[b][p]paletteuse=dither=none" \
   -loop 0 docs/images/dashboard.gif
 ```
+
+**Hold the last frame, or the loop reads as a glitch.** A transcript loop ends on a full page of prose and
+restarts on an empty one, so the seam is a hard jump backwards. Fading to black does not help — the UI is
+already near-black, so the fade is invisible and costs frames. `tpad=stop_mode=clone` repeats the final
+frame for 1.6 s instead, and the restart then reads as a deliberate pause rather than a stutter.
 
 Three choices in that line, each measured rather than copied:
 
@@ -167,25 +173,39 @@ Three choices in that line, each measured rather than copied:
 
 | Change | Size |
 |---|---|
-| 14 s, 10 fps, 192 colours, 1152 wide — the shipped loop | **0.70 MB** |
-| 12 fps instead of 10 | 0.76 MB |
-| 256 colours instead of 192 | 0.74 MB |
-| 12 fps at 224 colours | 0.78 MB |
-| 1440 wide instead of 1152 | 1.00 MB |
-| 20 s instead of 14 | **3.77 MB** |
+| 8 s, 6 fps, 128 colours, 1152 wide — the shipped loop | **2.10 MB** |
+| 7 fps instead of 6 | 2.35 MB |
+| 8 fps instead of 6 | 2.69 MB |
+| 160 colours instead of 128 | 2.22 MB |
+| 12 s instead of 8 | 3.16 MB |
+| 19 s — the whole recording | **8.87 MB** |
 
-So frame rate and colour depth barely matter, and **duration is the one that runs away** — not linearly,
-because a longer clip is a *busier* clip: the transcript streams in, and each new frame differs from the
-last where the earlier ones stood still. Cut seconds before you cut anything else. Width is the second
-lever. Keep the loop under about 1 MB.
+So **duration is the lever that runs away**, and it is not linear: a longer clip is a *busier* clip, since
+the prose keeps streaming and each new frame differs from the last where the earlier ones stood still. Cut
+seconds before you cut anything else; width and frame rate are the second and third levers, and colour
+depth is nearly free (128 to 160 costs 0.12 MB and there is no visible difference on this UI).
+
+**Streaming text is far more expensive than a cursor moving.** An earlier loop of the same window with
+little text and one session changing state came in at 0.70 MB for 14 s at 10 fps; this one is 2.10 MB for
+9.7 s at 6 fps, because nearly every frame repaints a wall of glyphs. Budget by content, not by duration
+alone. Keep the loop under about 3 MB and the width at 1152 or less.
 
 GitHub serves the GIF at its blob resolution, so a wider one is not sharper in a README column — it is
 only heavier.
 
+**The Zen mode still.** `docs/images/zen-mode.png` is a single frame lifted from a recording with
+`-frames:v 1` — not a separate capture, so it cannot drift from the loop. Take it from a moment when the
+mode is already on and the prose column is full; in the shipped one that is 89 s into the dashboard
+recording. Crop to the app window by the same rule as the GIF, which for that recording is
+`crop=1728:1020:56:81` — note the different offsets, because the two recordings were taken at
+different window positions. Copying the crop rectangle from one recording into the other is how the
+first attempt kept a strip of browser chrome at the top of the still.
+
 **The macOS recording filename is gitignored.** A capture lands as `Screen Recording 2026-11-24 at
-14.22.39.mov`, with spaces and a capital `S`; `.gitignore` names the `Screenshot*.png` pattern but
-*not* `.mov` files, so delete or move the source recording once the GIF is made rather than leaving it
-in the working tree. The GIF itself is `docs/images/dashboard.gif`, which is deliberately not ignored.
+14.22.39.mov`, with spaces and a capital `S`; `.gitignore` names the `Screenshot*.png` pattern and
+`Screen Recording*.mov`, so delete or move the source recording once the GIF is made rather than
+leaving it in the working tree. The two images are `docs/images/dashboard.gif` and
+`docs/images/zen-mode.png`, which are deliberately not ignored.
 
 **Before committing, check the image for things that are not the product**
 
