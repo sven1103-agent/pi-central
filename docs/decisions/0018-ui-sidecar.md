@@ -190,6 +190,21 @@ through a fixed verb set over CDP, with no new shipped dependency.**
     an agent happened to call a tool. The port is shown because two sessions on different ports is the mechanism keeping
     them apart, so a reader comparing two rows can see it. In calm density the badge earns a row on its own, on the same
     rule as the context bar — it is present or it is not, and absence renders nothing rather than a placeholder.
+16. **The interpreter is resolved at LAUNCH, and the fallback is a bare `node`.** The sidecar is started as
+    `node <entry>` from source, and that interpreter used to be `process.execPath` — the orchestrator's own binary,
+    captured when the process started and never re-resolved. Homebrew bumps node by *revision*, which changes the Cellar
+    path and removes the old directory, so an orchestrator that outlived a bump handed every new sidecar a path that no
+    longer existed: `env: …/Cellar/node/26.13.1_3/bin/node: No such file or directory`, exit 127, reported under a
+    warning that blamed the browser executable and the sidecar bundle
+    ([#299](https://github.com/sven1103-agent/pi-central/issues/299)). `composeSidecarPolicy` now checks the recorded
+    path at launch and falls back to the bare name `node`, which `execvp` resolves through the `PATH` the sidecar is
+    already given (the `PATH` `sidecar-policy.ts` composes for its environment, which C15 explains). When neither resolves, the launch is
+    refused with a message naming the interpreter and the PATH searched, which becomes the session's warning — rather
+    than a child that dies with 127 and says nothing. **The common case is unchanged**: an interpreter that exists is used
+    as given, with one `existsSync` and no search. **Rejected: restarting the orchestrator when its own binary
+    disappears.** True, and out of scope here — that is a lifecycle question (the family of
+    [#264](https://github.com/sven1103-agent/pi-central/issues/264)), and a session must be able to get a browser from a
+    running orchestrator either way.
 
 ## Consequences
 

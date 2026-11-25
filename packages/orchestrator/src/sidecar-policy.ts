@@ -20,7 +20,7 @@
  * launched without it does not start. That makes the appended fragment the renderer's ONLY confinement,
  * which is why the fragment is required rather than optional.
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { LaunchSpec } from "./rpc.ts";
 import { renderSidecarFragment } from "./sidecar-fragment.ts";
@@ -48,6 +48,80 @@ export const SHARED_TEMP_ROOTS = ["/tmp", "/private/tmp", "/var/folders", "/priv
 
 /** A minimal PATH, so the launcher resolves even when the orchestrator was started without one. */
 const DEFAULT_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+
+/** What the sidecar's interpreter comes from: the plan's executable, plus the PATH it may be resolved through. */
+export type InterpreterPlan = Pick<SidecarSpec, "sidecar" | "interpreter" | "path">;
+
+/** The directories that make up a `PATH` string, in order, with empty entries dropped. */
+function pathDirs(path: string): string[] {
+  return path.split(":").filter((dir) => dir !== "");
+}
+
+/**
+ * The `PATH` an interpreter is looked for in.
+ *
+ * One function rather than the same `??` chain three times: the resolution and the child's environment must agree on
+ * it, or a bare `node` is found through one PATH and looked for through another.
+ */
+function searchPath(plan: InterpreterPlan): string {
+  return plan.path ?? process.env["PATH"] ?? DEFAULT_PATH;
+}
+
+/**
+ * An interpreter that exists, out of the one on record and the bare name behind it — or nothing.
+ *
+ * ## Why the first candidate is not simply `process.execPath`
+ *
+ * The orchestrator's own binary is captured when the process STARTS and is never re-resolved. Measured: an
+ * orchestrator that outlived a Homebrew node revision bump (`26.13.1_3` → `_4`, the old Cellar directory
+ * deleted) handed every new sidecar a path that no longer existed, and the session browser failed with `env:
+ * …/node: No such file or directory`, exit 127, under a warning about the browser executable.
+ *
+ * So the resolved path is confirmed before it is used, and the answer when it is gone is the BARE NAME — which
+ * `env` finds through the `PATH` the launch already carries. That is why this returns a name rather than
+ * insisting on a path: `execvp` searches `PATH` for an entry with no slash, and the entry a bare `node` finds is
+ * a current one.
+ *
+ * ## Why it is checked here and not at launch
+ *
+ * `process.execPath` is the orchestrator's, so nothing else records whether it is still on disk; and the fallback
+ * needs the `PATH` composed for the sidecar, which exists only in this module (ADR-0018: one assembler).
+ */
+export function resolveInterpreterPath(
+  plan: InterpreterPlan,
+  exists: (path: string) => boolean = existsSync,
+): string | undefined {
+  const candidates = [plan.interpreter, "node"];
+  for (const candidate of candidates) {
+    if (candidate === undefined) continue;
+    if (!candidate.includes("/")) {
+      if (pathDirs(searchPath(plan)).some((dir) => exists(join(dir, candidate)))) return candidate;
+      continue;
+    }
+    if (exists(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * The executable the launch names first on the sidecar's command line.
+ *
+ * Throws, rather than falling back to an interpreter that is not there: a launch spec naming a missing file is a
+ * child that dies with `ENOENT` and nothing that says why, which is the failure this whole resolution exists to
+ * replace. The message names the interpreter AND the path that went missing, and it becomes the sidecar's failure
+ * warning (`sidecarFailureWarning`).
+ */
+export function resolveInterpreter(plan: InterpreterPlan): string {
+  if (plan.interpreter === undefined) return plan.sidecar;
+  const resolved = resolveInterpreterPath(plan);
+  if (resolved !== undefined) return resolved;
+  const searched = pathDirs(searchPath(plan)).join(", ");
+  throw new Error(
+    `no interpreter for the sidecar: ${plan.interpreter} does not exist` +
+      `${plan.interpreter === process.execPath ? " (the orchestrator's own node, replaced under it by an upgrade)" : ""}` +
+      `, and no \`node\` was found on the sidecar's PATH (${searched})`,
+  );
+}
 
 export interface SidecarSpec {
   /**
@@ -84,6 +158,21 @@ export interface SidecarSpec {
   safehouse: string;
   /** The sidecar executable: a fixed binary driven by the four verbs (ADR-0018 §2). */
   sidecar: string;
+  /**
+   * The binary `sidecar` is, when `sidecar` is a script rather than an executable — i.e. an interpreter.
+   *
+   * Not the same field, and the difference is a defect that shipped. `sidecar` was `process.execPath`, captured
+   * when the orchestrator started and never re-resolved, so a Homebrew node revision bump (`_3` → `_4`) that
+   * deleted the old Cellar directory under a running orchestrator left every new session browser launching an
+   * interpreter that no longer existed: `env: …/node: No such file or directory`, exit 127.
+   *
+   * It belongs HERE, in the one place the sidecar's argv is assembled (ADR-0018), rather than at the caller: the
+   * resolution has to sit beside the `PATH` it may use, and `options.sidecar` keeps naming the script so the
+   * failure still says which file could not be started.
+   *
+   * Undefined means `sidecar` is its own executable and nothing is resolved — the common case gains no lookup.
+   */
+  interpreter?: string;
   /**
    * The directory the sidecar's own code lives in, granted READ-ONLY.
    *
@@ -155,6 +244,17 @@ export function composeSidecarPolicy(spec: SidecarSpec): ComposedSidecar {
   }
   assertPrivateLocation(spec.sidecarCodeDir, "code");
 
+  const path = searchPath(spec);
+  /*
+   * The interpreter is resolved HERE, at launch, and not remembered from the orchestrator's start.
+   *
+   * Measured (issue #299): `process.execPath` was handed to every sidecar unchanged, and a Homebrew node revision
+   * bump that deleted the old Cellar directory under a running orchestrator left each new session browser
+   * launching a path that no longer existed. A refusal from here throws before anything is spawned, so it reaches
+   * the reader as the sidecar's failure warning instead of as exit 127 with nothing said.
+   */
+  const command = resolveInterpreter(spec);
+
   const args: string[] = [
     "--workdir",
     resolve(spec.profileDir),
@@ -169,7 +269,7 @@ export function composeSidecarPolicy(spec: SidecarSpec): ComposedSidecar {
     // argument. This is C15 one level down.
     "--env-pass=PI_CENTRAL_SIDECAR_TOKEN",
     "--",
-    spec.sidecar,
+    command,
     ...(spec.sidecarArgs ?? []),
     // The sidecar's own arguments, which mirror its entry point exactly:
     //   --executable  the browser it drives
@@ -208,7 +308,7 @@ export function composeSidecarPolicy(spec: SidecarSpec): ComposedSidecar {
        * its own binary, and nothing else -- no HOME, no credentials, no inherited secrets.
        */
       env: {
-        PATH: spec.path ?? process.env["PATH"] ?? DEFAULT_PATH,
+        PATH: path,
         /**
          * `HOME`, and only because Node will not start without it.
          *
