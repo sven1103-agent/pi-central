@@ -675,13 +675,23 @@ export class Supervisor extends EventEmitter {
     // registered", which was true and useless. The message goes on the session's warnings, where the other
     // "this will not work and here is why" facts already live (issues #25, #28).
     const wantsSidecar = sidecarPort !== undefined && input.mode === "sandboxed";
-    const sidecarHandle = wantsSidecar ? this.#startSidecar(input.id, sidecarPort) : undefined;
-    // Two ways to have no browser after asking for one: the spawn threw, or it started and died before we looked. Both
-    // are a FAULT, and both used to be silent to the reader and to the agent.
+    const started = wantsSidecar ? this.#startSidecar(input.id, sidecarPort) : undefined;
+    const sidecarHandle = started?.handle;
+    /*
+     * Two ways to have no browser after asking for one: the spawn threw, or it started and died before we looked. Both
+     * are a FAULT, and both used to be silent to the reader and to the agent.
+     *
+     * The thrown CAUSE is carried into the warning rather than replaced by "the process could not be spawned". Measured
+     * (issue #299): the assembler refuses a sidecar whose interpreter cannot be resolved, and that sentence — naming the
+     * interpreter and the PATH searched — is the only thing that tells the reader a Node upgrade is the reason. Swallowing
+     * it here would have produced a fixed diagnosis in a log line and a generic one on screen.
+     */
     const sidecarFailure =
-      wantsSidecar && sidecarHandle === undefined
-        ? sidecarFailureWarning("the process could not be spawned")
-        : undefined;
+      started === undefined
+        ? undefined
+        : started.handle === undefined
+          ? sidecarFailureWarning(started.cause ?? "the process could not be spawned")
+          : undefined;
 
     const env = {
       ...agentRoutingEnv(this.#config.agentRoot),
@@ -1579,7 +1589,14 @@ export class Supervisor extends EventEmitter {
     return port;
   }
 
-  #startSidecar(sessionId: string, port: number): SidecarHandle | undefined {
+  /**
+   * Spawn a session's sidecar, keeping the REASON when it cannot be spawned.
+   *
+   * The cause is returned rather than only logged, because it is the difference between "the process could not be
+   * spawned" and the sentence that names a missing interpreter (issue #299). A refusal here happens before anything is
+   * written, so it costs nothing to be specific.
+   */
+  #startSidecar(sessionId: string, port: number): { handle?: SidecarHandle; cause?: string } {
     try {
       const handle = spawnSidecar({
         sessionId,
@@ -1646,10 +1663,10 @@ export class Supervisor extends EventEmitter {
           this.#patch(sessionId);
         }
       });
-      return handle;
+      return { handle };
     } catch (error) {
       this.emit("log", sessionId, `no UI sidecar for this session: ${(error as Error).message}`);
-      return undefined;
+      return { cause: (error as Error).message };
     }
   }
 

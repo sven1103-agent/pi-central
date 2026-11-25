@@ -693,6 +693,47 @@ test("every test in this file that needs the private root SKIPS without it", () 
   assert.deepEqual(unguarded, [], "these tests use root without guarding on skip, so CI cannot run them");
 });
 
+test("a browser that cannot be started names the missing interpreter on the session, not a shrug", async () => {
+  if (skip) return console.log(skip);
+  /*
+   * The join that issue #299 needed and that no unit test covers on its own: the assembler's refusal has to survive the
+   * supervisor. `#startSidecar`'s catch used to turn every thrown cause into the fixed sentence "the process could not be
+   * spawned", so a reader with a deleted node path would have been told nothing useful even once the diagnosis existed.
+   *
+   * `process.execPath` and `PATH` are replaced rather than injected, because those are what the production call site
+   * reads — an injected interpreter would prove the wiring works while leaving the defect's actual input untested. Both
+   * are restored in the `finally`.
+   */
+  const realExec = process.execPath;
+  const realPath = process.env["PATH"];
+  const state = join(root as string, "stale-interpreter");
+  const app = new Supervisor(config({ sidecar: true, stateRoot: state }) as never, { rememberOpenSessions: false });
+  app.on("error", () => {});
+  app.on("log", () => {});
+  try {
+    process.execPath = "/opt/homebrew/Cellar/node/0.0.0_0/bin/node";
+    // Nothing here holds a node, so the bare-name fallback cannot resolve and the launch is refused rather than spawned.
+    process.env["PATH"] = "/nonexistent";
+    const started = await app.start({ cwd: root as string, mode: "sandboxed", sidecar: true });
+    assert.ok(started.ok, "the session still starts: a missing browser is not fatal");
+    if (!started.ok) return;
+    const warnings = app.get(started.session.id)?.warnings ?? [];
+    const browserWarning = warnings.find((w) => /session browser/i.test(w)) ?? "";
+    assert.match(browserWarning, /interpreter is missing/, "the cause reaches the reader, naming the interpreter");
+    assert.match(browserWarning, /0\.0\.0_0/, "and the path that went missing, which is the evidence");
+    assert.ok(
+      !/could not be spawned/.test(browserWarning),
+      "NOT the fixed sentence that replaced every cause before this",
+    );
+    assert.equal(app.sidecarFor(started.session.id), undefined, "and no handle is kept for a launch that never ran");
+  } finally {
+    process.execPath = realExec;
+    if (realPath === undefined) delete process.env["PATH"];
+    else process.env["PATH"] = realPath;
+  }
+  return app.stopAll().then(() => undefined);
+});
+
 test("a session with no browser is told so, instead of being left to investigate", () => {
   if (skip) return console.log(skip);
   /*
