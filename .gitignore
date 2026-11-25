@@ -32,9 +32,11 @@ img*.png
 # `git add -A` would have committed a full-desktop capture of a machine into the repository. The real
 # README image is `docs/images/dashboard.gif` and is deliberately not matched.
 Screenshot*.png
-# macOS screen recordings are `Screen Recording 2026-11-24 at 14.22.39.mov` — also with spaces, also
-# large (10–20 MB each). The README carries a converted GIF; the source recording is working material.
-Screen Recording*.mov
+# Screen recordings are working material: macOS names them `Screen Recording 2026-11-24 at 14.22.39.mov`,
+# and a renamed one is just `transcript.mov`. Both are 9–22 MB each, and the README carries a converted GIF.
+# The first version of this rule matched only the macOS pattern, so `transcript.mov` was swept in by
+# `git add -A` at 9 MB — the same defect the `Screenshot*.png` rule above records, one format over.
+*.mov
 # Review reports produced by a subagent while triaging a screenshot. Same failure as the line above:
 # they are working files, and `git add -A` during a slice swept one into a PR twice. Named explicitly
 # rather than as `*.md` so real documentation can never be caught by it.
