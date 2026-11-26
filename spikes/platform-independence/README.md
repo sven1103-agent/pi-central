@@ -5,9 +5,12 @@
 [KEYCHAIN.md](KEYCHAIN.md) for what happens to C13 and ADR-0010 §6, which the first write-up skipped,
 and [NEXT.md](NEXT.md) for the four things left and the order they unblock each other.
 
-If you take one thing from this spike, take [DOGWOOD-VS-SBPL.md](DOGWOOD-VS-SBPL.md). The two policy
-languages decide different things at different layers — SBPL is the kernel boundary, Dogwood is a policy
-engine behind one — and an earlier draft of this spike mistook their comparability for the finding.
+If you take one thing from this spike, take [BOUNDARY.md](BOUNDARY.md): a port does **not** sacrifice
+kernel enforcement. Box has a kernel backend on both platforms, and on macOS it drives the same
+`sandbox_init` we do — so a port keeps Seatbelt on macOS and *gains* a kernel view on Linux, where
+Safehouse refuses to run today (C10). [DOGWOOD-VS-SBPL.md](DOGWOOD-VS-SBPL.md) explains why that is not
+in tension with "Dogwood is a policy engine": Box is two layers, and the policy engine sits on top of
+the boundary rather than instead of it.
 
 Four runnable checks live in `harness/`. Each asserts something the write-ups claim, and each was
 written because a claim had already been made once without it:
@@ -18,7 +21,7 @@ written because a claim had already been made once without it:
 | `harness/check-pi-linux-claim.sh` | the "pi can't run on Linux" line is older than the fix it describes |
 | `harness/check-keychain-claim.sh` | Box has no keychain source, and the `gh` token is not routed either |
 | `harness/check-precedence.sh` | pi prefers a configured `!security` key over a route's variable |
-| `harness/check-layer-distinction.sh` | the kernel view enforces and Dogwood decides; neither substitutes |
+| `harness/check-layer-distinction.sh` | the kernel view enforces and Dogwood decides; Box has a kernel backend on both platforms |
 
 The one question no check here can answer is whether `pi` starts in a box on Linux, because this
 machine cannot start a box at all. [harness/linux-probe.yml](harness/linux-probe.yml) is that

@@ -60,6 +60,31 @@ printf '%s' "$policy" | grep -qi 'denies by default'
 check "policy denies by default, so it is a genuine admission controller" "$?"
 
 say ""
+say "== 6. Box has a KERNEL backend on both platforms, so a port does not drop kernel enforcement =="
+# Read from the shipped binary rather than a document: the helper reports its own backends and calls the
+# same libc entry point Safehouse calls. A port that kept the policy engine and lost the backend would be
+# the failure this asserts against.
+pkg=${1:-}
+if [ -z "$pkg" ]; then
+    pkg=$(ls -d "${HOME:-/nonexistent}"/.strands/box/packages/*/ 2>/dev/null | head -1)
+elif [ -d "$pkg/packages" ]; then
+    :
+else
+    # An argument naming .../resources should be walked back to the package root.
+    case "$pkg" in */resources) pkg=$(dirname "$pkg")/ ;; esac
+fi
+helper="${pkg%/}/strands-box-contain-trampoline"
+if [ -x "$helper" ]; then
+    strings "$helper" | grep -q 'macOS Seatbelt and, on Linux, the namespace'
+    check "the shipped backend reports Seatbelt on macOS and namespaces on Linux" "$?"
+    strings "$helper" | grep -q 'sandbox_init'
+    check "and drives sandbox_init - the same kernel call Safehouse uses" "$?"
+else
+    say "FAIL  no containment helper at $helper"
+    fail=1
+fi
+
+say ""
 if [ "$fail" -eq 0 ]; then
     say "RESULT: TWO layers - a kernel view (or Seatbelt) enforces, Dogwood decides behind it."
     say "        Neither substitutes for the other, which is what DOGWOOD-VS-SBPL.md records."
