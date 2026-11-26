@@ -184,6 +184,31 @@ configuration value that can widen the sandbox past `FORBIDDEN_ENABLE`, and hot-
 running process — Pi Central cannot change a Seatbelt profile of a live `safehouse` invocation, so
 "restart" is the honest answer and the slices say so.
 
+## Increment 9 — Portable: a sandbox backend, and the two platforms it must serve
+
+**Goal:** a person on Linux can run Pi Central with per-session confinement and an agent-owned
+credential identity, and a person on macOS keeps exactly what they have today.
+
+Opened from [#303](https://github.com/sven1103-agent/pi-central/issues/303), after a spike that measured
+the question instead of reading about it. The full increment — with its slices, non-goals, the property
+it must not lose, and the regression pin — is [INCREMENT-9-PORTABLE.md](INCREMENT-9-PORTABLE.md), and
+the stories are [USER-STORIES-9.md](USER-STORIES-9.md).
+
+| Slice | Evidence | State |
+|---|---|---|
+| The decision: is a second backend worth defining? | an ADR, accept or decline | open — **first** |
+| Does `pi` start in a box on Linux? | a workflow run with its exit status and both stdio files | open |
+| Does a started box confine a unix socket? | a probe reporting `REFUSED` | open |
+| Does Box keep `pi`'s stdio byte-clean? (C7) | a JSONL parse assertion | open |
+| The backend interface | a type plus an invariant test | open |
+| The keychain retired in the right order | C13's warning gone; a session still reaches a model | open |
+| The Linux backend, behind the interface | a live confined session | open |
+| `capabilities.ts` survives its subject | the same tests, keychain finding removed | open |
+| A Linux machine says what it is running | `--check-config` on both platforms | open |
+
+Non-goals of the whole increment, stated once: Windows, dropping macOS, degraded mode as a default, a
+container as "the" answer, day-one feature parity, and a GUI on Linux.
+
 ## Out of scope
 
 Recorded in [ROADMAP.md](ROADMAP.md#explicitly-out-of-scope) rather than as issues, so that the

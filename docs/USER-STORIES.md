@@ -12,6 +12,18 @@ from the user's side, before deciding how to build them.
 
 ---
 
+## Themes
+
+| Theme | Subject | File |
+|---|---|---|
+| A–E | The session: starting, driving, files, fleet, shipping | this file |
+| **P** | **Platform independence — the six stories behind Increment 9** | [USER-STORIES-9.md](USER-STORIES-9.md) |
+
+Theme P is separate because it is a different question: not *what does a user do with Pi Central* but
+*which machines may a user do it on, and at what cost to the isolation everyone else relies on*.
+
+---
+
 ## Theme A — Starting work is the critical path
 
 The prototype's hardest moment is its first moment: it asks for an absolute path before it
