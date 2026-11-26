@@ -5,6 +5,10 @@
 [KEYCHAIN.md](KEYCHAIN.md) for what happens to C13 and ADR-0010 §6, which the first write-up skipped,
 and [NEXT.md](NEXT.md) for the four things left and the order they unblock each other.
 
+If you take one thing from this spike, take [DOGWOOD-VS-SBPL.md](DOGWOOD-VS-SBPL.md). The two policy
+languages decide different things at different layers — SBPL is the kernel boundary, Dogwood is a policy
+engine behind one — and an earlier draft of this spike mistook their comparability for the finding.
+
 Four runnable checks live in `harness/`. Each asserts something the write-ups claim, and each was
 written because a claim had already been made once without it:
 
@@ -14,6 +18,7 @@ written because a claim had already been made once without it:
 | `harness/check-pi-linux-claim.sh` | the "pi can't run on Linux" line is older than the fix it describes |
 | `harness/check-keychain-claim.sh` | Box has no keychain source, and the `gh` token is not routed either |
 | `harness/check-precedence.sh` | pi prefers a configured `!security` key over a route's variable |
+| `harness/check-layer-distinction.sh` | the kernel view enforces and Dogwood decides; neither substitutes |
 
 The one question no check here can answer is whether `pi` starts in a box on Linux, because this
 machine cannot start a box at all. [harness/linux-probe.yml](harness/linux-probe.yml) is that
@@ -49,19 +54,29 @@ spike ends up researching last quarter's design.
 
 ## What is actually platform-coupled today
 
-Not just the sandbox. Sort these by how much they cost to move:
+Not just the sandbox. Sort these by how much they cost to move.
+
+A note on the row below that says "policy language (SBPL)": the cost is real, but it is the cost of
+*moving the boundary*, not of learning a language. SBPL **is** the macOS kernel boundary; Dogwood is a
+policy engine in a trusted process behind Box's own kernel view. [DOGWOOD-VS-SBPL.md](DOGWOOD-VS-SBPL.md)
+is the correction, and it is the most important page here.
 
 | Coupling | Constraint / file | Moves easily? |
 |---|---|---|
-| Policy language (SBPL) and `sandbox-exec` execution | C10, `docs/SANDBOX.md` | **No** — a different backend means a different policy language |
+| The kernel boundary itself: SBPL and `sandbox-exec` execution | C10, `docs/SANDBOX.md` | **No** — a different backend means a different kernel mechanism, not merely a different syntax |
 | Seatbelt cannot nest | C1, `sandbox-guard.ts` | No — constrains where Pi Central itself may run |
 | Provider keys resolved through the macOS Keychain via `security` | C13 | No — needs a different secret store per platform |
 | `open -g -R` reveal-in-Finder | `os-actions.ts:152-153` | Yes — one guarded verb, already refused off Darwin |
 | `.icns` assembled by hand, and a macOS 26 inset quirk | C17, C18 | Yes — packaging only |
 | App shell hardening and notarisation | ADR-0013, `window-security.ts` | Partly |
 
-Only **four** `process.platform` / `darwin` checks exist across `packages/`, which is misleading:
-the real coupling is the policy language and the credential store, not the branch count.
+Only **four** `process.platform` / `darwin` checks exist across `packages/`, which is misleading —
+but so is the guess above that the policy language and the credential store are the real coupling. Both
+were measured and both were cheaper than this note predicted: the credential store is *replaced* rather
+than ported ([KEYCHAIN.md](KEYCHAIN.md)), and the "policy language" cost is really the cost of a
+different **kernel** mechanism, because SBPL is not a policy engine at all
+([DOGWOOD-VS-SBPL.md](DOGWOOD-VS-SBPL.md)). What is left is the agent: whether `pi` runs inside whatever
+boundary the host provides ([NEXT.md](NEXT.md) §1).
 
 ## Questions this spike should answer
 

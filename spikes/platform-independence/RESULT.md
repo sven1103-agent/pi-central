@@ -8,10 +8,16 @@ first answer was a quotation, and it was wrong.
 
 ## The verdict, in one line
 
-**Nothing measured here blocks a port.** Pi Central's deny set translates into Box's policy language,
-Box's credential model is cross-platform and replaces the keychain with something simpler, and the
-Linux limitation that appeared to rule Box out is a stale documentation line whose underlying code
-changed four days before the line was last edited.
+**Nothing measured here blocks a port.** Pi Central's deny set has a kernel-enforced equivalent on
+Linux Box through a different mechanism, Box's credential model is cross-platform and replaces the
+keychain with something simpler, and the Linux limitation that appeared to rule Box out is a stale
+documentation line whose underlying code changed four days before the line was last edited.
+
+The first of those was originally written as *"the deny set translates into Box's policy language"*,
+which overstated it. SBPL is a kernel boundary and Dogwood is a policy engine in a trusted process;
+they decide different things at different layers. Box has **both** a kernel layer and a policy engine,
+so the port does not trade our kernel enforcement away — but the finding belongs to the mount view and
+seccomp, not to the language. [DOGWOOD-VS-SBPL.md](DOGWOOD-VS-SBPL.md) has the correction.
 
 Two corrections have been made to this file since it was first written, and both came from asking a
 question the first draft had skipped. The Linux one is below; the keychain one is in
@@ -29,7 +35,7 @@ Three questions, and the third is where the first version of this file was wrong
 
 | # | Question | Answer | Evidence |
 |---|---|---|---|
-| 1 | Can Box's policy language express Pi Central's deny set? | **Yes for the three file blocks. The fourth is a network deny with no rule-shaped counterpart.** | [harness/check-translation.sh](harness/check-translation.sh), 9/9 |
+| 1 | Can Box's policy language *express* Pi Central's deny set? | **Yes for the three file blocks — but Dogwood decides requests, it does not enforce a boundary, so this is an expressiveness result and not a security one.** | [harness/check-translation.sh](harness/check-translation.sh), 9/9, and [DOGWOOD-VS-SBPL.md](DOGWOOD-VS-SBPL.md) |
 | 2 | Is the credential model (C13) a blocker? | **No — but Box replaces the keychain rather than porting it.** Provider keys become a route; the `gh` token stays a file. | [KEYCHAIN.md](KEYCHAIN.md), [harness/check-keychain-claim.sh](harness/check-keychain-claim.sh) |
 | 3 | Does `pi` run in a Box on Linux? | **Unknown, and the reason I said no was a stale document. Nothing current says it cannot.** | [harness/check-pi-linux-claim.sh](harness/check-pi-linux-claim.sh), 5/5 |
 
@@ -49,6 +55,14 @@ result:
   because the patch is about this sandbox and not about Box.
 
 ## 1. The policy language: three blocks translate, and one rule cannot exist
+
+> **Correction, after a question about the two layers.** Dogwood and SBPL are **not comparable layers**:
+> SBPL is a kernel sandbox profile and Dogwood is a policy engine in a trusted process outside the box.
+> Box enforces confinement in *two* layers — a kernel view (mounts, seccomp, or Seatbelt) plus policy in
+> front of the broker — so this section measures *expressiveness* and nothing about enforcement
+> strength. What that distinction changes, including the one finding it strengthens and the one claim it
+> retires, is in [DOGWOOD-VS-SBPL.md](DOGWOOD-VS-SBPL.md). Read that before using this section as a
+> portability argument.
 
 [harness/.box/pc-denies.dw](harness/.box/pc-denies.dw) is `packages/orchestrator/src/fragment.ts`'s
 fragment rewritten in Dogwood, Box's policy language (a Cedar dialect). Each rule names the SBPL it
@@ -94,8 +108,10 @@ and stronger:
 
 Order-independent and specificity-independent. The class of defect that `spikes/ui-sidecar/RESULT.md`
 records — "a hand-written deny list failed open" — is harder to write here, because there is no
-last-match to lose. If a backend abstraction ever exists, this is the property to require of it, not
-"a policy file plus an argv".
+last-match to lose. That stands as a statement about **rules** — which is the only thing it can be,
+since Dogwood is a policy engine and the ordering problem was a property of the policy language on both
+sides. It is not an argument that a policy engine can replace a kernel boundary; see
+[DOGWOOD-VS-SBPL.md](DOGWOOD-VS-SBPL.md).
 
 ### The one rule with no counterpart
 
