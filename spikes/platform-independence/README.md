@@ -1,7 +1,18 @@
 # Spike: can Pi Central stop being macOS-only?
 
 **Status:** spike finished. Nothing here is implemented, and no decision is recorded yet — see
-[RESULT.md](RESULT.md) for the measurements and the shape the decision has to take.
+[RESULT.md](RESULT.md) for the measurements and the shape the decision has to take, and
+[KEYCHAIN.md](KEYCHAIN.md) for what happens to C13 and ADR-0010 §6, which the first write-up skipped.
+
+Four runnable checks live in `harness/`. Each asserts something the write-ups claim, and each was
+written because a claim had already been made once without it:
+
+| Check | What it proves |
+|---|---|
+| `harness/check-translation.sh` | the deny set loads in Box's policy language, and a broken one is refused |
+| `harness/check-pi-linux-claim.sh` | the "pi can't run on Linux" line is older than the fix it describes |
+| `harness/check-keychain-claim.sh` | Box has no keychain source, and the `gh` token is not routed either |
+| `harness/check-precedence.sh` | pi prefers a configured `!security` key over a route's variable |
 
 ## The question
 

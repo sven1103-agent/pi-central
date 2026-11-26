@@ -9,9 +9,14 @@ first answer was a quotation, and it was wrong.
 ## The verdict, in one line
 
 **Nothing measured here blocks a port.** Pi Central's deny set translates into Box's policy language,
-Box's credential model is cross-platform and stricter than the current one, and the Linux limitation
-that appeared to rule Box out is a stale documentation line whose underlying code changed four days
-before the line was last edited.
+Box's credential model is cross-platform and replaces the keychain with something simpler, and the
+Linux limitation that appeared to rule Box out is a stale documentation line whose underlying code
+changed four days before the line was last edited.
+
+Two corrections have been made to this file since it was first written, and both came from asking a
+question the first draft had skipped. The Linux one is below; the keychain one is in
+[KEYCHAIN.md](KEYCHAIN.md), and it is the sharper of the two — a route is *shadowed* by an `auth.json`
+command-key, so the keychain code must be removed **after** the configuration changes, not before.
 
 The recommendation in this file's first version was "option C is ruled out by an upstream blocker".
 That recommendation was built on the one claim the spike had not measured, and it does not survive the
@@ -25,7 +30,7 @@ Three questions, and the third is where the first version of this file was wrong
 | # | Question | Answer | Evidence |
 |---|---|---|---|
 | 1 | Can Box's policy language express Pi Central's deny set? | **Yes for the three file blocks. The fourth is a network deny with no rule-shaped counterpart.** | [harness/check-translation.sh](harness/check-translation.sh), 9/9 |
-| 2 | Is the credential model (C13) a blocker? | **No — Box's is cross-platform and better aligned with ADR-0010 than ours is.** | `box profile show --full` on `@box/pi` |
+| 2 | Is the credential model (C13) a blocker? | **No — but Box replaces the keychain rather than porting it.** Provider keys become a route; the `gh` token stays a file. | [KEYCHAIN.md](KEYCHAIN.md), [harness/check-keychain-claim.sh](harness/check-keychain-claim.sh) |
 | 3 | Does `pi` run in a Box on Linux? | **Unknown, and the reason I said no was a stale document. Nothing current says it cannot.** | [harness/check-pi-linux-claim.sh](harness/check-pi-linux-claim.sh), 5/5 |
 
 Everything comes from a real Strands Box installed into a scratch `HOME`, so the machine's own
@@ -174,12 +179,17 @@ sketch. The agent sees a placeholder, and the real key is inserted outside the s
 Four sources are supported (`env://`, `aws://`, a local credentials daemon, a password-manager
 plugin) and none is macOS-specific.
 
-This is *closer* to ADR-0010's principle than the current design is. ADR-0010 hands the agent its own
-credential and denies the host's; Box hands the agent **no** credential and injects one per request.
-"Agent-owned secrets, delivered per session" is preserved either way, and "the agent never holds the
-secret" is strictly stronger. The cost is real and belongs in any ADR: the key becomes a property of
+This is *closer* to ADR-0010's principle than the current design is, for **provider keys**: ADR-0010
+hands the agent its own credential and denies the host's, while Box hands the agent **no** credential
+and injects one per request. The cost is real and belongs in any ADR — the key becomes a property of
 the *route configuration* rather than of the agent's store, so the credential boundary moves from
 `agent-store.ts` to the profile.
+
+It is **not** true of the whole credential model, and the first draft of this section said it was. The
+`gh` token and the SSH identity stay files, and the shipped `@box/gh` pack declines to route the token
+for `git push` at all. [KEYCHAIN.md](KEYCHAIN.md) takes the four jobs apart and measures what actually
+happens to each, including the finding that pi prefers a configured `!security` key over a route's
+environment variable — so the keychain code is deleted *after* the configuration changes, not by them.
 
 ## 3. The claim that `pi` cannot run on Linux is stale — and I repeated it as fact
 
@@ -278,8 +288,9 @@ of which exists here.
   an omission.
 - Box's policy semantics are simpler than SBPL's for this use, and the property to require of any
   backend is order-independence rather than "an appended fragment".
-- Box's credential model is cross-platform and stronger than ADR-0010 requires, at the cost of moving
-  the boundary into the profile.
+- Box's credential model is cross-platform and stronger than ADR-0010 requires **for provider keys**,
+  at the cost of moving the boundary into the profile. It does not cover the `gh` token, which
+  [KEYCHAIN.md](KEYCHAIN.md) measures and keeps as a file.
 - A backend interface is **three** things, not two: an argv, a policy whose `forbid` wins regardless
   of order, and a statement of which file operations that policy covers.
 - The macOS-only claim in C10 and the README describes *Safehouse*, and the port's cost is in the
