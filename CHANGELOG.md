@@ -10,6 +10,10 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ## [Unreleased]
 
+### Changed
+
+- The platform-independence spike measures where the port is actually blocked: the policy language translates and the credential story improves, and the agent still does not run in the one cross-platform sandbox examined ([#303]).
+
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
 ## [0.16.3] — 2026-11-25
@@ -916,3 +920,4 @@ The spike that answered whether this was worth building.
 [#285]: https://github.com/sven1103-agent/pi-central/issues/285
 [#279]: https://github.com/sven1103-agent/pi-central/issues/279
 [#299]: https://github.com/sven1103-agent/pi-central/issues/299
+[#303]: https://github.com/sven1103-agent/pi-central/issues/303

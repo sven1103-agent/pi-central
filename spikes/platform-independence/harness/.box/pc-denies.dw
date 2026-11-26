@@ -1,0 +1,71 @@
+// Pi Central's appended fragment, translated into Strands Box's policy language (Dogwood, a Cedar
+// dialect). This file exists to answer ONE question: can Box's language express the deny set that
+// packages/orchestrator/src/fragment.ts renders as SBPL?
+//
+// It is a spike fixture, not a proposal. Nothing loads it at runtime.
+//
+// Each rule names the SBPL it stands in for. Where a deny has no counterpart, the rule is absent and
+// the comment says so - an absent deny that looks present is the failure mode this file guards against.
+
+// ---------------------------------------------------------------------------------------------
+// HOST_DENIES[0] - host git configuration (closes the credential-helper route)
+//   (deny file-read* (home-prefix "/.gitconfig") (home-subpath "/.config/git")
+//                    (home-literal "/.gitattributes"))
+// ---------------------------------------------------------------------------------------------
+@id("no_host_gitconfig")
+forbid (principal, action == Box::Action::"fs:read", resource)
+when { context.input.path == "~/.gitconfig" || context.input.path == "~/.gitattributes" };
+
+@id("no_host_git_config_dir")
+forbid (principal, action == Box::Action::"fs:read", resource)
+when { context.input.path like "~/.config/git/*" };
+
+// ---------------------------------------------------------------------------------------------
+// HOST_DENIES[1] - host GitHub CLI config, read AND write; ~/.config stays traversable
+//   (deny file-read* file-write* (home-subpath "/.config/gh"))
+// ---------------------------------------------------------------------------------------------
+@id("no_host_gh_config_read")
+forbid (principal, action == Box::Action::"fs:read", resource)
+when { context.input.path == "~/.config/gh" || context.input.path like "~/.config/gh/*" };
+
+@id("no_host_gh_config_write")
+forbid (
+principal,
+action in [Box::Action::"fs:write", Box::Action::"fs:delete", Box::Action::"fs:move"],
+resource
+)
+when { context.input.path == "~/.config/gh" || context.input.path like "~/.config/gh/*" };
+
+// ---------------------------------------------------------------------------------------------
+// HOST_DENIES[2] - the user's SSH world, denied as a DIRECTORY rather than as a key-name list.
+//   (deny file-read* file-write* file-read-metadata (home-subpath "/.ssh"))
+//
+// This is the rule the whole fragment's reasoning rests on: the unit of a path boundary is the
+// directory, because a name list fails open on the next key nobody predicted.
+// ---------------------------------------------------------------------------------------------
+@id("no_user_ssh")
+forbid (
+principal,
+action in [
+Box::Action::"fs:read",
+Box::Action::"fs:write",
+Box::Action::"fs:delete",
+Box::Action::"fs:move"
+],
+resource
+)
+when { context.input.path == "~/.ssh" || context.input.path like "~/.ssh/*" };
+
+// ---------------------------------------------------------------------------------------------
+// HOST_DENIES[2], second half - THE ssh-AGENT SOCKET: NOT EXPRESSIBLE.
+//
+// The SBPL is a NETWORK deny, because a file deny does not cover connect() on a unix socket:
+//   (deny network-outbound (remote unix-socket (path-regex #"^/tmp/com\.apple\.launchd\.[^/]+/Listeners$"))
+//                        (remote unix-socket (path-regex "^" HOME_DIR "/\\.ssh/agent(/.*)?$")))
+//
+// Box's net:connect carries host, port, ip4 and ip6 and nothing else, and Box has no unix-socket
+// action (verified: naming a socket-shaped field refuses to load - see RESULT.md). So a Box-based
+// backend would close this socket by NOT GRANTING THE PATH plus a sanitized environment, not by a
+// policy rule. That is a weaker control than the current one and is the finding, not a gap in this
+// translation.
+// ---------------------------------------------------------------------------------------------
