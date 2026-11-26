@@ -1,8 +1,9 @@
 # Spike: can Pi Central stop being macOS-only?
 
 **Status:** spike finished. Nothing here is implemented, and no decision is recorded yet — see
-[RESULT.md](RESULT.md) for the measurements and the shape the decision has to take, and
-[KEYCHAIN.md](KEYCHAIN.md) for what happens to C13 and ADR-0010 §6, which the first write-up skipped.
+[RESULT.md](RESULT.md) for the measurements and the shape the decision has to take,
+[KEYCHAIN.md](KEYCHAIN.md) for what happens to C13 and ADR-0010 §6, which the first write-up skipped,
+and [NEXT.md](NEXT.md) for the four things left and the order they unblock each other.
 
 Four runnable checks live in `harness/`. Each asserts something the write-ups claim, and each was
 written because a claim had already been made once without it:
@@ -13,6 +14,11 @@ written because a claim had already been made once without it:
 | `harness/check-pi-linux-claim.sh` | the "pi can't run on Linux" line is older than the fix it describes |
 | `harness/check-keychain-claim.sh` | Box has no keychain source, and the `gh` token is not routed either |
 | `harness/check-precedence.sh` | pi prefers a configured `!security` key over a route's variable |
+
+The one question no check here can answer is whether `pi` starts in a box on Linux, because this
+machine cannot start a box at all. [harness/linux-probe.yml](harness/linux-probe.yml) is that
+experiment as a `workflow_dispatch` workflow; [NEXT.md](NEXT.md) says how to run it and how to read
+its three possible outcomes.
 
 ## The question
 
