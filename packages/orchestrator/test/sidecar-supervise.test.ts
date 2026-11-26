@@ -240,6 +240,45 @@ test("the advice names the cause, and a C1 refusal is not called a fault to inve
   assert.match(unknown, /fault rather than a setting/, "and every cause is still named as a fault, not a setting");
 });
 
+test("a missing interpreter and a missing browser are told apart, and each names its own file", () => {
+  /*
+   * Falsification: restore the single /ENOENT|no such file/ branch, which is what shipped. Then the interpreter case
+   * matches it first and says "the browser executable or the sidecar bundle named in configuration does not exist" —
+   * the two files a measured session (#299) then went and checked, both of which were fine.
+   *
+   * Every string below is a shape measured in the wild rather than invented: the first is the exact stderr a
+   * Homebrew node revision bump produced, and the third is `composeSidecarPolicy`'s own refusal, which is what the
+   * fix produces instead of that exit 127.
+   */
+  const goneInterpreter = sidecarFailureWarning(
+    "the sidecar exited (code=127, signal=-) before it could listen:\n" +
+      "env: /opt/homebrew/Cellar/node/26.13.1_3/bin/node: No such file or directory",
+  );
+  assert.match(goneInterpreter, /interpreter is missing/, "the interpreter is named as the missing thing");
+  assert.match(goneInterpreter, /26\.13\.1_3/, "with the path that went missing, which is the evidence");
+  assert.match(goneInterpreter, /Restart Pi Central/, "and the one action that fixes it");
+  assert.ok(
+    !/browser executable or the sidecar bundle/.test(goneInterpreter),
+    "and it must NOT send the reader to the browser and the bundle, which are the two things that were fine",
+  );
+  assert.match(goneInterpreter, /fault rather than a setting/, "it is still classed as a fault");
+
+  // The refusal from the assembler, when no bare `node` could be resolved either.
+  const nothingToRun = sidecarFailureWarning(
+    "no interpreter for the sidecar: /opt/homebrew/Cellar/node/26.13.1_3/bin/node does not exist" +
+      ", and no `node` was found on the sidecar's PATH (/nowhere)",
+  );
+  assert.match(nothingToRun, /interpreter is missing/, "a refused launch is the same cause, said once");
+  assert.match(nothingToRun, /no \`node\` was found/, "and it says the fallback failed too");
+
+  // The other direction: a genuinely absent BROWSER keeps the advice that names it, and this fix must not swallow it.
+  const goneBrowser = sidecarFailureWarning(
+    "the sidecar exited (code=1, signal=-) before it could listen:\nno browser at /opt/google/chrome",
+  );
+  assert.match(goneBrowser, /browser executable or the sidecar bundle/, "a missing browser is still named as one");
+  assert.ok(!/interpreter is missing/.test(goneBrowser), "and it is not blamed on the interpreter");
+});
+
 test("a session with no sidecar gets no --mcp-config argument", async () => {
   assert.deepEqual(await mcpConfigArgs(undefined), []);
 });
@@ -316,6 +355,51 @@ test("a sidecar that dies before listening reports WHY, not just that it did", a
       assert.ok(error.message.length < 2000, `the message stays readable, got ${error.message.length} chars`);
       return true;
     },
+  );
+});
+
+test("a sidecar still starts when the interpreter it was given has been replaced on disk", async () => {
+  if (skip) return console.log(skip);
+  /*
+   * The reproduction from use, without needing Homebrew (issue #299): the orchestrator's own node path, as recorded
+   * before a revision bump deleted it. What makes this a real test rather than a mock is that the launch is EXECUTED
+   * — the stub launcher execs the argv, so an interpreter that does not exist fails here exactly as it did on the
+   * reporting machine, with exit 127 and no announcement.
+   *
+   * Falsification: pass `process.execPath` through unresolved and `ready` rejects instead of announcing a port.
+   */
+  // `path`: this process's own PATH, which resolves the bare `node` — the fallback the fix relies on.
+  const handle = spawnSidecar(
+    options({
+      sessionId: "sess-stale-node",
+      interpreter: "/opt/homebrew/Cellar/node/0.0.0_0/bin/node",
+      path: process.env["PATH"] ?? "/usr/bin:/bin",
+    }),
+  );
+  const announced = await handle.ready;
+  assert.ok(announced > 0, "the kernel-assigned port still arrives, so a current node ran the sidecar");
+  await handle.stop();
+});
+
+test("nothing to run at all is a stated refusal, not a child that dies with 127", () => {
+  if (skip) return console.log(skip);
+  /*
+   * Falsification: let the spawn proceed with the remembered path and this test's `assert.throws` fails — the handle
+   * is returned, and the reader learns only that the sidecar exited 127 (`spawnSidecar` throws synchronously, and
+   * the supervisor turns that into the session's warning). The PATH here has no node on it, so the fallback is gone
+   * too, which is the only case where refusing is better than spawning.
+   */
+  assert.throws(
+    () =>
+      spawnSidecar(
+        options({
+          sessionId: "sess-no-node",
+          interpreter: "/opt/homebrew/Cellar/node/0.0.0_0/bin/node",
+          // No directory here holds a node, so the bare-name fallback cannot resolve either.
+          path: "/nonexistent",
+        }),
+      ),
+    /no interpreter for the sidecar/,
   );
 });
 

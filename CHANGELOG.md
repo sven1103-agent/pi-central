@@ -12,9 +12,15 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
+## [0.16.3] — 2026-11-25
+
 ### Changed
 
 - The README shows a loop of the real dashboard instead of a screenshot that predated the activity bars, and a still of Zen mode beside it ([#7]).
+
+### Fixed
+
+- A session browser starts after a Node upgrade removed the interpreter the orchestrator was started with, and when nothing can be found the warning names the interpreter instead of the browser ([#299]).
 
 ## [0.16.2] — 2026-11-24
 
@@ -909,3 +915,4 @@ The spike that answered whether this was worth building.
 [#281]: https://github.com/sven1103-agent/pi-central/issues/281
 [#285]: https://github.com/sven1103-agent/pi-central/issues/285
 [#279]: https://github.com/sven1103-agent/pi-central/issues/279
+[#299]: https://github.com/sven1103-agent/pi-central/issues/299

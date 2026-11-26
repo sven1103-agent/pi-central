@@ -1,10 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   composeSidecarPolicy,
+  resolveInterpreter,
+  resolveInterpreterPath,
   SIDECAR_ENABLE,
   SHARED_TEMP_ROOTS,
   type SidecarSpec,
@@ -117,6 +119,98 @@ test("the fragment is written 0600 and pins the port it was given, per session",
   assert.ok(!readFileSync(a.fragmentFile, "utf8").includes("localhost:5173"));
 });
 
+test("an interpreter that no longer exists falls back to a bare node, and the launch still names one", () => {
+  if (skipReason) return console.log(skipReason);
+  /*
+   * Falsification: revert `resolveInterpreter` to `return plan.sidecar` (or pass `process.execPath` straight to
+   * the argv, which is the defect) and the first assertion fails: the launch names the deleted path.
+   *
+   * The shape is issue #299, and its measured evidence: a Homebrew node revision bump deletes the Cellar directory
+   * the orchestrator was started from, and a process that keeps handing out `process.execPath` launches an
+   * interpreter that is not there — `env: …/node: No such file or directory`, exit 127.
+   */
+  const bin = join(dir, "bin-fallback");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, "node"), "", { mode: 0o755 });
+  const { launch } = composeSidecarPolicy(
+    spec({ interpreter: "/opt/homebrew/Cellar/node/26.13.1_3/bin/node", path: `${bin}:/usr/bin` }),
+  );
+  const separator = launch.args.indexOf("--");
+  assert.equal(
+    launch.args[separator + 1],
+    "node",
+    "a bare name, not a hard-coded interpreter: execvp resolves it through the PATH the sidecar is given",
+  );
+  // The argv shape is unchanged — executable, then its own flags — so only the first word moved.
+  assert.deepEqual(launch.args.slice(separator + 2, separator + 4), ["--executable", spec().browser]);
+});
+
+test("the fallback's bare node is resolved through the PATH the sidecar itself gets", () => {
+  if (skipReason) return console.log(skipReason);
+  /*
+   * Falsification: compose the child environment from `process.env` (or drop `PATH` from it) and the assertion
+   * below fails — the resolution would rely on an environment the sidecar does not receive. `sidecar-policy.ts`
+   * records the measured version of this: with no `PATH`, a bare command name is not resolvable at all.
+   */
+  const bin = join(dir, "bin-env");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, "node"), "", { mode: 0o755 });
+  const { launch } = composeSidecarPolicy(spec({ interpreter: "/nowhere/node", path: `${bin}:/usr/bin` }));
+  assert.equal(launch.args[launch.args.indexOf("--") + 1], "node");
+  assert.equal(launch.env?.["PATH"], `${bin}:/usr/bin`, "the bare name must resolve in the child's own PATH");
+});
+
+test("an interpreter that exists is used as given, with no lookup beyond it", () => {
+  /*
+   * Falsification: resolve unconditionally — search `PATH` for a bare `node` even when the recorded path is fine —
+   * and the call count fails. The common case does not gain a lookup.
+   */
+  const asked: string[] = [];
+  const resolved = resolveInterpreterPath(
+    { sidecar: "/state/bin/pi-central-sidecar", interpreter: "/opt/homebrew/bin/node", path: "/usr/bin" },
+    (path) => {
+      asked.push(path);
+      return true;
+    },
+  );
+  assert.equal(resolved, "/opt/homebrew/bin/node");
+  assert.deepEqual(asked, ["/opt/homebrew/bin/node"], "one check, on the recorded path, and no search");
+});
+
+test("a sidecar that is its own executable resolves no interpreter at all", () => {
+  // Falsification: treat `sidecar` as a script unconditionally and this throws, or returns a `node` path.
+  const resolved = resolveInterpreter({
+    sidecar: "/state/bin/pi-central-sidecar",
+    path: "/usr/bin",
+  });
+  assert.equal(resolved, "/state/bin/pi-central-sidecar");
+});
+
+test("no interpreter anywhere is refused, naming the interpreter and the PATH that was searched", () => {
+  /*
+   * Falsification: fall back to the recorded path regardless (the defect) and no throw happens; return `undefined`
+   * and the argv names an empty string. Either way the reader is told the sidecar died with exit 127 and nothing
+   * about the interpreter — which is the warning this refusal replaces (issue #299).
+   */
+  assert.equal(
+    resolveInterpreterPath(
+      { sidecar: "/state/bin/sidecar.ts", interpreter: "/gone/node", path: "/nowhere:/elsewhere" },
+      () => false,
+    ),
+    undefined,
+    "with nothing on disk the answer is 'nothing', not the path that was remembered",
+  );
+  assert.throws(
+    () => resolveInterpreter({ sidecar: "/state/bin/sidecar.ts", interpreter: "/gone/node", path: "/nowhere" }),
+    (error: Error) => {
+      assert.match(error.message, /no interpreter for the sidecar/, "the refusal names what is missing");
+      assert.match(error.message, /\/gone\/node/, "the path that went missing");
+      assert.match(error.message, /\/nowhere/, "and the PATH that was searched, which is where a reader looks next");
+      return true;
+    },
+  );
+});
+
 test("a sidecar cannot be given a working directory", () => {
   if (skipReason) return console.log(skipReason);
   const { launch } = composeSidecarPolicy(spec());
@@ -160,6 +254,13 @@ test("the sidecar env carries what it needs to run, and no invented secret", () 
   assert.equal(launch.env["PI_CENTRAL_SIDECAR_TOKEN"], "test-token");
   // The token must NOT be on the command line, where any process of the same user can read it.
   assert.ok(!launch.args.join(" ").includes("test-token"), "the token leaks into argv");
+  // And the PATH in that object is the one an interpreter is resolved against, so the two cannot drift: a bare
+  // `node` found through one PATH and looked for through another is issue #299 with an extra step.
+  assert.equal(
+    composeSidecarPolicy(spec({ path: "/custom/bin:/usr/bin" })).launch.env?.["PATH"],
+    "/custom/bin:/usr/bin",
+    "the child's PATH is the one the interpreter resolution used",
+  );
 });
 
 test("a session can never be given a Chromium feature, and the sidecar is the only assembler that can", () => {
