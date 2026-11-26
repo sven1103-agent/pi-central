@@ -12,7 +12,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 
 ### Changed
 
-- The platform-independence spike measures where the port is actually blocked: the policy language translates and the credential story improves, and the agent still does not run in the one cross-platform sandbox examined ([#303]).
+- The platform-independence spike finds no measured blocker: the deny set translates, the credential model improves, and the Linux limitation that appeared to rule the sandbox out is a stale documentation line ([#303]).
 
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 

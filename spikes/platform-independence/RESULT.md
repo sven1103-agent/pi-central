@@ -1,30 +1,35 @@
-# Result: the policy language is not the blocker — the agent is
+# Result: the policy language is not the blocker, and neither is the agent
 
-**Status:** spike finished. Two questions answered with measurements, one blocker found that is not
-Pi Central's to clear.
+**Status:** spike finished. All three of the brief's questions answered, and the last one twice — the
+first answer was a quotation, and it was wrong.
 **Issue:** [#303](https://github.com/sven1103-agent/pi-central/issues/303)
-**Brief:** [README.md](README.md) · **Harness:** [harness/check-translation.sh](harness/check-translation.sh)
+**Brief:** [README.md](README.md) · **Harness:** [harness/check-translation.sh](harness/check-translation.sh),
+[harness/check-pi-linux-claim.sh](harness/check-pi-linux-claim.sh)
 
 ## The verdict, in one line
 
-**Pi Central's deny set is expressible in Strands Box's policy language — one rule excepted — but the
-agent Pi Central supervises does not run inside a Box on Linux, so adopting Box today moves the
-macOS-only boundary rather than removing it.**
+**Nothing measured here blocks a port.** Pi Central's deny set translates into Box's policy language,
+Box's credential model is cross-platform and stricter than the current one, and the Linux limitation
+that appeared to rule Box out is a stale documentation line whose underlying code changed four days
+before the line was last edited.
 
-That is not "it depends". It says where the coupling actually is: not in the policy language, and not
-in the credential store, but in the pair (pi, sandbox backend), which has no cross-platform instance.
+The recommendation in this file's first version was "option C is ruled out by an upstream blocker".
+That recommendation was built on the one claim the spike had not measured, and it does not survive the
+measurement. The honest conclusion is narrower, and it is the brief's own: *the dependency is the
+sandbox backend, and the product is portable.*
 
-The README's requirement line — "**macOS** | Safehouse (the sandbox) has no Linux backend yet" — is
-true today, because no other backend exists at all. It becomes the wrong diagnosis the moment a
-backend does exist, and someone will spend a week discovering that the *policy* was never the problem.
-That correction costs one edit and is worth making whichever option is chosen.
+## What was measured
 
-## What was measured, and how
+Three questions, and the third is where the first version of this file was wrong.
 
-Everything below comes from a real Strands Box, installed into a scratch `HOME` so the machine's own
-configuration was never touched, and then asked to validate a real profile. Questions 1 and 2 are
-measurements. Question 3 is a quotation, because the only honest way to measure it is on a Linux host
-and this is not one — it is marked as such everywhere it appears.
+| # | Question | Answer | Evidence |
+|---|---|---|---|
+| 1 | Can Box's policy language express Pi Central's deny set? | **Yes for the three file blocks. The fourth is a network deny with no rule-shaped counterpart.** | [harness/check-translation.sh](harness/check-translation.sh), 9/9 |
+| 2 | Is the credential model (C13) a blocker? | **No — Box's is cross-platform and better aligned with ADR-0010 than ours is.** | `box profile show --full` on `@box/pi` |
+| 3 | Does `pi` run in a Box on Linux? | **Unknown, and the reason I said no was a stale document. Nothing current says it cannot.** | [harness/check-pi-linux-claim.sh](harness/check-pi-linux-claim.sh), 5/5 |
+
+Everything comes from a real Strands Box installed into a scratch `HOME`, so the machine's own
+configuration was never touched, plus the upstream repository read through `gh`.
 
 Two notes on how the install was made, because both would otherwise look like a different machine's
 result:
@@ -35,20 +40,14 @@ result:
   what it was used for is *policy validation*, which is text in and text out. Nothing below depends on
   trusting the binary beyond that.
 - The installer defaults to `/var/tmp` for its scratch directory, which is not writable here. The one
-  substitution needed was `/var/tmp` → `/tmp`; `RESULT.md` records it rather than shipping a patched
-  script in the repository, because the patch is about this sandbox and not about Box.
-
-| # | Question | Answer | Evidence |
-|---|---|---|---|
-| 1 | Can Box's policy language express Pi Central's deny set? | **Yes for the three file blocks. The fourth is a network deny with no rule-shaped counterpart.** | [harness/check-translation.sh](harness/check-translation.sh), 9/9 checks |
-| 2 | Is the credential model (C13) a blocker? | **No — Box's is cross-platform and better aligned with ADR-0010 than ours is.** | `box profile show --full` on the `@box/pi` pack |
-| 3 | Does `pi` run in a Box on Linux? | **The shipped pack says no. Unverified here: no Linux host.** | `@box/pi` pack README, "Limitations" |
+  substitution needed was `/var/tmp` → `/tmp`; recorded here rather than shipped as a patched script,
+  because the patch is about this sandbox and not about Box.
 
 ## 1. The policy language: three blocks translate, and one rule cannot exist
 
-[harness/.box/pc-denies.dw](harness/.box/pc-denies.dw) is `packages/orchestrator/src/fragment.ts`'s fragment
-rewritten in Dogwood, Box's policy language (a Cedar dialect). Each rule names the SBPL it stands in
-for. `sh harness/check-translation.sh` runs nine checks and all pass:
+[harness/.box/pc-denies.dw](harness/.box/pc-denies.dw) is `packages/orchestrator/src/fragment.ts`'s
+fragment rewritten in Dogwood, Box's policy language (a Cedar dialect). Each rule names the SBPL it
+stands in for. `sh harness/check-translation.sh` runs nine checks and all pass:
 
 ```text
 box: box <the version on PATH — the harness prints it, and no document restates it>
@@ -182,26 +181,59 @@ secret" is strictly stronger. The cost is real and belongs in any ADR: the key b
 the *route configuration* rather than of the agent's store, so the credential boundary moves from
 `agent-store.ts` to the profile.
 
-## 3. The blocker: `pi` does not run in a Box on Linux
+## 3. The claim that `pi` cannot run on Linux is stale — and I repeated it as fact
 
-The shipped `@box/pi` pack — its `README.md` under `resources/packs/pi/`, verbatim from the installed
-archive:
+The first version of this file said, correctly quoting the `@box/pi` pack:
 
 > **pi doesn't run on Linux yet.** Node.js stops as it starts in the box: the box refuses the memory
 > that Node's compiler needs, and Node exits with status 133 and
 > `Check failed: 12 == (*__errno_location ())`.
 
-That is the whole answer to option C. Pi Central supervises `pi --mode rpc` and is not a fork of it
-(principle 4, ADR-0003). A backend that cannot run `pi` cannot be Pi Central's backend on Linux,
-however well its policy language fits — and the fit is *good*, which is what makes the blocker easy to
-miss. The pack also records the pair it was tested against; read this as *the last recorded state*, not
-as a measurement of the current pair.
+I labelled it "a quotation" and moved on, and then let it carry the recommendation. That was the wrong
+call twice over: a quotation is a source, not a test, and this one contradicts Box's own behaviour
+documentation. [harness/check-pi-linux-claim.sh](harness/check-pi-linux-claim.sh) dates the claim
+against the code:
 
-Node in a JIT inside a namespace sandbox is neither a Pi Central problem nor a Box bug: it is what
-Linux executable-memory restrictions do to a JIT, which Box documents at length. The repair is
-upstream, in one project or the other.
+```text
+== 1. the pack still claims pi does not run on Linux ==
+PASS  the @box/pi README on main still carries the Linux limitation
 
-## What this spike could not measure, and why
+== 2. the behaviour document says the opposite ==
+PASS  platform-differences.md says Linux permits writable-and-executable mmap/mprotect
+
+== 3. the commit that changed it, and when ==
+      f7af148b  2026-11-19T15:50:23Z
+      fix(containment): allow executable memory on Linux so JIT runtimes run (#488)
+PASS  the commit is the one that allowed executable memory for JIT runtimes
+      pack README last touched: 2026-11-24T20:13:34Z
+PASS  the JIT fix predates the last edit to the pack README, so the README was not re-tested after it
+
+RESULT: the claim is STALE - the behaviour changed before the pack README was last edited
+```
+
+The behaviour document — the table an operator reads to learn what the kernel allows where — now says:
+
+> Linux permits writable-and-executable `mmap` and `mprotect` with `PROT_EXEC`, so a JIT runtime
+> runs. It refuses every `pkey_mprotect` request. macOS has no filter here.
+
+And Box's design decision states why the per-process opt-in discussed in issue
+[#42](https://github.com/strands-agents/box/issues/42) was not needed: macOS has no counterpart rule, so
+a per-table key "would add a setting without closing a route". The whole class was permitted instead.
+The V8 abort that the pack describes is the *old* behaviour, documented in issue #42 before it was
+closed on 2026-11-19 — the same day as the fix.
+
+Two things follow, and both matter more than the correction itself:
+
+1. **A stale line can defeat a correct spike.** The first version of this file recommended *against*
+   option C on the strength of a sentence nobody had re-tested. That is exactly the failure
+   `docs/PRINCIPLES.md` rule 8 ("never state something false") exists to prevent, arriving from the
+   direction of quoting rather than inventing.
+2. **Upstream's docs contradict each other.** The same `linux-enforcement.md` that says
+   "Writable-and-executable `mmap` … are permitted" carries a glossary row saying "Box refuses
+   executable access through `mprotect`". Careful reading is not a substitute for measuring, in either
+   project.
+
+## What is still not measured, and what that now means
 
 `box run` cannot start **any** workload from inside this harness:
 
@@ -220,33 +252,35 @@ independently with a three-line `node` script, to rule Box out as the cause. So:
   keeps `pi`'s stdio byte-clean for JSONL framing (C7), whether it exits with the workload's status,
   whether the activity banner can be suppressed in a non-TTY, and whether the broker socket is a
   second non-nesting constraint are all **open**. Each needs a plain terminal.
-- **Linux was not measurable at all.** This is a Mac. Every Linux statement above is a quotation from
-  a document, and is marked as one.
+- **A Linux box was not measurable at all.** This is a Mac. The correction above is documentation and
+  repository history — strong evidence that the claim is stale, and not the same as watching `pi`
+  start in a Linux box.
 
-## What would have proved this wrong
+The distinction matters for what to do next, so it is worth stating plainly: *the claim is stale* is
+**not** the same as *pi runs on Linux*. The first is proven; the second is now the open question, and
+it is one command.
 
-- **That the deny set does not translate.** It did, except one rule — and that exception is
-  demonstrated by a *refusal*, not by an omission, which is the difference between "we could not write
-  it" and "we did not".
-- **That the credential story is macOS-shaped.** It is not; it is the strongest part of the port.
-- **That `pi` runs in a Box on Linux.** The pack says otherwise. One `box run pi` on an ARM64 Linux
-  host falsifies this whole result, and is the single experiment worth running next.
+## What would settle it
 
-## Recommendation for the decision (not taken here)
+**`box run pi -- --version` on an ARM64 Linux host.** That is the experiment, and it is the only one
+this spike leaves undone. It needs a Linux machine, a Box install, and pi installed through npm — none
+of which exists here.
 
-The issue asks for an ADR or a refusal. Neither is honest yet, but the shape is now determined:
+- If it works, Box is a live candidate and the port is bounded by the two items above: the unix-socket
+  deny (weaker under Box, or expressible only through a sanitized environment) and the exact-path
+  limitation of the filesystem lists.
+- If it fails, the failure will name its own cause. A V8 abort with `pkey_mprotect` in a `strace` is
+  a different problem from exit 133 on a JIT page, and the pack's sentence does not distinguish them.
 
-1. **Correct the framing first.** C10 records that *Safehouse* is macOS-only, and the README repeats it.
-   The measured statement is wider and less flattering: **the pair (`pi`, sandbox backend) has no
-   cross-platform instance today**, and that is true of every backend examined — including the one with
-   the better policy language.
-2. **Option C is ruled out for now by an upstream blocker**, not by an integration cost. Re-open it
-   when `@box/pi` drops that limitation, and expect the port to be cheap when it does, because the two
-   hard parts (policy and credentials) measured well.
-3. **Option B's interface is now specified by evidence**, and it is three things rather than two: an
-   argv, a policy whose `forbid` wins *regardless of order*, and an explicit statement of which file
-   operations the policy covers — the agent's own tools or only the shell. A backend that cannot deny a
-   unix socket must refuse a deny for one.
-4. **Option A's cost is unchanged and should be stated plainly**: the product's own code barely assumes
-   Darwin (four `process.platform` checks), and the product stays macOS-only because of a dependency it
-   does not own.
+## What this spike established, independent of that experiment
+
+- The deny set translates, and one deny has no rule-shaped counterpart — measured by a *refusal*, not
+  an omission.
+- Box's policy semantics are simpler than SBPL's for this use, and the property to require of any
+  backend is order-independence rather than "an appended fragment".
+- Box's credential model is cross-platform and stronger than ADR-0010 requires, at the cost of moving
+  the boundary into the profile.
+- A backend interface is **three** things, not two: an argv, a policy whose `forbid` wins regardless
+  of order, and a statement of which file operations that policy covers.
+- The macOS-only claim in C10 and the README describes *Safehouse*, and the port's cost is in the
+  backend, not in Pi Central: four `process.platform` checks across `packages/`.
