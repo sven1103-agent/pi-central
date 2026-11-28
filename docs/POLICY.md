@@ -103,10 +103,27 @@ $ box run pi -- --version
 That is Seatbelt working. Box's composed profile grants `/etc/ssl` — the system copy — and Homebrew's
 node opens its own, beside the formula. The refusal is correct; the grant is incomplete for this node.
 
-### The overlay, which is yours
+### The overlay, which is yours — and where it lives, honestly
 
-`~/.config/pi-central/profiles/macos-homebrew.toml`, referenced from the installation policy. Three
-paths, because that is what node touches:
+**Two different files, and only one of them exists today.** Lumping them together would be the
+comfortable thing to write and the wrong thing to ship, so they are kept apart:
+
+| File | Exists today? | Whose problem it fixes |
+|---|---|---|
+| `~/.strands/box/profiles/<name>/profile.toml` | **yes** — Box reads it | a Box profile that cannot start the agent on this machine |
+| `~/.config/pi-central/policy/*.toml` | **not yet** — slice [#314] builds it | Pi Central narrowing its own denied set |
+
+The rule above applies to **both**, and only the first is usable right now. The state root
+(`~/.config/pi-central`) is where Pi Central keeps its own state — measured: it holds
+`open-sessions.json`, `preferences.json`, `sidecars/` and `policy/` — but `config.ts` reads **no
+config file at all** (`readFileSync` appears zero times), so nothing there is consulted for policy
+yet. Saying otherwise would be documenting an intention as a feature.
+
+#### Today: the Box profile overlay
+
+`~/.strands/box/profiles/<name>/profile.toml`, beside the `policy.dw` that `box profile create` writes.
+Box reads it, so this is the only override that works before slice [#314] lands. Three paths, because
+that is what node touches:
 
 ```toml
 # Installation overlay — NOT shipped, NOT part of the solo profile.
@@ -127,6 +144,12 @@ read = [
   "/opt/homebrew/etc/openssl@4/certs",
 ]
 ```
+
+#### Tomorrow: the Pi Central installation policy
+
+`~/.config/pi-central/policy/`, one file per overlay, loaded by the orchestrator and refused if it would
+widen. That is slice [#314]'s deliverable and the reason the rule is written now: the mechanism does not
+exist, and the constraint on what may go in it does.
 
 **It merges, measured rather than assumed.** `[agent.filesystem] read` in a profile is *appended* to
 the pack's list, not substituted for it. The composed result keeps the pack's four entries and adds the
@@ -282,3 +305,5 @@ ADR-0020's test gains two rows, because a backend that cannot express these is n
 - **A `solo` rule that turns out to be wrong for a real workflow**, more than once for the same rule. Then
   it belongs in the installation layer, not the shipped one — the profile is an opinion, and opinions that
   keep being overridden are wrong.
+
+[#314]: https://github.com/sven1103-agent/pi-central/issues/314
