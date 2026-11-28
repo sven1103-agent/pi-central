@@ -61,7 +61,7 @@ says "opened first, closed last" rather than "first".
 
 | # | Slice | Evidence | How it is verified | State |
 |---|---|---|---|---|
-| 9-1 | **Is a second backend worth defining?** An ADR that either defines the boundary or declines the port with a reason | [ADR-0020](decisions/0020-a-sandbox-is-a-defined-boundary.md), citing this increment and the spike | `kind/decision` — reviewed, not tested | **opened** — Proposed; closed last, after 9-2 and 9-3 |
+| 9-1 | **Is a second backend worth defining?** An ADR that either defines the boundary or declines the port with a reason | [ADR-0020](decisions/0020-a-sandbox-is-a-defined-boundary.md), citing this increment and the spike | `kind/decision` — reviewed, not tested | **Accepted** — both blocking measurements reported |
 | 9-2 | **Does `pi` start in a box on Linux?** The probe, run on a hosted ARM64 runner | a workflow run with its exit status and both stdio files | `verified/measured` — an exit status | proposed |
 | 9-3 | **Does a started box confine a unix socket?** The one deny with no rule-shaped counterpart | a probe that reports `REFUSED`, beside a control that connects | `verified/manual` — needs a Linux host | proposed |
 | 9-4 | **Does Box keep `pi`'s stdio byte-clean?** One JSONL frame in, one parseable line out (C7) | a parse assertion, not a screenshot | `verified/auto` once scripted | proposed |

@@ -374,3 +374,66 @@ or a real refusal is exactly what the next run must separate.
 **The permissive control is why this is visible at all.** Without it, an empty result would have read as
 "REFUSED" and the boundary would have been credited with an effect nobody measured.
 
+
+## The unix socket: REFUSED, measured with a permissive control
+
+**Run [46152475032](https://github.com/sven1103-agent/pi-central/actions/runs/46152475032)**, Box 0.3.3,
+`ubuntu-24.04-arm`, one job, both arms:
+
+```console
+=== permissive control: the host itself, with no box ===
+control:  CONNECTED
+=== the box: a profile whose workload does the same connect ===
+boxed:    REFUSED
+REFUSED BY THE BOX: the control connected, the box did not.
+```
+
+So the one deny with **no rule-shaped counterpart** in Box's policy language is enforced anyway — by the
+mount view, not by a rule. The boundary holds for a unix socket the box was never told about.
+
+**This is a stronger result than the rule it replaces, and the reason is worth stating.** Today's
+protection is `(deny network-outbound (remote unix-socket …))` — an enumerated list of launchd socket
+paths plus `~/.ssh/agent`, written twice at two specificities because SBPL resolves by last match. A
+list fails open on the next socket name nobody predicted; this repository has already been bitten by
+exactly that class with a four-name credential list. A mount view that never exposes the socket path
+cannot be enumerated wrong.
+
+What it does **not** say: whether the refuse was `ENOENT` (invisible in the mount view) or `EPERM`.
+That distinction matters for the backend interface — the third part was "which file operations the
+policy covers" and this makes it "which operations, by what mechanism" — but it does not change the
+answer to the question asked.
+
+### Why it took nine runs, and every one was the harness
+
+Recorded because the failure pattern is the reusable part, and because a reader deserves to know how
+much of this measurement was measurement and how much was archaeology.
+
+| # | What was wrong | How it showed up |
+|---|---|---|
+| 1 | the step wrote the probe and never ran it | a step that looked like it did something |
+| 2 | `python3 -c "import socket:socket.socket(...)"` is a syntax error | **both** arms said REFUSED |
+| 3 | `box run <profile> -- <args>` gives the args to that profile's **agent** | nothing printed |
+| 4 | `[limits.shell] command` is not a key; `[agent] command` is | "unknown key" — read off the composed dump after three guesses |
+| 5 | a bare `["/bin/bash"]` makes the args bash's own argv | ran the script path *as a script*: exit 1, no output |
+| 6 | `["/bin/bash", "-c"]` composed and launched, still exit 1 silently | no output, again |
+| 7 | `[agent.filesystem] read/exec = ["/usr/bin"]` | **refused**: "a system root is never a grantable tree" |
+| 8 | my own diagnostic printed `sed -n '1,4p'` of stderr | the error was on **line 9** |
+
+Two of these were caught only by the permissive control, and (8) is the worst of them: a truncation I
+wrote hid the message I was looking for across three runs. The lesson is not "be careful" — it is that
+**a check whose output you suppress is not a check**.
+
+### A finding that arrived sideways, and belongs in ADR-0020
+
+`/usr/bin` is refused as a grant, and Box says why in one line:
+
+```console
+strands-box: error[B0102]: \`[agent]\` filesystem entry "/usr/bin" is refused:
+  grant is too broad to be authorized: /usr/bin (a system root is never a grantable tree)
+```
+
+The exact-path limitation ADR-0020 records for `filesystem.deny` also applies to **grants**, and it
+applies to system roots specifically. That constrains a backend interface more than the ADR currently
+says: a second backend must be able to grant "the session may execute its interpreter" without the
+interface assuming a PATH prefix is expressible.
+

@@ -1,6 +1,6 @@
 # ADR-0020 — A sandbox is a defined boundary, and macOS is merely where the only one runs
 
-- **Status:** Proposed — one of its two blocking measurements has reported (see *Ordering*)
+- **Status:** Accepted — both blocking measurements have reported (see *Ordering*)
 - **Date:** 2026-11-28
 - **Opened by:** issue [#303], slice [#304]
 - **Depends on:** [#305] (does `pi` start in a box on Linux) and [#306] (does a started box confine a unix
@@ -147,13 +147,26 @@ Stated so a future backend is judged rather than argued about. Each row can fail
 [#306] report, and an ADR cannot be half-accepted, which is why this status is one word rather than a
 list of completed criteria.
 
-**Progress: [#305] has reported.** Measured on `ubuntu-24.04-arm` with Box 0.3.3 and pi 1.7.0,
-`box run pi -- --version` exits **0** and prints `1.7.0`. So the pack's "does not run on Linux" line is
-stale *in fact*, and the platform can host the session.
-[#306] — whether a started box refuses a unix-socket connect — is **still unmeasured**: the probe's
-boxed arm produced no output at all, which is a tool-mapping problem in its own harness and not a
-finding about the boundary. That distinction is the reason this record stays `Proposed`: it needs the
-second measurement, and an empty result is not one.
+**Both have reported, and the record is Accepted.**
+
+[#305]: measured on `ubuntu-24.04-arm` with Box 0.3.3 and pi 1.7.0, `box run pi -- --version` exits
+**0** and prints `1.7.0`. The pack's "does not run on Linux" line is stale *in fact*, and the platform
+can host the session.
+
+[#306]: measured with a **permissive control** beside it — the control connected, the boxed arm was
+`REFUSED`. So the one deny with no rule-shaped counterpart is enforced anyway, **by the mount view and
+not by a rule**. That is stronger than the enumerated socket-path rule it replaces, because a view that
+never exposes the path cannot be enumerated wrong.
+
+Two things this does **not** decide, and neither is a reason to withhold acceptance:
+whether the refusal is `ENOENT` (invisible) or `EPERM` (denied), which the backend interface must
+eventually state; and whether the port is *worth* doing, which is [#310]'s business and not this
+record's.
+
+**One finding that arrived sideways belongs in the interface.** Box refuses `/usr/bin` as a grant —
+*"a system root is never a grantable tree"* — so the exact-path limitation this record notes for
+`filesystem.deny` also constrains **grants**, and system roots specifically. The interface must let a
+backend grant "the session may execute its interpreter" without assuming a PATH prefix is expressible.
 
 If [#305] fails, this record is **not** silently abandoned and does not become "proposed, pending more
 research". It moves to `Rejected`, with the measured reason, by the rule below.
