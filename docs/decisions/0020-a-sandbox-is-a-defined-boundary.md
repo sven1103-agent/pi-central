@@ -1,6 +1,6 @@
 # ADR-0020 — A sandbox is a defined boundary, and macOS is merely where the only one runs
 
-- **Status:** Proposed
+- **Status:** Proposed — one of its two blocking measurements has reported (see *Ordering*)
 - **Date:** 2026-11-28
 - **Opened by:** issue [#303], slice [#304]
 - **Depends on:** [#305] (does `pi` start in a box on Linux) and [#306] (does a started box confine a unix
@@ -146,6 +146,14 @@ Stated so a future backend is judged rather than argued about. Each row can fail
 [#305]–[#313] from each inventing one. It moves `Proposed` → `Accepted` **only** when [#305] and
 [#306] report, and an ADR cannot be half-accepted, which is why this status is one word rather than a
 list of completed criteria.
+
+**Progress: [#305] has reported.** Measured on `ubuntu-24.04-arm` with Box 0.3.3 and pi 1.7.0,
+`box run pi -- --version` exits **0** and prints `1.7.0`. So the pack's "does not run on Linux" line is
+stale *in fact*, and the platform can host the session.
+[#306] — whether a started box refuses a unix-socket connect — is **still unmeasured**: the probe's
+boxed arm produced no output at all, which is a tool-mapping problem in its own harness and not a
+finding about the boundary. That distinction is the reason this record stays `Proposed`: it needs the
+second measurement, and an empty result is not one.
 
 If [#305] fails, this record is **not** silently abandoned and does not become "proposed, pending more
 research". It moves to `Rejected`, with the measured reason, by the rule below.

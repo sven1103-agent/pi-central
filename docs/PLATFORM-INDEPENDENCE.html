@@ -470,6 +470,7 @@
         <span>Written 28 November 2026</span>
         <span>Nothing here is ported yet</span>
         <span>Eleven pieces of work planned</span>
+        <span>One question answered by measurement</span>
       </div>
     </header>
 
@@ -747,8 +748,32 @@
     <hr class="section-rule">
     <h2 id="unproven">What is still unproven</h2>
 
-    <p class="lead-in">Two questions. Both are commands, not design arguments. Until the first is run, the
-    honest state is "probably feasible, and feasibility unproven".</p>
+    <p class="lead-in">Two questions, and one of them has now been answered by running it. The section is
+    kept in its original form with the answer added, because the way the first answer arrived is worth
+    more than the answer.</p>
+
+    <div class="answer" style="margin-top:26px">
+      <p><strong>Answered: the agent program does start in a box on Linux.</strong></p>
+      <p>Measured on a hosted ARM64 runner with Box 0.3.3 and pi 1.7.0 — the command exited
+      <strong>0</strong> and printed <code>1.7.0</code>. The upstream line saying it cannot run is stale in
+      fact, not merely in date. The measurement cost a button, not a Linux desktop.</p>
+    </div>
+
+    <div class="aside warn">
+      <h4>And the first attempt got it wrong, which is the useful part</h4>
+      <p>The first run exited non-zero. Under the probe's own scheme that reads as "aborted: the memory
+      protection still refuses the program". It was nothing of the kind — the box had refused at
+      <em>credential setup</em>, before launching anything, because the profile under test carried a model
+      provider route and no key was set.</p>
+      <p>A missing secret wore the costume of a platform limitation. That is the third time in this work
+      that a claim nearly travelled further than its evidence, and the first time running the thing is
+      what caught it.</p>
+      <p>The probe now names this failure in its own output, so the next reader meets the trap before
+      falling into it.</p>
+    </div>
+
+    <p>Below is the section as it stood before the answer, because the remaining question is still open and
+    the shape of the thinking did not change.</p>
 
     <div class="table-wrap">
       <table>
@@ -757,11 +782,11 @@
         </thead>
         <tbody>
           <tr>
-            <td data-label="The question"><strong>Does the agent program start inside a box on Linux?</strong></td>
-            <td data-label="Why it decides everything">If it cannot start, nothing downstream matters. If it starts, the port is real.</td>
+            <td data-label="The question"><strong>Does the agent program start inside a box on Linux?</strong> <span class="pill settled">answered</span></td>
+            <td data-label="Why it decides everything">If it cannot start, nothing downstream matters. If it starts, the port is real. <strong>It starts</strong> — exit 0, and it printed its version.</td>
           </tr>
           <tr>
-            <td data-label="The question"><strong>Does a started box refuse a unix-socket connection?</strong></td>
+            <td data-label="The question"><strong>Does a started box refuse a unix-socket connection?</strong> <span class="pill open">still open</span></td>
             <td data-label="Why it decides everything">It is the one protection with no equivalent form in the new policy language. If it cannot be
             expressed, the port loses something we have today.</td>
           </tr>
