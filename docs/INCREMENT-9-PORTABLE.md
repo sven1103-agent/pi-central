@@ -66,6 +66,22 @@ says "opened first, closed last" rather than "first".
 | 9-7 | **The Linux backend, behind the interface** | a session on Linux confined, with a deny proven against a live session | `verified/manual` — a plain terminal on Linux | proposed |
 | 9-8 | **`capabilities.ts` survives its subject**: the two-way diagnosis without a keychain | the same tests, keychain finding removed, five findings intact | `verified/auto` | proposed |
 | 9-9 | **A Linux machine says what it is running**: `--check-config` states the backend and its limits | the output, on both platforms | `verified/manual` — two hosts | proposed |
+| 9-10 | **The GitHub identity survives the port**: the `gh` token and signing still work, or say why not | a commit pushed as the agent against the real remote | `verified/manual` — needs a real remote | proposed |
+
+**Slice-to-story map**, so no story is left without work and no slice without a reason:
+
+| Story | Slices |
+|---|---|
+| US-P1 — run on Linux with real confinement | 9-2, 9-3, 9-7 |
+| US-P2 — the macOS boundary stays as strong | 9-5, 9-7 |
+| US-P3 — the keychain stops being a gauntlet | 9-6 |
+| US-P4 — the GitHub identity still works | 9-6, 9-10 |
+| US-P5 — never surprised by which isolation I got | 9-9 |
+| US-P6 — the decision is recorded | 9-1 |
+
+9-10 exists because the map found it: US-P4 had no slice of its own, and the measured finding it rests
+on — Box does not route the token for `git push` — is the opposite of what the spike first assumed. A
+story with no slice is how a plan quietly drops a requirement.
 
 **Which slices can be closed by a stranger on any machine.** 9-1, 9-5 and 9-8 are ordinary code and
 review work. 9-2 and 9-4 need a hosted runner, which this repository already has. 9-3, 9-6, 9-7 and
