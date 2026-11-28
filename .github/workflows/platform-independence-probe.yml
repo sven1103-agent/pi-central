@@ -158,7 +158,13 @@ jobs:
             # -c, because box appends its args to this command: with a bare bash they became
             # bash's own argv, so "bash /bin/echo ARGS-ARRIVED" ran /bin/echo AS A SCRIPT and
             # exited 1 with no output -- which read as a boundary refusal for four runs.
-            echo 'command = ["/bin/bash", "-c"]'
+            # NODE, exactly parallel to pi's own profile -- node plus args, the one shape that has
+            # demonstrably worked here (pi --version printed 1.7.0). Two earlier shapes failed for
+            # harness reasons unrelated to the boundary: a bare ["/bin/bash"] made the args bash's
+            # argv (it ran the script PATH as a script: exit 1, no output), and ["/bin/bash", "-c"]
+            # composed and launched but still exited 1 silently, with Box having DROPPED /bin from
+            # both read and exec -- visible in the log as only /usr/bin and /usr/local/bin.
+            echo 'command = ["/usr/local/bin/node"]'
             echo ""
             echo "[agent.filesystem]"
             echo 'read = ["/bin", "/usr/bin", "/usr/local/bin"]'
@@ -295,8 +301,8 @@ jobs:
           echo ""
           echo "=== DOES THE SHELL PROFILE RUN ANYTHING AT ALL? ==="
           echo "A boundary refusal and a profile that never executed look identical from outside."
-          echo "-- box run shell -- 'echo ARGS-ARRIVED' --"
-          box run shell -- 'echo ARGS-ARRIVED' 2>/tmp/echo.err
+          echo "-- box run shell -- --version --"
+          box run shell -- --version 2>/tmp/echo.err
           echo "exit: $?"
           sed -n '1,4p' /tmp/echo.err
           echo ""
@@ -319,7 +325,7 @@ jobs:
           s.on("error", () => { console.log("REFUSED"); });
           s.on("timeout", () => { console.log("REFUSED"); s.destroy(); });
           MJS
-          boxed=$(box run shell -- 'node socket-connect.mjs' 2>/tmp/socket.err)
+          boxed=$(box run shell -- socket-connect.mjs 2>/tmp/socket.err)
           echo "boxed:   $boxed"
           sed -n '1,6p' /tmp/socket.err
 
