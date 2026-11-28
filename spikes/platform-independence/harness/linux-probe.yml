@@ -208,17 +208,28 @@ jobs:
           sleep 1
           ls -l /tmp/box-socket-probe 2>&1
 
+          # The connect is a real script, not a python -c one-liner. The first version used
+          # "import socket:socket.socket(...)", which is a SYNTAX ERROR -- so both arms printed
+          # REFUSED and the control is the only reason that was visible. A probe that cannot succeed
+          # reads exactly like a boundary that holds.
           cat > socket-probe.sh <<'PROBE'
           #!/bin/sh
-          if python3 -c "import socket:socket.socket(socket.AF_UNIX).connect('/tmp/box-socket-probe')" 2>/dev/null; then
-            echo "CONNECTED"
-          else
-            echo "REFUSED"
-          fi
+          exec python3 "$(dirname "$0")/socket-connect.py"
           PROBE
+          cat > socket-connect.py <<'PY2'
+          import socket, sys
+          s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+          s.settimeout(2)
+          try:
+              s.connect("/tmp/box-socket-probe")
+              print("CONNECTED")
+          except OSError:
+              print("REFUSED")
+          PY2
           chmod +x socket-probe.sh
-          cat socket-probe.sh
-
+          # Prove the probe CAN say CONNECTED before trusting it to say REFUSED.
+          echo "=== the probe run by hand, against its own listener ==="
+          python3 ./socket-connect.py
           echo ""
           echo "=== permissive control: the host itself, with no box ==="
           control=$(sh ./socket-probe.sh)
