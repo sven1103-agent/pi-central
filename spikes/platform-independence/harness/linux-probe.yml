@@ -10,10 +10,15 @@
 # on an ordinary push; and it downloads third-party release binaries, which a spike should do on
 # request rather than on every commit.
 #
-# Copy this file to .github/workflows/platform-independence-probe.yml to use it, then:
+# Installed at .github/workflows/platform-independence-probe.yml. This is the canonical source: edit
+# here and copy it there, so the spike keeps a copy that does not require the workflow to exist.
 #
 #   gh workflow run platform-independence-probe.yml
 #   gh run watch
+#
+# Why a hosted runner and not a local VM: the repository is public, so Actions minutes are not billed,
+# and ubuntu-24.04-arm is Box's own reference architecture. A Mac without a Linux desktop can still
+# verify the port. See spikes/platform-independence/VERIFYING.md.
 #
 # Every step reports rather than guessing. A step that cannot run says so and continues, so the job
 # ends with a paragraph of facts instead of a red X that means nothing.
@@ -22,9 +27,6 @@ name: platform-independence-probe
 on:
   workflow_dispatch:
     inputs:
-      box_version:
-        description: "Box release to install (empty = latest stable)"
-        required: false
       runner:
         description: "Runner label. ubuntu-24.04-arm is Box's reference architecture."
         required: false

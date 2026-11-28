@@ -52,6 +52,12 @@ jobs:
       - name: Documentation references resolve
         run: npm run check:docs
 
+      # The portability probe exists twice: the canonical source under spikes/ (readable without the
+      # workflow existing) and the installed copy GitHub runs. A duplicate invites silent drift, so the
+      # equality is a check rather than a habit. See spikes/platform-independence/VERIFYING.md.
+      - name: The portability probe's two copies agree
+        run: sh spikes/platform-independence/harness/check-probe-installed.sh
+
       - name: UI production build
         run: npm run ui:build
 

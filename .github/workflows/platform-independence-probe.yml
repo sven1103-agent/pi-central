@@ -1,0 +1,174 @@
+# Does pi run in a Strands Box on Linux? The one experiment the spike left undone.
+#
+# RESULT.md ends with this as the open question, because the machine the spike ran on is a Mac in a
+# Seatbelt sandbox: box run cannot start ANY workload there (it cannot bind its broker socket), so
+# nothing could be observed. A hosted runner has a real kernel, and ubuntu-24.04-arm is the same
+# architecture Box's own reference target uses (Amazon Linux 2023 ARM64), so it is the closest thing
+# to that target that is available without provisioning hardware.
+#
+# Deliberately workflow_dispatch only. It installs software and starts a sandbox, so it must never run
+# on an ordinary push; and it downloads third-party release binaries, which a spike should do on
+# request rather than on every commit.
+#
+# This is the installed copy. The canonical source is
+# spikes/platform-independence/harness/linux-probe.yml -- edit that one and copy it here, so the spike
+# keeps a copy that does not require the workflow to exist.
+#
+#   gh workflow run platform-independence-probe.yml
+#   gh run watch
+#
+# Why this runner and not a local VM: the repository is public, so Actions minutes are not billed, and
+# ubuntu-24.04-arm is Box's own reference architecture. A Mac without a Linux desktop can still verify
+# the port. See spikes/platform-independence/VERIFYING.md.
+#
+# Every step reports rather than guessing. A step that cannot run says so and continues, so the job
+# ends with a paragraph of facts instead of a red X that means nothing.
+name: platform-independence-probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "Runner label. ubuntu-24.04-arm is Box's reference architecture."
+        required: false
+        default: "ubuntu-24.04-arm"
+
+jobs:
+  pi-in-a-box:
+    runs-on: ${{ inputs.runner || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 20
+    steps:
+      - name: Record the environment
+        run: |
+          echo "== architecture and kernel =="
+          uname -m; uname -r
+          getconf GNU_LIBC_VERSION || true
+          echo "== the whole question, in one line =="
+          echo "Can 'pi' start inside a Strands Box on this host?"
+
+      # Box cannot build its cage without unprivileged user namespaces, and Ubuntu 23.10+ gates them
+      # behind an AppArmor profile. Hosted runners grant passwordless sudo, so the knob can be cleared
+      # for the job. Copied from Box's own CI, where the same step explains itself the same way.
+      #
+      # Reported, never silently assumed: if the knob is absent or the write is refused, the log says
+      # so, because "userns unavailable" and "pi cannot run" are different findings and this spike has
+      # already confused two claims once.
+      - name: Allow unprivileged user namespaces
+        run: |
+          knob=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [ -e "$knob" ]; then
+            echo "before: $(cat "$knob")"
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 \
+              || echo "WARNING: could not clear the AppArmor userns restriction"
+            echo "after:  $(cat "$knob")"
+          else
+            echo "knob absent -- this kernel does not restrict unprivileged userns"
+          fi
+          unshare --user --map-root-user true \
+            && echo "unshare(CLONE_NEWUSER): OK" \
+            || echo "WARNING: unshare(CLONE_NEWUSER) still refused"
+
+      - name: Install Box
+        run: |
+          cd "$(mktemp -d)"
+          curl -fsSL https://raw.githubusercontent.com/strands-agents/box/main/install.sh -o install.sh
+          # A hosted runner cannot run the macOS signature check, and this is Linux, which has none.
+          sh install.sh
+          export PATH="$HOME/.local/bin:$PATH"
+          box --version
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # npm, not pi's own installer: the @box/pi pack runs pi's script through node, and says so in its
+      # troubleshooting section ("pi from its own installer doesn't run. Install it with npm.").
+      - name: Install pi the way the pack requires
+        run: |
+          node --version
+          npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+          command -v pi
+          ls -l "$(command -v pi)"
+          pi --version
+
+      - name: Create a pi profile
+        run: |
+          mkdir -p "$RUNNER_TEMP/project" && cd "$RUNNER_TEMP/project"
+          # --policy is explicit so the command cannot block on a prompt in a non-TTY.
+          box profile create pi --with @box/pi,@box/anthropic --policy scoped
+          box profile show pi --full
+
+      # THE MEASUREMENT. `--version` is the smallest command that proves pi started: it needs node,
+      # its script, and nothing else -- no model, no key, no network. If this works, the claim in the
+      # pack's README is stale in fact and not only in date. If it fails, the failure names its own
+      # cause, which is why the full stdout and stderr are kept rather than grepped.
+      - name: Does pi start inside a box?
+        id: pi
+        run: |
+          cd "$RUNNER_TEMP/project"
+          set +e
+          box run pi -- --version > "$RUNNER_TEMP/pi.out" 2> "$RUNNER_TEMP/pi.err"
+          status=$?
+          set -e
+          echo "exit status: $status"
+          echo "--- stdout ---"; cat "$RUNNER_TEMP/pi.out"
+          echo "--- stderr ---"; cat "$RUNNER_TEMP/pi.err"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      # The shell, separately from the agent: a box that starts pi but whose Shell cannot run a command
+      # is not usable, and the two are different mechanisms (agent command vs Strands Shell).
+      - name: Does a shell command run inside a box?
+        run: |
+          cd "$RUNNER_TEMP/project"
+          set +e
+          box run pi -- -p "run the shell command: echo SHELL-OK > $TMPDIR/probe.txt && cat $TMPDIR/probe.txt" \
+            > "$RUNNER_TEMP/shell.out" 2>&1
+          echo "exit status: $?"
+          tail -40 "$RUNNER_TEMP/shell.out"
+          echo "(a model key is absent, so a failure here is expected and is not the question -- the"
+          echo " question above is whether pi STARTS. This step is here to keep the two apart.)"
+          set -e
+
+      # Does a route replace the keychain? No key is needed: the box either accepts the route's
+      # stand-in and sends it, or the profile refuses to compose. --version above proves startup;
+      # this proves the credential path is wired.
+      - name: Is the provider route wired?
+        run: |
+          cd "$RUNNER_TEMP/project"
+          box profile show pi --full | grep -A6 'egress.anthropic' || \
+            echo "NOTE: no anthropic route in the composed profile"
+
+      # The one gap the spike could not close: does a box, once it actually starts, let a workload
+      # reach the host's unix sockets? The spike measured that Dogwood has no socket-shaped field for
+      # net:connect, and that a rule naming one is REFUSED. What it could not measure is whether the
+      # remaining control — not granting the path — is sufficient, because no box would start.
+      #
+      # Kept narrow on purpose: this asks ONE question, and a failure here is a finding rather than a
+      # reason to distrust the pi result above.
+      - name: Can a workload connect to a host unix socket?
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP/project"
+          # A profile whose only workload writes to a unix socket the sandbox was never told about.
+          # printf, not a heredoc: an indented heredoc terminator does not close with <<'DW', so the
+          # first version of this step would have failed for a shell reason and looked like a finding.
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'if printf "x" | nc -U -w1 /tmp/box-socket-probe 2>/dev/null; then' \
+            '  echo "CONNECTED"' \
+            'else' \
+            '  echo "REFUSED"' \
+            'fi' > socket-probe.sh
+          chmod +x socket-probe.sh
+          echo "probe written; see RESULT.md for how to read the answer"
+          cat socket-probe.sh
+
+      - name: Verdict
+        if: always()
+        run: |
+          echo "=== what this run established ==="
+          echo "pi started in a box (exit 0):  ${{ steps.pi.outputs.status == '0' }}"
+          echo "exit status recorded:          ${{ steps.pi.outputs.status }}"
+          echo ""
+          echo "The .out and .err files above are the evidence. Read them before acting on this:"
+          echo "  exit 0                  -> the @box/pi 'doesn't run on Linux' line is stale in fact"
+          echo "  exit 133, V8 / errno    -> executable memory, i.e. the Java/Rust class of failure"
+          echo "  a namespace or sudo err -> the HOST refused the cage, and pi was never started"
+          echo "That third case is a different finding, and the log above says which one happened."
