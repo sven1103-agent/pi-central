@@ -145,9 +145,12 @@ jobs:
           # pointed at the pack.
           mkdir -p "$HOME/.strands/box/profiles/shell"
           cp -R "$HOME/.strands/box/profiles/pi/." "$HOME/.strands/box/profiles/shell/"
+          # [agent] command -- read off the composed dump above, not guessed. Three earlier attempts
+          # used "agent command", then "[limits.shell] command", and Box refused both with "unknown
+          # key". The composed view names the table and the key, which is why it is printed first.
           {
             echo "# Overrides the agent command supplied by the @box/pi pack."
-            echo "[limits.shell]"
+            echo "[agent]"
             echo 'command = ["/bin/bash"]'
           } >> "$HOME/.strands/box/profiles/shell/profile.toml"
           echo "=== the shell profile's own additions ==="
