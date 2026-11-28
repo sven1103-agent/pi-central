@@ -237,7 +237,10 @@ jobs:
 
           echo ""
           echo "=== the box: a profile whose workload does the same connect ==="
-          boxed=$(box run pi -- sh -c "$(cat ./socket-probe.sh)" 2>/tmp/socket.err)
+          # The FILE, not "$(cat ...)" through sh -c: the first version passed the script text, so
+          # its own "$(dirname "$0")" pointed nowhere and the arm printed nothing at all -- which the
+          # reader below correctly called UNCLASSIFIED rather than a finding.
+          boxed=$(box run pi -- python3 socket-connect.py 2>/tmp/socket.err)
           echo "boxed:   $boxed"
           sed -n '1,6p' /tmp/socket.err
 
