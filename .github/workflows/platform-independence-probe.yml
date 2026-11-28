@@ -133,20 +133,21 @@ jobs:
           # The socket question is about the mount view, not about pi, so the workload only needs to
           # be something that connects. bash is enough and needs no model.
           mkdir -p "$HOME/.strands/box/profiles/shell"
-          cp "$HOME/.strands/box/profiles/pi/profile.toml" "$HOME/.strands/box/profiles/shell/profile.toml"
+          # The whole profile FOLDER, not just the toml: policies[0] names policy.dw beside it, and a
+          # copy that took only the toml failed with "cannot read .../shell/policy.dw".
+          cp -R "$HOME/.strands/box/profiles/pi/." "$HOME/.strands/box/profiles/shell/"
           python3 - <<'PY'
-          import re, os
+          import os, re
           p = os.path.expanduser("~/.strands/box/profiles/shell/profile.toml")
           s = open(p).read()
-          # Replace the agent command array with a plain shell. Kept as a regex over the assignment
-          # rather than a TOML round-trip, because rewriting the whole file would lose its comments.
-          s2, n = re.subn(r'(?ms)^command\s*=\s*\[.*?\n\]', 'command = ["/bin/bash"]', s)
-          if n != 1:
-              s2, n = re.subn(r'(?ms)^command\s*=\s*\[.*?\]', 'command = ["/bin/bash"]', s)
+          # The command is ONE long line, so a multi-line regex matched nothing (measured: n == 0).
+          # Anchored per-line and greedy to the real end of the line instead.
+          s2, n = re.subn(r'(?m)^command\s*=.*$', 'command = ["/bin/bash"]', s)
           open(p, "w").write(s2)
           print("agent command replaced:", n)
           PY
-          grep -n -A2 "^command" "$HOME/.strands/box/profiles/shell/profile.toml" | head -5
+          # Verified by reading it back, because the previous run shipped a profile that still ran pi.
+          grep -n "^command" "$HOME/.strands/box/profiles/shell/profile.toml"
           # A SHELL-ONLY profile, because `box run <profile> -- <args>` hands the args to that
           # profile's tool: `box run pi -- node x.mjs` passes "node x.mjs" to PI, which is why two
           # runs printed nothing. The socket question is about the mount view, not about pi, so it
