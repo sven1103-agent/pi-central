@@ -148,10 +148,19 @@ jobs:
           # [agent] command -- read off the composed dump above, not guessed. Three earlier attempts
           # used "agent command", then "[limits.shell] command", and Box refused both with "unknown
           # key". The composed view names the table and the key, which is why it is printed first.
+          # The inherited [agent.filesystem] is pi's: exec = [node] and read of the node install.
+          # bash is neither, so the shell agent would fail to execute before it could run anything --
+          # which looks identical to a boundary refusal from outside. Both are granted here, and only
+          # /bin, /usr/bin and the project, so this profile stays a shell profile and not wide-read.
           {
             echo "# Overrides the agent command supplied by the @box/pi pack."
             echo "[agent]"
             echo 'command = ["/bin/bash"]'
+            echo ""
+            echo "[agent.filesystem]"
+            echo 'read = ["/bin", "/usr/bin", "/usr/local/bin"]'
+            echo 'write = []'
+            echo 'exec = ["/bin", "/usr/bin", "/usr/local/bin"]'
           } >> "$HOME/.strands/box/profiles/shell/profile.toml"
           echo "=== the shell profile's own additions ==="
           tail -4 "$HOME/.strands/box/profiles/shell/profile.toml"
@@ -279,6 +288,17 @@ jobs:
           echo "=== permissive control: the host itself, with no box ==="
           control=$(sh ./socket-probe.sh)
           echo "control: $control"
+
+          echo ""
+          echo "=== DOES THE SHELL PROFILE RUN ANYTHING AT ALL? ==="
+          echo "A boundary refusal and a profile that never executed look identical from outside."
+          echo "-- box run shell -- /bin/echo ARGS-ARRIVED --"
+          box run shell -- /bin/echo ARGS-ARRIVED 2>/tmp/echo.err
+          echo "exit: $?"
+          sed -n '1,4p' /tmp/echo.err
+          echo ""
+          echo "-- what that profile composes for the agent --"
+          box profile show shell --full 2>&1 | sed -n "/^\[agent\]/,/^\[tool\./p" | head -22
 
           echo ""
           echo "=== the box: a profile whose workload does the same connect ==="
