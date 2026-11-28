@@ -43,6 +43,132 @@ shipping it as data rather than as a `const` is the change; the rules themselves
 one. A profile with a name, a version and a changelog can be cited in an incident review; "our defaults"
 cannot.
 
+### The rule that keeps `solo` portable: no package-manager paths
+
+**A shipped profile may name only what it can derive — the workspace, the home directory. It may not
+contain a package-manager prefix.**
+
+No `/opt/homebrew/…`, no `/usr/local/…`, no `/nix/store/…`, no `~/.cargo/…`. Those paths are one
+machine's furniture: a Homebrew prefix, a formula version, a layout choice. Shipping them means the
+profile carries a stranger's install into every copy, and rots silently on the next version bump.
+
+This rule exists because the temptation arrived immediately and looked reasonable. On a Homebrew macOS
+machine, the shipped `@box/pi` pack cannot start the agent at all:
+
+```console
+/opt/homebrew/Cellar/node/26.13.1_4/bin/node: OpenSSL configuration error:
+… BIO_new_file:Operation not permitted … fopen(/opt/homebrew/etc/openssl@4/openssl.cnf, rb)
+```
+
+Measured on macOS, 0.3.1, in a run whose composed profile shows Core granting `/etc/ssl` (the *system*
+one) while Homebrew's node opens its own copy beside the formula. The obvious fix is one line in the
+profile — and it is the wrong line to ship, for four reasons stacked:
+
+| What the path encodes | Whose decision it is |
+|---|---|
+| `/opt/homebrew` | one person's Homebrew prefix |
+| `openssl@4` | a formula version that becomes `@5` |
+| `etc/openssl@4/openssl.cnf` | a Homebrew layout choice |
+| that node opens it at startup | this node build's compiled `OPENSSLDIR` |
+
+Four local facts, one line, and every one of them can change without the profile changing with it.
+
+**Where it belongs instead**, in order of preference:
+
+1. **Upstream, in the pack.** `@box/pi` already *searches* for node (`pi.node` is a `(search)`
+   option); it should find the OpenSSL config beside whichever node it found. That is a bug report
+   worth more than any workaround, because it fixes the failure for everyone.
+2. **The installation overlay**, where a person who knows their machine can see the line and own its
+   staleness.
+3. **Never in `solo`.** A shipped profile that does not start on a stock macOS is a smaller problem
+   than one that starts by carrying a path that expires.
+
+`scripts/check-profile-portability.mjs` asserts the rule against the shipped profile data, so the
+temptation fails a check rather than a review.
+
+
+## The installation overlay, worked through
+
+The rule above is easier to accept with a concrete case, so here is the one that produced it: a
+Homebrew macOS machine, Box 0.3.1, the shipped `@box/pi` pack.
+
+### What fails, and it fails honestly
+
+```console
+$ box run pi -- --version
+… /opt/homebrew/Cellar/node/26.13.1_4/bin/node: OpenSSL configuration error:
+    … BIO_new_file:Operation not permitted … fopen(/opt/homebrew/etc/openssl@4/openssl.cnf, rb)
+```
+
+That is Seatbelt working. Box's composed profile grants `/etc/ssl` — the system copy — and Homebrew's
+node opens its own, beside the formula. The refusal is correct; the grant is incomplete for this node.
+
+### The overlay, which is yours
+
+`~/.config/pi-central/profiles/macos-homebrew.toml`, referenced from the installation policy. Three
+paths, because that is what node touches:
+
+```toml
+# Installation overlay — NOT shipped, NOT part of the solo profile.
+#
+# Four local facts are encoded here on purpose, and each is yours to keep current:
+#   /opt/homebrew            your Homebrew prefix
+#   openssl@4                the formula version (becomes @5)
+#   etc/openssl@4/…          Homebrew's layout
+#   node opens it at startup this node build's compiled OPENSSLDIR
+#
+# If node stops starting after an upgrade, this file is the first place to look, and the
+# reason it is a separate file is so that it is findable rather than buried in solo.
+
+[agent.filesystem]
+read = [
+  "/opt/homebrew/etc/openssl@4/openssl.cnf",
+  "/opt/homebrew/etc/openssl@4/cert.pem",
+  "/opt/homebrew/etc/openssl@4/certs",
+]
+```
+
+**It merges, measured rather than assumed.** `[agent.filesystem] read` in a profile is *appended* to
+the pack's list, not substituted for it. The composed result keeps the pack's four entries and adds the
+three overlay paths; `write`, `exec` and `deny` are untouched. That matters because substitution
+would silently drop the agent's access to pi's own install tree — a failure that would look like "pi
+cannot start" and be attributed to the wrong thing.
+
+**What it may not do.** It may not remove a deny, and it may not grant a system root — Box refuses
+`/usr/bin` outright (*"a system root is never a grantable tree"*) and the overlay inherits that. It may
+add a read, add a deny, and nothing else.
+
+### The bug, stated precisely enough to file
+
+The overlay is a workaround, and the composition shows exactly whose bug it is. In one `box profile
+show`:
+
+| Layer | OpenSSL config |
+|---|---|
+| `[tool.node]` — the tools Box found | **granted**, plus `/opt/homebrew/Cellar/openssl@4/4.1.0`, `/opt/homebrew/etc/openssl@4`, `ca-certificates` and 28 dependency receipts |
+| `[agent.filesystem]` — the agent's own list | **granted only because the overlay added it** |
+
+So Box already knows where Homebrew's OpenSSL lives — it derives it for the tool layer from the formula
+— and does not carry that derivation to the agent. The pack searches for node (`pi.node` is a
+`(search)` option) and then grants that one binary, not the runtime node needs.
+
+That is a one-line fix upstream and a report worth filing. The overlay exists so a person is not
+blocked while it is open.
+
+**What it costs.** The staleness is explicit. A version bump moves `openssl@4` to `openssl@5` and the
+overlay breaks with a file-not-found, in a file named after the platform — rather than silently, in a
+shipped profile nobody thinks to check.
+
+### The same fix, done properly, is upstream
+
+`@box/pi` already searches for node (`pi.node` is a `(search)` option). It should search for the
+OpenSSL configuration next to whichever node it found, and the failure disappears for everyone. That
+report is worth filing, and the overlay is what a person uses while the report is open.
+
+An overlay is a **stopgap with an owner**, not a second shipped configuration. If a second overlay
+appears for a second package manager, that is a signal the pack needs fixing, not that Pi Central needs
+a library of them.
+
 ## Three layers, and the direction each may move
 
 ```

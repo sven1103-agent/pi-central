@@ -52,6 +52,13 @@ jobs:
       - name: Documentation references resolve
         run: npm run check:docs
 
+      # A shipped profile may name only what it can derive. The temptation is specific: a
+      # Homebrew macOS box needs /opt/homebrew/etc/openssl@4/openssl.cnf beside node's formula
+      # to start the agent at all, and the one-line fix belongs in an installation overlay.
+      # See docs/POLICY.md. Falsified by adding that path and watching this fail.
+      - name: The shipped profile names no package manager
+        run: npm run check:profile-portability
+
       # The portability probe exists twice: the canonical source under spikes/ (readable without the
       # workflow existing) and the installed copy GitHub runs. A duplicate invites silent drift, so the
       # equality is a check rather than a habit. See spikes/platform-independence/VERIFYING.md.
