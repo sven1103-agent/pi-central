@@ -183,23 +183,67 @@ jobs:
       #
       # Kept narrow on purpose: this asks ONE question, and a failure here is a finding rather than a
       # reason to distrust the pi result above.
+      # The one deny with no rule-shaped counterpart, so the only one a Linux port could LOSE
+      # silently. It needs a live socket, a permissive control, and a box -- which is why it belongs
+      # here and not in a document.
+      #
+      # A refusal with no permissive run beside it is not evidence: a host that simply has no nc, or
+      # no socket, produces the same "REFUSED" as a boundary that works. So both arms are measured.
       - name: Can a workload connect to a host unix socket?
         continue-on-error: true
         run: |
           cd "$RUNNER_TEMP/project"
-          # A profile whose only workload writes to a unix socket the sandbox was never told about.
-          # printf, not a heredoc: an indented heredoc terminator does not close with <<'DW', so the
-          # first version of this step would have failed for a shell reason and looked like a finding.
-          printf '%s\n' \
-            '#!/bin/sh' \
-            'if printf "x" | nc -U -w1 /tmp/box-socket-probe 2>/dev/null; then' \
-            '  echo "CONNECTED"' \
-            'else' \
-            '  echo "REFUSED"' \
-            'fi' > socket-probe.sh
+          set +e
+
+          # A listener with NO server: the kernel accepts the connection onto the backlog, so a
+          # successful connect proves reachability without needing anything to answer.
+          python3 - <<'PY' &
+          import socket, os, time
+          p = "/tmp/box-socket-probe"
+          if os.path.exists(p): os.unlink(p)
+          s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+          s.bind(p); s.listen(8)
+          time.sleep(120)
+          PY
+          sleep 1
+          ls -l /tmp/box-socket-probe 2>&1
+
+          cat > socket-probe.sh <<'PROBE'
+          #!/bin/sh
+          if python3 -c "import socket:socket.socket(socket.AF_UNIX).connect('/tmp/box-socket-probe')" 2>/dev/null; then
+            echo "CONNECTED"
+          else
+            echo "REFUSED"
+          fi
+          PROBE
           chmod +x socket-probe.sh
-          echo "probe written; see RESULT.md for how to read the answer"
           cat socket-probe.sh
+
+          echo ""
+          echo "=== permissive control: the host itself, with no box ==="
+          control=$(sh ./socket-probe.sh)
+          echo "control: $control"
+
+          echo ""
+          echo "=== the box: a profile whose workload does the same connect ==="
+          boxed=$(box run pi -- sh -c "$(cat ./socket-probe.sh)" 2>/tmp/socket.err)
+          echo "boxed:   $boxed"
+          sed -n '1,6p' /tmp/socket.err
+
+          echo ""
+          echo "=== how to read it ==="
+          if [ "$control" != "CONNECTED" ]; then
+            echo "INCONCLUSIVE: the control could not connect either, so the socket is not reachable"
+            echo "  from this host at all. Nothing is learned about the box."
+          elif [ "$boxed" = "REFUSED" ]; then
+            echo "REFUSED BY THE BOX: the control connected, the box did not. The boundary holds for"
+            echo "  a unix socket the box was never told about -- a kernel-view effect, not a rule."
+          elif [ "$boxed" = "CONNECTED" ]; then
+            echo "CONNECTED FROM INSIDE: the box allowed it. On a default-deny mount view that is the"
+            echo "  finding this slice exists to report -- record it in RESULT.md rather than explain it."
+          else
+            echo "UNCLASSIFIED: the boxed arm produced neither answer. Read the log above."
+          fi
 
       # The spike's remaining checks need an installed Box (three) or the upstream repository (one), so
       # they live here rather than in ci.yml. Box is installed above by the time this runs, which is the
