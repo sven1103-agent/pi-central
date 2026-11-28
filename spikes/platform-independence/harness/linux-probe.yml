@@ -43,6 +43,11 @@ jobs:
     runs-on: ${{ inputs.runner || 'ubuntu-24.04-arm' }}
     timeout-minutes: 20
     steps:
+      # The claims step runs the spike's harness scripts, so the repository has to be here. Its
+      # absence was a real defect in the first run: three checks reported "No such file" and the job
+      # went red for a reason that had nothing to do with the platform.
+      - uses: actions/checkout@v4
+
       - name: Record the environment
         run: |
           echo "== architecture and kernel =="
@@ -93,11 +98,22 @@ jobs:
           ls -l "$(command -v pi)"
           pi --version
 
-      - name: Create a pi profile
+      # TWO profiles, because the first run answered the wrong question.
+      #
+      # "pi" is @box/pi alone: no provider route, so no credential is required and the box can
+      # actually launch something. This is the profile the measurement below runs under, because the
+      # question is whether pi STARTS -- not whether a provider key is configured.
+      #
+      # "pi-anthropic" is the realistic composition and is kept for the route inspection. It cannot
+      # run a workload without ANTHROPIC_API_KEY, and Box refuses at setup when it is absent (B0104),
+      # which is a finding about the profile rather than about pi.
+      - name: Create the pi profiles
         run: |
           mkdir -p "$RUNNER_TEMP/project" && cd "$RUNNER_TEMP/project"
           # --policy is explicit so the command cannot block on a prompt in a non-TTY.
-          box profile create pi --with @box/pi,@box/anthropic --policy scoped
+          box profile create pi --with @box/pi --policy scoped
+          box profile create pi-anthropic --with @box/pi,@box/anthropic --policy scoped
+          echo "=== the profile the measurement uses ==="
           box profile show pi --full
 
       # THE MEASUREMENT. `--version` is the smallest command that proves pi started: it needs node,
@@ -109,12 +125,32 @@ jobs:
         run: |
           cd "$RUNNER_TEMP/project"
           set +e
+          # Profile "pi" has no provider route, so this cannot be blocked by a missing credential.
           box run pi -- --version > "$RUNNER_TEMP/pi.out" 2> "$RUNNER_TEMP/pi.err"
           status=$?
           set -e
           echo "exit status: $status"
           echo "--- stdout ---"; cat "$RUNNER_TEMP/pi.out"
           echo "--- stderr ---"; cat "$RUNNER_TEMP/pi.err"
+          echo ""
+          # FOUR outcomes, not three, and the fourth is the one the first run produced. The pack
+          # declares a provider route whose credential is an environment variable, so with no key set
+          # Box refuses BEFORE it launches anything. Reporting that as "pi does not start" would be a
+          # false finding about pi, produced by a missing secret.
+          if grep -q "credential setup failed\|B0104" "$RUNNER_TEMP/pi.err" 2>/dev/null; then
+            echo "VERDICT: INCONCLUSIVE -- Box refused at credential setup, before starting pi."
+            echo "         Nothing is learned about pi here. Set a key or use a profile with no route."
+            echo "verdict=inconclusive" >> "$GITHUB_OUTPUT"
+          elif [ "$status" -eq 0 ]; then
+            echo "VERDICT: pi STARTED and exited 0 -- the 'does not run on Linux' line is stale in fact."
+            echo "verdict=started" >> "$GITHUB_OUTPUT"
+          elif [ "$status" -eq 133 ] || grep -qi "V8\|errno\|mprotect" "$RUNNER_TEMP/pi.err" 2>/dev/null; then
+            echo "VERDICT: pi ABORTED on executable memory -- the pack's claim still holds."
+            echo "verdict=aborted" >> "$GITHUB_OUTPUT"
+          else
+            echo "VERDICT: pi exited $status for an unclassified reason -- read the two files above."
+            echo "verdict=other" >> "$GITHUB_OUTPUT"
+          fi
           echo "status=$status" >> "$GITHUB_OUTPUT"
 
       # The shell, separately from the agent: a box that starts pi but whose Shell cannot run a command
@@ -137,7 +173,7 @@ jobs:
       - name: Is the provider route wired?
         run: |
           cd "$RUNNER_TEMP/project"
-          box profile show pi --full | grep -A6 'egress.anthropic' || \
+          box profile show pi-anthropic --full | grep -A6 'egress.anthropic' || \
             echo "NOTE: no anthropic route in the composed profile"
 
       # The one gap the spike could not close: does a box, once it actually starts, let a workload
@@ -196,11 +232,16 @@ jobs:
         if: always()
         run: |
           echo "=== what this run established ==="
-          echo "pi started in a box (exit 0):  ${{ steps.pi.outputs.status == '0' }}"
-          echo "exit status recorded:          ${{ steps.pi.outputs.status }}"
+          echo "pi step verdict:   ${{ steps.pi.outputs.verdict }}"
+          echo "exit status:       ${{ steps.pi.outputs.status }}"
           echo ""
-          echo "The .out and .err files above are the evidence. Read them before acting on this:"
-          echo "  exit 0                  -> the @box/pi 'doesn't run on Linux' line is stale in fact"
-          echo "  exit 133, V8 / errno    -> executable memory, i.e. the Java/Rust class of failure"
-          echo "  a namespace or sudo err -> the HOST refused the cage, and pi was never started"
-          echo "That third case is a different finding, and the log above says which one happened."
+          echo "FOUR outcomes, and they are different findings:"
+          echo "  started       exit 0 -- the pack's 'does not run on Linux' line is stale IN FACT"
+          echo "  aborted       exit 133 / V8 / errno -- executable memory is still refused"
+          echo "  inconclusive  Box refused at credential setup, so pi never ran (B0104)."
+          echo "                Says NOTHING about pi. Give the profile a credential or none."
+          echo "  other         an unclassified exit -- read the two files above before concluding"
+          echo ""
+          echo "The first run of this workflow produced 'inconclusive' and would have read as"
+          echo "aborted, because a missing ANTHROPIC_API_KEY stopped Box before pi started."
+          echo "That is exactly the class of error this probe exists to avoid making."
