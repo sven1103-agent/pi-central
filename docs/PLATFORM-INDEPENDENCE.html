@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Platform independence — a document to return to</title>
+<style>
+  :root {
+    --paper:      #F7F8F7;
+    --paper-2:    #ECEFEE;
+    --ink:        #14181A;
+    --ink-2:      #4A5357;
+    --ink-3:      #5C6669;
+    --rule:       #D3D9D8;
+    --rule-2:     #E2E7E6;
+
+    --settled:    #0B6169;
+    --settled-bg: #E4F1F2;
+    --open:       #8A5E0F;
+    --open-bg:    #F7EEDC;
+    --refused:    #A33A4E;
+    --refused-bg: #F8E7EA;
+
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+
+    --measure: 64ch;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 18px;
+    line-height: 1.62;
+    font-kerning: normal;
+  }
+
+  /* ---------- shell ---------- */
+
+  .shell {
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 64px;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 40px 140px;
+  }
+
+  @media (max-width: 900px) {
+    .shell { grid-template-columns: minmax(0,1fr); gap: 0; padding: 0 22px 80px; }
+
+    /* Below the rail breakpoint a fixed table layout starves every column, and a
+       horizontal scrollbar hides the third column behind a gesture. Stack each row
+       into labelled blocks instead, so every cell keeps the header it belongs to. */
+    table, thead, tbody, tr, td, th { display: block; width: 100%; }
+    thead { position: absolute; left: -9999px; }
+    tr { padding: 14px 0; border-bottom: 1px solid var(--rule-2); }
+    td {
+      border: 0;
+      padding: 0 0 9px;
+      display: grid;
+      grid-template-columns: 33% minmax(0, 1fr);
+      gap: 10px;
+      align-items: baseline;
+    }
+    td:last-child { padding-bottom: 0; }
+    td::before {
+      content: attr(data-label);
+      font-size: 11px;
+      line-height: 1.35;
+      color: var(--ink-3);
+    }
+    .table-wrap { overflow-x: visible; }
+  }
+
+  /* ---------- contents rail ---------- */
+
+  .rail {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    padding: 42px 0 40px;
+    max-height: 100vh;
+    overflow-y: auto;
+    font-family: var(--sans);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .rail-title {
+    margin: 0 0 22px;
+    font-size: 12.5px;
+    color: var(--ink-3);
+    font-weight: 600;
+  }
+
+  .rail ol { list-style: none; margin: 0; padding: 0; }
+
+  .rail li { margin-bottom: 3px; }
+
+  .rail a {
+    display: block;
+    padding: 4px 0 4px 12px;
+    color: var(--ink-2);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+  }
+
+  .rail a:hover { color: var(--ink); border-left-color: var(--rule); }
+
+  .rail a:focus-visible {
+    outline: 2px solid var(--settled);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  .rail a.sub { padding-left: 26px; font-size: 12.5px; color: var(--ink-3); }
+
+  @media (max-width: 900px) {
+    .rail {
+      position: static;
+      max-height: none;
+      padding: 28px 0 8px;
+      border-bottom: 1px solid var(--rule);
+      margin-bottom: 32px;
+    }
+    .rail ol { display: flex; flex-wrap: wrap; gap: 2px 14px; }
+    .rail a { padding: 3px 0; border-left: 0; }
+    .rail a.sub { display: none; }
+  }
+
+  /* ---------- masthead ---------- */
+
+  .masthead { padding: 42px 0 0; }
+
+  .kicker {
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--ink-3);
+    margin: 0 0 14px;
+  }
+
+  h1 {
+    font-size: clamp(34px, 4.6vw, 50px);
+    line-height: 1.1;
+    font-weight: 400;
+    letter-spacing: -0.015em;
+    margin: 0 0 22px;
+    max-width: 22ch;
+  }
+
+  .standfirst {
+    font-size: 20px;
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: var(--measure);
+    margin: 0 0 8px;
+  }
+
+  .meta {
+    font-family: var(--sans);
+    font-size: 12.5px;
+    color: var(--ink-3);
+    border-top: 1px solid var(--rule);
+    padding-top: 14px;
+    margin-top: 34px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 20px;
+  }
+
+  /* ---------- typography ---------- */
+
+  h2 {
+    font-size: 27px;
+    font-weight: 400;
+    line-height: 1.24;
+    letter-spacing: -0.01em;
+    margin: 0 0 8px;
+    max-width: 34ch;
+  }
+
+  /* The rule belongs to the section, not to the heading's measure. */
+  .section-rule {
+    border: 0;
+    border-top: 1px solid var(--rule);
+    margin: 68px 0 0;
+    height: 0;
+  }
+
+  h3 {
+    font-family: var(--sans);
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: -0.005em;
+    margin: 38px 0 10px;
+    max-width: var(--measure);
+  }
+
+  p { max-width: var(--measure); margin: 0 0 18px; }
+
+  .lead-in { color: var(--ink-2); }
+
+  strong { font-weight: 650; }
+
+  em { font-style: italic; }
+
+  a { color: var(--settled); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+  a:focus-visible { outline: 2px solid var(--settled); outline-offset: 2px; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.855em;
+    background: var(--paper-2);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+
+  ul, ol.body-list { max-width: var(--measure); margin: 0 0 18px; padding-left: 22px; }
+  li { margin-bottom: 9px; }
+
+  /* ---------- status pills ---------- */
+
+  .pill {
+    display: inline-block;
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 650;
+    padding: 1px 7px;
+    border-radius: 2px;
+    white-space: nowrap;
+    vertical-align: 1px;
+  }
+  .pill.settled { background: var(--settled-bg); color: var(--settled); }
+  .pill.open    { background: var(--open-bg);    color: var(--open); }
+  .pill.refused { background: var(--refused-bg); color: var(--refused); }
+
+  /* ---------- the headline answer ---------- */
+
+  .answer {
+    margin: 46px 0 10px;
+    padding: 30px 34px;
+    background: var(--paper-2);
+    border-left: 4px solid var(--settled);
+    max-width: 72ch;
+  }
+
+  .answer p { margin: 0; font-size: 20px; line-height: 1.5; max-width: none; }
+  .answer p + p { margin-top: 14px; font-size: 17px; color: var(--ink-2); }
+
+  /* ---------- figures ---------- */
+
+  figure {
+    margin: 34px 0 40px;
+    padding: 0;
+  }
+
+  figure svg { display: block; width: 100%; height: auto; max-width: 100%; }
+
+  figcaption {
+    font-family: var(--sans);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--ink-3);
+    max-width: 68ch;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--rule-2);
+  }
+
+  figcaption b { color: var(--ink-2); font-weight: 650; }
+
+  /* ---------- tables ---------- */
+
+  .table-wrap { overflow-x: auto; margin: 26px 0 34px; }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    table-layout: fixed;
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.45;
+  }
+
+  td, th { overflow-wrap: anywhere; word-break: normal; }
+
+  code { overflow-wrap: anywhere; }
+
+  th {
+    text-align: left;
+    font-weight: 650;
+    font-size: 12px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 0 16px 8px 0;
+    border-bottom: 1px solid var(--ink-3);
+    vertical-align: bottom;
+  }
+
+  td {
+    padding: 11px 16px 11px 0;
+    border-bottom: 1px solid var(--rule-2);
+    vertical-align: top;
+    color: var(--ink-2);
+  }
+
+  td:last-child, th:last-child { padding-right: 0; }
+
+  td strong { color: var(--ink); }
+
+  /* ---------- measure cards ---------- */
+
+  .measures {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin: 26px 0 34px;
+  }
+
+  .measure {
+    background: var(--paper);
+    padding: 18px 18px 16px;
+  }
+
+  .measure .n {
+    font-family: var(--mono);
+    font-size: 27px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    display: block;
+    margin-bottom: 7px;
+  }
+
+  .measure .n.settled { color: var(--settled); }
+  .measure .n.ink { color: var(--ink); }
+
+  .measure .what {
+    font-family: var(--sans);
+    font-size: 12.5px;
+    line-height: 1.4;
+    color: var(--ink-2);
+    display: block;
+  }
+
+  /* ---------- asides ---------- */
+
+  .aside {
+    border: 1px solid var(--rule);
+    background: #fff;
+    padding: 24px 26px;
+    margin: 30px 0 36px;
+    max-width: 72ch;
+  }
+
+  .aside h4 {
+    font-family: var(--sans);
+    font-size: 12.5px;
+    font-weight: 650;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    margin: 0 0 12px;
+  }
+
+  .aside.warn { border-left: 4px solid var(--open); }
+  .aside.warn h4 { color: var(--open); }
+  .aside.stop { border-left: 4px solid var(--refused); }
+  .aside.stop h4 { color: var(--refused); }
+  .aside p:last-child { margin-bottom: 0; }
+  .aside p, .aside li { font-size: 16px; }
+
+  /* ---------- steps ---------- */
+
+  .steps { margin: 26px 0 34px; max-width: 72ch; }
+  .steps ol { list-style: none; margin: 0; padding: 0; }
+
+  .steps > li {
+    display: grid;
+    grid-template-columns: 34px minmax(0,1fr);
+    gap: 16px;
+    padding: 18px 0;
+    border-top: 1px solid var(--rule-2);
+  }
+
+  .steps > li:first-child { border-top: 0; padding-top: 0; }
+
+  .steps .num {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink-3);
+    padding-top: 3px;
+  }
+
+  .steps h4 {
+    font-family: var(--sans);
+    font-size: 15px;
+    font-weight: 650;
+    margin: 0 0 6px;
+  }
+
+  .steps p { margin: 0 0 8px; font-size: 16px; }
+  .steps p:last-child { margin-bottom: 0; }
+
+  /* ---------- footer ---------- */
+
+  footer {
+    margin-top: 80px;
+    padding-top: 24px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--ink-3);
+    max-width: 72ch;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+
+  @media print {
+    .rail { display: none; }
+    .shell { grid-template-columns: 1fr; padding: 0; max-width: none; }
+    body { font-size: 11pt; }
+    h2 { page-break-after: avoid; }
+    figure { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <nav class="rail" aria-label="Contents">
+    <p class="rail-title">Contents</p>
+    <ol>
+      <li><a href="#answer">The answer in one screen</a></li>
+      <li><a href="#where">Where we are right now</a></li>
+      <li><a href="#two-layers">Two layers, not one</a></li>
+      <li><a href="#boundary">What the boundary must do</a></li>
+      <li><a href="#defined">What we have decided</a></li>
+      <li><a href="#unproven">What is still unproven</a></li>
+      <li><a href="#size">How large the work is</a></li>
+      <li><a href="#checks">What keeps it honest</a></li>
+      <li><a href="#verify">How you verify it</a></li>
+      <li><a href="#next">What happens next</a></li>
+      <li><a href="#words">Words used here</a></li>
+    </ol>
+  </nav>
+
+  <main>
+
+    <header class="masthead">
+      <p class="kicker">The question behind the ninth piece of work</p>
+      <h1>Can Pi Central run anywhere other than a Mac?</h1>
+      <p class="standfirst">Probably yes. That is the whole answer, and this page is the long version — the
+      one to come back to when the pieces have drifted apart again.</p>
+      <div class="meta">
+        <span>Written 28 November 2026</span>
+        <span>Nothing here is ported yet</span>
+        <span>Two questions decide it</span>
+      </div>
+    </header>
+
+    <div class="answer" id="answer">
+      <p><strong>Probably yes, and it is a backend swap rather than a rewrite.</strong></p>
+      <p>Every session Pi Central runs sits inside a sandbox. That sandbox is a Mac-only tool called
+      Safehouse. The question this work answers is whether depending on that tool means depending on a
+      Mac — and it does not. The dependency is one swappable part, not the product around it.</p>
+    </div>
+
+    <hr class="section-rule">
+    <h2 id="where">Where we are right now</h2>
+
+    <p class="lead-in">Three states appear on this page and they are not the same thing. Confusing them is
+    what makes the plan feel more complicated than it is.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th style="width:110px">State</th><th>What it means</th><th style="width:34%">Where we are</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td data-label="State"><span class="pill settled">Measured</span></td>
+            <td data-label="What it means">Somebody ran a command and wrote down what it printed. Can be re-checked.</td>
+            <td data-label="Where we are">Most of it. The findings on this page are all measured.</td>
+          </tr>
+          <tr>
+            <td data-label="State"><span class="pill open">Planned</span></td>
+            <td data-label="What it means">Described, argued and recorded. Not built.</td>
+            <td data-label="Where we are"><strong>All ten pieces of planned work.</strong> Nine are unwritten, one is the decision itself.</td>
+          </tr>
+          <tr>
+            <td data-label="State"><span class="pill refused">Declined</span></td>
+            <td data-label="What it means">Considered and rejected, with the reason kept.</td>
+            <td data-label="Where we are">Two approaches, on purpose.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="aside warn">
+      <h4>Nothing has been ported yet</h4>
+      <p>Every commit so far is documentation, issue tracking, or a check wired into CI. No product code
+      has changed. The decision record is still marked <em>proposed</em>, which is deliberate — see
+      <a href="#unproven">what is still unproven</a>.</p>
+    </div>
+
+    <hr class="section-rule">
+    <h2 id="two-layers">Two layers, not one</h2>
+
+    <p class="lead-in">This is the correction that took the longest, and everything else depends on it.</p>
+
+    <p>There are two different things people mean by "the sandbox", and they live at different depths.</p>
+
+    <ul>
+      <li><strong>The kernel boundary.</strong> The operating system itself refuses the operation. On a Mac
+      this is Seatbelt. A process cannot get past it by asking differently.</li>
+      <li><strong>The policy engine.</strong> A trusted program outside the sandbox inspects each request
+      before passing it through, and refuses the ones a rule forbids. It answers questions like "may this
+      session connect to that host". The sandbox never sees a refusal it could argue with.</li>
+    </ul>
+
+    <p>The sandbox tool Pi Central uses today is a kernel boundary. The tool under consideration for Linux,
+    called Box, provides <em>both</em> layers — a kernel boundary and a policy engine. The original research
+    compared only the policy language and concluded things about security that a policy language cannot
+    support. That comparison was wrong, and the image below is what corrected it.</p>
+
+    <figure>
+      <svg viewBox="0 0 740 330" role="img" aria-labelledby="fig1t fig1d">
+        <title id="fig1t">Two places a rule can be written, and what each one covers</title>
+        <desc id="fig1d">A coverage table drawn as a diagram. Three things a session can do, in rows:
+        use the agent's own file tools, run a shell the agent starts, and run Python in the box. Two places a
+        deny can be written, in columns: the policy engine, and the profile's filesystem lists. Policy rules
+        cover only the shell and Python. The filesystem lists cover all three.</desc>
+
+        <text x="392" y="26" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="11"
+              font-weight="700" letter-spacing="0.05em" fill="#8A5E0F">POLICY ENGINE</text>
+        <text x="392" y="42" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="11" fill="#5C6669">in front, outside the boundary</text>
+
+        <text x="616" y="26" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="11"
+              font-weight="700" letter-spacing="0.05em" fill="#0B6169">FILESYSTEM LISTS</text>
+        <text x="616" y="42" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="11" fill="#5C6669">the kernel boundary itself</text>
+
+        <line x1="30" y1="58" x2="740" y2="58" stroke="#D3D9D8"/>
+        <line x1="286" y1="58" x2="286" y2="238" stroke="#D3D9D8"/>
+        <line x1="506" y1="58" x2="506" y2="238" stroke="#D3D9D8"/>
+
+        <text x="30" y="100" font-family="-apple-system, sans-serif" font-size="13" font-weight="650" fill="#14181A">the agent's own</text>
+        <text x="30" y="117" font-family="-apple-system, sans-serif" font-size="13" font-weight="650" fill="#14181A">file tools</text>
+
+        <rect x="300" y="82" width="192" height="34" fill="#F8E7EA" stroke="#A33A4E"/>
+        <text x="396" y="104" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12.5" font-weight="650" fill="#A33A4E">not covered</text>
+
+        <rect x="520" y="82" width="188" height="34" fill="#E4F1F2" stroke="#0B6169"/>
+        <text x="614" y="104" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12.5" font-weight="650" fill="#0B6169">covered</text>
+
+        <text x="30" y="160" font-family="-apple-system, sans-serif" font-size="13" font-weight="650" fill="#14181A">a shell the agent</text>
+        <text x="30" y="177" font-family="-apple-system, sans-serif" font-size="13" font-weight="650" fill="#14181A">starts</text>
+
+        <rect x="300" y="142" width="192" height="34" fill="#E4F1F2" stroke="#0B6169"/>
+        <text x="396" y="164" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12.5" font-weight="650" fill="#0B6169">covered</text>
+
+        <rect x="520" y="142" width="188" height="34" fill="#E4F1F2" stroke="#0B6169"/>
+        <text x="614" y="164" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12.5" font-weight="650" fill="#0B6169">covered</text>
+
+        <text x="30" y="220" font-family="-apple-system, sans-serif" font-size="13" font-weight="650" fill="#14181A">Python in the box</text>
+
+        <rect x="300" y="202" width="192" height="34" fill="#E4F1F2" stroke="#0B6169"/>
+        <text x="396" y="224" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12.5" font-weight="650" fill="#0B6169">covered</text>
+
+        <rect x="520" y="202" width="188" height="34" fill="#E4F1F2" stroke="#0B6169"/>
+        <text x="614" y="224" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12.5" font-weight="650" fill="#0B6169">covered</text>
+
+        <line x1="30" y1="238" x2="740" y2="238" stroke="#D3D9D8"/>
+
+        <text x="30" y="270" font-family="-apple-system, sans-serif" font-size="12.5" fill="#A33A4E">The one row with a gap is the one that matters: the agent's own file tools</text>
+        <text x="30" y="288" font-family="-apple-system, sans-serif" font-size="12.5" fill="#A33A4E">are bound by the filesystem lists, never by a policy rule.</text>
+        <text x="30" y="316" font-family="-apple-system, sans-serif" font-size="12.5" fill="#5C6669">So a port that writes its denies into only one column would look migrated and leave that row open.</text>
+      </svg>
+      <figcaption><b>Why "we wrote the denies" is not an answer.</b> The box's own documentation says a file
+      rule "applies only to the box's shell and to Python in the box". Its profile carries a separate
+      filesystem list, and that list is what the agent's own tools obey — because it is the kernel view
+      underneath, not a rule in front. A backend that cannot say which column it is writing into is not a
+      candidate, however well it runs.</figcaption>
+    </figure>
+
+    <hr class="section-rule">
+    <h2 id="boundary">What the boundary must do</h2>
+
+    <p class="lead-in">The decision defines the sandbox as three parts. The third was the discovery.</p>
+
+    <div class="steps">
+      <ol>
+        <li>
+          <span class="num">1</span>
+          <div>
+            <h4>The command line</h4>
+            <p>The concrete invocation that starts a session under the boundary. The obvious part.</p>
+          </div>
+        </li>
+        <li>
+          <span class="num">2</span>
+          <div>
+            <h4>A policy where a prohibition beats a permission, whatever the order</h4>
+            <p>The current sandbox decides conflicts by <em>last matching rule</em>, which is why a large
+            amount of existing code exists purely to restate narrower permissions at matching specificity.
+            That is a whole class of defect, and a replacement must not reintroduce it.</p>
+          </div>
+        </li>
+        <li>
+          <span class="num">3</span>
+          <div>
+            <h4>A statement of which file operations the policy actually covers</h4>
+            <p>Not "we wrote denies" but "these denies bind the agent's own tools, and these bind only a
+            shell". A backend that stays silent about this is not a candidate, however well it runs.</p>
+          </div>
+        </li>
+      </ol>
+    </div>
+
+    <hr class="section-rule">
+    <h2 id="defined">What we have decided</h2>
+
+    <p class="lead-in">The decision record is written. Its answer is narrower than the question, on purpose.</p>
+
+    <p><strong>A second sandbox backend is worth defining.</strong> That part is settled and argued in
+    <code>docs/decisions/0020-a-sandbox-is-a-defined-boundary.md</code>.</p>
+
+    <p><strong>Which backend is not settled, and the record refuses to guess.</strong> Box is the candidate
+    the research examined; it is not the decision. Naming it now would mean choosing ahead of two
+    measurements that do not exist yet — which is the same mistake the research already made twice, and
+    recorded both times.</p>
+
+    <p>Instead the record sets an <strong>admission test</strong>: seven requirements a future backend must
+    satisfy, each of which can fail. A candidate is judged against it rather than argued about.</p>
+
+    <h3>Two approaches are declined, not deferred</h3>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th style="width:34%">Approach</th><th>Why it is not on the table</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td data-label="Approach"><span class="pill refused">Declined</span><br><strong>Adopt Box today</strong></td>
+            <td data-label="Why it is not on the table">Premature. Two decisive measurements are missing, and deciding ahead of a measurement is
+            precisely the error the research already corrected itself for.</td>
+          </tr>
+          <tr>
+            <td data-label="Approach"><span class="pill refused">Declined</span><br><strong>A degraded mode with no isolation</strong></td>
+            <td data-label="Why it is not on the table">The tempting shortcut: run sessions unsandboxed elsewhere and label them. It ships an unsafe
+            session under a label everyone quickly learns to ignore. Worse than not porting.</td>
+          </tr>
+          <tr>
+            <td data-label="Approach"><span class="pill settled">Chosen</span><br><strong>Define the boundary, name no backend</strong></td>
+            <td data-label="Why it is not on the table">What today's evidence supports. It unblocks the work that does not depend on the missing
+            measurements, without pre-committing to an implementation.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <hr class="section-rule">
+    <h2 id="unproven">What is still unproven</h2>
+
+    <p class="lead-in">Two questions. Both are commands, not design arguments. Until the first is run, the
+    honest state is "probably feasible, and feasibility unproven".</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th style="width:44%">The question</th><th>Why it decides everything</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td data-label="The question"><strong>Does the agent program start inside a box on Linux?</strong></td>
+            <td data-label="Why it decides everything">If it cannot start, nothing downstream matters. If it starts, the port is real.</td>
+          </tr>
+          <tr>
+            <td data-label="The question"><strong>Does a started box refuse a unix-socket connection?</strong></td>
+            <td data-label="Why it decides everything">It is the one protection with no equivalent form in the new policy language. If it cannot be
+            expressed, the port loses something we have today.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="aside stop">
+      <h4>A warning the research earned the hard way</h4>
+      <p>An upstream document says the agent program does not run on Linux. That sentence is
+      <em>out of date</em> — the code that would have made it false was changed four days before the
+      document was last edited.</p>
+      <p>Out of date is not the same as "works". The first draft of the research repeated that sentence as
+      fact and let it drive a recommendation to rule the whole approach out. Both were wrong.</p>
+    </div>
+
+    <hr class="section-rule">
+    <h2 id="size">How large the work is</h2>
+
+    <p class="lead-in">An earlier summary said the port's cost was "four platform checks". That counted the
+    decisions and missed the mechanism. Measured properly:</p>
+
+    <div class="measures">
+      <div class="measure"><span class="n settled">2</span><span class="what">platform checks in product code — where a platform would be asked a question</span></div>
+      <div class="measure"><span class="n ink">14</span><span class="what">product modules that name the current sandbox tool</span></div>
+      <div class="measure"><span class="n ink">5</span><span class="what">of those that own the boundary, plus one spawn site</span></div>
+      <div class="measure"><span class="n ink">1,243</span><span class="what">lines in those five files</span></div>
+    </div>
+
+    <p>So the honest sentence is: <strong>two platform decisions, and one boundary implemented against one
+    backend across about twelve hundred lines.</strong> A backend swap of real size — not two lines, and not
+    a re-architecture.</p>
+
+    <hr class="section-rule">
+    <h2 id="checks">What keeps it honest</h2>
+
+    <p class="lead-in">Six runnable checks assert the research's claims. All six now run automatically, split
+    by what each actually needs rather than by convenience.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th style="width:30%">Where it runs</th><th>What it asserts</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td data-label="Where it runs"><strong>Every push to the repository</strong></td>
+            <td data-label="What it asserts">That a configured credential wins over the route's variable; that the "does not run on Linux"
+            line really is out of date; that the two copies of the Linux probe are identical.</td>
+          </tr>
+          <tr>
+            <td data-label="Where it runs"><strong>The portability probe, on request</strong></td>
+            <td data-label="What it asserts">That the deny rules translate; that a policy engine is not a kernel boundary; that the box has
+            no keychain source. These need an installed box, and three read its binary.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The probe workflow now <strong>fails</strong> if a claim the decision rests on has gone stale. That is
+    the difference between a claim and a quotation.</p>
+
+    <hr class="section-rule">
+    <h2 id="verify">How you verify it without a Linux machine</h2>
+
+    <p class="lead-in">You already have a Linux computer. It is not on your desk — it is a hosted runner in
+    the repository's continuous integration, free because the repository is public.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th style="width:26%">Piece of work</th><th style="width:20%">Verifiable here?</th><th>How</th></tr>
+        </thead>
+        <tbody>
+          <tr><td data-label="Piece of work">The decision</td><td data-label="Verifiable here?"><span class="pill settled">yes</span></td><td data-label="How">Writing, on this Mac.</td></tr>
+          <tr><td data-label="Piece of work">Does the agent start in a box</td><td data-label="Verifiable here?"><span class="pill settled">yes</span></td><td data-label="How">A hosted runner — a real Linux kernel.</td></tr>
+          <tr><td data-label="Piece of work">Is the session's output clean</td><td data-label="Verifiable here?"><span class="pill settled">yes</span></td><td data-label="How">A parse assertion on the same runner.</td></tr>
+          <tr><td data-label="Piece of work">The backend interface</td><td data-label="Verifiable here?"><span class="pill settled">yes</span></td><td data-label="How">Ordinary unit tests, here.</td></tr>
+          <tr><td data-label="Piece of work">Retiring the keychain</td><td data-label="Verifiable here?"><span class="pill open">partly</span></td><td data-label="How">The test here; a live model call needs a person.</td></tr>
+          <tr><td data-label="Piece of work">Does a box refuse a unix socket</td><td data-label="Verifiable here?"><span class="pill refused">no</span></td><td data-label="How">A Linux machine and a few minutes.</td></tr>
+          <tr><td data-label="Piece of work">The Linux backend itself</td><td data-label="Verifiable here?"><span class="pill refused">no</span></td><td data-label="How">Same.</td></tr>
+          <tr><td data-label="Piece of work">The GitHub identity after a port</td><td data-label="Verifiable here?"><span class="pill refused">no</span></td><td data-label="How">A real push against the real remote.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Five of ten pieces need nothing but this Mac and a button. Two are half-verifiable. Three need a
+    person in front of Linux — a colleague for an hour, a one-off cloud machine, or you later.</p>
+
+    <hr class="section-rule">
+    <h2 id="next">What happens next</h2>
+
+    <ul>
+      <li><strong>Run the probe</strong> on a hosted runner. One command, and its outcome is what turns the
+      plan into a decision.</li>
+      <li><strong>Read the outcome as one of three things</strong>: it starts — the stale line was stale in
+      fact; it aborts on a memory error — executable memory is still refused; the host refuses the cage — and
+      that says nothing about the agent program at all.</li>
+      <li><strong>Close the decision record</strong> once both questions answer. It moves to <em>accepted</em>
+      or <em>rejected</em>. It cannot be half-accepted, which is why it stays <em>proposed</em> now.</li>
+      <li><strong>Then, and only then</strong>, build the backend interface.</li>
+    </ul>
+
+    <hr class="section-rule">
+    <h2 id="words">Words used here</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:30%">Term</th><th>What it means</th></tr></thead>
+        <tbody>
+          <tr><td data-label="Term"><strong>Kernel boundary</strong></td><td data-label="What it means">The operating system refuses the operation itself. Seatbelt on a Mac; seccomp plus mounts on Linux.</td></tr>
+          <tr><td data-label="Term"><strong>Policy engine</strong></td><td data-label="What it means">A trusted program outside the boundary that inspects requests before passing them through.</td></tr>
+          <tr><td data-label="Term"><strong>Backend</strong></td><td data-label="What it means">The swappable part that starts a session under a boundary. Safehouse today.</td></tr>
+          <tr><td data-label="Term"><strong>Admission test</strong></td><td data-label="What it means">Seven requirements a future backend must satisfy, each able to fail.</td></tr>
+          <tr><td data-label="Term"><strong>Deny</strong></td><td data-label="What it means">A rule that forbids an operation. The unit the whole product's safety is built from.</td></tr>
+          <tr><td data-label="Term"><strong>Slice</strong></td><td data-label="What it means">One unit of planned work; one pull request.</td></tr>
+          <tr><td data-label="Term"><strong>Verified, measured, manual</strong></td><td data-label="What it means">How "done" is demonstrated: by a failing test, by a recorded number, or by a person confirming it.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <footer>
+      <p>Sources, in order of authority: the decision record at
+      <code>docs/decisions/0020-a-sandbox-is-a-defined-boundary.md</code>; the increment plan at
+      <code>docs/INCREMENT-9-PORTABLE.md</code>; the research notes under
+      <code>spikes/platform-independence/</code>. Every number on this page was measured on
+      28 November 2026 and can be re-derived from the repository.</p>
+    </footer>
+
+  </main>
+</div>
+</body>
+</html>

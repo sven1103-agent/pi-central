@@ -7,6 +7,10 @@ credential identity, and a person on macOS keeps exactly what they have today.
 [spikes/platform-independence/](../spikes/platform-independence/README.md) · **Status:** proposed — not
 started, and the first slice is a decision rather than code.
 
+> **Lost?** [PLATFORM-INDEPENDENCE.html](PLATFORM-INDEPENDENCE.html) is a single page that explains
+> this whole increment with diagrams — what is measured, what is planned, what is still unproven — for
+> reading when the pieces have drifted apart. Open it in a browser.
+
 ## Why this is an increment and not a task
 
 The spike settles the question in the *title* of #303 — is the dependency the sandbox backend or the
