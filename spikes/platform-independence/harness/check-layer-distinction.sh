@@ -77,8 +77,26 @@ helper="${pkg%/}/strands-box-contain-trampoline"
 if [ -x "$helper" ]; then
     strings "$helper" | grep -q 'macOS Seatbelt and, on Linux, the namespace'
     check "the shipped backend reports Seatbelt on macOS and namespaces on Linux" "$?"
-    strings "$helper" | grep -q 'sandbox_init'
-    check "and drives sandbox_init - the same kernel call Safehouse uses" "$?"
+
+    # WHICH SYMBOL IS EVIDENCE DEPENDS ON THE PLATFORM, and the first version of this arm was
+    # platform-blind: it demanded `sandbox_init` -- a macOS-only libc call -- in a Linux binary, so it
+    # failed on ubuntu-24.04-arm for a reason that said nothing about the claim. The claim is "a kernel
+    # boundary exists on both platforms", so the assertion must ask each build for ITS own mechanism.
+    case "$(uname -s)" in
+        Darwin)
+            strings "$helper" | grep -q 'sandbox_init'
+            check "and drives sandbox_init - the same kernel call Safehouse uses" "$?"
+            ;;
+        Linux)
+            # No Seatbelt here by definition. What must be present is the namespace machinery that
+            # constructs the mount view, which is the Linux half of the same claim.
+            strings "$helper" | grep -qi 'unshare\|CLONE_NEW'
+            check "and uses user namespaces, the Linux half of the same claim" "$?"
+            ;;
+        *)
+            say "SKIP  no known kernel backend for $(uname -s); the claim is untested here"
+            ;;
+    esac
 else
     say "FAIL  no containment helper at $helper"
     fail=1
