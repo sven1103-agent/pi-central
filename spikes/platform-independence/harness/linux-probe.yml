@@ -304,7 +304,7 @@ jobs:
           echo "-- box run shell -- --version --"
           box run shell -- --version 2>/tmp/echo.err
           echo "exit: $?"
-          sed -n '1,4p' /tmp/echo.err
+          cat /tmp/echo.err
           echo ""
           echo "-- what that profile composes for the agent --"
           box profile show shell --full 2>&1 | sed -n "/^\[agent\]/,/^\[tool\./p" | head -22
@@ -327,7 +327,7 @@ jobs:
           MJS
           boxed=$(box run shell -- socket-connect.mjs 2>/tmp/socket.err)
           echo "boxed:   $boxed"
-          sed -n '1,6p' /tmp/socket.err
+          cat /tmp/socket.err
 
           echo ""
           echo "=== how to read it ==="
