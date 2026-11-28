@@ -36,6 +36,48 @@ limitation, not a policy gap:
 - "Sandbox per session" and "one orchestrator" are therefore in tension, and the
   orchestrator wins by staying outside the boundary while holding no untrusted state.
 
+### C1a — Aliasing `pi` to a sandbox is a second way to arrive at the same `EPERM`
+
+This constraint is usually met as a spawning problem — "the orchestrator must not be
+sandboxed". It is also met **by habit**, one layer up, and that version is harder to
+notice because everything looks correct.
+
+A shell alias such as
+
+```
+alias pi=~/.config/sandbox-exec/run-sandboxed.sh
+```
+
+means that in an interactive terminal `pi` is already inside Seatbelt. So the ordinary
+sequence a person tries when exploring Box —
+
+```console
+$ box profile create pi --with @box/pi --policy scoped
+$ box run pi -- --version
+```
+
+— fails before Box starts a workload at all:
+
+```console
+strands-box: error: bind the broker socket: Operation not permitted (os error 1)
+```
+
+The message names a **socket**, not Seatbelt, which is why it reads as a Box defect or a
+profile mistake. It is C1: the box's containment helper cannot be created inside an
+existing sandbox, and the broker socket is the first thing it tries to bind.
+
+Two consequences:
+
+- **`command -v pi` does not reveal this.** In a non-interactive shell it reports
+  `/opt/homebrew/bin/pi`, the real entry point, because aliases are a shell feature and
+  that shell is not the user's. `type -a pi` or an interactive shell shows the alias; a
+  script cannot. Any advice about Box on macOS has to say "from a plain terminal" and mean
+  it.
+- **Box does not go through the alias anyway.** The `@box/pi` pack invokes
+  `${{ tool.pi.root }}/cli.js` with node directly (measured: `pack.toml` line 31), and it
+  replaces pi's bash tool with one that runs in `$BOX_SHELL_PATH` inside the box. So the
+  alias is irrelevant *to Box* and decisive *to the person testing it*.
+
 ## C2 — One RPC process owns one working directory
 
 `switch_session` reopens a session with the **session header's** `cwd`, not the
