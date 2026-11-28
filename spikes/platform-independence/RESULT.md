@@ -311,3 +311,66 @@ of which exists here.
   of order, and a statement of which file operations that policy covers.
 - The macOS-only claim in C10 and the README describes *Safehouse*, and the port's cost is in the
   backend, not in Pi Central: four `process.platform` checks across `packages/`.
+
+---
+
+# Addendum, 2026-11-28: the Linux question is answered
+
+**Measured, run [46132761583](https://github.com/sven1103-agent/pi-central/actions/runs/46132761583)** on
+`ubuntu-24.04-arm`, Box 0.3.3, pi 1.7.0:
+
+```console
+$ box run pi -- --version
+exit status: 0
+--- stdout ---
+1.7.0
+```
+
+**pi starts inside a Strands Box on Linux.** The pack README's line — *"pi doesn't run on Linux yet …
+Node exits with status 133"* — is stale **in fact**, not merely in date. The executable-memory fix
+(`f7af148b`, 2026-11-19, #488) does what it claims.
+
+This is the measurement the whole increment was blocked on, and it cost a button rather than a Linux
+desktop — which is what [VERIFYING.md](VERIFYING.md) promised.
+
+## What the first run got wrong, and why it matters more than the answer
+
+The first run reported a non-zero exit, and under the probe's own three-outcome scheme that reads as
+**"aborted: executable memory still refused"**. It was nothing of the kind:
+
+```console
+strands-box: error[B0104]: credential setup failed: credential variable
+             ANTHROPIC_API_KEY is not set, or holds only whitespace
+```
+
+Box refused **at credential setup, before launching anything**. The profile under test was
+`@box/pi,@box/anthropic`, whose provider route names an environment variable as its credential source.
+
+Three fixes, and the third is the general lesson:
+
+1. A **fourth outcome**, `inconclusive`, distinguished from `aborted` by grepping for `B0104`.
+2. A **credential-free profile** (`@box/pi` alone) so the question is asked of pi rather than of a
+   provider route.
+3. The probe now **names its own previous failure** in its output, because the failure mode — a missing
+   secret reading as a platform limitation — is the same class of error this spike has already made
+   twice with stale documentation.
+
+## Still open: whether a box confines a unix socket
+
+Not answered, and the attempt is recorded rather than hidden because the failure is informative.
+
+`box run <profile> -- <args>` hands `<args>` to **that profile's agent**, not to a shell. So:
+
+- `box run pi -- node x.mjs` gave pi `"node x.mjs"` as a *prompt*, and printed nothing;
+- a shell-only profile is required, and Box ships no shell starter (measured: `claude`, `codex`, `kiro`);
+- the agent command is overridable via `[agent] command` — not `[limits.shell] command`, which Box
+  refuses as an unknown key. That was read off `box profile show --full`, after three guesses cost three
+  runs.
+
+With that profile the box **starts** and the control arm connects, but the boxed arm still prints nothing,
+so the honest state is **unmeasured**. Whether that is a tool-mapping problem in `/bin/bash` as an agent
+or a real refusal is exactly what the next run must separate.
+
+**The permissive control is why this is visible at all.** Without it, an empty result would have read as
+"REFUSED" and the boundary would have been credited with an effect nobody measured.
+
