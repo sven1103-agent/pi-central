@@ -238,6 +238,13 @@ same reason as the filesystem sidecar ([ADR-0007](decisions/0007-filesystem-acce
 
 ## C10 — Safehouse is macOS-only
 
+> **Scope corrected by [ADR-0020](decisions/0020-a-sandbox-is-a-defined-boundary.md).** This constraint was
+> read as *"Pi Central is macOS-only"*, and it does not say that. It says one **implementation** of a
+> sandbox is macOS-only. The measured reason a second platform is unavailable is the pair (**a
+> supported `pi`, a supported sandbox backend**) — of which Safehouse is one half and `pi`'s own
+> executable-memory support was the other. The observations below remain true of Safehouse and are
+> kept as measured; what changed is their scope, not their truth.
+
 `safehouse` hard-fails off Darwin. `runtime_preflight` (line ~7066):
 
 ```
@@ -250,8 +257,9 @@ path.
 
 ### Consequences
 
-- Pi Central's sandboxed mode is **macOS-only**, and that is a property of the sandbox
-  backend, not of any credential choice. "Support Linux" is a backend decision.
+- Pi Central's sandboxed mode is **macOS-only while Safehouse is the only backend**, and that is a
+  property of the sandbox backend, not of any credential choice. "Support Linux" is a backend
+  decision — a bounded one, sized in ADR-0020.
 - macOS-only is an accepted constraint, which makes macOS-native mechanisms (e.g. the
   Keychain) have **zero marginal platform cost**.
 - `safehouse --stdout` still renders a policy on any platform; only *execution* is gated.

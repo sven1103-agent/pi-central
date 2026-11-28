@@ -13,6 +13,9 @@ They are kept because each one is the reason a constraint or an invariant test e
 ### Changed
 
 - The platform-independence spike finds no measured blocker: the deny set translates, the credential model improves, and the Linux limitation that appeared to rule the sandbox out is a stale documentation line ([#303]).
+- Isolation is defined as a three-part backend interface — an argv, a policy whose `forbid` wins regardless of order, and a statement of which file operations that policy covers — and macOS is described as where the only current backend runs, not as a product constraint ([#304]).
+- The macOS-only constraint and the README's requirements table name the pair (a supported `pi`, a supported sandbox backend) rather than Safehouse alone, which was the narrower measured reason ([#304]).
+- The spike's platform-agnostic checks run on every push, and its Box-dependent checks run in the portability probe workflow, so a claim ADR-0020 rests on cannot go stale unobserved ([#304]).
 
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
@@ -921,3 +924,4 @@ The spike that answered whether this was worth building.
 [#279]: https://github.com/sven1103-agent/pi-central/issues/279
 [#299]: https://github.com/sven1103-agent/pi-central/issues/299
 [#303]: https://github.com/sven1103-agent/pi-central/issues/303
+[#304]: https://github.com/sven1103-agent/pi-central/issues/304

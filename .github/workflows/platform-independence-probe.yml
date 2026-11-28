@@ -160,6 +160,33 @@ jobs:
           echo "probe written; see RESULT.md for how to read the answer"
           cat socket-probe.sh
 
+      # The spike's remaining checks need an installed Box (three) or the upstream repository (one), so
+      # they live here rather than in ci.yml. Box is installed above by the time this runs, which is the
+      # whole reason the promotion is split this way.
+      #
+      # These are the assertions ADR-0020 rests on. A claim that only exists in a write-up is a
+      # quotation; these are what make it a measurement.
+      - name: The spike's Box-dependent claims still hold
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          fail=0
+          for f in check-translation check-layer-distinction check-keychain-claim; do
+            echo ""
+            echo "=== $f ==="
+            sh "spikes/platform-independence/harness/$f.sh" || fail=1
+          done
+          echo ""
+          echo "=== verdict ==="
+          if [ "$fail" -eq 0 ]; then
+            echo "The spike's Box-dependent claims still hold on this Box release."
+          else
+            echo "A check above FAILED. ADR-0020 cites these; read the failure before the ADR."
+            exit 1
+          fi
+
       - name: Verdict
         if: always()
         run: |

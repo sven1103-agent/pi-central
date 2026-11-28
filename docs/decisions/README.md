@@ -25,6 +25,7 @@ reader can tell whether a decision still holds.
 | [0016](0016-rail-visibility.md) | The rail's visibility, width, density and folds are reader preferences; the breakpoint is only a floor | Accepted |
 | [0017](0017-calm-transcript.md) | A followed transcript keeps its newest line above the window's foot and glides rather than teleporting; text coalescing is a separate slice | Accepted |
 | [0019](0019-preferences-belong-to-the-installation.md) | A reader's preferences belong to the installation, not to a browser origin | Accepted |
+| [0020](0020-a-sandbox-is-a-defined-boundary.md) | A sandbox is a defined boundary; macOS is only where the one we have runs | Proposed |
 
 ## Format
 
@@ -41,7 +42,7 @@ record. Do not rewrite history in place.
 
 ## Constraint references
 
-ADRs cite the hard limits in [../CONSTRAINTS.md](../CONSTRAINTS.md) as `C1`–`C16`. Those
+ADRs cite the hard limits in [../CONSTRAINTS.md](../CONSTRAINTS.md) as `C1`–`C21`. Those
 limits were verified against the Pi and Agent Safehouse versions recorded in
 [../CONSTRAINTS.md](../CONSTRAINTS.md); re-verify them when either is upgraded, since an ADR's
 premises can expire. (The versions are not repeated here: a README may state no version at all,

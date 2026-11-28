@@ -58,6 +58,19 @@ jobs:
       - name: The portability probe's two copies agree
         run: sh spikes/platform-independence/harness/check-probe-installed.sh
 
+      # The spike's claims are load-bearing: ADR-0020 rests on them, and a claim that only lives in a
+      # write-up is a quotation. These two need neither a Box install nor the network, so they run on
+      # every push. The other four read an installed Box or the upstream repository and run in
+      # platform-independence-probe.yml, which is where Box exists.
+      # check-pi-linux-claim.sh reads the upstream repository through the API, so it needs a token.
+      # The job-scoped GITHUB_TOKEN is enough for a public repo; check-precedence.sh needs nothing.
+      - name: The spike's platform-agnostic claims still hold
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sh spikes/platform-independence/harness/check-precedence.sh
+          sh spikes/platform-independence/harness/check-pi-linux-claim.sh
+
       - name: UI production build
         run: npm run ui:build
 
