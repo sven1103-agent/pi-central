@@ -350,6 +350,61 @@ jobs:
             echo "UNCLASSIFIED: the boxed arm produced neither answer. Read the log above."
           fi
 
+      # "broad exec: may run any reachable binary, and load code it writes into its writable
+      # grants above" -- Box's own disclosure on macOS. This asks what that MEANS: the agent
+      # writes a program into its writable grant, then tries to run it.
+      #
+      # The distinction is real: enumerating which interpreters may run is defence in depth on top
+      # of the filesystem profile. Deferring to the profile alone is a different, thinner promise.
+      - name: Can the agent run a program it wrote itself?
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP/project"
+          set +e
+
+          # Written into the agent's writable grant (the project), which is what "code it writes
+          # into its writable grants" means. Both a shell script and a compiled-then-run path,
+          # because "broad exec" could mean either that the toolchain may run, or only that the
+          # shell may.
+          printf '%s\n' '#!/bin/sh' 'echo WROTTEN-AND-RAN' > ./agent-wrote.sh
+          chmod +x ./agent-wrote.sh
+          ls -l ./agent-wrote.sh
+
+          echo ""
+          echo "=== control: the host runs it with no box ==="
+          control=$(sh ./agent-wrote.sh 2>&1)
+          echo "control: $control"
+
+          echo ""
+          echo "=== the pi profile: node is the only assigned interpreter here ==="
+          boxed=$(box run pi -- 'cat agent-wrote.sh' 2>/tmp/wrote.err)
+          echo "pi (read it back): $boxed"
+
+          echo ""
+          echo "=== a shell profile: bash was never granted anywhere ==="
+          # This is the sharp arm. If the shell profile can run the script, then exec is decided by
+          # the filesystem profile alone and the exec list is decorative.
+          shellrun=$(box run shell -- "sh ./agent-wrote.sh" 2>/tmp/wrote-shell.err)
+          echo "shell profile: $shellrun"
+
+          echo ""
+          echo "=== the whole stderr, both arms ==="
+          cat /tmp/wrote.err
+          cat /tmp/wrote-shell.err
+
+          echo ""
+          echo "=== how to read it ==="
+          if [ "$control" != "WROTTEN-AND-RAN" ]; then
+            echo "INCONCLUSIVE: the control did not run it either; nothing is learned about the box."
+          elif [ "$shellrun" = "WROTTEN-AND-RAN" ]; then
+            echo "RAN: a program the agent wrote executed inside the box. Exec is decided by the"
+            echo "  filesystem profile, not by an exec list -- the macOS disclosure, reproduced."
+          elif printf '%s' "$shellrun" | grep -qi "denied\|refus\|not permitted"; then
+            echo "REFUSED: the box would not execute a program the agent wrote. Defence in depth holds."
+          else
+            echo "UNCLASSIFIED: neither answer. Read the stderr above."
+          fi
+
       # The spike's remaining checks need an installed Box (three) or the upstream repository (one), so
       # they live here rather than in ci.yml. Box is installed above by the time this runs, which is the
       # whole reason the promotion is split this way.
