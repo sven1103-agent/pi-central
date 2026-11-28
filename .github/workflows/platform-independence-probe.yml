@@ -107,6 +107,17 @@ jobs:
       # "pi-anthropic" is the realistic composition and is kept for the route inspection. It cannot
       # run a workload without ANTHROPIC_API_KEY, and Box refuses at setup when it is absent (B0104),
       # which is a finding about the profile rather than about pi.
+      # Discovery, printed once so the next step is chosen from the CLI's own vocabulary rather than
+      # from guesses. Three runs were spent guessing at "shell" / "@box/base" before this existed.
+      - name: What Box actually offers
+        run: |
+          set +e
+          echo "=== box run --help ==="
+          box run --help 2>&1 | head -40
+          echo ""
+          echo "=== box profile list ==="
+          box profile list 2>&1 | head -30
+
       - name: Create the pi profiles
         run: |
           mkdir -p "$RUNNER_TEMP/project" && cd "$RUNNER_TEMP/project"
@@ -117,8 +128,7 @@ jobs:
           # profile's tool: `box run pi -- node x.mjs` passes "node x.mjs" to PI, which is why two
           # runs printed nothing. The socket question is about the mount view, not about pi, so it
           # must run under a profile whose tool IS the shell.
-          box profile create shell --with @box/base --policy scoped 2>/dev/null || \
-            box profile create shell --policy scoped
+
           echo "=== the profile the measurement uses ==="
           box profile show pi --full
 
