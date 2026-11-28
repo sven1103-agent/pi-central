@@ -125,33 +125,29 @@ jobs:
           box profile create pi --with @box/pi --policy scoped
           box profile create pi-anthropic --with @box/pi,@box/anthropic --policy scoped
 
-          # A shell-only profile, built from pi's by replacing the agent command. Box ships no
-          # shell starter (measured: claude, codex, kiro), and `box run <profile> -- <args>` hands the
-          # args to THAT profile's agent -- so `box run pi -- node x.mjs` ran pi with "node x.mjs" as
-          # a prompt, which is why two runs printed nothing at all.
+          # A shell-only profile, built from pi's, because Box ships no shell starter (measured:
+          # claude, codex, kiro) and `box run <profile> -- <args>` hands the args to THAT profile's
+          # agent -- so `box run pi -- node x.mjs` gave pi "node x.mjs" as a PROMPT. Two runs printed
+          # nothing at all for that reason, and the reader correctly said UNCLASSIFIED both times.
           #
-          # The socket question is about the mount view, not about pi, so the workload only needs to
-          # be something that connects. bash is enough and needs no model.
+          # The socket question is about the mount view, not about pi, so the workload only has to
+          # connect. bash needs no model.
+          #
+          # `command` is NOT in the profile file: it comes from the pack, and the profile's
+          # [limits.shell] table is how a run's composed "command = [...]" is overridden. Rewriting
+          # profile.toml found nothing to rewrite (measured: "replaced: 0", twice), which is what
+          # pointed at the pack.
           mkdir -p "$HOME/.strands/box/profiles/shell"
-          # The whole profile FOLDER, not just the toml: policies[0] names policy.dw beside it, and a
-          # copy that took only the toml failed with "cannot read .../shell/policy.dw".
           cp -R "$HOME/.strands/box/profiles/pi/." "$HOME/.strands/box/profiles/shell/"
-          python3 - <<'PY'
-          import os, re
-          p = os.path.expanduser("~/.strands/box/profiles/shell/profile.toml")
-          s = open(p).read()
-          # The command is ONE long line, so a multi-line regex matched nothing (measured: n == 0).
-          # Anchored per-line and greedy to the real end of the line instead.
-          s2, n = re.subn(r'(?m)^command\s*=.*$', 'command = ["/bin/bash"]', s)
-          open(p, "w").write(s2)
-          print("agent command replaced:", n)
-          PY
-          # Verified by reading it back, because the previous run shipped a profile that still ran pi.
-          grep -n "^command" "$HOME/.strands/box/profiles/shell/profile.toml"
-          # A SHELL-ONLY profile, because `box run <profile> -- <args>` hands the args to that
-          # profile's tool: `box run pi -- node x.mjs` passes "node x.mjs" to PI, which is why two
-          # runs printed nothing. The socket question is about the mount view, not about pi, so it
-          # must run under a profile whose tool IS the shell.
+          {
+            echo "# Overrides the agent command supplied by the @box/pi pack."
+            echo "[limits.shell]"
+            echo 'command = ["/bin/bash"]'
+          } >> "$HOME/.strands/box/profiles/shell/profile.toml"
+          echo "=== the shell profile's own additions ==="
+          tail -4 "$HOME/.strands/box/profiles/shell/profile.toml"
+          echo "=== and what a run of it composes ==="
+          box profile show shell --full 2>&1 | grep -A3 "limits.shell" | head -6
 
           echo "=== the profile the measurement uses ==="
           box profile show pi --full
