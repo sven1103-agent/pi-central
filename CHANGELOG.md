@@ -18,6 +18,7 @@ They are kept because each one is the reason a constraint or an invariant test e
 - The spike's platform-agnostic checks run on every push, and its Box-dependent checks run in the portability probe workflow, so a claim ADR-0020 rests on cannot go stale unobserved ([#304]).
 - The sandbox policy becomes configurable in one direction only: one shipped profile named `solo`, and an installation overlay that may narrow freely while a widening is refused rather than merged ([#314]).
 - `pi` is measured to start inside a Strands Box on Linux, so the "doesn't run on Linux" limitation is stale in fact and not only in date ([#305]).
+- A started box refuses a unix-socket connection by mount view rather than by rule, so the one deny with no rule-shaped counterpart is enforced anyway ([#306]).
 
 <!-- Empty at tag time: a release cannot ship undocumented changes. -->
 
@@ -929,3 +930,4 @@ The spike that answered whether this was worth building.
 [#304]: https://github.com/sven1103-agent/pi-central/issues/304
 [#314]: https://github.com/sven1103-agent/pi-central/issues/314
 [#305]: https://github.com/sven1103-agent/pi-central/issues/305
+[#306]: https://github.com/sven1103-agent/pi-central/issues/306

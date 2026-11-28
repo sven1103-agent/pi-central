@@ -753,6 +753,23 @@
     more than the answer.</p>
 
     <div class="answer" style="margin-top:26px">
+      <p><strong>Both answered. The record is no longer provisional.</strong></p>
+      <p>First: the agent program <strong>does</strong> start inside a box on Linux — measured above.
+      Second: a started box <strong>does</strong> refuse a unix-socket connect. The permissive control
+      connected; the boxed run was refused.</p>
+    </div>
+
+    <div class="aside" style="border-left-color: var(--settled)">
+      <h4>The refusal is stronger than the rule it replaces</h4>
+      <p>Today's protection is an enumerated list of socket paths, written twice at two specificities
+      because the current policy language resolves conflicts by last matching rule. A list fails open on
+      the next socket name nobody predicted — and this project has already been bitten by exactly that,
+      with a credential list that left one file readable while reporting the others refused.</p>
+      <p>The box refuses the connect because the mount view never exposes the socket's path at all. A
+      view that never shows the name <em>cannot</em> be enumerated wrong.</p>
+    </div>
+
+    <div class="answer" style="margin-top:26px">
       <p><strong>Answered: the agent program does start in a box on Linux.</strong></p>
       <p>Measured on a hosted ARM64 runner with Box 0.3.3 and pi 1.7.0 — the command exited
       <strong>0</strong> and printed <code>1.7.0</code>. The upstream line saying it cannot run is stale in
@@ -786,7 +803,7 @@
             <td data-label="Why it decides everything">If it cannot start, nothing downstream matters. If it starts, the port is real. <strong>It starts</strong> — exit 0, and it printed its version.</td>
           </tr>
           <tr>
-            <td data-label="The question"><strong>Does a started box refuse a unix-socket connection?</strong> <span class="pill open">still open</span></td>
+            <td data-label="The question"><strong>Does a started box refuse a unix-socket connection?</strong> <span class="pill settled">answered</span></td>
             <td data-label="Why it decides everything">It is the one protection with no equivalent form in the new policy language. If it cannot be
             expressed, the port loses something we have today.</td>
           </tr>
