@@ -166,10 +166,16 @@ jobs:
             # both read and exec -- visible in the log as only /usr/bin and /usr/local/bin.
             echo 'command = ["/usr/local/bin/node"]'
             echo ""
+            # EXACT PATHS ONLY. A directory such as /usr/bin is refused outright -- measured:
+            #   strands-box: error[B0102]: `[agent]` filesystem entry "/usr/bin" is refused:
+            #   grant is too broad to be authorized: /usr/bin (a system root is never a grantable tree)
+            # So a shell profile cannot be built by granting a PATH prefix. This is the same
+            # finding ADR-0020 records for the profile lists -- exact paths, no trees -- arriving
+            # from a direction I did not expect: it blocks granting a runtime, not just a deny.
             echo "[agent.filesystem]"
-            echo 'read = ["/bin", "/usr/bin", "/usr/local/bin"]'
+            echo 'read = ["/usr/local/bin/node"]'
             echo 'write = []'
-            echo 'exec = ["/bin", "/usr/bin", "/usr/local/bin"]'
+            echo 'exec = ["/usr/local/bin/node"]'
           } >> "$HOME/.strands/box/profiles/shell/profile.toml"
           echo "=== the shell profile's own additions ==="
           tail -4 "$HOME/.strands/box/profiles/shell/profile.toml"
