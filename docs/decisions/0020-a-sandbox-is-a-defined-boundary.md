@@ -77,8 +77,8 @@ README's last edit (`harness/check-pi-linux-claim.sh`) — but *stale* is not *w
 **A second sandbox backend is worth defining, and Pi Central's isolation is defined as an interface
 rather than as Safehouse's command line.**
 
-The interface has **three** parts. The spike found three, not two, and the third is the one a port is
-most likely to lose silently.
+The interface has **four** parts. The spike found three; the fourth came from asking who is allowed to
+change the policy, and it is the difference between shipping an opinion and shipping a product.
 
 1. **An argv** — the concrete command that starts a session under the boundary.
 2. **A policy whose `forbid` wins regardless of order** — an exception to a broad permit is a
@@ -93,9 +93,31 @@ most likely to lose silently.
    Python in the box" — so a port that wrote denies only in the policy would look migrated and be
    open.
 
+4. **Where the policy comes from, and who may widen it** — a shipped default, an installation's
+   overlay, and a project file that may only narrow. A backend that cannot express layering, or that
+   silently honours a project-supplied file, does not have this part at all.
+
 A backend that cannot deny a unix socket must **say so**, rather than accept a parameter named
 `deny` and drop it. Today's two independent SSH-socket layers ([C11] plus the fragment) become one
 under Box, via a sanitized environment; that is a real, stated reduction.
+
+### The policy is not ours to own
+
+The deny set is currently a literal in `fragment.ts` and the orchestrator reads **no configuration file
+at all**. That ships an opinion as a fact, and an organisation that must route model traffic through its
+own gateway cannot adopt the product on day one.
+
+So the fourth part is a policy *source*, not a policy: one shipped profile named `solo` (the practices
+this project was built around), an installation overlay that may narrow freely and widen only with an
+explicit recorded acknowledgement, and a project file — if it ever exists — that may only narrow. The
+rule is one line: **a configuration may only narrow the boundary; widening it is a separate act.**
+
+Measured, and it changed the design: Safehouse has a project-level surface (`<workdir>/.safehouse`) that
+takes `key=value` options, not policy expressions, so it **widens** — it granted a path the appended
+fragment never named, three times over. Our layer cannot constrain what it does not name, and enumerating
+is the failure [C15c] already records. Therefore Pi Central does not pass `--trust-workdir-config`, and a
+repository cannot widen the boundary by committing a file. [POLICY.md](../POLICY.md) has the measurement,
+the three layers, and what each costs.
 
 **And the ADR declines to name a backend.** It defines the boundary and sets the admission test; which
 implementation passes it is [#305]'s and [#306]'s business. Naming one now would be deciding on
@@ -115,6 +137,8 @@ Stated so a future backend is judged rather than argued about. Each row can fail
 | Executable memory is available to the session (JIT runtimes) | `pi` is a V8 process; this is [#305] |
 | The session's stdio is byte-clean for JSONL framing | [C7] |
 | No credential is readable by the agent that ADR-0010 says it must not have | ADR-0010 |
+| An inner policy layer can only narrow; a widening is **refused at load**, not merged | [POLICY.md](../POLICY.md) |
+| The backend states whether a **project-supplied** configuration is honoured or ignored | silence here lets a repository widen everyone who opens it |
 
 ### Ordering
 

@@ -173,6 +173,46 @@ prevent.
 
 ---
 
+### US-P7 — The policy is mine, and I may only tighten it
+
+**Status:** proposed · **Priority:** high · **Constraint:** deny-by-default, applied to configuration
+
+> As an organisation adopting Pi Central, I want to change the sandbox policy to fit my own rules — and
+> only ever make it stricter — so that I can adopt the product at all without weakening the isolation it
+> promises.
+
+**Context.** The deny set is a literal inside `fragment.ts` and the orchestrator reads no configuration
+file at all (verified by searching `config.ts` and `server.ts` for `readFileSync`). So the policy is
+Pi Central's, entirely. An organisation that must route model traffic through its own gateway, or that
+must deny a path this project has never heard of, cannot adopt the product — and the constraint arrives on
+day one, so "we will add an option later" does not help.
+
+The obvious fix is the dangerous one. [POLICY.md](POLICY.md) measures Safehouse's own project-level
+surface, `<workdir>/.safehouse`: it takes `key=value` options rather than policy expressions, so it
+**widens** — a trusted file granted a path the appended fragment never named, three occurrences for one
+path. Our layer cannot constrain what it does not name, and enumerating names is the failure C15c already
+records ("a four-name deny list left `~/.gitconfig` readable while reporting the other three refused").
+
+**Acceptance criteria**
+
+- Exactly **one** profile ships, named `solo`, and it is the current deny set expressed as data rather
+  than as a `const` — the rules do not change, only where they live and what they are called.
+- An installation may add denies and exceptions in the state root, and every such change applies.
+- An installation change that would **widen** the shipped boundary is **refused at load** with a message
+  naming the rule, and the refusal is logged once — not merged, not silently dropped.
+- Pi Central does **not** pass `--trust-workdir-config`, so a repository cannot widen the boundary by
+  committing a file. Asserted, because a future caller could reintroduce the flag in one line.
+- The shipped profile's digest is recorded and compared, so an upgrade that changes it is visible rather
+  than inferred.
+- The profile's name appears in the status a machine reports (US-P5), so a reader knows which policy they
+  got.
+
+**What would falsify this story.** An installation whose widening overlay is accepted silently — the
+boundary would then depend on a file the session it governs can influence. Or a narrower overlay that is
+refused, which would mean the rule was written as "no changes" rather than "only downward".
+
+---
+
 ## Stories deliberately **not** written
 
 Recorded so their absence is a decision rather than an oversight.

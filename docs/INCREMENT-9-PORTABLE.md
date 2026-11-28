@@ -71,6 +71,7 @@ says "opened first, closed last" rather than "first".
 | 9-8 | **`capabilities.ts` survives its subject**: the two-way diagnosis without a keychain | the same tests, keychain finding removed, five findings intact | `verified/auto` | proposed |
 | 9-9 | **A Linux machine says what it is running**: `--check-config` states the backend and its limits | the output, on both platforms | `verified/manual` — two hosts | proposed |
 | 9-10 | **The GitHub identity survives the port**: the `gh` token and signing still work, or say why not | a commit pushed as the agent against the real remote | `verified/manual` — needs a real remote | proposed |
+| 9-11 | **The policy is configurable, and only downward**: a shipped `solo` profile, an installation overlay that narrows freely, and a widening that is refused rather than merged | a test where an overlay that widens is **refused**, beside one where narrowing is accepted | `verified/auto` — a refusal is testable | proposed — [POLICY.md](POLICY.md) |
 
 **Slice-to-story map**, so no story is left without work and no slice without a reason:
 
@@ -81,7 +82,14 @@ says "opened first, closed last" rather than "first".
 | US-P3 — the keychain stops being a gauntlet | 9-6 |
 | US-P4 — the GitHub identity still works | 9-6, 9-10 |
 | US-P5 — never surprised by which isolation I got | 9-9 |
+| US-P7 — the policy is mine, and I may only tighten it | 9-11 |
 | US-P6 — the decision is recorded | 9-1 |
+
+9-11 exists because the plan was wrong about ownership: it treated the deny set as Pi Central's to
+define, and an organisation that must route model traffic through its own gateway cannot adopt a product
+whose policy it cannot change. The shipped profile is an **opinion**, named `solo`; the overlay is the
+customer's; and a widening is refused rather than merged. [POLICY.md](POLICY.md) records the measurement
+that decided a project file cannot be trusted with it.
 
 9-10 exists because the map found it: US-P4 had no slice of its own, and the measured finding it rests
 on — Box does not route the token for `git push` — is the opposite of what the spike first assumed. A

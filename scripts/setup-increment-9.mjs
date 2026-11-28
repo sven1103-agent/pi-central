@@ -29,11 +29,17 @@ const MILESTONE_DESCRIPTION =
   "Linux probe answers, so the decision issue is opened first and closed last. " +
   "See docs/INCREMENT-9-PORTABLE.md.";
 
-/** The one label this increment needs that the existing taxonomy cannot express. */
-const MISSING_LABEL = [
-  "area/platform",
-  "EC6CB9",
-  "A second operating system, a second sandbox backend, and the boundary between them",
+/**
+ * The labels this increment needs that the existing taxonomy cannot express.
+ *
+ * A list rather than a single entry, because the second one was discovered the way this kind of
+ * omission always is: the script got as far as attaching labels to an issue and failed on
+ * "could not add label: area/config not found". One hard-coded special case would have left the
+ * next one to the same discovery.
+ */
+const MISSING_LABELS = [
+  ["area/platform", "EC6CB9", "A second operating system, a second sandbox backend, and the boundary between them"],
+  ["area/config", "B5D33D", "What ships as a default, and what an installation may change"],
 ];
 
 /** Every slice states an OUTCOME, ACCEPTANCE CRITERIA that could fail, and EVIDENCE. */
@@ -253,6 +259,33 @@ const ISSUES = [
       "measured finding it rests on is the opposite of what the spike first assumed.",
     doc: "docs/USER-STORIES-9.md#us-p4--my-github-identity-still-works-or-i-am-told-it-does-not",
   },
+  {
+    key: "9-11",
+    title: "The policy is configurable, and only downward",
+    labels: ["kind/slice", "area/sandbox", "area/config", "area/platform", "verified/auto", "priority/p1"],
+    outcome:
+      "One profile named solo ships as data, an installation may narrow it freely, and an overlay that " +
+      "would widen it is refused at load rather than merged. docs/POLICY.md carries the design.",
+    criteria: [
+      "The current deny set is expressed as a shipped profile named solo. The rules do not change, only " +
+        "where they live and what they are called.",
+      "An installation overlay that ADDS a deny is accepted. One that would widen is REFUSED at load, " +
+        "naming the rule, and logged once — not merged and not silently dropped.",
+      "A test fails on the permissive side too: an overlay that widens must be refused by a test that " +
+        "would pass if the refusal were removed.",
+      "Pi Central does not pass --trust-workdir-config, asserted, because a repo must not widen the " +
+        "boundary by committing a file and a future caller could reintroduce the flag in one line.",
+      "The shipped profile's digest is recorded and compared, so an upgrade that changes it is visible.",
+      "The active profile's name appears in the status a machine reports (see 9-9).",
+    ],
+    evidence:
+      "a test where a widening overlay is refused, beside one where a narrowing overlay is accepted.",
+    notes:
+      "Measured in docs/POLICY.md: Safehouse's own project-level surface takes key=value, not policy " +
+      "expressions, so a trusted .safehouse file WIDENS — it granted a path the appended fragment never " +
+      "named, three occurrences for one path. Enumerating names is the failure C15c already records.",
+    doc: "docs/USER-STORIES-9.md#us-p7--the-policy-is-mine-and-i-may-only-tighten-it",
+  },
 ];
 
 // --- Plumbing -----------------------------------------------------------------------------------
@@ -276,10 +309,15 @@ function milestoneExists() {
   }
 }
 
-function labelExists() {
+// `gh label view` does not exist in current gh releases, so the first version of this
+// function always returned false and the script re-created an existing label on every run.
+// `label list` is the command that actually exists; filter it here rather than relying on a
+// subcommand that may or may not be present.
+function labelExists(name) {
   if (DRY_RUN) return false;
   try {
-    return run(["label", "view", MISSING_LABEL[0], "--repo", REPO, "--json", "name", "--jq", ".name"]) === MISSING_LABEL[0];
+    const out = run(["label", "list", "--repo", REPO, "--limit", "200", "--json", "name", "--jq", ".[].name"]);
+    return out.split("\n").map((s) => s.trim()).includes(name);
   } catch {
     return false;
   }
@@ -347,12 +385,13 @@ if (printIndex !== -1) {
 
 console.log((DRY_RUN ? "DRY RUN — " : "") + "Increment 9 bootstrap for " + REPO);
 
-if (labelExists()) {
-  console.log("  label " + MISSING_LABEL[0] + ": exists");
-} else {
-  console.log("  label " + MISSING_LABEL[0] + ": create");
-  gh(["label", "create", MISSING_LABEL[0], "--repo", REPO, "--color", MISSING_LABEL[1],
-      "--description", MISSING_LABEL[2]]);
+for (const [name, color, description] of MISSING_LABELS) {
+  if (labelExists(name)) {
+    console.log("  label " + name + ": exists");
+  } else {
+    console.log("  label " + name + ": create");
+    gh(["label", "create", name, "--repo", REPO, "--color", color, "--description", description]);
+  }
 }
 
 if (milestoneExists()) {

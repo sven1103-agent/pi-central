@@ -449,6 +449,7 @@
       <li><a href="#two-layers">Two layers, not one</a></li>
       <li><a href="#boundary">What the boundary must do</a></li>
       <li><a href="#defined">What we have decided</a></li>
+      <li><a href="#policy">Who owns the policy</a></li>
       <li><a href="#unproven">What is still unproven</a></li>
       <li><a href="#size">How large the work is</a></li>
       <li><a href="#checks">What keeps it honest</a></li>
@@ -468,7 +469,7 @@
       <div class="meta">
         <span>Written 28 November 2026</span>
         <span>Nothing here is ported yet</span>
-        <span>Two questions decide it</span>
+        <span>Eleven pieces of work planned</span>
       </div>
     </header>
 
@@ -674,6 +675,76 @@
     </div>
 
     <hr class="section-rule">
+    <h2 id="policy">Who owns the policy</h2>
+
+    <p class="lead-in">This part came from a question the plan had not asked: whose policy is it? The
+    answer decides whether the product can be adopted by anyone with rules of their own.</p>
+
+    <p>Today the policy is a literal inside the source code and the orchestrator reads <strong>no
+    configuration file at all</strong>. That ships an opinion as though it were a fact. An organisation
+    that must route model traffic through its own gateway cannot use the product — and the constraint
+    arrives on the first day, so "we will add an option later" is not an answer.</p>
+
+    <p>So one profile ships, named <code>solo</code>, and it is deliberately an <strong>opinion</strong>:
+    the practices this project was built around, stated with a name and a version. An installation may
+    then narrow it freely. Widening it is the one direction that needs a ceremony.</p>
+
+    <figure>
+      <svg viewBox="0 0 740 300" role="img" aria-labelledby="fig2t fig2d">
+        <title id="fig2t">Three policy layers and the only direction each may move</title>
+        <desc id="fig2d">Three stacked layers: the shipped solo profile at the top, an installation overlay
+        in the middle, and a project file at the bottom. Narrowing arrows point down through all three.
+        A widening arrow is shown only at the installation layer, and marked as requiring an explicit
+        recorded act. The project layer has no widening arrow at all.</desc>
+
+        <rect x="30" y="20" width="440" height="62" fill="#E4F1F2" stroke="#0B6169" stroke-width="2"/>
+        <text x="48" y="44" font-family="-apple-system, sans-serif" font-size="13" font-weight="650" fill="#14181A">the shipped profile — solo</text>
+        <text x="48" y="64" font-family="-apple-system, sans-serif" font-size="12" fill="#4A5357">Pi Central's opinion. Ships with the release, compared by digest.</text>
+
+        <rect x="30" y="106" width="440" height="62" fill="#fff" stroke="#D3D9D8" stroke-width="2"/>
+        <text x="48" y="130" font-family="-apple-system, sans-serif" font-size="13" font-weight="650" fill="#14181A">the installation overlay</text>
+        <text x="48" y="150" font-family="-apple-system, sans-serif" font-size="12" fill="#4A5357">The person or organisation. Never inside a working directory.</text>
+
+        <rect x="30" y="192" width="440" height="62" fill="#F8F9F8" stroke="#D3D9D8" stroke-dasharray="5 4" stroke-width="2"/>
+        <text x="48" y="216" font-family="-apple-system, sans-serif" font-size="13" font-weight="650" fill="#5C6669">a project file</text>
+        <text x="48" y="236" font-family="-apple-system, sans-serif" font-size="12" fill="#5C6669">A repository. Narrow only — and today not read at all.</text>
+
+        <!-- narrowing arrows -->
+        <line x1="490" y1="51" x2="490" y2="252" stroke="#0B6169" stroke-width="2"/>
+        <text x="504" y="120" font-family="-apple-system, sans-serif" font-size="12" font-weight="650" fill="#0B6169">narrowing</text>
+        <text x="504" y="138" font-family="-apple-system, sans-serif" font-size="12" fill="#0B6169">free, at every layer</text>
+        <text x="504" y="176" font-family="-apple-system, sans-serif" font-size="12" fill="#0B6169">no ceremony</text>
+
+        <!-- widening: from the installation overlay UP into the shipped profile -->
+        <line x1="610" y1="106" x2="610" y2="88" stroke="#A33A4E" stroke-width="2"/>
+        <path d="M 604 96 L 610 84 L 616 96 z" fill="#A33A4E"/>
+        <text x="628" y="94" font-family="-apple-system, sans-serif" font-size="12" font-weight="650" fill="#A33A4E">widening</text>
+        <text x="628" y="112" font-family="-apple-system, sans-serif" font-size="12" fill="#A33A4E">needs an explicit</text>
+        <text x="628" y="130" font-family="-apple-system, sans-serif" font-size="12" fill="#A33A4E">act, and is recorded</text>
+
+        <!-- project: no widening -->
+        <text x="30" y="282" font-family="-apple-system, sans-serif" font-size="12" fill="#5C6669">
+          A project has no widening path at all: it may tighten the rules, never loosen them.
+        </text>
+      </svg>
+      <figcaption><b>One direction, three layers.</b> Narrowing cannot hurt anyone, so it is free
+      everywhere. Widening is the only dangerous move, so it is the only one that needs a ceremony — and
+      at the project layer it is not available in any form.</figcaption>
+    </figure>
+
+    <div class="aside stop">
+      <h4>A measurement that changed the design</h4>
+      <p>The existing sandbox tool already has a project-level file, and our own documentation describes
+      it as the place for "project- or team-specific restrictions" — which reads as though it narrows.</p>
+      <p><strong>It widens.</strong> It takes options rather than policy expressions, and a trusted one
+      granted a path our own deny layer had never named, three times over. Our layer cannot constrain a
+      path it does not know about, and enumerating paths is the failure this project already fixed once —
+      a four-name deny list that left one credential readable while reporting the other three refused.</p>
+      <p>So the product does not read that file. A repository cannot widen the boundary by committing
+      something, because the something is never loaded.</p>
+    </div>
+
+    <hr class="section-rule">
     <h2 id="unproven">What is still unproven</h2>
 
     <p class="lead-in">Two questions. Both are commands, not design arguments. Until the first is run, the
@@ -806,6 +877,9 @@
           <tr><td data-label="Term"><strong>Backend</strong></td><td data-label="What it means">The swappable part that starts a session under a boundary. Safehouse today.</td></tr>
           <tr><td data-label="Term"><strong>Admission test</strong></td><td data-label="What it means">Seven requirements a future backend must satisfy, each able to fail.</td></tr>
           <tr><td data-label="Term"><strong>Deny</strong></td><td data-label="What it means">A rule that forbids an operation. The unit the whole product's safety is built from.</td></tr>
+          <tr><td data-label="Term"><strong>Profile</strong></td><td data-label="What it means">One named policy. <code>solo</code> ships; it is an opinion, not a neutral default.</td></tr>
+          <tr><td data-label="Term"><strong>Overlay</strong></td><td data-label="What it means">An installation's additions on top of the shipped profile. May narrow; may widen only with an explicit act.</td></tr>
+          <tr><td data-label="Term"><strong>Narrow</strong></td><td data-label="What it means">To forbid more than the layer above does. Always allowed, because it cannot hurt anyone.</td></tr>
           <tr><td data-label="Term"><strong>Slice</strong></td><td data-label="What it means">One unit of planned work; one pull request.</td></tr>
           <tr><td data-label="Term"><strong>Verified, measured, manual</strong></td><td data-label="What it means">How "done" is demonstrated: by a failing test, by a recorded number, or by a person confirming it.</td></tr>
         </tbody>
