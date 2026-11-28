@@ -240,7 +240,18 @@ jobs:
           # The FILE, not "$(cat ...)" through sh -c: the first version passed the script text, so
           # its own "$(dirname "$0")" pointed nowhere and the arm printed nothing at all -- which the
           # reader below correctly called UNCLASSIFIED rather than a finding.
-          boxed=$(box run pi -- python3 socket-connect.py 2>/tmp/socket.err)
+          # NODE, not python3: the box's pack maps node, git, npm and pi as tools, so a bare
+          # python3 is not routed and the arm printed nothing. Measured across two runs before
+          # switching -- the earlier arm was silently empty rather than refused.
+          cat > socket-connect.mjs <<'MJS'
+          import net from "node:net";
+          const s = net.connect("/tmp/box-socket-probe");
+          s.setTimeout(2000);
+          s.on("connect", () => { console.log("CONNECTED"); s.destroy(); });
+          s.on("error", () => { console.log("REFUSED"); });
+          s.on("timeout", () => { console.log("REFUSED"); s.destroy(); });
+          MJS
+          boxed=$(box run pi -- node socket-connect.mjs 2>/tmp/socket.err)
           echo "boxed:   $boxed"
           sed -n '1,6p' /tmp/socket.err
 
