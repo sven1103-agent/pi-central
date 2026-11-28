@@ -125,6 +125,12 @@ jobs:
           box profile create pi --with @box/pi --policy scoped
           box profile create pi-anthropic --with @box/pi,@box/anthropic --policy scoped
 
+          # WHAT KEY SPACE A PROFILE MAY OVERRIDE, printed before trying: four runs were spent
+          # guessing (agent command, then [limits.shell] command) and both were refused. The composed
+          # view is the only place the answer is stated.
+          echo "=== every key pi's composition exposes ==="
+          box profile show pi --full 2>&1 | grep -E "^\[|^[a-z_]+ *=" | head -40
+
           # A shell-only profile, built from pi's, because Box ships no shell starter (measured:
           # claude, codex, kiro) and `box run <profile> -- <args>` hands the args to THAT profile's
           # agent -- so `box run pi -- node x.mjs` gave pi "node x.mjs" as a PROMPT. Two runs printed
