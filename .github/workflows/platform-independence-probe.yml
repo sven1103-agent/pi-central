@@ -26,6 +26,11 @@
 name: platform-independence-probe
 
 on:
+  # TEMPORARY, REMOVE AFTER THE FIRST RUN. workflow_dispatch requires the workflow to exist on the
+  # default branch, so a branch-only spike cannot be dispatched. A push trigger scoped to this one
+  # branch is the smallest thing that runs it without merging the whole branch first.
+  push:
+    branches: [spike/303-platform-independence]
   workflow_dispatch:
     inputs:
       runner:

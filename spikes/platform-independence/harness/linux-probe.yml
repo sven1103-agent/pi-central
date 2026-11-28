@@ -10,21 +10,27 @@
 # on an ordinary push; and it downloads third-party release binaries, which a spike should do on
 # request rather than on every commit.
 #
-# Installed at .github/workflows/platform-independence-probe.yml. This is the canonical source: edit
-# here and copy it there, so the spike keeps a copy that does not require the workflow to exist.
+# This is the installed copy. The canonical source is
+# spikes/platform-independence/harness/linux-probe.yml -- edit that one and copy it here, so the spike
+# keeps a copy that does not require the workflow to exist.
 #
 #   gh workflow run platform-independence-probe.yml
 #   gh run watch
 #
-# Why a hosted runner and not a local VM: the repository is public, so Actions minutes are not billed,
-# and ubuntu-24.04-arm is Box's own reference architecture. A Mac without a Linux desktop can still
-# verify the port. See spikes/platform-independence/VERIFYING.md.
+# Why this runner and not a local VM: the repository is public, so Actions minutes are not billed, and
+# ubuntu-24.04-arm is Box's own reference architecture. A Mac without a Linux desktop can still verify
+# the port. See spikes/platform-independence/VERIFYING.md.
 #
 # Every step reports rather than guessing. A step that cannot run says so and continues, so the job
 # ends with a paragraph of facts instead of a red X that means nothing.
 name: platform-independence-probe
 
 on:
+  # TEMPORARY, REMOVE AFTER THE FIRST RUN. workflow_dispatch requires the workflow to exist on the
+  # default branch, so a branch-only spike cannot be dispatched. A push trigger scoped to this one
+  # branch is the smallest thing that runs it without merging the whole branch first.
+  push:
+    branches: [spike/303-platform-independence]
   workflow_dispatch:
     inputs:
       runner:
