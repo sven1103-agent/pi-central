@@ -124,6 +124,29 @@ jobs:
           # --policy is explicit so the command cannot block on a prompt in a non-TTY.
           box profile create pi --with @box/pi --policy scoped
           box profile create pi-anthropic --with @box/pi,@box/anthropic --policy scoped
+
+          # A shell-only profile, built from pi's by replacing the agent command. Box ships no
+          # shell starter (measured: claude, codex, kiro), and `box run <profile> -- <args>` hands the
+          # args to THAT profile's agent -- so `box run pi -- node x.mjs` ran pi with "node x.mjs" as
+          # a prompt, which is why two runs printed nothing at all.
+          #
+          # The socket question is about the mount view, not about pi, so the workload only needs to
+          # be something that connects. bash is enough and needs no model.
+          mkdir -p "$HOME/.strands/box/profiles/shell"
+          cp "$HOME/.strands/box/profiles/pi/profile.toml" "$HOME/.strands/box/profiles/shell/profile.toml"
+          python3 - <<'PY'
+          import re, os
+          p = os.path.expanduser("~/.strands/box/profiles/shell/profile.toml")
+          s = open(p).read()
+          # Replace the agent command array with a plain shell. Kept as a regex over the assignment
+          # rather than a TOML round-trip, because rewriting the whole file would lose its comments.
+          s2, n = re.subn(r'(?ms)^command\s*=\s*\[.*?\n\]', 'command = ["/bin/bash"]', s)
+          if n != 1:
+              s2, n = re.subn(r'(?ms)^command\s*=\s*\[.*?\]', 'command = ["/bin/bash"]', s)
+          open(p, "w").write(s2)
+          print("agent command replaced:", n)
+          PY
+          grep -n -A2 "^command" "$HOME/.strands/box/profiles/shell/profile.toml" | head -5
           # A SHELL-ONLY profile, because `box run <profile> -- <args>` hands the args to that
           # profile's tool: `box run pi -- node x.mjs` passes "node x.mjs" to PI, which is why two
           # runs printed nothing. The socket question is about the mount view, not about pi, so it
